@@ -243,7 +243,7 @@ export class RouteGenerator {
               position: { ...currentPos },
               dimensions: { x: stepWidth, y: 2.0, z: stepLen },
               yaw: currentYaw,
-              pitch: 0.05,
+              pitch: 0,
               roll: 0,
               type: RouteNodeType.STEP_UP,
               intensity: 0.8 + (st / steps) * 0.2,
@@ -448,15 +448,24 @@ export class RouteGenerator {
     };
     nodes.push(finishNode);
 
-    const finish: FinishDefinition = {
-      routeNodeId: finishNode.id,
-      time: analysis.duration,
-      position: { ...finishNode.position },
-      yaw: currentYaw
-    };
-
-    // 4. Validate and repair route to ensure 100% traversability
+    // 4. Validate and repair route to ensure 100% traversability with rigid downstream propagation
     const { repairedNodes, repairsCount } = RouteValidator.validateAndRepair(nodes);
+
+    // Sync checkpoint and finish coordinates with repaired nodes
+    for (const cp of checkpoints) {
+      const node = repairedNodes.find(n => n.id === cp.routeNodeId);
+      if (node) {
+        cp.position = { ...node.position };
+        cp.yaw = node.yaw;
+      }
+    }
+    const updatedFinishNode = repairedNodes.find(n => n.id === finishNode.id) || repairedNodes[repairedNodes.length - 1];
+    const finish: FinishDefinition = {
+      routeNodeId: updatedFinishNode.id,
+      time: analysis.duration,
+      position: { ...updatedFinishNode.position },
+      yaw: updatedFinishNode.yaw
+    };
 
     return {
       seed: analysis.seed,
@@ -466,6 +475,147 @@ export class RouteGenerator {
       totalDistance: cumulativeDistance,
       targetDuration: analysis.duration,
       repairedJumpsCount: repairsCount
+    };
+  }
+
+  /**
+   * Guaranteed safe fallback route generator
+   * Used as the last-resort defensive layer if procedural generation fails validation.
+   * Produces a clean, 100% traversable course matching all song sections and timestamps.
+   */
+  public static generateSafeFallback(analysis: TrackAnalysis): GeneratedTrack {
+    const nodes: RouteNode[] = [];
+    const checkpoints: CheckpointDefinition[] = [];
+    let currentPos: Vector3Like = { x: 0, y: 0, z: 0 };
+    let currentYaw = 0;
+    let cumulativeDistance = 0;
+    let nodeId = 0;
+
+    const startLen = 32.0;
+    const startWidth = 14.0;
+    nodes.push({
+      id: nodeId++,
+      time: 0,
+      position: { ...currentPos },
+      dimensions: { x: startWidth, y: 2.0, z: startLen },
+      yaw: currentYaw,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.3,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false,
+      isBoost: false
+    });
+
+    currentPos = getOffsetPosition(currentPos, currentYaw, startLen * 0.5);
+    cumulativeDistance += startLen * 0.5;
+
+    for (let s = 0; s < analysis.sections.length; s++) {
+      const sec = analysis.sections[s];
+
+      if (s > 0) {
+        const cpLen = 16.0;
+        currentPos = getOffsetPosition(currentPos, currentYaw, 4.0 + cpLen * 0.5);
+        cumulativeDistance += 4.0 + cpLen * 0.5;
+
+        const cpNode: RouteNode = {
+          id: nodeId++,
+          time: sec.start,
+          position: { ...currentPos },
+          dimensions: { x: 12.0, y: 2.0, z: cpLen },
+          yaw: currentYaw,
+          pitch: 0,
+          roll: 0,
+          type: RouteNodeType.CHECKPOINT,
+          intensity: sec.intensity,
+          sectionIndex: s,
+          arcLength: cumulativeDistance,
+          isSurf: false,
+          isBoost: false
+        };
+        nodes.push(cpNode);
+        checkpoints.push({
+          id: checkpoints.length,
+          routeNodeId: cpNode.id,
+          time: sec.start,
+          position: { ...cpNode.position },
+          yaw: currentYaw,
+          sectionIndex: s
+        });
+
+        currentPos = getOffsetPosition(currentPos, currentYaw, cpLen * 0.5);
+        cumulativeDistance += cpLen * 0.5;
+      }
+
+      const count = Math.max(2, Math.floor(sec.duration / 4.0));
+      const platLen = 22.0;
+      const gap = 3.5;
+
+      for (let p = 0; p < count; p++) {
+        currentPos = getOffsetPosition(currentPos, currentYaw, gap + platLen * 0.5);
+        cumulativeDistance += gap + platLen * 0.5;
+
+        const pTime = sec.start + (p / count) * sec.duration;
+        nodes.push({
+          id: nodeId++,
+          time: pTime,
+          position: { ...currentPos },
+          dimensions: { x: 12.0, y: 2.0, z: platLen },
+          yaw: currentYaw,
+          pitch: 0,
+          roll: 0,
+          type: RouteNodeType.RUNWAY,
+          intensity: sec.intensity,
+          sectionIndex: s,
+          arcLength: cumulativeDistance,
+          isSurf: false,
+          isBoost: false
+        });
+
+        currentPos = getOffsetPosition(currentPos, currentYaw, platLen * 0.5);
+        cumulativeDistance += platLen * 0.5;
+      }
+    }
+
+    // Finish portal
+    const finishLen = 24.0;
+    currentPos = getOffsetPosition(currentPos, currentYaw, 5.0 + finishLen * 0.5);
+    cumulativeDistance += 5.0 + finishLen * 0.5;
+
+    const finishNode: RouteNode = {
+      id: nodeId++,
+      time: analysis.duration,
+      position: { ...currentPos },
+      dimensions: { x: 14.0, y: 2.0, z: finishLen },
+      yaw: currentYaw,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.FINISH,
+      intensity: 1.0,
+      sectionIndex: analysis.sections.length - 1,
+      arcLength: cumulativeDistance,
+      isSurf: false,
+      isBoost: false
+    };
+    nodes.push(finishNode);
+
+    const finish: FinishDefinition = {
+      routeNodeId: finishNode.id,
+      time: analysis.duration,
+      position: { ...finishNode.position },
+      yaw: currentYaw
+    };
+
+    return {
+      seed: analysis.seed,
+      route: nodes,
+      checkpoints,
+      finish,
+      totalDistance: cumulativeDistance,
+      targetDuration: analysis.duration,
+      repairedJumpsCount: 0
     };
   }
 }

@@ -89,7 +89,7 @@ export class SurfValidator {
 
     // Advance along yaw
     currentPos = {
-      x: currentPos.x - Math.sin(yaw) * (runwayLen * 0.5 + 4.0),
+      x: currentPos.x + Math.sin(yaw) * (runwayLen * 0.5 + 4.0),
       y: currentPos.y,
       z: currentPos.z + Math.cos(yaw) * (runwayLen * 0.5 + 4.0)
     };
@@ -112,7 +112,7 @@ export class SurfValidator {
     });
 
     currentPos = {
-      x: currentPos.x - Math.sin(yaw) * (runwayLen * 0.5),
+      x: currentPos.x + Math.sin(yaw) * (runwayLen * 0.5),
       y: currentPos.y,
       z: currentPos.z + Math.cos(yaw) * (runwayLen * 0.5)
     };

@@ -16,6 +16,7 @@ import { PlayheadSystem } from './PlayheadSystem';
 import { SpectralArchitecture } from './SpectralArchitecture';
 import { DropSetpiece } from './DropSetpiece';
 import { Environment } from './Environment';
+import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 
 export class World {
   public physics: PhysicsWorld;
@@ -26,6 +27,7 @@ export class World {
   public skyline: SkylineArchitecture | null = null;
   public spectralArchitecture: SpectralArchitecture | null = null;
   public dropSetpiece: DropSetpiece | null = null;
+  public debugChainMesh: THREE.LineSegments | null = null;
 
   public track: GeneratedTrack | null = null;
   public analysis: TrackAnalysis | null = null;
@@ -79,6 +81,9 @@ export class World {
 
     // 6. Build Major Drop Setpiece
     this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
+
+    // 7. Authoritative Route Continuity Debug Chain
+    this.buildDebugChain(track);
   }
 
   public update(
@@ -201,10 +206,69 @@ export class World {
       this.dropSetpiece = null;
     }
 
+    if (this.debugChainMesh) {
+      this.scene.remove(this.debugChainMesh);
+      this.debugChainMesh.geometry.dispose();
+      (this.debugChainMesh.material as THREE.Material).dispose();
+      this.debugChainMesh = null;
+    }
+
     this.playheadSystem.clear();
     this.physics.dispose();
     this.track = null;
     this.analysis = null;
+  }
+
+  public setDebugChainVisible(visible: boolean): void {
+    if (this.debugChainMesh) {
+      this.debugChainMesh.visible = visible;
+    }
+  }
+
+  private buildDebugChain(track: GeneratedTrack): void {
+    const route = track.route;
+    if (route.length < 2) return;
+
+    const positions: number[] = [];
+    const colors: number[] = [];
+
+    for (let i = 0; i < route.length - 1; i++) {
+      const exit = getNodeExitAnchor(route[i]).position;
+      const entry = getNodeEntryAnchor(route[i + 1]).position;
+
+      positions.push(exit.x, exit.y + 0.2, exit.z);
+      positions.push(entry.x, entry.y + 0.2, entry.z);
+
+      const dx = entry.x - exit.x;
+      const dy = entry.y - exit.y;
+      const dz = entry.z - exit.z;
+      const horizDist = Math.sqrt(dx * dx + dz * dz);
+
+      let col = new THREE.Color(0x00ff88); // Green: well connected
+      if (horizDist > 14.0 || dy > 1.45) {
+        col = new THREE.Color(0xff2244); // Red: invalid gap
+      } else if (horizDist > 10.0 || dy > 1.2) {
+        col = new THREE.Color(0xffcc00); // Yellow: marginal gap
+      }
+
+      colors.push(col.r, col.g, col.b);
+      colors.push(col.r, col.g, col.b);
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.85,
+      linewidth: 2
+    });
+
+    this.debugChainMesh = new THREE.LineSegments(geom, mat);
+    this.debugChainMesh.visible = false;
+    this.scene.add(this.debugChainMesh);
   }
 
   public dispose(): void {

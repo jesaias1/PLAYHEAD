@@ -8,6 +8,20 @@ export interface Vector3Like {
   z: number;
 }
 
+export interface RouteAnchor {
+  position: Vector3Like;
+  yaw: number;
+  elevation: number;
+  arcLength: number;
+}
+
+export interface TraversalPhrase {
+  entry: RouteAnchor;
+  exit: RouteAnchor;
+  nodes: RouteNode[];
+  checkpoint?: CheckpointDefinition;
+}
+
 export enum RouteNodeType {
   RUNWAY = 'RUNWAY',
   STEP_UP = 'STEP_UP',

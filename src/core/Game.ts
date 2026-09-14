@@ -450,8 +450,28 @@ export class Game {
         const next = current < 0.9 ? 1.0 : (current < 1.4 ? 1.5 : 0.5);
         this.world.visualController.setReactivityMultiplier(next);
         this.ui.hud.showToast(`AUDIO REACTIVITY: ${next.toFixed(1)}X`, 1500);
+      } else if (e.code === 'KeyN' && e.shiftKey && !e.repeat) {
+        // Dev shortcut: Jump to next checkpoint
+        if (this.stateMachine.is(GameState.PLAYING)) {
+          this.jumpToNextCheckpoint();
+        }
       }
     });
+  }
+
+  private jumpToNextCheckpoint(): void {
+    if (!this.currentTrack || this.currentTrack.checkpoints.length === 0) return;
+    const songTime = this.audioEngine.getCurrentTime();
+    const nextCp = this.currentTrack.checkpoints.find(cp => cp.time > songTime + 1.0);
+    if (nextCp) {
+      this.currentCheckpoint = nextCp;
+      this.restoreToCheckpoint();
+      this.ui.hud.showToast(`DEV JUMP: CHECKPOINT (#${nextCp.sectionIndex}) @ ${nextCp.time.toFixed(1)}s`, 1500);
+    } else {
+      this.currentCheckpoint = null;
+      this.restoreToCheckpoint();
+      this.ui.hud.showToast('DEV JUMP: START @ 0.0s', 1500);
+    }
   }
 
   /**

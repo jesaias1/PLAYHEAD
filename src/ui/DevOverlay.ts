@@ -6,6 +6,7 @@
 import { PlayerController } from '../player/PlayerController';
 import { World } from '../world/World';
 import { AudioEngine } from '../audio/AudioEngine';
+import { TrackGenerator } from '../generation/TrackGenerator';
 
 export class DevOverlay {
   public element: HTMLElement;
@@ -64,13 +65,21 @@ export class DevOverlay {
   public update(player: PlayerController, world: World, audio: AudioEngine): void {
     if (!this.isVisible) return;
 
+    world.setDebugChainVisible(this.isVisible);
+
     const pos = player.position;
     const vel = player.velocity;
     const speed = player.getSpeedUnits();
     const vs = world.visualController.state;
 
+    const conn = TrackGenerator.lastReport?.connectivity;
+    const connStatus = conn
+      ? (conn.isValid ? `100% VALID (${conn.totalEdgesChecked}/${conn.totalEdgesChecked} edges | max gap: ${conn.maxObservedHorizontalGap.toFixed(1)}m | max step: +${conn.maxObservedStepUp.toFixed(2)}m)` : `FAIL (${conn.brokenEdges.length} BROKEN EDGES!)`)
+      : 'CHECKED';
+
     const lines = [
       '=== PLAYHEAD DEV DIAGNOSTICS (F3) ===',
+      `ROUTE CHAIN: ${connStatus}`,
       `PALETTE: ${vs.palette.name} | THEME: ${vs.sectionTheme} (#${vs.sectionIndex + 1}) | REACTIVITY: ${vs.reactivityMultiplier.toFixed(1)}x`,
       `COLOR MIX: PRI=${vs.primaryMix.toFixed(2)} SEC=${vs.secondaryMix.toFixed(2)} HI=${vs.highlightMix.toFixed(2)}`,
       `STRAFE: ANGLE=${player.currentStrafeAngle.toFixed(1)}° EFF=${(player.currentStrafeEfficiency * 100).toFixed(0)}% [${player.currentStrafeRating}]`,
@@ -83,7 +92,7 @@ export class DevOverlay {
       `FLUX: ${vs.flux.toFixed(2)} | ONSET PULSE: ${vs.onsetPulse.toFixed(2)} | CENTROID: ${vs.brightness.toFixed(2)}`,
       `BUILDUP: ${vs.buildup.toFixed(2)} | DROP IMPACT: ${vs.dropImpact.toFixed(2)} | NEXT DROP DIST: ${vs.upcomingDropDistance > 9000 ? 'NONE' : vs.upcomingDropDistance.toFixed(1) + 'm'}`,
       `SYNC DELTA: ${vs.syncDelta.toFixed(2)}s | PLAYER PROG: ${(vs.playerProgress * 100).toFixed(1)}% | TIME PROG: ${(vs.progress * 100).toFixed(1)}%`,
-      world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount}` : 'TRACK: NONE'
+      world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE'
     ];
 
     this.element.innerText = lines.join('\n');

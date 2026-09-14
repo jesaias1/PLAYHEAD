@@ -4,6 +4,7 @@
  */
 
 import { RouteNode, RouteNodeType } from './GenerationTypes';
+import { getNodeExitAnchor, getNodeEntryAnchor } from './RouteConnectivityValidator';
 
 export interface ValidationConfig {
   playerRunSpeed: number;   // Expected running speed (m/s)
@@ -33,21 +34,20 @@ export class RouteValidator {
       const current = repaired[i];
       const next = repaired[i + 1];
 
-      // Calculate edge-to-edge distance along route heading
-      // Current node end edge:
-      const halfLenCurrent = current.dimensions.z * 0.5;
+      // Calculate exact physical edge-to-edge anchors (including pitch, yaw, roll)
+      const currentEndAnchor = getNodeExitAnchor(current);
+      const nextStartAnchor = getNodeEntryAnchor(next);
+
       const currentEnd = {
-        x: current.position.x + Math.sin(current.yaw) * halfLenCurrent,
-        y: current.position.y + current.dimensions.y * 0.5,
-        z: current.position.z + Math.cos(current.yaw) * halfLenCurrent
+        x: currentEndAnchor.position.x,
+        y: currentEndAnchor.position.y + current.dimensions.y * 0.5,
+        z: currentEndAnchor.position.z
       };
 
-      // Next node start edge:
-      const halfLenNext = next.dimensions.z * 0.5;
       const nextStart = {
-        x: next.position.x - Math.sin(next.yaw) * halfLenNext,
-        y: next.position.y + next.dimensions.y * 0.5,
-        z: next.position.z - Math.cos(next.yaw) * halfLenNext
+        x: nextStartAnchor.position.x,
+        y: nextStartAnchor.position.y + next.dimensions.y * 0.5,
+        z: nextStartAnchor.position.z
       };
 
       const dx = nextStart.x - currentEnd.x;
@@ -62,9 +62,11 @@ export class RouteValidator {
 
       // 1. Check upward elevation limit
       if (dy > config.maxStepUp) {
-        // Lower next node elevation to safe limit
+        // Lower next node and all downstream nodes to safe limit (rigid elevation propagation)
         const excess = dy - config.maxStepUp;
-        next.position.y -= excess;
+        for (let k = i + 1; k < repaired.length; k++) {
+          repaired[k].position.y -= excess;
+        }
         repairsCount++;
       }
 
@@ -73,15 +75,22 @@ export class RouteValidator {
       const maxFeasibleGap = this.calculateMaxJumpDistance(updatedDy, config);
 
       if (horizontalGap > maxFeasibleGap) {
-        // Gap is too wide! Pull next node closer
+        // Gap is too wide! Pull next node closer and propagate rigid shift to all downstream nodes
         const safeGap = Math.max(1.0, maxFeasibleGap * 0.85);
         const pullRatio = safeGap / (horizontalGap + 1e-5);
-
         const newStartX = currentEnd.x + dx * pullRatio;
         const newStartZ = currentEnd.z + dz * pullRatio;
+        const halfLenNext = next.dimensions.z * 0.5;
+        const targetPosX = newStartX + Math.sin(next.yaw) * halfLenNext;
+        const targetPosZ = newStartZ + Math.cos(next.yaw) * halfLenNext;
 
-        next.position.x = newStartX + Math.sin(next.yaw) * halfLenNext;
-        next.position.z = newStartZ + Math.cos(next.yaw) * halfLenNext;
+        const shiftX = targetPosX - next.position.x;
+        const shiftZ = targetPosZ - next.position.z;
+
+        for (let k = i + 1; k < repaired.length; k++) {
+          repaired[k].position.x += shiftX;
+          repaired[k].position.z += shiftZ;
+        }
 
         // Also widen landing platform for comfort
         next.dimensions.x = Math.max(next.dimensions.x, 8.0);

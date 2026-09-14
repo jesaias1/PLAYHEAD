@@ -322,7 +322,7 @@ export class SurfPhraseGenerator {
 
   private static offsetPos(pos: Vector3Like, yaw: number, dist: number): Vector3Like {
     return {
-      x: pos.x - Math.sin(yaw) * dist,
+      x: pos.x + Math.sin(yaw) * dist,
       y: pos.y,
       z: pos.z + Math.cos(yaw) * dist
     };
@@ -332,7 +332,7 @@ export class SurfPhraseGenerator {
     return {
       x: pos.x + Math.cos(yaw) * lateralDist,
       y: pos.y,
-      z: pos.z + Math.sin(yaw) * lateralDist
+      z: pos.z - Math.sin(yaw) * lateralDist
     };
   }
 
