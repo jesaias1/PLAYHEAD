@@ -518,6 +518,11 @@ export class Game {
         this.world.visualController.state.sectionIndex + 1
       );
 
+      this.ui.hud.updateSurfPrompt(
+        this.playerController.surfState.isSurfing || this.playerController.isSurfing,
+        this.playerController.surfState.surfSide
+      );
+
       // Dynamic FOV based on speed
       const settings = SettingsManager.getInstance().settings;
       this.environment.setDynamicFovSpeed(

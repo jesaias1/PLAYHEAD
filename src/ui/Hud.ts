@@ -32,6 +32,10 @@ export class Hud {
 
       <div class="hud-center">
         <div class="hud-reticle"></div>
+        <div class="hud-surf-indicator hidden" id="hud-surf-indicator">
+          <span class="hud-surf-key" id="hud-surf-key">A</span>
+          <span class="hud-surf-text" id="hud-surf-text">HOLD TO SURF</span>
+        </div>
       </div>
       <div class="hud-toast" id="hud-toast"></div>
 
@@ -52,7 +56,14 @@ export class Hud {
     this.syncElem = this.element.querySelector('#hud-sync') as HTMLElement;
     this.progressBarFill = this.element.querySelector('#hud-progress') as HTMLElement;
     this.toastElem = this.element.querySelector('#hud-toast') as HTMLElement;
+    this.surfIndicatorElem = this.element.querySelector('#hud-surf-indicator') as HTMLElement;
+    this.surfKeyElem = this.element.querySelector('#hud-surf-key') as HTMLElement;
+    this.surfTextElem = this.element.querySelector('#hud-surf-text') as HTMLElement;
   }
+
+  private surfIndicatorElem: HTMLElement;
+  private surfKeyElem: HTMLElement;
+  private surfTextElem: HTMLElement;
 
   public show(): void {
     this.element.classList.remove('hidden');
@@ -93,6 +104,17 @@ export class Hud {
 
     const pct = Math.min(100, Math.max(0, progressRatio * 100));
     this.progressBarFill.style.width = `${pct.toFixed(1)}%`;
+  }
+
+  public updateSurfPrompt(isSurfing: boolean, surfSide: 'LEFT' | 'RIGHT' | 'NONE'): void {
+    if (isSurfing && (surfSide === 'LEFT' || surfSide === 'RIGHT')) {
+      const key = surfSide === 'LEFT' ? 'A' : 'D';
+      this.surfKeyElem.textContent = key;
+      this.surfTextElem.textContent = `HOLD [${key}] TO SURF`;
+      this.surfIndicatorElem.classList.remove('hidden');
+    } else {
+      this.surfIndicatorElem.classList.add('hidden');
+    }
   }
 
   public showToast(msg: string, durationMs = 2000): void {

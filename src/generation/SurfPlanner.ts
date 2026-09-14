@@ -102,15 +102,15 @@ export class SurfPlanner {
     // Sort candidates by suitability descending
     candidates.sort((a, b) => b.suitability - a.suitability);
 
-    // Pick top 1-3 candidates with minimum time spacing of 25 seconds between surfs
-    const maxEvents = Math.min(3, Math.max(1, Math.floor(totalDuration / 75.0)));
+    // Pick top 1-3 candidates with minimum time spacing of 20 seconds between surfs
+    const maxEvents = Math.min(3, Math.max(1, Math.floor(totalDuration / 45.0)));
     const selected: typeof candidates = [];
 
     for (const cand of candidates) {
       if (selected.length >= maxEvents) break;
 
       const tooClose = selected.some(s =>
-        Math.abs(s.section.start - cand.section.start) < 25.0
+        Math.abs(s.section.start - cand.section.start) < 20.0
       );
 
       if (!tooClose) {

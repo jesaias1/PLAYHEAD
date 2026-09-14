@@ -2,8 +2,12 @@
  * SurfPhraseGenerator for PLAYHEAD
  * Generates complete, playable, and readable 3D surf modules
  * for procedural courses.
+ * - Exact musical timing (approach during riser, ramp entry on downbeat)
+ * - Multi-tier vertical descent slides that continue the level on a lower plane
+ * - Seamless collision alignment and wide catch decks
  */
 
+import * as THREE from 'three';
 import { CheckpointDefinition, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
 import { SurfEvent } from './SurfPlanner';
 import { SeededRandom } from './SeededRandom';
@@ -39,16 +43,17 @@ export class SurfPhraseGenerator {
     const bankSign = rng.nextBool() ? 1 : -1;
 
     // ==========================================
-    // 1. Approach Runway (Clear, wide, readable setup)
+    // 1. Approach Runway (High-contrast lead-in)
+    // Timed 1.5s before event.startTime so player arrives on the ramp exactly on the drop!
     // ==========================================
-    const approachLen = 22.0;
-    const approachWidth = 14.0;
+    const approachLen = 24.0;
+    const approachWidth = 16.0;
     currentPos = this.offsetPos(currentPos, currentYaw, 4.0 + approachLen * 0.5);
     arcLength += 4.0 + approachLen * 0.5;
 
     const approachNode: RouteNode = {
       id: nodeId++,
-      time: event.startTime,
+      time: Math.max(0, event.startTime - 1.5),
       position: { ...currentPos },
       dimensions: { x: approachWidth, y: 2.0, z: approachLen },
       yaw: currentYaw,
@@ -63,12 +68,12 @@ export class SurfPhraseGenerator {
     };
     nodes.push(approachNode);
 
-    // If signature surf, register a checkpoint at the approach for instant replay
+    // Register a checkpoint at the approach for instant retry if player misses the surf line
     if (event.isSignature || event.type === 'SURF_DROP') {
       checkpointDef = {
         id: event.id * 100,
         routeNodeId: approachNode.id,
-        time: event.startTime,
+        time: Math.max(0, event.startTime - 1.5),
         position: { ...approachNode.position },
         yaw: currentYaw,
         sectionIndex: event.sectionIndex
@@ -83,20 +88,23 @@ export class SurfPhraseGenerator {
     // ==========================================
     switch (event.type) {
       case 'SURF_DROP': {
-        // Showcase drop surf: long dramatic sweep with generous landing
-        const rampLen = event.isSignature ? 65.0 : 45.0;
-        const rampWidth = 10.0;
-        const bankRoll = bankSign * 1.02; // ~58 degrees
-        const pitch = -0.07; // downward slope
+        // MONUMENTAL VERTICAL DESCENT SLIDE:
+        // Plunges 14m - 18.5m down to a lower deck, and the entire level continues below!
+        const rampLen = event.isSignature ? 75.0 : 58.0;
+        const rampWidth = 12.0;
+        const bankRoll = bankSign * 1.02; // ~58.4 degrees bank
+        const pitch = -0.24; // ~13.7 degrees downward plunge
 
+        // Align ramp laterally (bankSign > 0 => ramp on left; bankSign < 0 => ramp on right)
         currentPos = this.offsetPos(currentPos, currentYaw, 2.0 + rampLen * 0.5);
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * -3.5);
         currentPos.y += 0.5;
         arcLength += 2.0 + rampLen * 0.5;
 
-        const surfNormal = this.computeNormal(currentYaw, bankRoll);
+        const surfNormal = this.computeNormal(pitch, currentYaw, bankRoll);
         const rampNode: RouteNode = {
           id: nodeId++,
-          time: event.startTime + 1.5,
+          time: event.startTime, // Exact downbeat / drop timestamp!
           position: { ...currentPos },
           dimensions: { x: rampWidth, y: 2.0, z: rampLen },
           yaw: currentYaw,
@@ -112,20 +120,22 @@ export class SurfPhraseGenerator {
         };
         nodes.push(rampNode);
 
+        // Advance to bottom of the ramp
         currentPos = this.offsetPos(currentPos, currentYaw, rampLen * 0.5);
-        currentPos.y += rampLen * pitch;
+        currentPos.y += rampLen * pitch; // Drops ~18m or ~14m vertically
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * 3.5); // Realign to center
         arcLength += rampLen * 0.5;
 
-        // Massive landing plain
-        const landingLen = 32.0;
-        const landingWidth = 24.0;
-        currentPos = this.offsetPos(currentPos, currentYaw, 6.0 + landingLen * 0.5);
-        currentPos.y -= 1.0;
-        arcLength += 6.0 + landingLen * 0.5;
+        // LOWER-DECK CATCH LANDING (Generous 26m wide speedway continuing the level below)
+        const landingLen = 36.0;
+        const landingWidth = 26.0;
+        currentPos = this.offsetPos(currentPos, currentYaw, 4.0 + landingLen * 0.5);
+        currentPos.y -= 0.5;
+        arcLength += 4.0 + landingLen * 0.5;
 
         nodes.push({
           id: nodeId++,
-          time: event.endTime,
+          time: event.startTime + Math.round((rampLen / 20.0) * 10) / 10,
           position: { ...currentPos },
           dimensions: { x: landingWidth, y: 2.0, z: landingLen },
           yaw: currentYaw,
@@ -145,72 +155,75 @@ export class SurfPhraseGenerator {
       }
 
       case 'SURF_TRANSFER': {
-        // Two ramps with aerial transfer gap
-        const rampLen = 38.0;
-        const rampWidth = 9.0;
+        // Two opposing surf ramps with aerial gap transfer and vertical step-down
+        const rampLen = 42.0;
+        const rampWidth = 10.0;
+        const pitch = -0.12; // ~7 degree plunge
         const roll1 = bankSign * 1.04;
         const roll2 = -bankSign * 1.04;
 
         // Ramp 1
         currentPos = this.offsetPos(currentPos, currentYaw, 2.0 + rampLen * 0.5);
-        currentPos.x += bankSign * 3.0;
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * -3.5);
         arcLength += 2.0 + rampLen * 0.5;
 
         nodes.push({
           id: nodeId++,
-          time: event.startTime + 1.0,
+          time: event.startTime,
           position: { ...currentPos },
           dimensions: { x: rampWidth, y: 2.0, z: rampLen },
           yaw: currentYaw,
-          pitch: -0.06,
+          pitch,
           roll: roll1,
           type: RouteNodeType.SURF_RAMP,
           intensity: event.intensity,
           sectionIndex: event.sectionIndex,
           arcLength,
           isSurf: true,
-          surfNormal: this.computeNormal(currentYaw, roll1),
+          surfNormal: this.computeNormal(pitch, currentYaw, roll1),
           isBoost: false
         });
 
         currentPos = this.offsetPos(currentPos, currentYaw, rampLen * 0.5);
-        currentPos.y -= rampLen * 0.06;
+        currentPos.y += rampLen * pitch; // Drops ~5.0m
         arcLength += rampLen * 0.5;
 
-        // Transfer gap: 10m forward, 6m lateral shift to opposite side
-        const transferGap = 10.0;
+        // Aerial transfer gap (9m forward, 7m lateral shift to opposite side)
+        const transferGap = 9.0;
         currentPos = this.offsetPos(currentPos, currentYaw, transferGap + rampLen * 0.5);
-        currentPos.x -= bankSign * 6.0;
+        currentPos = this.offsetLateral(currentPos, currentYaw, -bankSign * 7.0);
+        currentPos.y -= 1.0;
         arcLength += transferGap + rampLen * 0.5;
 
         // Ramp 2
         nodes.push({
           id: nodeId++,
-          time: event.startTime + 2.8,
+          time: event.startTime + 2.5,
           position: { ...currentPos },
           dimensions: { x: rampWidth, y: 2.0, z: rampLen },
           yaw: currentYaw,
-          pitch: -0.06,
+          pitch,
           roll: roll2,
           type: RouteNodeType.SURF_RAMP,
           intensity: event.intensity,
           sectionIndex: event.sectionIndex,
           arcLength,
           isSurf: true,
-          surfNormal: this.computeNormal(currentYaw, roll2),
+          surfNormal: this.computeNormal(pitch, currentYaw, roll2),
           isBoost: false
         });
 
         currentPos = this.offsetPos(currentPos, currentYaw, rampLen * 0.5);
-        currentPos.y -= rampLen * 0.06;
+        currentPos.y += rampLen * pitch; // Drops another ~5.0m
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * 3.5); // Realign to center
         arcLength += rampLen * 0.5;
 
-        // Catch deck
-        const landingLen = 28.0;
-        const landingWidth = 22.0;
-        currentPos = this.offsetPos(currentPos, currentYaw, 6.0 + landingLen * 0.5);
-        currentPos.x += bankSign * 3.0;
-        arcLength += 6.0 + landingLen * 0.5;
+        // Catch deck at lower elevation (-11.0m total drop)
+        const landingLen = 32.0;
+        const landingWidth = 24.0;
+        currentPos = this.offsetPos(currentPos, currentYaw, 4.0 + landingLen * 0.5);
+        currentPos.y -= 0.5;
+        arcLength += 4.0 + landingLen * 0.5;
 
         nodes.push({
           id: nodeId++,
@@ -237,18 +250,19 @@ export class SurfPhraseGenerator {
       case 'SURF_CANYON':
       case 'SURF_CHAIN':
       default: {
-        // Continuous flow ramp
-        const rampLen = 42.0;
-        const rampWidth = 10.0;
-        const roll = bankSign * 1.0;
-        const pitch = -0.06;
+        // Continuous flow surf ramp with moderate elevation drop (-8.5m)
+        const rampLen = 55.0;
+        const rampWidth = 11.0;
+        const pitch = -0.14; // ~8 degree plunge
+        const roll = bankSign * 0.98; // ~56.1 degrees bank
 
         currentPos = this.offsetPos(currentPos, currentYaw, 2.0 + rampLen * 0.5);
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * -3.5);
         arcLength += 2.0 + rampLen * 0.5;
 
         nodes.push({
           id: nodeId++,
-          time: event.startTime + 1.2,
+          time: event.startTime,
           position: { ...currentPos },
           dimensions: { x: rampWidth, y: 2.0, z: rampLen },
           yaw: currentYaw,
@@ -259,18 +273,20 @@ export class SurfPhraseGenerator {
           sectionIndex: event.sectionIndex,
           arcLength,
           isSurf: true,
-          surfNormal: this.computeNormal(currentYaw, roll),
+          surfNormal: this.computeNormal(pitch, currentYaw, roll),
           isBoost: false
         });
 
         currentPos = this.offsetPos(currentPos, currentYaw, rampLen * 0.5);
-        currentPos.y += rampLen * pitch;
+        currentPos.y += rampLen * pitch; // Drops ~7.7m
+        currentPos = this.offsetLateral(currentPos, currentYaw, bankSign * 3.5); // Realign to center
         arcLength += rampLen * 0.5;
 
-        const landingLen = 26.0;
-        const landingWidth = 20.0;
-        currentPos = this.offsetPos(currentPos, currentYaw, 6.0 + landingLen * 0.5);
-        arcLength += 6.0 + landingLen * 0.5;
+        const landingLen = 30.0;
+        const landingWidth = 22.0;
+        currentPos = this.offsetPos(currentPos, currentYaw, 4.0 + landingLen * 0.5);
+        currentPos.y -= 0.5;
+        arcLength += 4.0 + landingLen * 0.5;
 
         nodes.push({
           id: nodeId++,
@@ -312,11 +328,22 @@ export class SurfPhraseGenerator {
     };
   }
 
-  private static computeNormal(yaw: number, roll: number): Vector3Like {
+  private static offsetLateral(pos: Vector3Like, yaw: number, lateralDist: number): Vector3Like {
     return {
-      x: -Math.cos(yaw) * Math.sin(roll),
-      y: Math.cos(roll),
-      z: Math.sin(yaw) * Math.sin(roll)
+      x: pos.x + Math.cos(yaw) * lateralDist,
+      y: pos.y,
+      z: pos.z + Math.sin(yaw) * lateralDist
+    };
+  }
+
+  private static computeNormal(pitch: number, yaw: number, roll: number): Vector3Like {
+    const euler = new THREE.Euler(pitch, yaw, roll, 'YXZ');
+    const normal = new THREE.Vector3(0, 1, 0).applyEuler(euler).normalize();
+    return {
+      x: normal.x,
+      y: normal.y,
+      z: normal.z
     };
   }
 }
+

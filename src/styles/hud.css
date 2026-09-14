@@ -110,6 +110,51 @@
   transform: translate(-50%, 0);
 }
 
+/* Center Surf Prompt Indicator */
+.hud-surf-indicator {
+  position: absolute;
+  top: 58%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(12, 16, 24, 0.88);
+  border: 1px solid var(--accent-color);
+  padding: 6px 16px;
+  border-radius: 2px;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.hud-surf-indicator.hidden {
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  visibility: hidden;
+}
+
+.hud-surf-key {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 800;
+  background: var(--accent-color);
+  color: #0c1018;
+  padding: 2px 8px;
+  border-radius: 2px;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+}
+
+.hud-surf-text {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #ffffff;
+  text-transform: uppercase;
+}
+
 /* Bottom Progress & Sync */
 .hud-bottom {
   display: flex;

@@ -55,6 +55,11 @@ export class RouteValidator {
       const horizontalGap = Math.sqrt(dx * dx + dz * dz);
       const dy = nextStart.y - currentEnd.y; // Positive if stepping UP
 
+      // 0. Skip gap and step-up modifications for surf ramps and their entry/exit transitions
+      if (current.isSurf || next.isSurf) {
+        continue;
+      }
+
       // 1. Check upward elevation limit
       if (dy > config.maxStepUp) {
         // Lower next node elevation to safe limit
