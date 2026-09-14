@@ -1,13 +1,14 @@
 /**
- * Procedural Sky & Horizon Shader for PLAYHEAD
- * Monumental Audio Brutalism: Infinite architectural signal-space with sub-bass horizon glow,
- * drifting haze bands, and drop atmospheric expansion.
+ * StarfieldSky for PLAYHEAD
+ * Subtle, atmospheric night skybox with procedural GLSL starfield,
+ * sub-bass horizon glow, mid-frequency atmospheric haze, and drop atmospheric expansion.
+ * Zero textures or static HDRIs: 100% lightweight procedural shader.
  */
 
 import * as THREE from 'three';
 import { MusicVisualState } from './MusicVisualController';
 
-const SKY_VERTEX_SHADER = `
+const STARFIELD_VERTEX_SHADER = `
 varying vec3 vWorldPosition;
 varying vec2 vUv;
 
@@ -19,7 +20,7 @@ void main() {
 }
 `;
 
-const SKY_FRAGMENT_SHADER = `
+const STARFIELD_FRAGMENT_SHADER = `
 uniform vec3 uVoidColor;
 uniform vec3 uHorizonColor;
 uniform vec3 uSecondaryColor;
@@ -110,7 +111,7 @@ void main() {
 }
 `;
 
-export class ProceduralSky {
+export class StarfieldSky {
   public mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
 
@@ -118,8 +119,8 @@ export class ProceduralSky {
     const geometry = new THREE.SphereGeometry(900, 32, 24);
 
     this.material = new THREE.ShaderMaterial({
-      vertexShader: SKY_VERTEX_SHADER,
-      fragmentShader: SKY_FRAGMENT_SHADER,
+      vertexShader: STARFIELD_VERTEX_SHADER,
+      fragmentShader: STARFIELD_FRAGMENT_SHADER,
       uniforms: {
         uVoidColor: { value: new THREE.Color(0x04060a) },
         uHorizonColor: { value: new THREE.Color(0x101b2b) },

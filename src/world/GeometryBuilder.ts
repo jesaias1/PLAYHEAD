@@ -51,12 +51,15 @@ export class GeometryBuilder {
       metalness: 0.15
     });
 
-    // 2. Surf Material (Polished dark metallic slate)
+    // 2. Surf Material (Polished dark metallic slate with audio-reactive flow)
     const surfMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2e3642,
-      roughness: 0.25,
-      metalness: 0.7
+      color: 0x1a222d,
+      emissive: isPalette ? paletteOrAccent.primary : new THREE.Color(0x00f0ff),
+      emissiveIntensity: 0.12,
+      roughness: 0.35,
+      metalness: 0.65
     });
+    reactiveMaterials.push(surfMaterial);
 
     // 3. Audio-Reactive Accent Edge Material
     const accentMaterial = new THREE.MeshStandardMaterial({
@@ -112,9 +115,11 @@ export class GeometryBuilder {
       // Add Emissive Edge Trim on lateral sides
       const edgesGeom = new THREE.EdgesGeometry(geom);
       const lineMat = new THREE.LineBasicMaterial({
-        color: accentColor,
+        color: node.isSurf
+          ? (isPalette ? paletteOrAccent.secondary : accentColor)
+          : accentColor,
         transparent: true,
-        opacity: node.isBoost ? 1.0 : 0.85
+        opacity: node.isSurf ? 0.95 : (node.isBoost ? 1.0 : 0.85)
       });
       const edges = new THREE.LineSegments(edgesGeom, lineMat);
       edges.position.copy(mesh.position);

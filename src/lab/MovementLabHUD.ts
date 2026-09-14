@@ -20,6 +20,8 @@ export class MovementLabHUD {
   private lastLandingElem: HTMLElement;
   private lookElem: HTMLElement;
   private trajStatusElem: HTMLElement;
+  private surfRowElem: HTMLElement;
+  private surfInfoElem: HTMLElement;
 
   constructor() {
     this.element = document.createElement('div');
@@ -55,6 +57,10 @@ export class MovementLabHUD {
           <span class="lab-stat-label">ACCEL EFFICIENCY:</span>
           <span class="lab-stat-val" id="lab-strafe-eff">—</span>
         </div>
+        <div class="lab-stat-row" id="lab-surf-row" style="display: none;">
+          <span class="lab-stat-label">SURF TELEMETRY:</span>
+          <span class="lab-stat-val surf" id="lab-surf-info">—</span>
+        </div>
         <div class="lab-stat-row">
           <span class="lab-stat-label">PEAK SPEED:</span>
           <span class="lab-stat-val" id="lab-peak-speed">0 u/s</span>
@@ -84,6 +90,8 @@ export class MovementLabHUD {
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>1/2/3</b> PRESETS</span>
         <span class="cheat-sep">|</span>
+        <span class="cheat-item"><b>4-8</b> SURF LAB</span>
+        <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>T</b> TRAJECTORY</span>
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>ESC</b> EXIT</span>
@@ -101,6 +109,8 @@ export class MovementLabHUD {
     this.lastLandingElem = this.element.querySelector('#lab-last-landing') as HTMLElement;
     this.lookElem = this.element.querySelector('#lab-look') as HTMLElement;
     this.trajStatusElem = this.element.querySelector('#lab-traj') as HTMLElement;
+    this.surfRowElem = this.element.querySelector('#lab-surf-row') as HTMLElement;
+    this.surfInfoElem = this.element.querySelector('#lab-surf-info') as HTMLElement;
   }
 
   public update(
@@ -124,16 +134,27 @@ export class MovementLabHUD {
     // Speed
     this.speedElem.textContent = `${formatSpeed(speedUnits)} u/s (${horizSpeed.toFixed(1)} m/s)`;
 
-    // State
-    if (player.isSurfing) {
-      this.stateElem.textContent = 'SURFING';
+    // State & Surf Telemetry
+    const isSurf = player.surfState.isSurfing || player.isSurfing;
+    if (isSurf) {
+      const sideText = player.surfState.surfSide !== 'NONE' ? ` [${player.surfState.surfSide} RAMP]` : '';
+      this.stateElem.textContent = `SURFING${sideText}`;
       this.stateElem.className = 'lab-stat-val surf';
+
+      this.surfRowElem.style.display = 'flex';
+      const tSpeed = player.surfState.tangentialSpeed;
+      const tUnits = Math.round(tSpeed * player.config.speedUnitScale);
+      const eUnits = Math.round(player.surfState.entrySpeed * player.config.speedUnitScale);
+      const sn = player.surfState.surfNormal;
+      this.surfInfoElem.textContent = `${player.surfState.surfaceAngleDeg.toFixed(1)}° slope | Tang: ${tUnits} u/s (${tSpeed.toFixed(1)} m/s) | Entry: ${eUnits} u/s | N: (${sn.x.toFixed(2)}, ${sn.y.toFixed(2)}, ${sn.z.toFixed(2)})`;
     } else if (player.isGrounded) {
       this.stateElem.textContent = 'GROUNDED';
       this.stateElem.className = 'lab-stat-val grounded';
+      this.surfRowElem.style.display = 'none';
     } else {
       this.stateElem.textContent = 'AIRBORNE';
       this.stateElem.className = 'lab-stat-val airborne';
+      this.surfRowElem.style.display = 'none';
     }
 
     // Velocity components

@@ -6,12 +6,19 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
 import { RouteValidator } from './RouteValidator';
 import { SeededRandom } from './SeededRandom';
+import { SurfPlanner } from './SurfPlanner';
+import { SurfPhraseGenerator } from './SurfPhraseGenerator';
+import { SurfValidator } from './SurfValidator';
 
 export class RouteGenerator {
   public static generate(analysis: TrackAnalysis): GeneratedTrack {
     const rng = new SeededRandom(analysis.seed);
     const nodes: RouteNode[] = [];
     const checkpoints: CheckpointDefinition[] = [];
+
+    // Plan structured, musically-aligned surf events
+    const surfEvents = SurfPlanner.plan(analysis);
+    const executedSurfEventIds = new Set<number>();
 
     // Reference running velocity (metres/second)
     const refSpeed = 16.0;
@@ -134,6 +141,54 @@ export class RouteGenerator {
           cumulativeDistance += platLen * 0.5;
           sectionCurrentDistance += platLen * 0.5;
 
+        } else if (surfEvents.some(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id))) {
+          // Dedicated planned musical surf event
+          const plannedSurf = surfEvents.find(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id))!;
+          executedSurfEventIds.add(plannedSurf.id);
+
+          const phrase = SurfPhraseGenerator.generate(
+            plannedSurf,
+            currentPos,
+            currentYaw,
+            cumulativeDistance,
+            nodeId,
+            rng
+          );
+
+          const valRes = SurfValidator.validate(phrase);
+          if (valRes.isValid) {
+            for (const n of phrase.nodes) {
+              nodes.push(n);
+            }
+            if (phrase.checkpoint && !checkpoints.some(cp => cp.sectionIndex === sIdx)) {
+              checkpoints.push(phrase.checkpoint);
+            }
+            currentPos = phrase.endPos;
+            currentYaw = phrase.endYaw;
+            const distAdded = phrase.endArcLength - cumulativeDistance;
+            cumulativeDistance = phrase.endArcLength;
+            sectionCurrentDistance += distAdded;
+            nodeId = phrase.nextNodeId;
+          } else {
+            const fallback = SurfValidator.createFallback(
+              currentPos,
+              currentYaw,
+              cumulativeDistance,
+              nodeId,
+              sIdx,
+              currentNodeTime
+            );
+            for (const n of fallback.nodes) {
+              nodes.push(n);
+            }
+            currentPos = fallback.endPos;
+            currentYaw = fallback.endYaw;
+            const distAdded = fallback.endArcLength - cumulativeDistance;
+            cumulativeDistance = fallback.endArcLength;
+            sectionCurrentDistance += distAdded;
+            nodeId = fallback.nextNodeId;
+          }
+
         } else if (theme === 'DROP' && sectionCurrentDistance < 20) {
           // Massive Dramatic Drop Event: Colossal downward leap into high-speed boost runway
           const dropGap = 8.0;
@@ -205,73 +260,35 @@ export class RouteGenerator {
           }
 
         } else if (theme === 'SURF' && phraseRoll < 0.6) {
-          // Generate a Surf Ramp sequence
-          const surfLen = 30.0;
-          const surfWidth = 6.0;
-          const bankAngle = (rng.nextBool() ? 1 : -1) * 1.05; // ~60 degree slope
-
-          currentPos = getOffsetPosition(currentPos, currentYaw, 4.0 + surfLen * 0.5);
-          currentPos.y += 1.0;
-          cumulativeDistance += 4.0 + surfLen * 0.5;
-          sectionCurrentDistance += 4.0 + surfLen * 0.5;
-
-          // Compute surf surface normal
-          const surfNormal = {
-            x: -Math.cos(currentYaw) * Math.sin(bankAngle),
-            y: Math.cos(bankAngle),
-            z: Math.sin(currentYaw) * Math.sin(bankAngle)
-          };
-
-          const surfNode: RouteNode = {
-            id: nodeId++,
-            time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
-            position: { ...currentPos },
-            dimensions: { x: surfWidth, y: 2.0, z: surfLen },
-            yaw: currentYaw,
-            pitch: -0.08, // slight downward slope for speed
-            roll: bankAngle,
-            type: RouteNodeType.SURF_RAMP,
-            intensity: section.intensity,
-            sectionIndex: sIdx,
-            arcLength: cumulativeDistance,
-            isSurf: true,
-            surfNormal,
-            isBoost: false
-          };
-          nodes.push(surfNode);
-
-          currentPos = getOffsetPosition(currentPos, currentYaw, surfLen * 0.5);
-          currentPos.y -= 2.4; // follow surf downward angle
-          cumulativeDistance += surfLen * 0.5;
-          sectionCurrentDistance += surfLen * 0.5;
-
-          // Mandatory landing platform after surf
-          const landLen = 22.0;
-          const landWidth = 14.0;
-          currentPos = getOffsetPosition(currentPos, currentYaw, 6.0 + landLen * 0.5);
-          cumulativeDistance += 6.0 + landLen * 0.5;
-          sectionCurrentDistance += 6.0 + landLen * 0.5;
-
-          const landNode: RouteNode = {
-            id: nodeId++,
-            time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
-            position: { ...currentPos },
-            dimensions: { x: landWidth, y: 2.0, z: landLen },
-            yaw: currentYaw,
-            pitch: 0,
-            roll: 0,
-            type: RouteNodeType.LANDING,
-            intensity: section.intensity,
-            sectionIndex: sIdx,
-            arcLength: cumulativeDistance,
-            isSurf: false,
-            isBoost: false
-          };
-          nodes.push(landNode);
-
-          currentPos = getOffsetPosition(currentPos, currentYaw, landLen * 0.5);
-          cumulativeDistance += landLen * 0.5;
-          sectionCurrentDistance += landLen * 0.5;
+          // Generate a validated surf phrase
+          const phrase = SurfPhraseGenerator.generate(
+            {
+              id: nodeId,
+              sectionIndex: sIdx,
+              startTime: currentNodeTime,
+              endTime: currentNodeTime + 8.0,
+              duration: 8.0,
+              type: 'SURF_RELEASE',
+              intensity: section.intensity,
+              suitability: 0.7,
+              entrySpeedTarget: 18.0,
+              isSignature: false
+            },
+            currentPos,
+            currentYaw,
+            cumulativeDistance,
+            nodeId,
+            rng
+          );
+          for (const n of phrase.nodes) {
+            nodes.push(n);
+          }
+          currentPos = phrase.endPos;
+          currentYaw = phrase.endYaw;
+          const distAdded = phrase.endArcLength - cumulativeDistance;
+          cumulativeDistance = phrase.endArcLength;
+          sectionCurrentDistance += distAdded;
+          nodeId = phrase.nextNodeId;
 
         } else if (theme === 'SPEED' || (section.intensity > 0.75 && phraseRoll < 0.45)) {
           // Boost Runway

@@ -10,6 +10,7 @@ import { MovementMath } from './MovementMath';
 import { PlayerStats } from './PlayerStats';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { SettingsManager } from '../core/Settings';
+import { SurfState } from './SurfState';
 
 export class PlayerController {
   public position = new THREE.Vector3();
@@ -19,6 +20,7 @@ export class PlayerController {
   public isSurfing = false;
   public groundNormal = new THREE.Vector3(0, 1, 0);
   public surfNormal = new THREE.Vector3(0, 1, 0);
+  public surfState: SurfState = new SurfState();
 
   public currentPreset: MovementPresetName = 'PLAYHEAD';
   public config: MovementConfig = { ...DEFAULT_MOVEMENT_CONFIG };
@@ -66,6 +68,7 @@ export class PlayerController {
   public setPosition(pos: THREE.Vector3 | { x: number; y: number; z: number }): void {
     this.position.set(pos.x, pos.y, pos.z);
     this.velocity.set(0, 0, 0);
+    this.surfState.reset();
     this.syncCamera();
   }
 
@@ -128,15 +131,23 @@ export class PlayerController {
     const wasGrounded = this.isGrounded;
 
     // 3. Movement State Processing
-    if (this.isSurfing) {
-      // Surfing Physics: Zero friction, momentum conservation, gravitational acceleration along slope
-      MovementMath.applySurf(this.velocity, this.surfNormal, this.config.gravity, dt);
-
-      // Allow responsive steering along slope
-      if (hasInput) {
-        MovementMath.accelerate(this.velocity, wishDir, this.config.maxAirWishSpeed * 3.0, this.config.airAcceleration, dt);
-      }
+    if (this.surfState.isSurfing || this.isSurfing) {
+      // Surfing Physics: Zero friction, momentum conservation, downhill gravity, and ramp strafe authority
+      this.surfState.updateSurfPhysics(
+        this.velocity,
+        wishDir,
+        hasInput,
+        forward,
+        this.surfNormal,
+        this.isSurfing,
+        this.config.gravity,
+        this.config.airAcceleration,
+        this.config.maxAirWishSpeed,
+        dt
+      );
       this.lastAirAccelAdded = 0;
+      this.currentStrafeEfficiency = 0;
+      this.currentStrafeRating = 'NONE';
     } else if (this.isGrounded) {
       // CRITICAL BHOP FIX: Check jump BEFORE applying ground friction on landing frame!
       if (this.jumpBufferTimer > 0) {
@@ -228,6 +239,7 @@ export class PlayerController {
     this.isSurfing = colRes.isSurfing;
     if (colRes.isSurfing) {
       this.surfNormal.copy(colRes.surfNormal);
+      this.surfState.contactPoint.copy(colRes.surfContactPoint);
     }
 
     if (this.isGrounded && this.velocity.y < 0) {

@@ -24,6 +24,7 @@ import { DevOverlay } from '../ui/DevOverlay';
 import { calculateLookYaw } from '../utils/math';
 import { MovementLab } from '../lab/MovementLab';
 import { StrafeVisualizer } from '../player/StrafeVisualizer';
+import { SurfVisuals } from '../world/SurfVisuals';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -34,6 +35,7 @@ export class Game {
   public cameraController: CameraController;
   public playerController: PlayerController;
   public strafeVisualizer: StrafeVisualizer;
+  public surfVisuals: SurfVisuals;
   public replayRecorder: ReplayRecorder;
   public replayPlayer: ReplayPlayer;
   public ui: UIManager;
@@ -66,6 +68,7 @@ export class Game {
     this.cameraController = new CameraController(this.environment.camera, this.environment.renderer.domElement);
     this.playerController = new PlayerController(this.cameraController, this.world.physics);
     this.strafeVisualizer = new StrafeVisualizer(this.environment.scene);
+    this.surfVisuals = new SurfVisuals(this.environment.scene);
 
     // 4. Replay Systems
     this.replayRecorder = new ReplayRecorder();
@@ -144,6 +147,7 @@ export class Game {
           this.audioEngine.stop();
           this.cameraController.unlock();
           this.strafeVisualizer.clear();
+          this.surfVisuals.clear();
           if (this.movementLab) {
             this.movementLab.dispose();
             this.movementLab = null;
@@ -156,6 +160,7 @@ export class Game {
           this.audioEngine.stop();
           this.world.dispose();
           this.strafeVisualizer.clear();
+          this.surfVisuals.clear();
           this.currentAnalysis = null;
           this.currentTrack = null;
           if (this.movementLab) {
@@ -290,6 +295,7 @@ export class Game {
     this.passedCheckpoints.clear();
     this.playerController.stats.reset();
     this.strafeVisualizer.clear();
+    this.surfVisuals.clear();
     this.runElapsedTime = 0;
 
     const startNode = this.currentTrack.route[0];
@@ -405,6 +411,7 @@ export class Game {
     this.audioEngine.stop();
     this.world.dispose();
     this.strafeVisualizer.clear();
+    this.surfVisuals.clear();
     if (this.movementLab) {
       this.movementLab.dispose();
       this.movementLab = null;
@@ -495,6 +502,13 @@ export class Game {
         frameDelta
       );
 
+      // Update Surf Visuals
+      this.surfVisuals.update(
+        this.playerController,
+        this.world.visualController.state,
+        frameDelta
+      );
+
       // Update HUD
       this.ui.hud.update(
         this.playerController.getSpeedUnits(),
@@ -544,6 +558,12 @@ export class Game {
       if (this.movementLab) {
         this.movementLab.update(frameDelta);
       }
+      this.surfVisuals.update(
+        this.playerController,
+        this.world.visualController.state,
+        frameDelta
+      );
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine);
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       this.replayPlayer.update(frameDelta);
       const songTime = this.audioEngine.getCurrentTime();

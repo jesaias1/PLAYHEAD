@@ -176,9 +176,10 @@ async function runVisualPlaytest() {
   await page.screenshot({ path: 'screenshot_vis_ambient.png' });
   console.log('[SAVED] screenshot_vis_ambient.png');
 
-  // 8. Test Movement Lab Area H (Lateral Steer Calibration)
-  console.log('[VISUAL PLAYTEST] Testing Movement Lab Area H...');
+  // 8. Test Movement Lab
+  console.log('[VISUAL PLAYTEST] Testing Movement Lab...');
   await page.evaluate(() => {
+    window.game.stateMachine.transitionTo('IMPORT');
     window.game.stateMachine.transitionTo('MOVEMENT_LAB');
   });
   await new Promise((r) => setTimeout(r, 800));
@@ -191,10 +192,126 @@ async function runVisualPlaytest() {
       game.playerController.setOrientation(Math.PI);
     }
   });
-  await new Promise((r) => setTimeout(r, 600));
-
+  await new Promise((r) => setTimeout(r, 500));
   await page.screenshot({ path: 'screenshot_lab_area_h.png' });
   console.log('[SAVED] screenshot_lab_area_h.png');
+
+  // Test Area F1 (Key 4)
+  console.log('[VISUAL PLAYTEST] Testing Area F1: Easy Single Ramp...');
+  await page.evaluate(() => {
+    const pc = window.game.playerController;
+    window.game.movementLab.teleportPlayer(new pc.position.constructor(0, 1.5, 1050), Math.PI);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_lab_surf_f1.png' });
+  console.log('[SAVED] screenshot_lab_surf_f1.png');
+
+  // Test Area F2 (Key 5)
+  console.log('[VISUAL PLAYTEST] Testing Area F2: Long Flow Ramp...');
+  await page.evaluate(() => {
+    const pc = window.game.playerController;
+    window.game.movementLab.teleportPlayer(new pc.position.constructor(0, 5.5, 1190), Math.PI);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_lab_surf_f2.png' });
+  console.log('[SAVED] screenshot_lab_surf_f2.png');
+
+  // Test Area F3 (Key 6)
+  console.log('[VISUAL PLAYTEST] Testing Area F3: Transfer Test...');
+  await page.evaluate(() => {
+    const pc = window.game.playerController;
+    window.game.movementLab.teleportPlayer(new pc.position.constructor(0, 3.5, 1360), Math.PI);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_lab_surf_f3.png' });
+  console.log('[SAVED] screenshot_lab_surf_f3.png');
+
+  // Test Area F4 (Key 7)
+  console.log('[VISUAL PLAYTEST] Testing Area F4: High-Speed Surf Chute...');
+  await page.evaluate(() => {
+    const pc = window.game.playerController;
+    window.game.movementLab.teleportPlayer(new pc.position.constructor(0, 1.5, 1540), Math.PI);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_lab_surf_f4.png' });
+  console.log('[SAVED] screenshot_lab_surf_f4.png');
+
+  // Test Area F5 (Key 8)
+  console.log('[VISUAL PLAYTEST] Testing Area F5: Surf Exit & Launch...');
+  await page.evaluate(() => {
+    const pc = window.game.playerController;
+    window.game.movementLab.teleportPlayer(new pc.position.constructor(0, 1.5, 1730), Math.PI);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_lab_surf_f5.png' });
+  console.log('[SAVED] screenshot_lab_surf_f5.png');
+
+  // Starry Skybox: Pitch camera upward
+  console.log('[VISUAL PLAYTEST] Capturing Starry Skybox looking up...');
+  await page.evaluate(() => {
+    window.game.cameraController.setOrientation(Math.PI, 0.75);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: 'screenshot_starry_sky.png' });
+  console.log('[SAVED] screenshot_starry_sky.png');
+  await page.evaluate(() => {
+    window.game.cameraController.setOrientation(Math.PI, 0.0);
+  });
+
+  // Test Active Surf Physics & Contact Ribbon in Movement Lab Area F1
+  console.log('[VISUAL PLAYTEST] Simulating surf contact on Area F1...');
+  await page.evaluate(() => {
+    const game = window.game;
+    // Position player right onto the banked ramp of Area F1 (x = -4.0, y = 2.2, z = 1085) with forward velocity
+    game.playerController.setPosition({ x: -4.2, y: 2.5, z: 1080 });
+    game.playerController.velocity.set(0, -1.0, 18.0);
+    game.playerController.setOrientation(Math.PI);
+  });
+  // Advance physics simulation
+  await new Promise((r) => setTimeout(r, 200));
+  await page.screenshot({ path: 'screenshot_surf_contact_ribbon.png' });
+  console.log('[SAVED] screenshot_surf_contact_ribbon.png');
+
+  // Check procedural track with drop surf
+  console.log('[VISUAL PLAYTEST] Returning to Import to verify procedural drop surf...');
+  await page.evaluate(() => {
+    window.game.stateMachine.transitionTo('IMPORT');
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  await page.click('#btn-dev-track');
+  await page.waitForFunction(() => {
+    const btn = document.querySelector('#btn-enter-track');
+    return btn && !btn.disabled;
+  }, { timeout: 15000 });
+  await page.click('#btn-enter-track');
+  await page.waitForFunction(() => {
+    return window.game && window.game.stateMachine.is('PLAYING');
+  }, { timeout: 8000 });
+
+  // Locate the first procedural surf node in track
+  await page.evaluate(() => {
+    const game = window.game;
+    const track = game.currentTrack;
+    const surfNode = track.route.find((n) => n.isSurf);
+    if (surfNode) {
+      // Position player just ahead of the surf node
+      const idx = track.route.indexOf(surfNode);
+      const approachNode = idx > 0 ? track.route[idx - 1] : surfNode;
+      game.audioEngine.seek(approachNode.time);
+      game.playerController.setPosition({
+        x: approachNode.position.x,
+        y: approachNode.position.y + 1.5,
+        z: approachNode.position.z
+      });
+      const dx = surfNode.position.x - approachNode.position.x;
+      const dz = surfNode.position.z - approachNode.position.z;
+      const lookYaw = Math.atan2(-dx, -dz);
+      game.playerController.setOrientation(lookYaw);
+    }
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  await page.screenshot({ path: 'screenshot_procedural_drop_surf.png' });
+  console.log('[SAVED] screenshot_procedural_drop_surf.png');
 
   // 9. Capture dev diagnostics telemetry JSON
   const telemetry = await page.evaluate(() => {
@@ -217,7 +334,10 @@ async function runVisualPlaytest() {
       buildup: vs.buildup,
       dropImpact: vs.dropImpact,
       strafeEfficiency: pc.currentStrafeEfficiency,
-      strafeRating: pc.currentStrafeRating
+      strafeRating: pc.currentStrafeRating,
+      isSurfing: pc.isSurfing,
+      surfSlopeAngle: pc.surfState.surfaceAngleDeg,
+      surfTangentialSpeed: pc.surfState.tangentialSpeed
     };
   });
   console.log('[VISUAL PLAYTEST TELEMETRY]', JSON.stringify(telemetry, null, 2));
@@ -232,7 +352,15 @@ async function runVisualPlaytest() {
     'screenshot_vis_strafe.png',
     'screenshot_vis_dnb.png',
     'screenshot_vis_ambient.png',
-    'screenshot_lab_area_h.png'
+    'screenshot_lab_area_h.png',
+    'screenshot_lab_surf_f1.png',
+    'screenshot_lab_surf_f2.png',
+    'screenshot_lab_surf_f3.png',
+    'screenshot_lab_surf_f4.png',
+    'screenshot_lab_surf_f5.png',
+    'screenshot_starry_sky.png',
+    'screenshot_surf_contact_ribbon.png',
+    'screenshot_procedural_drop_surf.png'
   ];
 
   for (const file of screenshotFiles) {

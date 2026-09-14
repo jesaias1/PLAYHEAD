@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { RouteNode } from '../generation/GenerationTypes';
 import { BoxCollider } from './Collider';
+import { SurfState, SurfaceClassification } from '../player/SurfState';
 
 export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
@@ -47,6 +48,7 @@ export class PhysicsWorld {
     groundNormal: THREE.Vector3;
     isSurfing: boolean;
     surfNormal: THREE.Vector3;
+    surfContactPoint: THREE.Vector3;
     isBoost: boolean;
     boostSpeed: number;
     hitWall: boolean;
@@ -57,6 +59,7 @@ export class PhysicsWorld {
     const groundNormal = new THREE.Vector3(0, 1, 0);
     let isSurfing = false;
     const surfNormal = new THREE.Vector3();
+    const surfContactPoint = new THREE.Vector3();
     let isBoost = false;
     let boostSpeed = 0;
     let hitWall = false;
@@ -81,13 +84,15 @@ export class PhysicsWorld {
           // Push out
           adjusted.addScaledVector(resBottom.normal, resBottom.penetration);
 
-          // Check if ground, surf, or wall
-          if (resBottom.normal.y >= 0.65) {
+          // Classify surface: WALKABLE_GROUND vs SURF_SURFACE vs WALL
+          const classification = SurfState.classifySurface(resBottom.normal, resBottom.isSurf);
+          if (classification === SurfaceClassification.WALKABLE_GROUND) {
             isGrounded = true;
             groundNormal.copy(resBottom.normal);
-          } else if (resBottom.isSurf || (resBottom.normal.y >= 0.15 && resBottom.normal.y < 0.65)) {
+          } else if (classification === SurfaceClassification.SURF_SURFACE) {
             isSurfing = true;
             surfNormal.copy(resBottom.normal);
+            surfContactPoint.copy(resBottom.contactPoint);
           } else {
             hitWall = true;
             wallNormal.copy(resBottom.normal);
@@ -117,6 +122,7 @@ export class PhysicsWorld {
       groundNormal,
       isSurfing,
       surfNormal,
+      surfContactPoint,
       isBoost,
       boostSpeed,
       hitWall,

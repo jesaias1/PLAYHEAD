@@ -252,6 +252,88 @@ export class MovementLab {
       addBox(`AreaH_Lane_${laneX}`, laneX, 0.05, 960, 0.4, 0.1, 90, markerMat);
     }
     addBox('AreaH_CenterLine', 0, 0.05, 960, 0.4, 0.1, 90, accentMat);
+
+    // ==========================================
+    // AREA F1 — EASY SINGLE RAMP (z: 1040 .. 1160)
+    // [KEY 4 WARP] Big descending plane (roll ~57°), generous catch platform
+    // ==========================================
+    this.createAreaBanner('AREA F1 // EASY SINGLE RAMP [KEY 4]', 0, 4.5, 1040);
+    addBox('AreaF1_Approach', 0, 0, 1055, 14, 2, 24);
+    // 57 degree banked surf ramp (roll = 1.0 rad, pitch = -0.06)
+    addBox('AreaF1_Ramp', -3.5, 0.5, 1095, 10, 2, 50, surfMat, true, 1.0, -0.06);
+    // Wide catch landing
+    addBox('AreaF1_Landing', 0, -2.5, 1140, 24, 2, 36);
+
+    // ==========================================
+    // AREA F2 — LONG FLOW RAMP (z: 1180 .. 1330)
+    // [KEY 5 WARP] Extended 75m continuous surf line to test sustained speed
+    // ==========================================
+    this.createAreaBanner('AREA F2 // LONG FLOW RAMP [KEY 5]', 0, 8.5, 1180);
+    addBox('AreaF2_ElevatedTakeoff', 0, 4.0, 1195, 14, 2, 26);
+    // 58 degree banked surf ramp on right side (roll = -1.02 rad, pitch = -0.07)
+    addBox('AreaF2_FlowRamp', 4.0, 2.5, 1255, 11, 2, 85, surfMat, true, -1.02, -0.07);
+    addBox('AreaF2_ExitRunway', 0, -2.0, 1315, 22, 2, 34);
+
+    // ==========================================
+    // AREA F3 — TRANSFER TEST (z: 1350 .. 1510)
+    // [KEY 6 WARP] Left ramp (-X) to Right ramp (+X) transfer gap
+    // ==========================================
+    this.createAreaBanner('AREA F3 // TRANSFER TEST [KEY 6]', 0, 6.5, 1350);
+    addBox('AreaF3_Approach', 0, 2.0, 1365, 14, 2, 24);
+    // Left ramp (banked right, roll = 1.05)
+    addBox('AreaF3_Ramp1', -4.5, 1.5, 1405, 8, 2, 45, surfMat, true, 1.05, -0.06);
+    // Right ramp (banked left, roll = -1.05) across 8m lateral offset and 8m longitudinal gap
+    addBox('AreaF3_Ramp2', 4.5, -0.5, 1465, 8, 2, 45, surfMat, true, -1.05, -0.06);
+    // Landing catch deck
+    addBox('AreaF3_Landing', 0, -2.5, 1505, 24, 2, 32);
+
+    // ==========================================
+    // AREA F4 — HIGH-SPEED SURF CHUTE (z: 1530 .. 1700)
+    // [KEY 7 WARP] Boost entry into steep 62° downhill surf chute
+    // ==========================================
+    this.createAreaBanner('AREA F4 // HIGH-SPEED SURF CHUTE [KEY 7]', 0, 4.5, 1530);
+    addBox('AreaF4_Approach', 0, 0, 1545, 14, 2, 24);
+    // Boost pad accelerating player into chute
+    const boostNode = {
+      id: 1990,
+      time: 0,
+      position: { x: 0, y: 0.1, z: 1565 },
+      dimensions: { x: 12, y: 0.2, z: 16 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.BOOST,
+      intensity: 1.0,
+      sectionIndex: 0,
+      arcLength: 1565,
+      isSurf: false,
+      isBoost: true,
+      boostSpeed: 20.0
+    };
+    const boostCol = new BoxCollider(boostNode);
+    this.physics.addCollider(boostCol);
+    const boostMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(12, 0.2, 16),
+      accentMat
+    );
+    boostMesh.position.set(0, 0.1, 1565);
+    this.rootGroup.add(boostMesh);
+
+    // Steep 62-degree downhill surf chute
+    addBox('AreaF4_Chute', -4.0, -1.0, 1615, 10, 2, 70, surfMat, true, 1.08, -0.12);
+    // Broad high-speed landing plain
+    addBox('AreaF4_Landing', 0, -8.0, 1675, 28, 2, 45);
+
+    // ==========================================
+    // AREA F5 — SURF EXIT & LAUNCH TEST (z: 1720 .. 1880)
+    // [KEY 8 WARP] Surf ramp ending with upward kicker launching player onto catch deck
+    // ==========================================
+    this.createAreaBanner('AREA F5 // SURF EXIT & LAUNCH [KEY 8]', 0, 4.5, 1720);
+    addBox('AreaF5_Approach', 0, 0, 1735, 14, 2, 24);
+    // Surf ramp with kicker pitch
+    addBox('AreaF5_KickerRamp', 3.5, 0.5, 1780, 9, 2, 55, surfMat, true, -1.02, 0.04);
+    // Void gap: 20m
+    addBox('AreaF5_CatchDeck', 0, 1.0, 1845, 26, 2, 45);
   }
 
   private createAreaBanner(text: string, x: number, y: number, z: number): void {
@@ -336,6 +418,13 @@ export class MovementLab {
     this.trajPointsMesh.geometry.setDrawRange(0, 0);
   }
 
+  public teleportPlayer(pos: THREE.Vector3, yaw: number): void {
+    this.player.setPosition(pos);
+    this.player.setOrientation(yaw);
+    this.player.velocity.set(0, 0, 0);
+    this.clearTrajectory();
+  }
+
   private initListeners(): void {
     if (typeof window === 'undefined') return;
 
@@ -344,6 +433,21 @@ export class MovementLab {
         this.resetPlayer();
       } else if (e.code === 'KeyT' && !e.repeat) {
         this.toggleTrajectory();
+      } else if (e.code === 'Digit4' && !e.repeat) {
+        // Area F1: Easy Single Ramp
+        this.teleportPlayer(new THREE.Vector3(0, 1.5, 1050), Math.PI);
+      } else if (e.code === 'Digit5' && !e.repeat) {
+        // Area F2: Long Flow Ramp
+        this.teleportPlayer(new THREE.Vector3(0, 5.5, 1190), Math.PI);
+      } else if (e.code === 'Digit6' && !e.repeat) {
+        // Area F3: Transfer Test
+        this.teleportPlayer(new THREE.Vector3(0, 3.5, 1360), Math.PI);
+      } else if (e.code === 'Digit7' && !e.repeat) {
+        // Area F4: High-Speed Surf Chute
+        this.teleportPlayer(new THREE.Vector3(0, 1.5, 1540), Math.PI);
+      } else if (e.code === 'Digit8' && !e.repeat) {
+        // Area F5: Surf Exit & Launch
+        this.teleportPlayer(new THREE.Vector3(0, 1.5, 1730), Math.PI);
       }
     };
     window.addEventListener('keydown', this.keyListener);
