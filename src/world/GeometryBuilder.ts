@@ -44,20 +44,30 @@ export class GeometryBuilder {
       ? paletteOrAccent.void
       : new THREE.Color(0x090a0d);
 
-    // 1. Route Platform Material (Dark matte brutalist concrete with clear value contrast)
+    // 0. Procedural Textures for Brutalist Surface Detail
+    const concreteTex = createProceduralConcreteTexture();
+    const surfTex = createProceduralSurfTexture();
+
+    // 1. Route Platform Material (Heavy cast brutalist concrete with micro-roughness)
     const platformMaterial = new THREE.MeshStandardMaterial({
       color: surfaceColor,
-      roughness: 0.85,
-      metalness: 0.15
+      roughness: 0.88,
+      metalness: 0.12,
+      roughnessMap: concreteTex,
+      bumpMap: concreteTex,
+      bumpScale: 0.035
     });
 
-    // 2. Surf Material (Polished dark metallic slate with audio-reactive flow)
+    // 2. Surf Material (Polished dark metallic slate with directional glide sheen)
     const surfMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a222d,
+      color: 0x18202b,
       emissive: isPalette ? paletteOrAccent.primary : new THREE.Color(0x00f0ff),
-      emissiveIntensity: 0.12,
-      roughness: 0.35,
-      metalness: 0.65
+      emissiveIntensity: 0.14,
+      roughness: 0.28,
+      metalness: 0.72,
+      roughnessMap: surfTex,
+      bumpMap: surfTex,
+      bumpScale: 0.02
     });
     reactiveMaterials.push(surfMaterial);
 
@@ -65,9 +75,9 @@ export class GeometryBuilder {
     const accentMaterial = new THREE.MeshStandardMaterial({
       color: 0x050608,
       emissive: accentColor,
-      emissiveIntensity: 0.5,
-      roughness: 0.4,
-      metalness: 0.7
+      emissiveIntensity: 0.55,
+      roughness: 0.35,
+      metalness: 0.75
     });
     reactiveMaterials.push(accentMaterial);
 
@@ -75,28 +85,31 @@ export class GeometryBuilder {
     const checkpointMaterial = new THREE.MeshStandardMaterial({
       color: 0x0a0c10,
       emissive: accentColor,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 1.5,
       transparent: true,
-      opacity: 0.75,
-      roughness: 0.2
+      opacity: 0.82,
+      roughness: 0.18
     });
     reactiveMaterials.push(checkpointMaterial);
 
-    // 5. Finish Gate Material (Bright pristine monument)
+    // 5. Finish Gate Material (Bright pristine monumental monolith)
     const finishMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: accentColor,
-      emissiveIntensity: 1.8,
-      roughness: 0.1,
-      metalness: 0.9
+      emissiveIntensity: 1.9,
+      roughness: 0.12,
+      metalness: 0.88
     });
     reactiveMaterials.push(finishMaterial);
 
     // 6. Background Monument Material (Ultra-dark towering monolithic slabs)
     const backgroundMonolithMaterial = new THREE.MeshStandardMaterial({
       color: voidColor,
-      roughness: 0.95,
-      metalness: 0.1
+      roughness: 0.94,
+      metalness: 0.1,
+      roughnessMap: concreteTex,
+      bumpMap: concreteTex,
+      bumpScale: 0.05
     });
 
     // Build Route Meshes
@@ -174,15 +187,26 @@ export class GeometryBuilder {
 
 /**
  * Creates an elegant brutalist arch marking a checkpoint
+ * Features stepped plinth footings and clean architectural proportions
  */
 function createCheckpointArch(node: RouteNode, material: THREE.Material): THREE.Group {
   const archGroup = new THREE.Group();
   archGroup.position.set(node.position.x, node.position.y, node.position.z);
   archGroup.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
-  const archHeight = 8.0;
-  const pillarWidth = 1.0;
+  const archHeight = 8.5;
+  const pillarWidth = 1.2;
   const halfWidth = node.dimensions.x * 0.5;
+
+  // Stepped Plinth Footings (Left & Right)
+  const plinthGeom = new THREE.BoxGeometry(pillarWidth * 1.6, 0.8, pillarWidth * 1.6);
+  const plinthLeft = new THREE.Mesh(plinthGeom, material);
+  plinthLeft.position.set(-halfWidth + pillarWidth * 0.5, 0.4, 0);
+  archGroup.add(plinthLeft);
+
+  const plinthRight = new THREE.Mesh(plinthGeom, material);
+  plinthRight.position.set(halfWidth - pillarWidth * 0.5, 0.4, 0);
+  archGroup.add(plinthRight);
 
   // Left Pillar
   const pLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, archHeight, pillarWidth), material);
@@ -194,8 +218,8 @@ function createCheckpointArch(node: RouteNode, material: THREE.Material): THREE.
   pRight.position.set(halfWidth - pillarWidth * 0.5, archHeight * 0.5, 0);
   archGroup.add(pRight);
 
-  // Top Beam
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x, pillarWidth, pillarWidth), material);
+  // Top Beam (Overhanging lintel)
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth, pillarWidth * 1.2, pillarWidth * 1.4), material);
   beam.position.set(0, archHeight, 0);
   archGroup.add(beam);
 
@@ -204,17 +228,28 @@ function createCheckpointArch(node: RouteNode, material: THREE.Material): THREE.
 
 /**
  * Monumental final portal structure
+ * Multi-tiered brutalist monoliths with vertical accent core
  */
 function createFinishPortal(node: RouteNode, material: THREE.Material, accentColor: THREE.Color): THREE.Group {
   const portalGroup = new THREE.Group();
   portalGroup.position.set(node.position.x, node.position.y, node.position.z);
   portalGroup.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
-  const portalHeight = 24.0;
-  const pillarWidth = 3.5;
+  const portalHeight = 26.0;
+  const pillarWidth = 3.6;
   const halfWidth = node.dimensions.x * 0.5;
 
-  // Colossal Twin Monoliths
+  // Colossal Twin Tiered Monoliths
+  // Base tier
+  const baseLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.3, portalHeight * 0.4, pillarWidth * 2.4), material);
+  baseLeft.position.set(-halfWidth - pillarWidth * 0.6, portalHeight * 0.2, 0);
+  portalGroup.add(baseLeft);
+
+  const baseRight = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.3, portalHeight * 0.4, pillarWidth * 2.4), material);
+  baseRight.position.set(halfWidth + pillarWidth * 0.6, portalHeight * 0.2, 0);
+  portalGroup.add(baseRight);
+
+  // Main columns
   const pLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, portalHeight, pillarWidth * 2), material);
   pLeft.position.set(-halfWidth - pillarWidth * 0.5, portalHeight * 0.5, 0);
   portalGroup.add(pLeft);
@@ -223,10 +258,14 @@ function createFinishPortal(node: RouteNode, material: THREE.Material, accentCol
   pRight.position.set(halfWidth + pillarWidth * 0.5, portalHeight * 0.5, 0);
   portalGroup.add(pRight);
 
-  // Overhead Monolithic Lintel
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3, pillarWidth * 1.5, pillarWidth * 2), material);
-  lintel.position.set(0, portalHeight + pillarWidth * 0.75, 0);
-  portalGroup.add(lintel);
+  // Overhead Monolithic Double Lintel
+  const lowerLintel = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3.2, pillarWidth * 1.2, pillarWidth * 2.2), material);
+  lowerLintel.position.set(0, portalHeight + pillarWidth * 0.6, 0);
+  portalGroup.add(lowerLintel);
+
+  const upperLintel = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 1.8, pillarWidth * 0.8, pillarWidth * 1.8), material);
+  upperLintel.position.set(0, portalHeight + pillarWidth * 1.6, 0);
+  portalGroup.add(upperLintel);
 
   // Glowing Finish Energy Gateway (Center plane)
   const gateGeom = new THREE.PlaneGeometry(node.dimensions.x, portalHeight);
@@ -245,6 +284,7 @@ function createFinishPortal(node: RouteNode, material: THREE.Material, accentCol
 
 /**
  * Distant massive brutalist pylon framing the negative space
+ * Stepped monolith with central negative space slot
  */
 function createBrutalistPylon(node: RouteNode, material: THREE.Material): THREE.Group {
   const pylonGroup = new THREE.Group();
@@ -258,13 +298,113 @@ function createBrutalistPylon(node: RouteNode, material: THREE.Material): THREE.
   pylonGroup.position.set(px, py, pz);
   pylonGroup.rotation.y = node.yaw + (side > 0 ? 0.3 : -0.3);
 
-  const height = 80.0 + (node.id % 4) * 20.0;
-  const width = 8.0 + (node.id % 3) * 4.0;
-  const depth = 12.0;
+  const height = 85.0 + (node.id % 4) * 25.0;
+  const width = 10.0 + (node.id % 3) * 4.0;
+  const depth = 14.0;
 
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
-  mesh.position.y = height * 0.5;
-  pylonGroup.add(mesh);
+  // Split monolith with central vertical negative space channel
+  const wingWidth = width * 0.42;
+  const slitOffset = (width - wingWidth) * 0.5;
+
+  const leftWing = new THREE.Mesh(new THREE.BoxGeometry(wingWidth, height, depth), material);
+  leftWing.position.set(-slitOffset, height * 0.5, 0);
+  pylonGroup.add(leftWing);
+
+  const rightWing = new THREE.Mesh(new THREE.BoxGeometry(wingWidth, height, depth), material);
+  rightWing.position.set(slitOffset, height * 0.5, 0);
+  pylonGroup.add(rightWing);
+
+  // Overhead crown cap connecting wings
+  const crown = new THREE.Mesh(new THREE.BoxGeometry(width, height * 0.08, depth * 1.1), material);
+  crown.position.set(0, height * 0.96, 0);
+  pylonGroup.add(crown);
 
   return pylonGroup;
+}
+
+/**
+ * Procedural concrete texture generator
+ * Generates subtle formwork aggregate noise and fine striations
+ */
+function createProceduralConcreteTexture(): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(0, 0, size, size);
+
+    const imgData = ctx.getImageData(0, 0, size, size);
+    const data = imgData.data;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const idx = (y * size + x) * 4;
+        const grain = (Math.random() - 0.5) * 28;
+        const formwork = Math.sin(y * 0.08) * 8 + Math.cos(x * 0.03) * 6;
+        const val = Math.max(0, Math.min(255, 128 + grain + formwork));
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+    return texture;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Procedural surf texture generator
+ * Generates sleek directional micro-grooves and specular highlights
+ */
+function createProceduralSurfTexture(): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = '#606060';
+    ctx.fillRect(0, 0, size, size);
+
+    const imgData = ctx.getImageData(0, 0, size, size);
+    const data = imgData.data;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const idx = (y * size + x) * 4;
+        const groove = Math.sin(x * 0.5) * 25 + (Math.random() - 0.5) * 12;
+        const val = Math.max(0, Math.min(255, 96 + groove));
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, 8);
+    return texture;
+  } catch {
+    return null;
+  }
 }

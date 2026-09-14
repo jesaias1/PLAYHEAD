@@ -147,27 +147,42 @@ export class AnalysisScreen {
     ctx.fillStyle = '#0e1013';
     ctx.fillRect(0, 0, w, h);
 
-    // Section vertical markers
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    // Section vertical markers and labels
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
     ctx.lineWidth = 1;
+    ctx.font = '9px "Space Mono", monospace';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+
     for (const sec of analysis.sections) {
       const x = (sec.start / analysis.duration) * w;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, h);
       ctx.stroke();
+
+      ctx.fillText(sec.theme, x + 4, 12);
     }
 
-    // Real Waveform bars
+    // Real Waveform bars (graded by amplitude & spectral excitement)
     const env = analysis.waveform;
     const barWidth = w / env.length;
-    ctx.fillStyle = analysis.visualAccent.hex;
+    const accentHex = analysis.visualAccent.hex;
 
     for (let i = 0; i < env.length; i++) {
       const amp = env[i];
-      const barH = Math.max(2, amp * (h * 0.85));
+      const barH = Math.max(3, amp * (h * 0.88));
       const x = i * barWidth;
       const y = midY - barH * 0.5;
+
+      // Brighter highlight for peaks
+      if (amp > 0.65) {
+        ctx.fillStyle = '#ffffff';
+      } else if (amp > 0.35) {
+        ctx.fillStyle = accentHex;
+      } else {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      }
+
       ctx.fillRect(x, y, Math.max(1, barWidth - 1), barH);
     }
   }

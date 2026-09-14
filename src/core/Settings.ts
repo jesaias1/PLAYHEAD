@@ -9,6 +9,7 @@ export interface GameSettings {
   reduceMotion: boolean;
   holdToBhop: boolean;
   showDebug: boolean;
+  visualQuality: 'HIGH' | 'PERFORMANCE';
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -17,7 +18,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   masterVolume: 0.8,
   reduceMotion: false,
   holdToBhop: true,
-  showDebug: false
+  showDebug: false,
+  visualQuality: 'HIGH'
 };
 
 const STORAGE_KEY = 'trackrun_settings';

@@ -112,10 +112,12 @@ export class DropSetpiece {
     const leftWall = new THREE.Mesh(wallGeom, baseMat);
     leftWall.position.set(-20, 25, -30);
     this.group.add(leftWall);
+    this.animatedElements.push(leftWall);
 
     const rightWall = new THREE.Mesh(wallGeom, baseMat);
     rightWall.position.set(20, 25, -30);
     this.group.add(rightWall);
+    this.animatedElements.push(rightWall);
   }
 
   private buildSpectralCathedral(baseMat: THREE.Material, accentMat: THREE.Material): void {
@@ -205,6 +207,29 @@ export class DropSetpiece {
     if (this.materials[1]) {
       this.materials[1].emissiveIntensity = (0.05 + buildup * 0.7 + dropPulse * 2.8) * reactMult;
       this.materials[1].emissive.copy(visualState.palette.highlight);
+    }
+
+    // Dynamic geometric motion based on family
+    if (this.family === 'SPLIT_MONOLITH' && this.animatedElements.length >= 2) {
+      // Slit open laterally from 20m up to 36m on buildup & drop
+      const splitOffset = (buildup * 12.0 + dropPulse * 16.0) * reactMult;
+      this.animatedElements[0].position.x = -20 - splitOffset;
+      this.animatedElements[1].position.x = 20 + splitOffset;
+    } else if (this.family === 'SPECTRAL_CATHEDRAL') {
+      // Arches rise slightly and breathe with bass
+      for (let i = 0; i < this.animatedElements.length; i++) {
+        const arch = this.animatedElements[i];
+        const phase = visualState.time * 2.0 + i * 0.5;
+        arch.position.y = Math.sin(phase) * 1.2 + dropPulse * 4.0;
+      }
+    } else if (this.family === 'FRACTURE') {
+      // Slabs float and subtly rotate with low mid/bass
+      for (let i = 0; i < this.animatedElements.length; i++) {
+        const slab = this.animatedElements[i];
+        const side = (i % 2 === 0) ? -1 : 1;
+        slab.rotation.y = 0.15 * side + Math.sin(visualState.time * 0.8 + i) * 0.1;
+        slab.position.y = 8 + (i * 2) + Math.sin(visualState.time * 1.5 + i * 0.8) * 1.5 + dropPulse * 3.0;
+      }
     }
   }
 

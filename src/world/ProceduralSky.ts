@@ -34,6 +34,7 @@ uniform float uDropImpact;
 uniform float uBuildup;
 uniform float uSectionIntensity;
 uniform float uReactivity;
+uniform float uStarVisibility;
 
 varying vec3 vWorldPosition;
 varying vec2 vUv;
@@ -45,33 +46,34 @@ float hash31(vec3 p) {
   return fract((p.x + p.y) * p.z);
 }
 
-// Sparse procedural starfield
-float starfield(vec3 dir, float time, float high, float dropImpact) {
-  if (dir.y < 0.02) return 0.0;
-
-  // Quantize direction vector into sphere grid cells
-  vec3 grid = floor(dir * 210.0);
-  float h = hash31(grid);
-
-  // Sparse stars: only top ~1.6% of cells contain a star
-  if (h < 0.984) return 0.0;
-
-  // Jittered star position inside cell
-  vec3 cellCenter = (grid + 0.5) / 210.0;
-  float distToCenter = length(dir - cellCenter);
-  float starCore = 1.0 - smoothstep(0.0, 0.0038, distToCenter);
-
-  // Subtle musical twinkle driven by highs and time
-  float twinkle = sin(time * 2.5 + h * 6.28) * 0.3 + 0.7;
-  twinkle += high * 0.45 * sin(time * 7.0 + h * 12.0);
+// Multi-tier procedural starfield (dim distant field + crisp mid stars + hero stars)
+float starfield(vec3 dir, float time, float high, float dropImpact, float starVis) {
+  if (dir.y < 0.02 || starVis <= 0.01) return 0.0;
 
   // Elevation fade (fade near horizon into haze)
-  float elevationFade = smoothstep(0.03, 0.22, dir.y);
+  float elevationFade = smoothstep(0.02, 0.25, dir.y);
 
-  // Drop impact subtly blooms visible star count
-  float dropBoost = 1.0 + dropImpact * 0.6;
+  // 1. Far dim stars (dense, subtle background carpet)
+  vec3 gridFar = floor(dir * 280.0);
+  float hFar = hash31(gridFar);
+  float farStars = (hFar > 0.975) ? (1.0 - smoothstep(0.0, 0.0030, length(dir - (gridFar + 0.5) / 280.0))) * 0.45 : 0.0;
 
-  return starCore * twinkle * elevationFade * dropBoost;
+  // 2. Mid stars (crisper, twinkling with highs)
+  vec3 gridMid = floor(dir * 180.0);
+  float hMid = hash31(gridMid);
+  float midTwinkle = sin(time * 2.2 + hMid * 6.28) * 0.3 + 0.7;
+  midTwinkle += high * 0.4 * sin(time * 6.0 + hMid * 10.0);
+  float midStars = (hMid > 0.988) ? (1.0 - smoothstep(0.0, 0.0035, length(dir - (gridMid + 0.5) / 180.0))) * midTwinkle * 0.8 : 0.0;
+
+  // 3. Hero stars (sparse bright anchor beacons)
+  vec3 gridHero = floor(dir * 95.0);
+  float hHero = hash31(gridHero);
+  float heroTwinkle = sin(time * 1.5 + hHero * 6.28) * 0.2 + 0.8;
+  heroTwinkle += high * 0.6 * sin(time * 9.0 + hHero * 14.0);
+  float heroStars = (hHero > 0.994) ? (1.0 - smoothstep(0.0, 0.0042, length(dir - (gridHero + 0.5) / 95.0))) * heroTwinkle * 1.6 : 0.0;
+
+  float totalStars = (farStars + midStars + heroStars) * elevationFade * (1.0 + dropImpact * 0.8) * starVis;
+  return totalStars;
 }
 
 void main() {
@@ -99,9 +101,9 @@ void main() {
   float beaconFactor = beaconCols * smoothstep(0.0, 0.22, elevation) * smoothstep(0.38, 0.08, elevation) * (uHigh * 0.65 + uDropImpact * 0.9) * uReactivity;
   vec3 beacons = uHighlightColor * beaconFactor;
 
-  // 5. Subtle Starry Night Skybox
-  float stars = starfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity);
-  vec3 starColor = mix(uHighlightColor, vec3(0.92, 0.95, 1.0), 0.65) * stars * (0.85 + uHigh * 0.45);
+  // 5. Multi-Tier Starfield modulated by SongDirector
+  float stars = starfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility);
+  vec3 starColor = mix(uHighlightColor, vec3(0.92, 0.95, 1.0), 0.7) * stars * (0.9 + uHigh * 0.5);
 
   // 6. Coordinated Composition
   vec3 finalColor = baseVoid + horizonGlow + haze + beacons + starColor;
@@ -134,7 +136,8 @@ export class ProceduralSky {
         uDropImpact: { value: 0.0 },
         uBuildup: { value: 0.0 },
         uSectionIntensity: { value: 0.5 },
-        uReactivity: { value: 1.0 }
+        uReactivity: { value: 1.0 },
+        uStarVisibility: { value: 0.5 }
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -146,7 +149,7 @@ export class ProceduralSky {
     scene.add(this.mesh);
   }
 
-  public update(visualState: MusicVisualState, cameraPos: THREE.Vector3): void {
+  public update(visualState: MusicVisualState, cameraPos: THREE.Vector3, starVisibility = 0.5): void {
     // Follow camera position so sky remains at infinite apparent distance
     this.mesh.position.copy(cameraPos);
 
@@ -167,6 +170,7 @@ export class ProceduralSky {
     u.uBuildup.value = visualState.buildup;
     u.uSectionIntensity.value = visualState.sectionIntensity;
     u.uReactivity.value = visualState.reactivityMultiplier;
+    u.uStarVisibility.value = starVisibility;
   }
 
   public dispose(): void {

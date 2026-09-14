@@ -55,16 +55,29 @@
 
 .hud-speed-value {
   font-family: var(--font-mono);
-  font-size: 2.4rem;
+  font-size: 2.5rem;
   font-weight: 700;
   line-height: 1;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+.hud-speed-value.speed-high {
+  color: var(--accent-color);
+  text-shadow: 0 0 16px var(--accent-glow);
+}
+
+.hud-speed-value.speed-hyper {
+  color: #ffffff;
+  text-shadow: 0 0 20px var(--accent-color), 0 0 45px var(--accent-glow);
 }
 
 .hud-speed-unit {
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.2em;
   color: var(--text-muted);
   margin-top: 4px;
 }

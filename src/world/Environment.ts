@@ -4,6 +4,8 @@
 
 import * as THREE from 'three';
 import { VisualAccent } from '../audio/AudioFeatures';
+import { PostProcessing, QualityMode } from '../rendering/PostProcessing';
+import { SettingsManager } from '../core/Settings';
 
 export class Environment {
   public scene: THREE.Scene;
@@ -11,6 +13,7 @@ export class Environment {
   public renderer: THREE.WebGLRenderer;
   public dirLight: THREE.DirectionalLight;
   public hemiLight: THREE.HemisphereLight;
+  public postProcessing: PostProcessing;
 
   private defaultFov = 75;
   private currentFov = 75;
@@ -36,12 +39,20 @@ export class Environment {
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.toneMappingExposure = 1.15;
 
     container.appendChild(this.renderer.domElement);
 
-    // 4. Lighting: stark, high-contrast brutalist key light + cold ambient
+    // 4. PostProcessing pipeline (selective bloom + subtle vignette)
+    this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
+    const savedQuality = SettingsManager.getInstance().settings.visualQuality;
+    if (savedQuality) {
+      this.postProcessing.setQuality(savedQuality);
+    }
+
+    // 5. Lighting: stark, high-contrast brutalist key light + cold ambient
     this.hemiLight = new THREE.HemisphereLight(0x45556b, 0x111620, 0.9);
     this.scene.add(this.hemiLight);
 
@@ -51,6 +62,11 @@ export class Environment {
     this.scene.add(this.dirLight.target);
 
     window.addEventListener('resize', this.onResize);
+  }
+
+  public setQuality(mode: QualityMode): void {
+    this.postProcessing.setQuality(mode);
+    SettingsManager.getInstance().update({ visualQuality: mode });
   }
 
   public setBaseFov(fov: number): void {
@@ -110,22 +126,24 @@ export class Environment {
 
   public updateAtmosphere(
     visualState: { sectionTheme: string; dropImpact: number; buildup: number; energy: number; palette: { fogColor: THREE.Color } },
-    dt: number
+    dt: number,
+    directorState?: { fogNear: number; fogFar: number; bloomStrength: number; vignetteIntensity: number }
   ): void {
     if (this.scene.fog instanceof THREE.Fog) {
-      // Determine target fog far distance based on musical theme
-      let targetFar = 320;
-      let targetNear = 45;
+      let targetFar = directorState ? directorState.fogFar : 320;
+      let targetNear = directorState ? directorState.fogNear : 45;
 
-      if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {
-        targetFar = 460; // Horizon opens wide at drop
-        targetNear = 60;
-      } else if (visualState.sectionTheme === 'BUILDUP') {
-        targetFar = 220; // Tension compression
-        targetNear = 30;
-      } else if (visualState.sectionTheme === 'BREATH') {
-        targetFar = 390; // Open quiet void
-        targetNear = 50;
+      if (!directorState) {
+        if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {
+          targetFar = 460; // Horizon opens wide at drop
+          targetNear = 60;
+        } else if (visualState.sectionTheme === 'BUILDUP') {
+          targetFar = 220; // Tension compression
+          targetNear = 30;
+        } else if (visualState.sectionTheme === 'BREATH') {
+          targetFar = 390; // Open quiet void
+          targetNear = 50;
+        }
       }
 
       const lerpSpeed = Math.min(1.0, dt * 2.5);
@@ -134,13 +152,18 @@ export class Environment {
       this.scene.fog.color.lerp(visualState.palette.fogColor, lerpSpeed);
     }
 
+    if (directorState && this.postProcessing) {
+      this.postProcessing.setBloomIntensity(directorState.bloomStrength);
+      this.postProcessing.setVignetteIntensity(directorState.vignetteIntensity);
+    }
+
     // Subtle exposure modulation on musical peaks
-    const targetExposure = 1.20 + visualState.dropImpact * 0.15 + visualState.energy * 0.05;
+    const targetExposure = 1.15 + visualState.dropImpact * 0.15 + visualState.energy * 0.05;
     this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1.0, dt * 4.0);
   }
 
   public render(): void {
-    this.renderer.render(this.scene, this.camera);
+    this.postProcessing.render();
   }
 
   private onResize = (): void => {
@@ -149,10 +172,12 @@ export class Environment {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    this.postProcessing.resize(width, height);
   };
 
   public dispose(): void {
     window.removeEventListener('resize', this.onResize);
+    this.postProcessing.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {
       this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);

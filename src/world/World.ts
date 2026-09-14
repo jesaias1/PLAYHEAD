@@ -16,6 +16,8 @@ import { PlayheadSystem } from './PlayheadSystem';
 import { SpectralArchitecture } from './SpectralArchitecture';
 import { DropSetpiece } from './DropSetpiece';
 import { Environment } from './Environment';
+import { SongDirector } from './SongDirector';
+import { SpectacleRenderer } from './SpectacleRenderer';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 
 export class World {
@@ -23,6 +25,8 @@ export class World {
   public visualController: MusicVisualController;
   public sky: ProceduralSky;
   public playheadSystem: PlayheadSystem;
+  public songDirector: SongDirector;
+  public spectacleRenderer: SpectacleRenderer;
 
   public skyline: SkylineArchitecture | null = null;
   public spectralArchitecture: SpectralArchitecture | null = null;
@@ -41,6 +45,8 @@ export class World {
     this.visualController = new MusicVisualController();
     this.sky = new ProceduralSky(scene);
     this.playheadSystem = new PlayheadSystem(scene);
+    this.songDirector = new SongDirector();
+    this.spectacleRenderer = new SpectacleRenderer(scene);
   }
 
   public loadTrack(analysis: TrackAnalysis, track: GeneratedTrack, environment?: Environment): void {
@@ -49,8 +55,9 @@ export class World {
     this.analysis = analysis;
     this.track = track;
 
-    // 1. Initialize Visual Signal Bus with Palette
+    // 1. Initialize Visual Signal Bus with Palette and Song Director
     this.visualController.init(analysis, track);
+    this.songDirector.init(analysis, track);
     if (environment) {
       environment.setPalette(this.visualController.state.palette);
     }
@@ -82,7 +89,10 @@ export class World {
     // 6. Build Major Drop Setpiece
     this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
 
-    // 7. Authoritative Route Continuity Debug Chain
+    // 7. Initialize Spectacle Visual Renderer
+    this.spectacleRenderer.init(track);
+
+    // 8. Authoritative Route Continuity Debug Chain
     this.buildDebugChain(track);
   }
 
@@ -102,11 +112,19 @@ export class World {
     this.visualController.update(songTime, progress.arcProgress, dt, playerSpeed);
     const vState = this.visualController.state;
 
-    // Update procedural sky & atmosphere
-    this.sky.update(vState, playerPos);
+    // Update Song Director (macro dramatic arc, experience phases, spectacle planning)
+    const directorState = this.songDirector.update(songTime, progress.arcProgress, dt, vState, progress.nearestNode);
+    vState.dramaticIntensity = directorState.dramaticIntensity;
+    this.visualController.reactivityMultiplier = directorState.spectralReactivity;
+
+    // Update procedural sky & atmosphere with director modulation
+    this.sky.update(vState, playerPos, directorState.starVisibility);
     if (environment) {
-      environment.updateAtmosphere(vState, dt);
+      environment.updateAtmosphere(vState, dt, directorState);
     }
+
+    // Update spectacle runtime renderer (shockwaves, ignition pulses)
+    this.spectacleRenderer.update(directorState.activeSpectacle, vState, playerPos);
 
     // Update skyline architecture
     if (this.skyline) {
@@ -214,6 +232,7 @@ export class World {
     }
 
     this.playheadSystem.clear();
+    this.songDirector.dispose();
     this.physics.dispose();
     this.track = null;
     this.analysis = null;

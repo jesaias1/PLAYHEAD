@@ -89,6 +89,15 @@ export class Hud {
     }
     this.speedElem.textContent = formatSpeed(speed);
 
+    // Speed intensity classes for visual feedback
+    if (speed > 28) {
+      this.speedElem.className = 'hud-speed-value speed-hyper';
+    } else if (speed > 18) {
+      this.speedElem.className = 'hud-speed-value speed-high';
+    } else {
+      this.speedElem.className = 'hud-speed-value';
+    }
+
     // Sync Delta formatting
     const sign = syncDelta >= 0 ? '+' : '-';
     const abs = Math.abs(syncDelta).toFixed(2);

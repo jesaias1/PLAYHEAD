@@ -52,6 +52,7 @@ export interface MusicVisualState {
   activeHazeColor: THREE.Color;
   routePulsePhase: number;
   kineticMusicIntensity: number;
+  dramaticIntensity: number;
 
   reactivityMultiplier: number;
 }
@@ -121,6 +122,7 @@ export class MusicVisualController {
       activeHazeColor: defaultPalette.void.clone(),
       routePulsePhase: 0,
       kineticMusicIntensity: 0,
+      dramaticIntensity: 0.2,
       reactivityMultiplier: 1.0
     };
   }

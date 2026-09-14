@@ -27,28 +27,38 @@ export class ImportScreen {
     this.element.className = 'screen import-screen';
     this.element.innerHTML = `
       <div class="import-container">
+        <div class="brand-badge">ARCHITECTURAL AUDIO ENGINE v1.0</div>
         <h1 class="brand-title">PLAYHEAD</h1>
-        <p class="brand-subtitle">DROP A SONG. ENTER IT.</p>
-        <p class="brand-tagline">BECOME THE PLAYHEAD.</p>
+        <p class="brand-subtitle">DROP A TRACK. ENTER THE SIGNAL.</p>
 
         <div class="drop-zone" id="import-drop-zone">
-          <div class="drop-prompt">DRAG AUDIO FILE HERE</div>
-          <div class="drop-subtext">.MP3, .WAV, .OGG, .M4A, .FLAC</div>
+          <div class="signal-line"></div>
+          <div class="drop-prompt">DRAG AUDIO FILE HERE OR CLICK TO BROWSE</div>
+          <div class="drop-subtext">MP3 · WAV · FLAC · OGG · M4A — REAL-TIME PROCEDURAL GENERATION</div>
         </div>
 
-        <div class="import-actions">
-          <button class="primary" id="btn-browse-file">BROWSE FILE</button>
-          <button class="secondary" id="btn-dev-track">DEV: ELECTRONIC DROP</button>
-          <button class="secondary" id="btn-dev-dnb">DEV: BREAKBEAT DNB</button>
-          <button class="secondary" id="btn-dev-ambient">DEV: AMBIENT SPARSE</button>
-          <button class="secondary" id="btn-dev-silent">DEV: NEAR SILENT</button>
-          <button class="secondary" id="btn-movement-lab">MOVEMENT LAB</button>
+        <div class="import-actions-panel">
+          <button class="primary btn-hero" id="btn-browse-file">BROWSE AUDIO FILE</button>
+          
+          <div class="preset-section">
+            <div class="preset-label">PRESET AUDIO PATTERNS</div>
+            <div class="preset-grid">
+              <button class="secondary btn-preset" id="btn-dev-track">ELECTRONIC DROP</button>
+              <button class="secondary btn-preset" id="btn-dev-dnb">BREAKBEAT D&B</button>
+              <button class="secondary btn-preset" id="btn-dev-ambient">AMBIENT SPARSE</button>
+              <button class="secondary btn-preset" id="btn-dev-silent">NEAR SILENT</button>
+            </div>
+          </div>
+
+          <div class="lab-section">
+            <button class="secondary btn-lab" id="btn-movement-lab">ENTER MOVEMENT LAB</button>
+          </div>
         </div>
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
 
         <div class="privacy-notice">
-          LOCAL ANALYSIS — AUDIO NEVER LEAVES YOUR DEVICE
+          HIGH-PRECISION CLIENT-SIDE DSP // AUDIO REMAINS IN LOCAL MEMORY ONLY
         </div>
       </div>
     `;
