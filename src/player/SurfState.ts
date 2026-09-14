@@ -51,11 +51,15 @@ export class SurfState {
     const ny = normal.y;
 
     // Normal pointing steeply upward (> 45.6 degrees from horizontal)
-    if (ny >= 0.70 && !isExplicitSurf) {
+    if (ny >= 0.70) {
+      // Explicit surf ramps are slick on all non-vertical faces (cannot walk/stand on them)
+      if (isExplicitSurf) {
+        return SurfaceClassification.SURF_SURFACE;
+      }
       return SurfaceClassification.WALKABLE_GROUND;
     }
 
-    // Surf surface: either explicitly tagged as surf ramp, or steep slope between ~45° and ~79°
+    // Surf surface: steep slope between ~45.6° and ~79.6° (ny between 0.18 and 0.70)
     if (isExplicitSurf || (ny >= 0.18 && ny < 0.70)) {
       return SurfaceClassification.SURF_SURFACE;
     }
@@ -115,39 +119,79 @@ export class SurfState {
       this.surfSide = 'NONE';
     }
 
-    // 3. Clip velocity moving into the ramp surface (preserve tangential velocity)
-    const intoNormal = velocity.dot(this.surfNormal);
-    if (intoNormal < 0) {
-      // Zero the velocity component penetrating into the surface
-      velocity.addScaledVector(this.surfNormal, -intoNormal);
-    }
-
-    // 4. Project gravity onto the slope tangent plane (pulls player downhill along the ramp)
+    // 3. Slope Tangent Vectors
+    // Downhill direction: projection of world downward gravity onto the slope plane
     const grav = new THREE.Vector3(0, -gravity, 0);
     const gravDotNorm = grav.dot(this.surfNormal);
     const slopeGravity = grav.clone().addScaledVector(this.surfNormal, -gravDotNorm);
+
+    const downhillDir = slopeGravity.clone();
+    if (downhillDir.lengthSq() > 1e-6) {
+      downhillDir.normalize();
+    } else {
+      downhillDir.set(0, -1, 0);
+    }
+    const uphillDir = downhillDir.clone().negate();
+
+    // 4. Clip inward velocity penetrating into the surface
+    const intoNormal = velocity.dot(this.surfNormal);
+    if (intoNormal < 0) {
+      velocity.addScaledVector(this.surfNormal, -intoNormal);
+    }
+
+    // 5. Apply Downhill Slope Gravity (accelerates player downhill along slope face)
+    // In Counter-Strike, gravity always pulls players down steep slopes so they cannot hover or crawl
     velocity.addScaledVector(slopeGravity, dt);
 
-    // 5. Authentic Source Air-Acceleration on Surf Ramp:
-    // When player presses wishDir into/along ramp, air acceleration increases speed.
-    // Clipping keeps them on the tangent plane, generating forward/downhill drive!
-    if (hasInput) {
-      MovementMath.accelerate(
-        velocity,
-        wishDir,
-        maxAirWishSpeed * 2.5,
-        airAcceleration,
-        dt
-      );
+    // Record uphill velocity before input
+    const uphillSpeedBeforeInput = Math.max(0, velocity.dot(uphillDir));
 
-      // Re-clip against normal so pushing into ramp doesn't sink into it
+    // 6. Authentic Counter-Strike Air Acceleration on Surf Ramp:
+    // - In CS, players hold strafe (A or D) into the ramp to hug the surface and build speed.
+    // - Players CANNOT walk or crawl uphill on the steep slope with W.
+    if (hasInput) {
+      // Project wish direction onto the slope tangent plane
+      const wishTangent = wishDir.clone();
+      const wishDotNorm = wishTangent.dot(this.surfNormal);
+      wishTangent.addScaledVector(this.surfNormal, -wishDotNorm);
+
+      // Strictly eliminate any uphill component from wish direction
+      const wishUphill = wishTangent.dot(uphillDir);
+      if (wishUphill > 0) {
+        wishTangent.addScaledVector(uphillDir, -wishUphill);
+      }
+
+      if (wishTangent.lengthSq() > 1e-4) {
+        wishTangent.normalize();
+
+        // Authentic CS air wish speed (~2.0 m/s; prevents ground-speed climbing)
+        const surfWishSpeed = Math.min(maxAirWishSpeed, 2.5);
+
+        MovementMath.accelerate(
+          velocity,
+          wishTangent,
+          surfWishSpeed,
+          airAcceleration,
+          dt
+        );
+      }
+
+      // Re-clip against normal so pushing into ramp stays strictly on surface
       const intoNormalAfterInput = velocity.dot(this.surfNormal);
       if (intoNormalAfterInput < 0) {
         velocity.addScaledVector(this.surfNormal, -intoNormalAfterInput);
       }
+
+      // STRICT CS SURF INVARIANT:
+      // Normal clipping or input must NEVER increase uphill velocity beyond pre-input momentum!
+      // This completely prevents the "crawling up the steep ramp" bug.
+      const currentUphillSpeed = velocity.dot(uphillDir);
+      if (currentUphillSpeed > uphillSpeedBeforeInput) {
+        velocity.addScaledVector(uphillDir, uphillSpeedBeforeInput - currentUphillSpeed);
+      }
     }
 
-    // 6. Record tangential speed
+    // 7. Record tangential speed
     const normComponent = velocity.dot(this.surfNormal);
     const tangVel = velocity.clone().addScaledVector(this.surfNormal, -normComponent);
     this.tangentialSpeed = tangVel.length();

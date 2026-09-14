@@ -113,4 +113,46 @@ describe('SurfPhysics & Surface Classification', () => {
     surf.updateSurfPhysics(vel, wishDir, false, camForward, surfNormal, true, 24.0, 90.0, 3.0, dt);
     expect(surf.isSurfing).toBe(true);
   });
+
+  it('prohibits crawling or walking uphill on steep surf ramps and slides player downhill under gravity', () => {
+    const surf = new SurfState();
+    // 60-degree ramp: normal facing (+X, +Y) with ny = 0.5, nx = 0.866
+    const surfNormal = new THREE.Vector3(0.866025, 0.5, 0).normalize();
+
+    // Player stationary on the ramp (v = 0)
+    const vel = new THREE.Vector3(0, 0, 0);
+
+    // Player looks directly into/up the ramp (-X direction) and presses W (forward)
+    const wishDir = new THREE.Vector3(-1, 0, 0);
+    const camForward = new THREE.Vector3(-1, 0, 0);
+    const gravity = 24.0;
+    const dt = 1 / 120;
+
+    // Simulate 30 ticks (0.25 seconds) of holding W into/up the steep ramp
+    for (let i = 0; i < 30; i++) {
+      surf.updateSurfPhysics(
+        vel,
+        wishDir,
+        true, // holding W
+        camForward,
+        surfNormal,
+        true,
+        gravity,
+        90.0,
+        3.0,
+        dt
+      );
+    }
+
+    // Must be sliding DOWNHILL under gravity, NOT crawling UP the ramp!
+    expect(vel.y).toBeLessThan(0); // Y must be strictly negative (falling/sliding down)
+    expect(vel.x).toBeGreaterThan(0); // sliding away from the wall down the slope (+X direction)
+
+    // Verify upward slope component is strictly <= 0
+    const grav = new THREE.Vector3(0, -gravity, 0);
+    const slopeGravity = grav.clone().addScaledVector(surfNormal, -grav.dot(surfNormal));
+    const uphillDir = slopeGravity.clone().normalize().negate();
+    expect(vel.dot(uphillDir)).toBeLessThanOrEqual(0);
+  });
 });
+

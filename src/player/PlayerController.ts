@@ -132,6 +132,11 @@ export class PlayerController {
 
     // 3. Movement State Processing
     if (this.surfState.isSurfing || this.isSurfing) {
+      // In Counter-Strike, a player on a surf ramp is not grounded and cannot jump or walk freely
+      this.isGrounded = false;
+      this.jumpBufferTimer = 0;
+      this.coyoteTimer = 0;
+
       // Surfing Physics: Zero friction, momentum conservation, downhill gravity, and ramp strafe authority
       this.surfState.updateSurfPhysics(
         this.velocity,
@@ -234,15 +239,16 @@ export class PlayerController {
     );
 
     this.position.copy(colRes.adjustedPos);
-    this.isGrounded = colRes.isGrounded;
-    this.groundNormal.copy(colRes.groundNormal);
     this.isSurfing = colRes.isSurfing;
+    this.isGrounded = colRes.isGrounded && !colRes.isSurfing;
+    this.groundNormal.copy(colRes.groundNormal);
     if (colRes.isSurfing) {
       this.surfNormal.copy(colRes.surfNormal);
       this.surfState.contactPoint.copy(colRes.surfContactPoint);
+      this.isGrounded = false;
     }
 
-    if (this.isGrounded && this.velocity.y < 0) {
+    if (this.isGrounded && !this.isSurfing && this.velocity.y < 0) {
       this.velocity.y = 0;
     }
 

@@ -116,6 +116,12 @@ export class PhysicsWorld {
       }
     }
 
+    // In Counter-Strike, surfing and ground states are strictly mutually exclusive.
+    // A player on a surf ramp is never grounded (no ground friction, no jumping, no walking).
+    if (isSurfing) {
+      isGrounded = false;
+    }
+
     return {
       adjustedPos: adjusted,
       isGrounded,
