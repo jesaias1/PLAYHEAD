@@ -1,0 +1,122 @@
+/**
+ * Collision primitives and query routines for TRACK//RUN
+ */
+
+import * as THREE from 'three';
+import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+
+export interface CollisionResult {
+  hasContact: boolean;
+  contactPoint: THREE.Vector3;
+  normal: THREE.Vector3;
+  penetration: number;
+  isSurf: boolean;
+  isBoost: boolean;
+  boostSpeed?: number;
+}
+
+export class BoxCollider {
+  public center = new THREE.Vector3();
+  public halfSize = new THREE.Vector3();
+  public rotation = new THREE.Euler();
+  public matrix = new THREE.Matrix4();
+  public invMatrix = new THREE.Matrix4();
+  public isSurf: boolean;
+  public isBoost: boolean;
+  public boostSpeed: number;
+  public nodeType: RouteNodeType;
+  public surfNormal?: THREE.Vector3;
+  public boundingRadius: number;
+
+  constructor(node: RouteNode) {
+    this.center.set(node.position.x, node.position.y, node.position.z);
+    this.halfSize.set(node.dimensions.x * 0.5, node.dimensions.y * 0.5, node.dimensions.z * 0.5);
+    this.boundingRadius = this.halfSize.length();
+    this.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
+
+    this.matrix.makeRotationFromEuler(this.rotation);
+    this.matrix.setPosition(this.center);
+    this.invMatrix.copy(this.matrix).invert();
+
+    this.isSurf = node.isSurf;
+    this.isBoost = node.isBoost;
+    this.boostSpeed = node.boostSpeed || 12.0;
+    this.nodeType = node.type;
+
+    if (node.surfNormal) {
+      this.surfNormal = new THREE.Vector3(node.surfNormal.x, node.surfNormal.y, node.surfNormal.z).normalize();
+    }
+  }
+
+  /**
+   * Test sphere/capsule against this OBB
+   */
+  public testSphere(sphereCenter: THREE.Vector3, radius: number): CollisionResult {
+    // Transform sphere center into OBB local space
+    const localPoint = sphereCenter.clone().applyMatrix4(this.invMatrix);
+
+    // Find closest point in local AABB
+    const clamped = new THREE.Vector3(
+      Math.max(-this.halfSize.x, Math.min(this.halfSize.x, localPoint.x)),
+      Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y)),
+      Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z))
+    );
+
+    const localDiff = localPoint.clone().sub(clamped);
+    const distSq = localDiff.lengthSq();
+
+    // Check if outside radius
+    if (distSq > radius * radius && distSq > 1e-6) {
+      return {
+        hasContact: false,
+        contactPoint: new THREE.Vector3(),
+        normal: new THREE.Vector3(),
+        penetration: 0,
+        isSurf: this.isSurf,
+        isBoost: this.isBoost,
+        boostSpeed: this.boostSpeed
+      };
+    }
+
+    // Contact detected
+    let localNormal: THREE.Vector3;
+    let penetration: number;
+
+    if (distSq > 1e-6) {
+      const dist = Math.sqrt(distSq);
+      localNormal = localDiff.divideScalar(dist);
+      penetration = radius - dist;
+    } else {
+      // Sphere center is inside box - find shallowest face
+      const dx = this.halfSize.x - Math.abs(localPoint.x);
+      const dy = this.halfSize.y - Math.abs(localPoint.y);
+      const dz = this.halfSize.z - Math.abs(localPoint.z);
+
+      if (dy <= dx && dy <= dz) {
+        localNormal = new THREE.Vector3(0, localPoint.y >= 0 ? 1 : -1, 0);
+        penetration = radius + dy;
+      } else if (dx <= dz) {
+        localNormal = new THREE.Vector3(localPoint.x >= 0 ? 1 : -1, 0, 0);
+        penetration = radius + dx;
+      } else {
+        localNormal = new THREE.Vector3(0, 0, localPoint.z >= 0 ? 1 : -1);
+        penetration = radius + dz;
+      }
+    }
+
+    // Transform normal back to world space
+    const normalMatrix = new THREE.Matrix3().setFromMatrix4(this.matrix);
+    const worldNormal = localNormal.clone().applyMatrix3(normalMatrix).normalize();
+    const contactPoint = clamped.applyMatrix4(this.matrix);
+
+    return {
+      hasContact: true,
+      contactPoint,
+      normal: worldNormal,
+      penetration,
+      isSurf: this.isSurf,
+      isBoost: this.isBoost,
+      boostSpeed: this.boostSpeed
+    };
+  }
+}

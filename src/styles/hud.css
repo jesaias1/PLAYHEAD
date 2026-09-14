@@ -1,0 +1,271 @@
+/* In-Game HUD */
+#hud-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 32px 40px;
+  opacity: 1;
+  transition: opacity 0.2s var(--ease-sharp);
+}
+
+#hud-container.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.hud-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.hud-track-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-track-title {
+  font-family: var(--font-sans);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+
+.hud-section-info {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  color: var(--accent-color);
+}
+
+.hud-speed-gauge {
+  text-align: right;
+}
+
+.hud-speed-value {
+  font-family: var(--font-mono);
+  font-size: 2.4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.hud-speed-unit {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Center Crosshair */
+.hud-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.hud-reticle {
+  width: 4px;
+  height: 4px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  opacity: 0.6;
+}
+
+.hud-toast {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translate(-50%, -10px);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+  background: var(--bg-surface-translucent);
+  border: 1px solid var(--accent-dim);
+  padding: 8px 24px;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.25s var(--ease-sharp);
+}
+
+.hud-toast.active {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Bottom Progress & Sync */
+.hud-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.hud-sync-indicator {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: var(--bg-surface-translucent);
+  border: 1px solid var(--border-subtle);
+  padding: 6px 16px;
+}
+
+.hud-sync-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+}
+
+.hud-sync-val {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.hud-sync-val.ahead {
+  color: #00ff88;
+}
+
+.hud-sync-val.behind {
+  color: #ff3366;
+}
+
+.hud-progress-bar-container {
+  width: 100%;
+  max-width: 480px;
+  height: 2px;
+  background: var(--border-subtle);
+  position: relative;
+}
+
+.hud-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-color);
+  box-shadow: 0 0 10px var(--accent-color);
+  transition: width 0.1s linear;
+}
+
+/* Movement Lab HUD */
+#movement-lab-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 24px 32px;
+}
+
+.lab-hud-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(7, 8, 10, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  padding: 16px 20px;
+  max-width: 440px;
+  backdrop-filter: blur(8px);
+}
+
+.lab-hud-header {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #00f0ff;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+  padding-bottom: 4px;
+}
+
+.lab-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.lab-stat-label {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.lab-stat-val {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.lab-stat-val.highlight {
+  color: #00f0ff;
+  font-weight: 700;
+}
+
+.lab-stat-val.bold {
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.lab-stat-val.positive {
+  color: #00ff88;
+}
+
+.lab-stat-val.grounded {
+  color: #e2e8f0;
+}
+
+.lab-stat-val.airborne {
+  color: #ffb703;
+}
+
+.lab-stat-val.surf {
+  color: #00f0ff;
+}
+
+.lab-cheat-sheet {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(7, 8, 10, 0.88);
+  border: 1px solid var(--border-medium);
+  padding: 8px 20px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+
+.lab-cheat-sheet b {
+  color: #00f0ff;
+}
+
+.cheat-sep {
+  color: var(--text-muted);
+  opacity: 0.5;
+}

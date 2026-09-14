@@ -1,0 +1,27 @@
+:root {
+  --bg-primary: #07080a;
+  --bg-secondary: #0e1013;
+  --bg-surface: #15181d;
+  --bg-surface-translucent: rgba(14, 16, 19, 0.85);
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.18);
+  --border-strong: rgba(255, 255, 255, 0.35);
+
+  --text-primary: #f2f4f7;
+  --text-secondary: #8c939e;
+  --text-muted: #505661;
+  --text-dim: #2e343d;
+
+  /* Dynamic Track Accent (overwritten per song) */
+  --accent-color: #00f0ff;
+  --accent-rgb: 0, 240, 255;
+  --accent-glow: rgba(0, 240, 255, 0.25);
+  --accent-dim: rgba(0, 240, 255, 0.08);
+
+  --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Space Mono', 'SF Mono', Consolas, monospace;
+
+  --ease-sharp: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-expo: cubic-bezier(0.19, 1, 0.22, 1);
+}
