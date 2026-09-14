@@ -22,23 +22,25 @@ describe('SurfPhysics & Surface Classification', () => {
     expect(SurfState.classifySurface(new THREE.Vector3(0.998, 0.05, 0), false)).toBe(SurfaceClassification.WALL);
   });
 
-  it('preserves tangential momentum and applies downhill slope gravity without ground friction', () => {
+  it('preserves tangential momentum and applies downhill slope gravity when no keys held', () => {
     const surf = new SurfState();
-    // 60-degree ramp: normal facing (+X, +Y) with ny = 0.5, nx = 0.866
-    const surfNormal = new THREE.Vector3(0.866025, 0.5, 0).normalize();
+    // 60-degree ramp: normal facing (-X, +Y) with ny = 0.5, nx = -0.866
+    const surfNormal = new THREE.Vector3(-0.866025, 0.5, 0).normalize();
 
     // Player entering at 20 m/s along +Z (tangential to the ramp slope)
     const vel = new THREE.Vector3(0, 0, 20.0);
     const wishDir = new THREE.Vector3();
     const camForward = new THREE.Vector3(0, 0, 1);
+    const camRight = new THREE.Vector3(-1, 0, 0); // facing +Z in right-handed coords
     const gravity = 24.0;
     const dt = 1 / 60;
 
     surf.updateSurfPhysics(
       vel,
       wishDir,
-      false,
+      false, // no keys held
       camForward,
+      camRight,
       surfNormal,
       true, // in physical contact
       gravity,
@@ -51,45 +53,89 @@ describe('SurfPhysics & Surface Classification', () => {
     // Forward tangential speed (+Z) must be preserved (no friction!)
     expect(vel.z).toBeCloseTo(20.0, 4);
 
-    // Gravity projected along slope:
-    // grav = (0, -24, 0). grav.dot(normal) = -12.
-    // slopeGravity = (0, -24, 0) - (-12 * normal) = (0, -24, 0) + (10.39, 6.0, 0) = (10.39, -18.0, 0)
-    // Pulls down (-Y) and outward (-X downhill)
+    // No strafe held -> downhill slope gravity accelerates player down the ramp
     expect(vel.y).toBeLessThan(0); // sliding downhill
     expect(vel.dot(surfNormal)).toBeCloseTo(0, 5); // strictly on the tangent plane
   });
 
-  it('allows air-strafe input into the ramp to accelerate forward along tangent', () => {
+  it('holding A on a left-side ramp keeps player on the ramp and gains carving speed', () => {
     const surf = new SurfState();
-    // Ramp on player's right: normal points toward -X
+    // Ramp on left: when looking along +Z, player's left is +X.
+    // Ramp surface faces toward the player (-X direction): normal = (-0.866, 0.5, 0)
     const surfNormal = new THREE.Vector3(-0.866025, 0.5, 0).normalize();
 
     const vel = new THREE.Vector3(0, 0, 14.0);
     const camForward = new THREE.Vector3(0, 0, 1);
-    // Player strafes right (holding D, wishDir towards +X into the ramp)
+    const camRight = new THREE.Vector3(-1, 0, 0);
+    // Player holds KeyA (strafe left into the left ramp, wishDir = -camRight = (+1, 0, 0))
     const wishDir = new THREE.Vector3(1, 0, 0);
     const gravity = 24.0;
-    const dt = 1 / 60;
+    const dt = 1 / 120;
 
     const initialSpeed = vel.length();
 
-    surf.updateSurfPhysics(
-      vel,
-      wishDir,
-      true,
-      camForward,
-      surfNormal,
-      true,
-      gravity,
-      90.0,
-      3.0,
-      dt
-    );
+    // Simulate 30 ticks (0.25 seconds) of holding A into the ramp
+    for (let i = 0; i < 30; i++) {
+      surf.updateSurfPhysics(
+        vel,
+        wishDir,
+        true, // holding A
+        camForward,
+        camRight,
+        surfNormal,
+        true,
+        gravity,
+        150.0,
+        2.0,
+        dt
+      );
+    }
 
-    // Input directed into ramp was clipped against normal and converted to tangent acceleration
+    // 1. Holding A must counterbalance slope gravity: Y velocity must NOT drop!
+    expect(vel.y).toBeGreaterThanOrEqual(-0.01);
+
+    // 2. Forward speed along +Z must be maintained and gain carving speed
+    expect(vel.z).toBeGreaterThan(14.0);
     expect(vel.length()).toBeGreaterThan(initialSpeed);
-    // Velocity dot normal remains >= 0 (never sinking into the ramp)
-    expect(vel.dot(surfNormal)).toBeGreaterThanOrEqual(-1e-6);
+
+    // 3. SurfSide is classified as LEFT
+    expect(surf.surfSide).toBe('LEFT');
+  });
+
+  it('holding D on a right-side ramp keeps player on the ramp and maintains altitude', () => {
+    const surf = new SurfState();
+    // Ramp on right: when looking along +Z, player's right is -X.
+    // Ramp surface faces toward player (+X direction): normal = (0.866, 0.5, 0)
+    const surfNormal = new THREE.Vector3(0.866025, 0.5, 0).normalize();
+
+    const vel = new THREE.Vector3(0, 0, 14.0);
+    const camForward = new THREE.Vector3(0, 0, 1);
+    const camRight = new THREE.Vector3(-1, 0, 0);
+    // Player holds KeyD (strafe right into the right ramp, wishDir = +camRight = (-1, 0, 0))
+    const wishDir = new THREE.Vector3(-1, 0, 0);
+    const gravity = 24.0;
+    const dt = 1 / 120;
+
+    for (let i = 0; i < 30; i++) {
+      surf.updateSurfPhysics(
+        vel,
+        wishDir,
+        true, // holding D
+        camForward,
+        camRight,
+        surfNormal,
+        true,
+        gravity,
+        150.0,
+        2.0,
+        dt
+      );
+    }
+
+    // Altitude maintained on right ramp when holding D
+    expect(vel.y).toBeGreaterThanOrEqual(-0.01);
+    expect(vel.z).toBeGreaterThan(14.0);
+    expect(surf.surfSide).toBe('RIGHT');
   });
 
   it('stabilizes contact across micro-seams using contact grace period', () => {
@@ -98,19 +144,20 @@ describe('SurfPhysics & Surface Classification', () => {
     const vel = new THREE.Vector3(0, 0, 15.0);
     const wishDir = new THREE.Vector3();
     const camForward = new THREE.Vector3(0, 0, 1);
+    const camRight = new THREE.Vector3(-1, 0, 0);
     const dt = 1 / 120;
 
     // Frame 1: Contact
-    surf.updateSurfPhysics(vel, wishDir, false, camForward, surfNormal, true, 24.0, 90.0, 3.0, dt);
+    surf.updateSurfPhysics(vel, wishDir, false, camForward, camRight, surfNormal, true, 24.0, 90.0, 3.0, dt);
     expect(surf.isSurfing).toBe(true);
 
     // Frame 2: 1-tick micro-separation (e.g. crossing seam between ramp segments)
-    surf.updateSurfPhysics(vel, wishDir, false, camForward, surfNormal, false, 24.0, 90.0, 3.0, dt);
+    surf.updateSurfPhysics(vel, wishDir, false, camForward, camRight, surfNormal, false, 24.0, 90.0, 3.0, dt);
     // Must maintain surf state through the grace window
     expect(surf.isSurfing).toBe(true);
 
     // Frame 3: Resumed contact
-    surf.updateSurfPhysics(vel, wishDir, false, camForward, surfNormal, true, 24.0, 90.0, 3.0, dt);
+    surf.updateSurfPhysics(vel, wishDir, false, camForward, camRight, surfNormal, true, 24.0, 90.0, 3.0, dt);
     expect(surf.isSurfing).toBe(true);
   });
 
@@ -125,6 +172,7 @@ describe('SurfPhysics & Surface Classification', () => {
     // Player looks directly into/up the ramp (-X direction) and presses W (forward)
     const wishDir = new THREE.Vector3(-1, 0, 0);
     const camForward = new THREE.Vector3(-1, 0, 0);
+    const camRight = new THREE.Vector3(0, 0, -1);
     const gravity = 24.0;
     const dt = 1 / 120;
 
@@ -135,6 +183,7 @@ describe('SurfPhysics & Surface Classification', () => {
         wishDir,
         true, // holding W
         camForward,
+        camRight,
         surfNormal,
         true,
         gravity,

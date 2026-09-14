@@ -70,17 +70,25 @@ export class SurfState {
 
   /**
    * Update surf physics step
+   * Implements authentic Counter-Strike: Source / CS 1.6 surfing:
+   * - Ramp on LEFT: hold A (strafe into ramp) to stay on, hold height, and build speed
+   * - Ramp on RIGHT: hold D (strafe into ramp) to stay on, hold height, and build speed
+   * - Release keys (no strafe): downhill slope gravity pulls player down the ramp
+   * - Press wrong strafe key: accelerates away from ramp, peeling off into air
+   * - Forward W input: cannot crawl or walk up steep slope from a dead stop
+   * - Zero surface friction: 100% momentum conservation + carving speed boost
    */
   public updateSurfPhysics(
     velocity: THREE.Vector3,
     wishDir: THREE.Vector3,
     hasInput: boolean,
     cameraForward: THREE.Vector3,
+    cameraRight: THREE.Vector3 | undefined,
     contactNormal: THREE.Vector3,
     hasPhysicalContact: boolean,
     gravity: number,
     airAcceleration: number,
-    maxAirWishSpeed: number,
+    _maxAirWishSpeed: number,
     dt: number
   ): void {
     if (hasPhysicalContact) {
@@ -106,24 +114,33 @@ export class SurfState {
     this.timeSurfing += dt;
 
     // 1. Calculate surface angle relative to horizontal plane
-    const angleRad = Math.acos(Math.max(-1, Math.min(1, this.surfNormal.y)));
+    const normal = this.surfNormal.clone().normalize();
+    const angleRad = Math.acos(Math.max(-1, Math.min(1, normal.y)));
     this.surfaceAngleDeg = (angleRad * 180) / Math.PI;
 
-    // 2. Determine surf side (is ramp to the player's left or right?)
-    const crossY = cameraForward.x * this.surfNormal.z - cameraForward.z * this.surfNormal.x;
-    if (crossY > 0.1) {
+    // 2. Camera right vector
+    const right = cameraRight
+      ? cameraRight.clone().normalize()
+      : new THREE.Vector3(-cameraForward.z, 0, cameraForward.x).normalize();
+
+    // 3. Determine surf side (is ramp to the player's LEFT or RIGHT?)
+    // In FPS coordinates, normal points outward from ramp towards player.
+    // Ramp on player's LEFT  => normal points towards player's RIGHT => normal.dot(right) > 0
+    // Ramp on player's RIGHT => normal points towards player's LEFT  => normal.dot(right) < 0
+    const normalDotRight = normal.dot(right);
+    if (normalDotRight > 0.05) {
       this.surfSide = 'LEFT';
-    } else if (crossY < -0.1) {
+    } else if (normalDotRight < -0.05) {
       this.surfSide = 'RIGHT';
     } else {
       this.surfSide = 'NONE';
     }
 
-    // 3. Slope Tangent Vectors
-    // Downhill direction: projection of world downward gravity onto the slope plane
+    // 4. Slope Tangent & Gravity Decomposition
+    // Downhill direction: projection of world downward gravity onto the ramp plane
     const grav = new THREE.Vector3(0, -gravity, 0);
-    const gravDotNorm = grav.dot(this.surfNormal);
-    const slopeGravity = grav.clone().addScaledVector(this.surfNormal, -gravDotNorm);
+    const gravDotNorm = grav.dot(normal);
+    const slopeGravity = grav.clone().addScaledVector(normal, -gravDotNorm);
 
     const downhillDir = slopeGravity.clone();
     if (downhillDir.lengthSq() > 1e-6) {
@@ -133,67 +150,102 @@ export class SurfState {
     }
     const uphillDir = downhillDir.clone().negate();
 
-    // 4. Clip inward velocity penetrating into the surface
-    const intoNormal = velocity.dot(this.surfNormal);
+    // 5. Normal Clipping (Zero Penetration / Deflection)
+    const intoNormal = velocity.dot(normal);
     if (intoNormal < 0) {
-      velocity.addScaledVector(this.surfNormal, -intoNormal);
+      velocity.addScaledVector(normal, -intoNormal);
     }
 
-    // 5. Apply Downhill Slope Gravity (accelerates player downhill along slope face)
-    // In Counter-Strike, gravity always pulls players down steep slopes so they cannot hover or crawl
+    // 6. Apply Downhill Slope Gravity
+    // Downhill gravity always pulls the player down steep slopes unless counterbalanced by strafing into the ramp
     velocity.addScaledVector(slopeGravity, dt);
 
-    // Record uphill velocity before input
-    const uphillSpeedBeforeInput = Math.max(0, velocity.dot(uphillDir));
+    // 7. Authentic Counter-Strike Surf Strafe Authority & Speed Generation
+    // CS Surf Standard parameters (scaled to TRACKRUN units)
+    const SURF_AIR_ACCEL = 150.0; // standard CS:S surf sv_airaccelerate
+    const SURF_WISH_SPEED = 2.0;  // equivalent to CS:S 30 u/s wishspeed
 
-    // 6. Authentic Counter-Strike Air Acceleration on Surf Ramp:
-    // - In CS, players hold strafe (A or D) into the ramp to hug the surface and build speed.
-    // - Players CANNOT walk or crawl uphill on the steep slope with W.
-    if (hasInput) {
-      // Project wish direction onto the slope tangent plane
-      const wishTangent = wishDir.clone();
-      const wishDotNorm = wishTangent.dot(this.surfNormal);
-      wishTangent.addScaledVector(this.surfNormal, -wishDotNorm);
+    if (hasInput && wishDir.lengthSq() > 1e-4) {
+      const wish = wishDir.clone().normalize();
+      const strafeComp = wish.dot(right);
 
-      // Strictly eliminate any uphill component from wish direction
-      const wishUphill = wishTangent.dot(uphillDir);
-      if (wishUphill > 0) {
-        wishTangent.addScaledVector(uphillDir, -wishUphill);
+      // In CS surfing:
+      // - Ramp on LEFT: hold A (strafe left, strafeComp < -0.1) to push into ramp
+      // - Ramp on RIGHT: hold D (strafe right, strafeComp > 0.1) to push into ramp
+      const isStrafingIntoRamp =
+        (this.surfSide === 'LEFT' && strafeComp < -0.1) ||
+        (this.surfSide === 'RIGHT' && strafeComp > 0.1);
+
+      const isStrafingAwayFromRamp =
+        (this.surfSide === 'LEFT' && strafeComp > 0.1) ||
+        (this.surfSide === 'RIGHT' && strafeComp < -0.1);
+
+      if (isStrafingIntoRamp) {
+        // Player is holding the correct into-ramp strafe key (A for left ramp, D for right ramp)
+        // 1. Counterbalance downhill slope gravity to stay on the ramp at steady height!
+        const holdStrength = Math.min(1.0, Math.abs(strafeComp));
+        velocity.addScaledVector(slopeGravity, -holdStrength * dt);
+
+        // 2. Air Acceleration along ramp surface (Source AirAccelerate)
+        const wishOnRamp = wish.clone();
+        wishOnRamp.addScaledVector(normal, -wishOnRamp.dot(normal));
+        if (wishOnRamp.lengthSq() > 1e-4) {
+          wishOnRamp.normalize();
+          const currentSpeed = velocity.dot(wishOnRamp);
+          const addSpeed = SURF_WISH_SPEED - currentSpeed;
+          if (addSpeed > 0) {
+            const accelSpeed = Math.min(addSpeed, SURF_AIR_ACCEL * SURF_WISH_SPEED * dt);
+            velocity.addScaledVector(wishOnRamp, accelSpeed);
+          }
+        }
+
+        // 3. Authentic Carving Forward Speed Acceleration:
+        // When surfing along the ramp, holding the into-ramp key and carving with mouse
+        // produces sustained speed accumulation (classic CS surf speed gain)
+        const forwardTangent = cameraForward.clone();
+        forwardTangent.addScaledVector(normal, -forwardTangent.dot(normal));
+        if (forwardTangent.lengthSq() > 1e-4) {
+          forwardTangent.normalize();
+          const fwdSpeed = velocity.dot(forwardTangent);
+          // If carrying forward momentum along the ramp, holding into the ramp accelerates forward
+          if (fwdSpeed > 2.0) {
+            const carveBoost = 8.0 * holdStrength * dt;
+            velocity.addScaledVector(forwardTangent, carveBoost);
+          }
+        }
+      } else if (isStrafingAwayFromRamp) {
+        // Player is strafing AWAY from the ramp (holding D on left ramp, or A on right ramp)
+        // Accelerates off the ramp into open air
+        MovementMath.accelerate(velocity, wish, SURF_WISH_SPEED * 2.0, airAcceleration, dt);
+      } else {
+        // Forward (W) or Backward (S) input without into-ramp strafe
+        // STRICT CS ANTI-CRAWL INVARIANT:
+        // Forward W input must NEVER allow crawling or climbing uphill from a stop!
+        const wishOnRamp = wish.clone();
+        wishOnRamp.addScaledVector(normal, -wishOnRamp.dot(normal));
+
+        // Eliminate any uphill component from W/S input
+        const uphillWish = wishOnRamp.dot(uphillDir);
+        if (uphillWish > 0) {
+          wishOnRamp.addScaledVector(uphillDir, -uphillWish);
+        }
+
+        if (wishOnRamp.lengthSq() > 1e-4) {
+          wishOnRamp.normalize();
+          MovementMath.accelerate(velocity, wishOnRamp, SURF_WISH_SPEED, airAcceleration, dt);
+        }
       }
 
-      if (wishTangent.lengthSq() > 1e-4) {
-        wishTangent.normalize();
-
-        // Authentic CS air wish speed (~2.0 m/s; prevents ground-speed climbing)
-        const surfWishSpeed = Math.min(maxAirWishSpeed, 2.5);
-
-        MovementMath.accelerate(
-          velocity,
-          wishTangent,
-          surfWishSpeed,
-          airAcceleration,
-          dt
-        );
-      }
-
-      // Re-clip against normal so pushing into ramp stays strictly on surface
-      const intoNormalAfterInput = velocity.dot(this.surfNormal);
-      if (intoNormalAfterInput < 0) {
-        velocity.addScaledVector(this.surfNormal, -intoNormalAfterInput);
-      }
-
-      // STRICT CS SURF INVARIANT:
-      // Normal clipping or input must NEVER increase uphill velocity beyond pre-input momentum!
-      // This completely prevents the "crawling up the steep ramp" bug.
-      const currentUphillSpeed = velocity.dot(uphillDir);
-      if (currentUphillSpeed > uphillSpeedBeforeInput) {
-        velocity.addScaledVector(uphillDir, uphillSpeedBeforeInput - currentUphillSpeed);
+      // Re-clip against normal to ensure velocity remains strictly on or away from ramp surface
+      const intoNormalAfter = velocity.dot(normal);
+      if (intoNormalAfter < 0) {
+        velocity.addScaledVector(normal, -intoNormalAfter);
       }
     }
 
-    // 7. Record tangential speed
-    const normComponent = velocity.dot(this.surfNormal);
-    const tangVel = velocity.clone().addScaledVector(this.surfNormal, -normComponent);
+    // 8. Record tangential speed
+    const normComponent = velocity.dot(normal);
+    const tangVel = velocity.clone().addScaledVector(normal, -normComponent);
     this.tangentialSpeed = tangVel.length();
   }
 

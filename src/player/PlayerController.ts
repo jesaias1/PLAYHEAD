@@ -143,6 +143,7 @@ export class PlayerController {
         wishDir,
         hasInput,
         forward,
+        right,
         this.surfNormal,
         this.isSurfing,
         this.config.gravity,
@@ -246,6 +247,12 @@ export class PlayerController {
       this.surfNormal.copy(colRes.surfNormal);
       this.surfState.contactPoint.copy(colRes.surfContactPoint);
       this.isGrounded = false;
+
+      // Clip velocity against surf normal immediately upon contact to avoid penetrating ramp
+      const intoSurf = this.velocity.dot(colRes.surfNormal);
+      if (intoSurf < 0) {
+        this.velocity.addScaledVector(colRes.surfNormal, -intoSurf);
+      }
     }
 
     if (this.isGrounded && !this.isSurfing && this.velocity.y < 0) {
