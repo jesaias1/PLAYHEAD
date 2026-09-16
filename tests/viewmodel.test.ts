@@ -52,6 +52,30 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
+  it('guarantees zero periodic walk bobbing while walking or running on ground', () => {
+    const vm = new ViewmodelController();
+    const camera = new THREE.PerspectiveCamera();
+    const camCtrl = new CameraController(camera, {} as HTMLElement);
+    const physics = new PhysicsWorld();
+    const player = new PlayerController(camCtrl, physics);
+
+    // Player running steadily on flat ground
+    player.isGrounded = true;
+    player.velocity.set(0, 0, 15.0);
+
+    const initialY = vm['motionGroup'].position.y;
+
+    // Simulate 60 frames (1 second) of steady grounded running
+    for (let frame = 0; frame < 60; frame++) {
+      vm.update(0.016, player, camCtrl, 0, 0);
+      // Vertical compression and motion group Y must remain completely steady (no sin/cos bob oscillation)
+      expect(vm['compressionY']).toBe(0);
+      expect(vm['motionGroup'].position.y).toBeCloseTo(initialY, 4);
+    }
+
+    vm.dispose();
+  });
+
   it('responds to mouse movement with spring-damper sway', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();

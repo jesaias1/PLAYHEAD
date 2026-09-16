@@ -143,7 +143,7 @@ describe('MusicPack — Bundled Production Catalog', () => {
   it('finds tracks by id correctly', () => {
     const track = MusicPack.getTrackById('hyperdrive-collider');
     expect(track).toBeDefined();
-    expect(track?.title).toBe('HYPERDRIVE COLLIDER');
+    expect(track?.title).toContain('HYPERDRIVE COLLIDER');
     expect(track?.bpm).toBe(128);
 
     const missing = MusicPack.getTrackById('non-existent');

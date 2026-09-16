@@ -1,40 +1,47 @@
 /**
  * ViewmodelController for PLAYHEAD
- * Manages the first-person hands and stylized karambit.
+ * Manages the first-person viewmodel using real licensed artist-made assets:
+ * - PSX First Person Arms (Drillimpact, CC0) with hand-painted runner gloves
+ * - Low-Poly Karambit (alixor22, CC-BY 4.0) attached to right hand bone in tactical reverse grip
  *
- * Implements second-order spring-damper inertia, mouse look lag/snap,
- * strafe banking, fluid bhop landing compression, authentic surf balancing,
- * and the [F] karambit inspect flourish.
+ * Physics-Driven Motion:
+ * - ZERO Periodic Walk Bob: Rock-solid stability when running on flat ground.
+ * - Mouse Look Inertia: Second-order spring-damper lag and snap.
+ * - Air-Strafe Banking: Aerodynamic bank roll and lateral wind drift responding to [A]/[D] & lateral velocity.
+ * - Jump Takeoff & Landing Compression: Scaled one-shot impacts with fluid bhop chain absorption.
+ * - Surf Balance Stance: Ramp-aligned lean with aerodynamic tuck.
+ * - Inspect Flourish: [F] key triggers a 360° ring spin flourish.
  */
 
 import * as THREE from 'three';
 import { PlayerController } from '../player/PlayerController';
 import { CameraController } from '../player/CameraController';
 import { SettingsManager } from '../core/Settings';
-import { ViewmodelGeometry, ViewmodelMeshes } from './ViewmodelGeometry';
+import { ViewmodelAssetLoader, ViewmodelRigInstance } from './ViewmodelAssetLoader';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
-  private meshes: ViewmodelMeshes;
+  private rigInstance: ViewmodelRigInstance;
+  private isRigLoaded = false;
+
+  public get isLoaded(): boolean {
+    return this.isRigLoaded;
+  }
 
   // Rig Groups
   private rootGroup: THREE.Group;
   private swayGroup: THREE.Group;
-  private bobGroup: THREE.Group;
-  private rightArmGroup: THREE.Group;
-  private leftArmGroup: THREE.Group;
-  private knifeGroup: THREE.Group;
+  private motionGroup: THREE.Group;
 
-  // Base Offsets (lower right of screen, clear center for route readability)
-  private readonly baseRightPos = new THREE.Vector3(0.17, -0.12, -0.28);
-  private readonly baseRightRot = new THREE.Vector3(-0.10, 0.14, -0.03);
-  private readonly baseLeftPos = new THREE.Vector3(-0.19, -0.16, -0.27);
-  private readonly baseLeftRot = new THREE.Vector3(-0.06, -0.18, 0.08);
+  // Arms Base Transform (calibrated for Drillimpact PSX arms)
+  private readonly baseArmsPos = new THREE.Vector3(0, -1.58, 0);
+  private readonly baseArmsRotY = Math.PI;
 
-  private readonly defaultKnifePos = new THREE.Vector3(0.015, -0.012, -0.075);
-  private readonly defaultKnifeRot = new THREE.Vector3(-0.22, 0.20, -0.12);
+  // Default Knife Transform relative to handR socket
+  private readonly defaultKnifePos = new THREE.Vector3(-0.015, 0.055, 0.015);
+  private readonly defaultKnifeRot = new THREE.Vector3(-Math.PI * 0.38, 0.15, -Math.PI * 0.26);
 
   // Spring Physics State (Damped Harmonic Oscillator)
   private swayPos = new THREE.Vector3();
@@ -46,16 +53,15 @@ export class ViewmodelController {
   private targetSwayPos = new THREE.Vector3();
   private targetSwayRot = new THREE.Vector3();
 
-  // Bobbing & Locomotion State
-  private bobTimer = 0;
-  private bobOffset = new THREE.Vector3();
-  private bobRotOffset = new THREE.Vector3();
-
-  // Vertical Compression (Jump / Landing)
+  // Vertical Compression & Physics Offsets
   private compressionY = 0;
   private compressionVelY = 0;
   private wasGroundedLastFrame = true;
   private lastJumpTime = 0;
+
+  // Air & Jump State
+  private airOffset = new THREE.Vector3();
+  private airRotOffset = new THREE.Vector3();
 
   // Surfing Balance Blend
   private surfBlend = 0;
@@ -64,8 +70,7 @@ export class ViewmodelController {
   // Inspect Flourish State
   private isInspecting = false;
   private inspectTimer = 0;
-  private readonly inspectDuration = 1.5; // seconds
-  private inspectVariant = 0;
+  private readonly inspectDuration = 1.25; // seconds
 
   // Track Emissive Color
   private accentColor = new THREE.Color(0x00f0ff);
@@ -80,59 +85,75 @@ export class ViewmodelController {
     this.camera.position.set(0, 0, 0);
     this.camera.quaternion.set(0, 0, 0, 1);
 
-    // 2. Dedicated Local Lighting (hands are always clearly readable regardless of world shadows)
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x303d50, 1.4);
+    // 2. Dedicated Local Lighting
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x223040, 1.4);
     this.scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2.6);
-    dirLight.position.set(1.8, 3.0, 2.2);
-    this.scene.add(dirLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
+    keyLight.position.set(1.5, 2.5, 2.0);
+    this.scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0x88bbff, 1.6);
-    fillLight.position.set(-2.2, 1.8, 1.8);
+    const fillLight = new THREE.DirectionalLight(0x88ccff, 1.4);
+    fillLight.position.set(-2.0, 1.5, 1.5);
     this.scene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight(0x00f0ff, 1.3);
+    const rimLight = new THREE.DirectionalLight(0x00f0ff, 1.0);
     rimLight.position.set(-1.0, -1.8, -1.2);
     this.scene.add(rimLight);
 
-    // 3. Construct Rig Geometry
-    this.meshes = ViewmodelGeometry.buildRig(this.accentColor);
-    this.rootGroup = this.meshes.rootGroup;
-    this.rightArmGroup = this.meshes.rightArmGroup;
-    this.leftArmGroup = this.meshes.leftArmGroup;
-    this.knifeGroup = this.meshes.knifeGroup;
-
-    // Hierarchy: scene -> rootGroup -> swayGroup -> bobGroup -> arms
+    // 3. Hierarchy: scene -> rootGroup -> swayGroup -> motionGroup -> rigInstance.rootGroup
+    this.rootGroup = new THREE.Group();
     this.swayGroup = new THREE.Group();
-    this.bobGroup = new THREE.Group();
+    this.motionGroup = new THREE.Group();
 
-    this.rootGroup.remove(this.rightArmGroup);
-    this.rootGroup.remove(this.leftArmGroup);
-
-    this.bobGroup.add(this.rightArmGroup);
-    this.bobGroup.add(this.leftArmGroup);
-    this.swayGroup.add(this.bobGroup);
+    this.swayGroup.add(this.motionGroup);
     this.rootGroup.add(this.swayGroup);
     this.scene.add(this.rootGroup);
 
-    this.applyBasePose();
+    // Initial temporary fallback rig while asynchronous assets load
+    this.rigInstance = ViewmodelAssetLoader.buildFallbackRig(this.accentColor);
+    this.applyRigBaseTransform();
+    this.motionGroup.add(this.rigInstance.rootGroup);
+
+    // 4. Asynchronously load real artist-made assets
+    this.loadRealAssets();
+
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
     }
   }
 
-  public setAccentColor(col: THREE.Color): void {
-    this.accentColor.copy(col);
-    this.meshes.knifeSignalMaterial.emissive.copy(col);
+  private async loadRealAssets(): Promise<void> {
+    try {
+      const realRig = await ViewmodelAssetLoader.loadRig(this.accentColor);
+      this.motionGroup.remove(this.rigInstance.rootGroup);
+      this.rigInstance.dispose();
+
+      this.rigInstance = realRig;
+      this.applyRigBaseTransform();
+      this.motionGroup.add(this.rigInstance.rootGroup);
+      this.isRigLoaded = true;
+    } catch (err) {
+      console.warn('[ViewmodelController] Asset load error, keeping fallback:', err);
+    }
   }
 
-  private applyBasePose(): void {
-    this.rightArmGroup.position.copy(this.baseRightPos);
-    this.rightArmGroup.rotation.set(this.baseRightRot.x, this.baseRightRot.y, this.baseRightRot.z);
+  private applyRigBaseTransform(): void {
+    const arms = this.rigInstance.armsScene;
+    if (arms) {
+      arms.position.copy(this.baseArmsPos);
+      arms.rotation.set(0, this.baseArmsRotY, 0);
+    }
+    const knife = this.rigInstance.knifeGroup;
+    if (knife) {
+      knife.position.copy(this.defaultKnifePos);
+      knife.rotation.set(this.defaultKnifeRot.x, this.defaultKnifeRot.y, this.defaultKnifeRot.z);
+    }
+  }
 
-    this.leftArmGroup.position.copy(this.baseLeftPos);
-    this.leftArmGroup.rotation.set(this.baseLeftRot.x, this.baseLeftRot.y, this.baseLeftRot.z);
+  public setAccentColor(col: THREE.Color): void {
+    this.accentColor.copy(col);
+    this.rigInstance.setAccentColor(col);
   }
 
   /**
@@ -141,7 +162,6 @@ export class ViewmodelController {
   public triggerInspect(): void {
     this.isInspecting = true;
     this.inspectTimer = 0;
-    this.inspectVariant = (this.inspectVariant + 1) % 2;
   }
 
   public isInspectActive(): boolean {
@@ -149,7 +169,8 @@ export class ViewmodelController {
   }
 
   /**
-   * Updates viewmodel physics, animations, and movement responses
+   * Updates viewmodel physics, animations, and movement responses.
+   * NOTE: Periodic walking bob is strictly ZERO.
    */
   public update(
     dt: number,
@@ -161,43 +182,52 @@ export class ViewmodelController {
     const settings = SettingsManager.getInstance().settings;
     if (settings.viewmodelMode === 'OFF') return;
 
+    // Update skeletal animation mixer for idle finger breathing
+    if (this.rigInstance.mixer) {
+      this.rigInstance.mixer.update(dt);
+    }
+
     const swayScale = settings.viewmodelSway !== undefined ? settings.viewmodelSway : 1.0;
     const speed = player.getSpeedUnits();
     const isGrounded = player.isGrounded;
     const isSurfing = player.isSurfing || player.surfState.isSurfing;
-    const keys = player.keysState;
 
-    // 1. Mouse Look Sway (Lag and Snap Inertia)
-    // Horizontal mouse delta creates lateral drift and subtle roll bank
-    const mouseSensitivityFactor = 0.0018 * swayScale;
-    this.targetSwayRot.y = -mouseDeltaX * mouseSensitivityFactor;
-    this.targetSwayRot.z = mouseDeltaX * mouseSensitivityFactor * 0.75;
-    this.targetSwayRot.x = mouseDeltaY * mouseSensitivityFactor * 0.85;
+    // 1. Mouse Look Inertia (Lag & Snap via damped spring)
+    const mouseSens = 0.0018 * swayScale;
+    const maxMouseOffset = 0.035;
 
-    this.targetSwayPos.x = -mouseDeltaX * 0.00035 * swayScale;
-    this.targetSwayPos.y = mouseDeltaY * 0.00025 * swayScale;
+    this.targetSwayPos.x = clamp(-mouseDeltaX * mouseSens * 0.7, -maxMouseOffset, maxMouseOffset);
+    this.targetSwayPos.y = clamp(mouseDeltaY * mouseSens * 0.5, -maxMouseOffset, maxMouseOffset);
 
-    // 2. Strafe Reaction (Holding A / D banks into the turn and shifts laterally)
-    let strafeInputX = 0;
-    if (keys.left) strafeInputX += 1;
-    if (keys.right) strafeInputX -= 1;
+    this.targetSwayRot.y = clamp(-mouseDeltaX * mouseSens * 1.8, -0.08, 0.08);
+    this.targetSwayRot.x = clamp(mouseDeltaY * mouseSens * 1.5, -0.06, 0.06);
 
-    // Strafe inertia: moving left pushes viewmodel slightly right and banks left
-    const strafeDriftX = strafeInputX * 0.016 * swayScale;
-    const strafeBankRoll = -strafeInputX * 0.045 * swayScale;
-    this.targetSwayPos.x += strafeDriftX;
-    this.targetSwayRot.z += strafeBankRoll;
+    // 2. Air-Strafe Banking & Lateral Wind Drift (Input & velocity driven, NOT cyclic)
+    const keys = player.keysState as any;
+    let targetStrafeRoll = 0;
+    let targetStrafeX = 0;
 
-    // 3. High-Speed Aerodynamic Tuck
+    if (keys.left && !keys.right) {
+      targetStrafeRoll = -0.045 * swayScale;
+      targetStrafeX = -0.012 * swayScale;
+    } else if (keys.right && !keys.left) {
+      targetStrafeRoll = 0.045 * swayScale;
+      targetStrafeX = 0.012 * swayScale;
+    }
+
+    this.targetSwayRot.z = targetStrafeRoll;
+    this.targetSwayPos.x += targetStrafeX;
+
+    // 3. High-Speed Aerodynamic Tuck & Drag (Continuous scaling, no hard switch)
     if (speed > 16.0) {
-      const speedExcess = Math.min(1.0, (speed - 16.0) / 25.0);
-      this.targetSwayPos.z = -speedExcess * 0.025; // Pull back slightly
-      this.targetSwayRot.x -= speedExcess * 0.04;  // Angle knife slightly forward
+      const speedRatio = clamp((speed - 16.0) / 30.0, 0, 1);
+      this.targetSwayPos.z = -speedRatio * 0.015; // Subtle backward drag
+      this.targetSwayPos.y += -speedRatio * 0.008; // Aerodynamic tuck
     } else {
       this.targetSwayPos.z = 0;
     }
 
-    // 4. Spring-Damper Simulation for Sway (Second-order harmonic oscillator)
+    // 4. Spring-Damper Simulation for Mouse & Strafe Sway (Second-order harmonic oscillator)
     const springK = 38.0;
     const dampingC = 9.5;
 
@@ -230,62 +260,49 @@ export class ViewmodelController {
     this.swayGroup.position.copy(this.swayPos);
     this.swayGroup.rotation.copy(this.swayRot);
 
-    // 5. Running Bob & Micro-Idle Breathing
-    if (isGrounded && speed > 2.0 && !isSurfing) {
-      const bobFreq = Math.min(18.0, 7.5 + speed * 0.4);
-      this.bobTimer += dt * bobFreq;
-
-      const bobAmp = Math.min(0.012, 0.004 + (speed / 30.0) * 0.008) * swayScale;
-      this.bobOffset.x = Math.sin(this.bobTimer * 0.5) * bobAmp * 0.7;
-      this.bobOffset.y = Math.abs(Math.sin(this.bobTimer)) * bobAmp;
-      this.bobRotOffset.z = Math.sin(this.bobTimer * 0.5) * 0.02 * swayScale;
-    } else if (!isGrounded && !isSurfing) {
-      // In air: bob fades, light suspended float
-      this.bobOffset.lerp(new THREE.Vector3(0, 0.008, 0.005), Math.min(1.0, dt * 8.0));
-      this.bobRotOffset.lerp(new THREE.Vector3(-0.03, 0, 0), Math.min(1.0, dt * 8.0));
-    } else {
-      // Idle micro-breathing
-      this.bobTimer += dt * 1.8;
-      this.bobOffset.set(0, Math.sin(this.bobTimer) * 0.0015, 0);
-      this.bobRotOffset.set(Math.sin(this.bobTimer) * 0.004, 0, 0);
-    }
-
-    // 6. Jump Takeoff & Landing Compression (Fluid Bhop Chaining)
+    // 5. Jump Takeoff & Landing Compression (Fluid Bhop Chaining)
     if (!this.wasGroundedLastFrame && isGrounded) {
-      // Just landed!
+      // Just landed! One-shot impact compression
       const fallSpeed = Math.abs(player.velocity.y);
-      const isQuickBhop = Date.now() - this.lastJumpTime < 280;
+      const isQuickBhop = Date.now() - this.lastJumpTime < 300;
 
-      // Bhop chaining: impact is short and springy with instantaneous recovery
-      const impactMultiplier = isQuickBhop ? 0.35 : 1.0;
-      const landingDip = Math.min(0.026, Math.max(0.006, fallSpeed * 0.002)) * impactMultiplier;
-      this.compressionVelY = -landingDip * 35.0;
-    } else if (this.wasGroundedLastFrame && !isGrounded && player.velocity.y > 1.0) {
-      // Just jumped! Initial light takeoff dip
-      this.compressionVelY = -0.15;
+      // In a fast bhop chain, attenuate impact by 35% to keep hops springy and light
+      const compressionScale = isQuickBhop ? 0.65 : 1.0;
+      const impactMagnitude = clamp(fallSpeed * 0.0018, 0.005, 0.025) * compressionScale;
+
+      this.compressionY = -impactMagnitude;
+      this.compressionVelY = 0;
+    } else if (this.wasGroundedLastFrame && !isGrounded && player.velocity.y > 2.0) {
+      // Just jumped! Small one-shot upward release
       this.lastJumpTime = Date.now();
+      this.compressionY = -0.008;
+      this.compressionVelY = 0.25;
     }
     this.wasGroundedLastFrame = isGrounded;
 
-    // Compression spring
-    const compK = 55.0;
-    const compDamping = 12.0;
-    const compForce = -compK * this.compressionY - compDamping * this.compressionVelY;
-    this.compressionVelY += compForce * dt;
+    // Spring rebound for landing compression (fast spring return)
+    const reboundSpringK = 45.0;
+    const reboundDamping = 12.0;
+    const compAcc = -reboundSpringK * this.compressionY - reboundDamping * this.compressionVelY;
+    this.compressionVelY += compAcc * dt;
     this.compressionY += this.compressionVelY * dt;
 
-    this.bobGroup.position.set(
-      this.bobOffset.x,
-      this.bobOffset.y + this.compressionY,
-      this.bobOffset.z
-    );
-    this.bobGroup.rotation.set(
-      this.bobRotOffset.x,
-      this.bobRotOffset.y,
-      this.bobRotOffset.z
-    );
+    // 6. Airborne Stance (Vertical velocity influence, NO periodic bob)
+    if (!isGrounded && !isSurfing) {
+      const vY = player.velocity.y;
+      const targetAirY = clamp(-vY * 0.0012, -0.015, 0.012);
+      this.airOffset.y += (targetAirY - this.airOffset.y) * Math.min(1.0, dt * 8.0);
+      this.airRotOffset.x += (clamp(vY * 0.002, -0.03, 0.03) - this.airRotOffset.x) * Math.min(1.0, dt * 8.0);
+    } else {
+      this.airOffset.set(0, 0, 0);
+      this.airRotOffset.set(0, 0, 0);
+    }
 
-    // 7. Surfing Balance Posture
+    // Apply combined motion (compression + air offset) to motionGroup
+    this.motionGroup.position.set(0, this.compressionY + this.airOffset.y, this.airOffset.z);
+    this.motionGroup.rotation.set(this.airRotOffset.x, this.airRotOffset.y, this.airRotOffset.z);
+
+    // 7. Surfing Balance Stance
     const targetSurfBlend = isSurfing ? 1.0 : 0.0;
     this.surfBlend += (targetSurfBlend - this.surfBlend) * Math.min(1.0, dt * 7.0);
 
@@ -294,47 +311,42 @@ export class ViewmodelController {
       const targetSideTilt = surfSide === 'LEFT' ? -1.0 : (surfSide === 'RIGHT' ? 1.0 : 0.0);
       this.surfSideTilt += (targetSideTilt - this.surfSideTilt) * Math.min(1.0, dt * 8.0);
 
-      // Downhill slide balance:
-      // Left ramp (holding A): right arm tilts down parallel to slope, left arm extends outwards for balance
-      const tiltAngle = this.surfSideTilt * 0.12 * this.surfBlend;
-      this.rightArmGroup.rotation.z = this.baseRightRot.z + tiltAngle;
-      this.rightArmGroup.position.y = this.baseRightPos.y + this.surfBlend * 0.012;
-
-      this.leftArmGroup.rotation.z = this.baseLeftRot.z + tiltAngle * 1.5;
-      this.leftArmGroup.position.x = this.baseLeftPos.x - this.surfSideTilt * 0.025 * this.surfBlend;
-
-      // High-speed wind rush micro-vibration
-      const vibration = Math.sin(Date.now() * 0.045) * 0.001 * (speed / 28.0) * this.surfBlend;
-      this.bobGroup.position.x += vibration;
-      this.bobGroup.position.y += vibration * 0.5;
-    } else {
-      this.rightArmGroup.rotation.z = this.baseRightRot.z;
-      this.rightArmGroup.position.y = this.baseRightPos.y;
-      this.leftArmGroup.rotation.z = this.baseLeftRot.z;
-      this.leftArmGroup.position.x = this.baseLeftPos.x;
+      // Downhill surf lean
+      const tiltAngle = this.surfSideTilt * 0.08 * this.surfBlend;
+      this.motionGroup.rotation.z += tiltAngle;
+      this.motionGroup.position.x += -this.surfSideTilt * 0.015 * this.surfBlend;
     }
 
     // 8. Inspect Flourish Animation ([F] key)
     if (this.isInspecting) {
       this.updateInspectFlourish(dt);
     } else {
-      // Reset knife relative to right hand
-      this.knifeGroup.position.copy(this.defaultKnifePos);
-      this.knifeGroup.rotation.set(this.defaultKnifeRot.x, this.defaultKnifeRot.y, this.defaultKnifeRot.z);
+      // Reset knife transform relative to handR socket
+      if (this.rigInstance.knifeGroup) {
+        this.rigInstance.knifeGroup.position.copy(this.defaultKnifePos);
+        this.rigInstance.knifeGroup.rotation.set(
+          this.defaultKnifeRot.x,
+          this.defaultKnifeRot.y,
+          this.defaultKnifeRot.z
+        );
+      }
     }
 
-    // 9. Minimal Mode Support (hides left arm, pulls right arm slightly closer to edge)
+    // 9. Minimal Mode Support (hides left hand)
     if (settings.viewmodelMode === 'MINIMAL') {
-      this.leftArmGroup.visible = false;
-      this.rightArmGroup.position.x = this.baseRightPos.x + 0.04;
-      this.rightArmGroup.position.y = this.baseRightPos.y - 0.03;
+      if (this.rigInstance.handLBone) {
+        this.rigInstance.handLBone.visible = false;
+      }
+      this.motionGroup.position.x = 0.03;
     } else {
-      this.leftArmGroup.visible = true;
+      if (this.rigInstance.handLBone) {
+        this.rigInstance.handLBone.visible = true;
+      }
     }
   }
 
   /**
-   * Updates the karambit spin flourish animation
+   * Updates the karambit spin flourish animation around its finger ring
    */
   private updateInspectFlourish(dt: number): void {
     this.inspectTimer += dt;
@@ -346,47 +358,59 @@ export class ViewmodelController {
       return;
     }
 
-    if (progress < 0.35) {
-      // Phase 1: Rapid 360° spin around the index finger ring
-      const spinP = progress / 0.35;
+    const knife = this.rigInstance.knifeGroup;
+    if (!knife) return;
+
+    if (progress < 0.40) {
+      // Phase 1: Rapid 360° spin around the finger ring
+      const spinP = progress / 0.40;
       const angle = spinP * Math.PI * 2;
-      this.knifeGroup.position.set(
+      knife.position.set(
         this.defaultKnifePos.x,
-        this.defaultKnifePos.y + Math.sin(angle) * 0.012,
+        this.defaultKnifePos.y + Math.sin(angle) * 0.015,
         this.defaultKnifePos.z
       );
-      this.knifeGroup.rotation.set(
+      knife.rotation.set(
         this.defaultKnifeRot.x + angle,
         this.defaultKnifeRot.y,
         this.defaultKnifeRot.z
       );
     } else if (progress < 0.75) {
-      // Phase 2: Inverted blade display (showing off the glowing signal channel)
-      const displayP = (progress - 0.35) / 0.40;
+      // Phase 2: Inverted blade display (angled towards camera displaying the hawkbill curve)
+      const displayP = (progress - 0.40) / 0.35;
       const easeDisplay = Math.sin(displayP * Math.PI);
-      this.knifeGroup.position.set(0.018, 0.01 * easeDisplay, -0.075);
-      this.knifeGroup.rotation.set(0.4 * easeDisplay, 0.35 * easeDisplay, 0.25 * easeDisplay);
+      knife.position.set(
+        this.defaultKnifePos.x + 0.01 * easeDisplay,
+        this.defaultKnifePos.y + 0.015 * easeDisplay,
+        this.defaultKnifePos.z + 0.01 * easeDisplay
+      );
+      knife.rotation.set(
+        this.defaultKnifeRot.x + 0.3 * easeDisplay,
+        this.defaultKnifeRot.y + 0.25 * easeDisplay,
+        this.defaultKnifeRot.z + 0.2 * easeDisplay
+      );
     } else {
       // Phase 3: Snap cleanly back into combat ready grip
       const snapP = (progress - 0.75) / 0.25;
       const t = clamp(snapP, 0, 1);
       const easeSnap = 1 - (1 - t) * (1 - t);
 
-      this.knifeGroup.position.set(
-        THREE.MathUtils.lerp(0.018, this.defaultKnifePos.x, easeSnap),
-        THREE.MathUtils.lerp(0.0, this.defaultKnifePos.y, easeSnap),
-        THREE.MathUtils.lerp(-0.075, this.defaultKnifePos.z, easeSnap)
+      knife.position.set(
+        THREE.MathUtils.lerp(this.defaultKnifePos.x + 0.01, this.defaultKnifePos.x, easeSnap),
+        THREE.MathUtils.lerp(this.defaultKnifePos.y + 0.015, this.defaultKnifePos.y, easeSnap),
+        THREE.MathUtils.lerp(this.defaultKnifePos.z + 0.01, this.defaultKnifePos.z, easeSnap)
       );
-      this.knifeGroup.rotation.set(
-        THREE.MathUtils.lerp(0.4, this.defaultKnifeRot.x, easeSnap),
-        THREE.MathUtils.lerp(0.35, this.defaultKnifeRot.y, easeSnap),
-        THREE.MathUtils.lerp(0.25, this.defaultKnifeRot.z, easeSnap)
+      knife.rotation.set(
+        THREE.MathUtils.lerp(this.defaultKnifeRot.x + 0.3, this.defaultKnifeRot.x, easeSnap),
+        THREE.MathUtils.lerp(this.defaultKnifeRot.y + 0.25, this.defaultKnifeRot.y, easeSnap),
+        THREE.MathUtils.lerp(this.defaultKnifeRot.z + 0.2, this.defaultKnifeRot.z, easeSnap)
       );
     }
   }
 
   /**
-   * Renders the viewmodel scene with depth clear to prevent clipping into world geometry
+   * Renders the viewmodel scene with depth clear to prevent clipping into world geometry,
+   * while preserving the already rendered world color buffer.
    */
   public render(renderer: THREE.WebGLRenderer): void {
     const settings = SettingsManager.getInstance().settings;
@@ -400,7 +424,6 @@ export class ViewmodelController {
     }
 
     // Clear depth buffer so the first-person hands & karambit render cleanly on top of the world
-    // Disable autoClear so the rendered world frame is preserved beneath the viewmodel
     const origAutoClear = renderer.autoClear;
     renderer.autoClear = false;
     renderer.clearDepth();
@@ -409,17 +432,16 @@ export class ViewmodelController {
   }
 
   private onResize = (): void => {
-    if (typeof window === 'undefined') return;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    if (typeof window !== 'undefined') {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+    }
   };
 
   public dispose(): void {
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', this.onResize);
     }
-    this.meshes.dispose();
+    this.rigInstance.dispose();
   }
 }

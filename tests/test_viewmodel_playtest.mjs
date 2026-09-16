@@ -153,7 +153,10 @@ async function runViewmodelPlaytest() {
     await new Promise(r => setTimeout(r, 200));
 
     const isLeftHidden = await page.evaluate(() => {
-      return !window.game.viewmodelController['leftArmGroup'].visible;
+      const vm = window.game.viewmodelController;
+      const bone = vm.rigInstance?.handLBone;
+      if (bone) return bone.visible === false;
+      return !vm['leftArmGroup']?.visible;
     });
     console.log(`[VIEWMODEL TEST] Minimal mode left arm hidden: ${isLeftHidden}`);
     if (!isLeftHidden) throw new Error('Minimal mode failed to hide left arm');
