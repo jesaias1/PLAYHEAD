@@ -26,6 +26,8 @@ export class CameraController {
   public roll = 0;  // Bank angle
 
   public cameraBankEnabled = false; // Disabled by default for raw testing
+  public lastMouseDeltaX = 0;
+  public lastMouseDeltaY = 0;
   private domElement: HTMLElement;
   private isLocked = false;
   private justLocked = false;
@@ -112,6 +114,9 @@ export class CameraController {
   public applyMouseDelta(deltaX: number, deltaY: number): void {
     const factor = CameraController.BASE_SENSITIVITY * this.sensitivity;
 
+    this.lastMouseDeltaX += deltaX;
+    this.lastMouseDeltaY += deltaY;
+
     // Physical mouse RIGHT => yaw decreases => rotates view toward player's RIGHT
     this.yaw -= deltaX * factor;
 
@@ -122,6 +127,13 @@ export class CameraController {
     this.pitch = clamp(this.pitch, -1.55, 1.55);
 
     this.updateCameraRotation();
+  }
+
+  public consumeMouseDelta(): { x: number; y: number } {
+    const d = { x: this.lastMouseDeltaX, y: this.lastMouseDeltaY };
+    this.lastMouseDeltaX = 0;
+    this.lastMouseDeltaY = 0;
+    return d;
   }
 
   private updateCameraRotation(): void {

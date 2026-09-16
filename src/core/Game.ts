@@ -27,6 +27,7 @@ import { MovementLab } from '../lab/MovementLab';
 import { StrafeVisualizer } from '../player/StrafeVisualizer';
 import { SurfVisuals } from '../world/SurfVisuals';
 import { TrackCatalogEntry } from '../audio/MusicPack';
+import { ViewmodelController } from '../viewmodel/ViewmodelController';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -36,6 +37,7 @@ export class Game {
   public world: World;
   public cameraController: CameraController;
   public playerController: PlayerController;
+  public viewmodelController: ViewmodelController;
   public strafeVisualizer: StrafeVisualizer;
   public surfVisuals: SurfVisuals;
   public replayRecorder: ReplayRecorder;
@@ -70,9 +72,10 @@ export class Game {
     // 2. World System
     this.world = new World(this.environment.scene);
 
-    // 3. Player & Camera
+    // 3. Player, Camera & Viewmodel
     this.cameraController = new CameraController(this.environment.camera, this.environment.renderer.domElement);
     this.playerController = new PlayerController(this.cameraController, this.world.physics);
+    this.viewmodelController = new ViewmodelController();
     this.strafeVisualizer = new StrafeVisualizer(this.environment.scene);
     this.surfVisuals = new SurfVisuals(this.environment.scene);
 
@@ -371,6 +374,7 @@ export class Game {
     this.cameraController.setSensitivity(settings.mouseSensitivity);
     this.environment.setBaseFov(settings.fov);
     this.audioEngine.setVolume(settings.masterVolume);
+    this.viewmodelController.setAccentColor(this.world.visualController.state.palette.primary);
   }
 
   private handlePlayerFall(): void {
@@ -511,6 +515,11 @@ export class Game {
         // Dev shortcut: Jump to next checkpoint
         if (this.stateMachine.is(GameState.PLAYING)) {
           this.jumpToNextCheckpoint();
+        }
+      } else if (e.code === 'KeyF' && !e.repeat) {
+        // Viewmodel Inspect Karambit flourish
+        if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
+          this.viewmodelController.triggerInspect();
         }
       }
     });
@@ -682,5 +691,22 @@ export class Game {
 
     this.environment.update(frameDelta);
     this.environment.render();
+
+    // Render First-Person Viewmodel (Hands + Karambit) in PLAYING, COUNTDOWN, or MOVEMENT_LAB
+    if (
+      this.stateMachine.is(GameState.PLAYING) ||
+      this.stateMachine.is(GameState.COUNTDOWN) ||
+      this.stateMachine.is(GameState.MOVEMENT_LAB)
+    ) {
+      const mouseDelta = this.cameraController.consumeMouseDelta();
+      this.viewmodelController.update(
+        frameDelta,
+        this.playerController,
+        this.cameraController,
+        mouseDelta.x,
+        mouseDelta.y
+      );
+      this.viewmodelController.render(this.environment.renderer);
+    }
   };
 }

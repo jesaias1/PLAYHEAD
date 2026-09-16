@@ -59,6 +59,25 @@ export class SettingsModal {
           </select>
         </div>
 
+        <div class="settings-row">
+          <label class="settings-label">VIEWMODEL (HANDS & BLADE)</label>
+          <select class="settings-select" id="set-vm-mode" style="background: var(--bg-surface-elevated); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px 8px; font-family: var(--font-mono); font-size: 0.8rem;">
+            <option value="FULL">FULL (BOTH HANDS + KARAMBIT)</option>
+            <option value="MINIMAL">MINIMAL (RIGHT HAND ONLY)</option>
+            <option value="OFF">OFF (DISABLED)</option>
+          </select>
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">VIEWMODEL FOV</label>
+          <input type="range" class="settings-input" id="set-vm-fov" min="50" max="85" step="1" />
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">VIEWMODEL SWAY INTENSITY</label>
+          <input type="range" class="settings-input" id="set-vm-sway" min="0" max="2" step="0.1" />
+        </div>
+
         <div style="margin-top: 24px; text-align: center;">
           <button class="primary" id="btn-set-close">CLOSE</button>
         </div>
@@ -71,11 +90,18 @@ export class SettingsModal {
     this.motionInput = this.element.querySelector('#set-motion') as HTMLInputElement;
     this.bhopInput = this.element.querySelector('#set-bhop') as HTMLInputElement;
     this.ghostSelect = this.element.querySelector('#set-ghost') as HTMLSelectElement;
+    this.vmModeSelect = this.element.querySelector('#set-vm-mode') as HTMLSelectElement;
+    this.vmFovInput = this.element.querySelector('#set-vm-fov') as HTMLInputElement;
+    this.vmSwayInput = this.element.querySelector('#set-vm-sway') as HTMLInputElement;
     this.closeBtn = this.element.querySelector('#btn-set-close') as HTMLButtonElement;
 
     this.initValues();
     this.initEvents();
   }
+
+  private vmModeSelect: HTMLSelectElement;
+  private vmFovInput: HTMLInputElement;
+  private vmSwayInput: HTMLInputElement;
 
   public setOnClose(cb: () => void): void {
     this.onCloseCallback = cb;
@@ -99,6 +125,9 @@ export class SettingsModal {
     this.motionInput.checked = s.reduceMotion;
     this.bhopInput.checked = s.holdToBhop;
     this.ghostSelect.value = s.ghostMode || 'ALL';
+    this.vmModeSelect.value = s.viewmodelMode || 'FULL';
+    this.vmFovInput.value = `${s.viewmodelFov || 65}`;
+    this.vmSwayInput.value = `${s.viewmodelSway !== undefined ? s.viewmodelSway : 1.0}`;
   }
 
   private initEvents(): void {
@@ -124,6 +153,18 @@ export class SettingsModal {
 
     this.ghostSelect.addEventListener('change', () => {
       this.settingsManager.update({ ghostMode: this.ghostSelect.value as any });
+    });
+
+    this.vmModeSelect.addEventListener('change', () => {
+      this.settingsManager.update({ viewmodelMode: this.vmModeSelect.value as any });
+    });
+
+    this.vmFovInput.addEventListener('input', () => {
+      this.settingsManager.update({ viewmodelFov: parseInt(this.vmFovInput.value, 10) });
+    });
+
+    this.vmSwayInput.addEventListener('input', () => {
+      this.settingsManager.update({ viewmodelSway: parseFloat(this.vmSwayInput.value) });
     });
 
     this.closeBtn.addEventListener('click', () => {
