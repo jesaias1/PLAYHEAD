@@ -69,6 +69,14 @@ export class ResultsScreen {
             <div class="stat-label">TOTAL SCORE</div>
             <div class="stat-value" id="res-score">0</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">VS THE ECHO</div>
+            <div class="stat-value" id="res-rival">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">GHOST RACING</div>
+            <div class="stat-value" id="res-ghost-status">RECORDED</div>
+          </div>
         </div>
 
         <div class="results-actions">
@@ -88,6 +96,8 @@ export class ResultsScreen {
     this.strafeEffElem = this.element.querySelector('#res-strafe') as HTMLElement;
     this.fallsElem = this.element.querySelector('#res-falls') as HTMLElement;
     this.scoreElem = this.element.querySelector('#res-score') as HTMLElement;
+    this.rivalElem = this.element.querySelector('#res-rival') as HTMLElement;
+    this.ghostStatusElem = this.element.querySelector('#res-ghost-status') as HTMLElement;
 
     this.replayBtn = this.element.querySelector('#btn-res-replay') as HTMLButtonElement;
     this.againBtn = this.element.querySelector('#btn-res-again') as HTMLButtonElement;
@@ -95,6 +105,9 @@ export class ResultsScreen {
 
     this.initEvents();
   }
+
+  private rivalElem: HTMLElement;
+  private ghostStatusElem: HTMLElement;
 
   public setCallbacks(callbacks: {
     onReplay: () => void;
@@ -106,7 +119,11 @@ export class ResultsScreen {
     this.onNewTrackCallback = callbacks.onNewTrack;
   }
 
-  public showResults(results: RunResults, seed: number): void {
+  public showResults(
+    results: RunResults,
+    seed: number,
+    ghostInfo?: { rivalDelta?: number; isNewPB?: boolean }
+  ): void {
     this.rankElem.textContent = results.rank;
     this.timeElem.textContent = formatTime(results.completionTime);
     this.targetElem.textContent = formatTime(results.targetTime);
@@ -119,6 +136,24 @@ export class ResultsScreen {
     this.strafeEffElem.textContent = results.strafeEfficiency >= 0 ? `${results.strafeEfficiency}%` : '—';
     this.fallsElem.textContent = `${results.fallsCount}`;
     this.scoreElem.textContent = results.score.toLocaleString();
+
+    // Temporal Rival & Ghost Info
+    if (ghostInfo?.rivalDelta !== undefined) {
+      const rSign = ghostInfo.rivalDelta < 0 ? '▲ -' : '▼ +';
+      this.rivalElem.textContent = `${rSign}${Math.abs(ghostInfo.rivalDelta).toFixed(2)}s`;
+      this.rivalElem.style.color = ghostInfo.rivalDelta < 0 ? '#00ff88' : '#ff3366';
+    } else {
+      this.rivalElem.textContent = '—';
+      this.rivalElem.style.color = 'var(--text-primary)';
+    }
+
+    if (ghostInfo?.isNewPB) {
+      this.ghostStatusElem.textContent = 'NEW PB GHOST';
+      this.ghostStatusElem.style.color = '#00f0ff';
+    } else {
+      this.ghostStatusElem.textContent = 'SYNCED';
+      this.ghostStatusElem.style.color = 'var(--text-secondary)';
+    }
 
     // Check & Save Personal Best
     this.savePersonalBest(seed, results);

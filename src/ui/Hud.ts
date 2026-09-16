@@ -3,6 +3,7 @@
  */
 
 import { formatSpeed } from '../utils/math';
+import { SplitResult } from '../replay/GhostManager';
 
 export class Hud {
   public element: HTMLElement;
@@ -39,10 +40,21 @@ export class Hud {
       </div>
       <div class="hud-toast" id="hud-toast"></div>
 
+      <div class="hud-split-toast" id="hud-split-toast">
+        <div class="hud-split-header" id="hud-split-header">CHECKPOINT 1 // VS ECHO</div>
+        <div class="hud-split-val" id="hud-split-val">▲ -0.00s</div>
+      </div>
+
       <div class="hud-bottom">
-        <div class="hud-sync-indicator">
-          <span class="hud-sync-label">SYNC DELTA</span>
-          <span class="hud-sync-val" id="hud-sync">0.00s</span>
+        <div class="hud-stats-strip">
+          <div class="hud-sync-indicator">
+            <span class="hud-sync-label">SYNC DELTA</span>
+            <span class="hud-sync-val" id="hud-sync">0.00s</span>
+          </div>
+          <div class="hud-split-badge hidden" id="hud-split-badge">
+            <span class="hud-split-badge-label" id="hud-split-badge-label">VS ECHO</span>
+            <span class="hud-split-badge-val" id="hud-split-badge-val">0.00s</span>
+          </div>
         </div>
         <div class="hud-progress-bar-container">
           <div class="hud-progress-bar-fill" id="hud-progress"></div>
@@ -59,11 +71,26 @@ export class Hud {
     this.surfIndicatorElem = this.element.querySelector('#hud-surf-indicator') as HTMLElement;
     this.surfKeyElem = this.element.querySelector('#hud-surf-key') as HTMLElement;
     this.surfTextElem = this.element.querySelector('#hud-surf-text') as HTMLElement;
+
+    this.splitToastElem = this.element.querySelector('#hud-split-toast') as HTMLElement;
+    this.splitHeaderElem = this.element.querySelector('#hud-split-header') as HTMLElement;
+    this.splitValElem = this.element.querySelector('#hud-split-val') as HTMLElement;
+    this.splitBadgeElem = this.element.querySelector('#hud-split-badge') as HTMLElement;
+    this.splitBadgeLabelElem = this.element.querySelector('#hud-split-badge-label') as HTMLElement;
+    this.splitBadgeValElem = this.element.querySelector('#hud-split-badge-val') as HTMLElement;
   }
 
   private surfIndicatorElem: HTMLElement;
   private surfKeyElem: HTMLElement;
   private surfTextElem: HTMLElement;
+
+  private splitToastElem: HTMLElement;
+  private splitHeaderElem: HTMLElement;
+  private splitValElem: HTMLElement;
+  private splitBadgeElem: HTMLElement;
+  private splitBadgeLabelElem: HTMLElement;
+  private splitBadgeValElem: HTMLElement;
+  private splitTimeout: number | null = null;
 
   public show(): void {
     this.element.classList.remove('hidden');
@@ -76,6 +103,13 @@ export class Hud {
       this.toastTimeout = null;
     }
     this.toastElem.classList.remove('active');
+
+    if (this.splitTimeout) {
+      clearTimeout(this.splitTimeout);
+      this.splitTimeout = null;
+    }
+    this.splitToastElem.classList.remove('active');
+    this.splitBadgeElem.classList.add('hidden');
   }
 
   public setTrackInfo(title: string, sectionText: string): void {
@@ -137,6 +171,33 @@ export class Hud {
     this.toastTimeout = window.setTimeout(() => {
       this.toastElem.classList.remove('active');
       this.toastTimeout = null;
+    }, durationMs);
+  }
+
+  public showSplit(split: SplitResult, durationMs = 2600): void {
+    if (this.splitTimeout) {
+      clearTimeout(this.splitTimeout);
+    }
+
+    const targetName = split.target === 'PB' ? 'PB' : 'ECHO';
+    const sign = split.isAhead ? '▲ -' : '▼ +';
+    const absVal = Math.abs(split.deltaSeconds).toFixed(2);
+    const splitClass = split.isAhead ? 'ahead' : 'behind';
+
+    this.splitHeaderElem.textContent = `CHECKPOINT ${split.checkpointIndex + 1} // VS ${targetName}`;
+    this.splitValElem.textContent = `${sign}${absVal}s`;
+    this.splitValElem.className = `hud-split-val ${splitClass}`;
+    this.splitToastElem.classList.add('active');
+
+    // Update bottom badge
+    this.splitBadgeLabelElem.textContent = `VS ${targetName}`;
+    this.splitBadgeValElem.textContent = `${split.isAhead ? '-' : '+'}${absVal}s`;
+    this.splitBadgeValElem.className = `hud-split-badge-val ${splitClass}`;
+    this.splitBadgeElem.classList.remove('hidden');
+
+    this.splitTimeout = window.setTimeout(() => {
+      this.splitToastElem.classList.remove('active');
+      this.splitTimeout = null;
     }, durationMs);
   }
 }

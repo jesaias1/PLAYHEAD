@@ -19,6 +19,7 @@ import { CameraController } from '../player/CameraController';
 import { PlayerController } from '../player/PlayerController';
 import { ReplayRecorder } from '../replay/ReplayRecorder';
 import { ReplayPlayer } from '../replay/ReplayPlayer';
+import { GhostManager } from '../replay/GhostManager';
 import { UIManager } from '../ui/UIManager';
 import { DevOverlay } from '../ui/DevOverlay';
 import { calculateLookYaw } from '../utils/math';
@@ -38,6 +39,7 @@ export class Game {
   public surfVisuals: SurfVisuals;
   public replayRecorder: ReplayRecorder;
   public replayPlayer: ReplayPlayer;
+  public ghostManager: GhostManager;
   public ui: UIManager;
   public devOverlay: DevOverlay;
 
@@ -70,9 +72,10 @@ export class Game {
     this.strafeVisualizer = new StrafeVisualizer(this.environment.scene);
     this.surfVisuals = new SurfVisuals(this.environment.scene);
 
-    // 4. Replay Systems
+    // 4. Replay & Ghost Systems
     this.replayRecorder = new ReplayRecorder();
     this.replayPlayer = new ReplayPlayer(this.environment.scene, this.environment.camera);
+    this.ghostManager = new GhostManager(this.environment.scene);
 
     // 5. UI Manager
     this.ui = new UIManager(uiRoot);
@@ -106,6 +109,11 @@ export class Game {
     // Analysis Screen
     this.ui.analysisScreen.setOnEnterTrack(() => {
       this.stateMachine.transitionTo(GameState.COUNTDOWN);
+    });
+
+    // Settings Modal
+    this.ui.settingsModal.setOnClose(() => {
+      this.ghostManager.applySettingsVisibility();
     });
 
     // Pause Screen
@@ -206,6 +214,7 @@ export class Game {
           this.isFinished = false;
           this.audioEngine.play(this.currentCheckpoint ? this.currentCheckpoint.time : 0);
           this.replayRecorder.start();
+          this.ghostManager.start();
           break;
 
         case GameState.PAUSED:
@@ -225,7 +234,26 @@ export class Game {
               this.runElapsedTime,
               this.currentAnalysis.duration
             );
-            this.ui.resultsScreen.showResults(results, this.currentTrack.seed);
+
+            // Check and save personal best ghost
+            let isNewPB = false;
+            if (this.replayRecorder.hasData()) {
+              isNewPB = this.ghostManager.saveIfPersonalBest(
+                this.currentTrack.seed,
+                this.currentAnalysis.filename || 'PLAYHEAD TRACK',
+                results.completionTime,
+                results.score,
+                this.replayRecorder.frames
+              );
+            }
+
+            const rivalTime = this.ghostManager.getRivalTime();
+            const rivalDelta = rivalTime !== null ? results.completionTime - rivalTime : undefined;
+
+            this.ui.resultsScreen.showResults(results, this.currentTrack.seed, {
+              rivalDelta,
+              isNewPB
+            });
           }
           break;
 
@@ -297,6 +325,10 @@ export class Game {
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
     this.runElapsedTime = 0;
+
+    // Prepare ghosts for track
+    this.ghostManager.prepareTrack(this.currentTrack, this.currentAnalysis?.filename || 'PLAYHEAD TRACK');
+    this.ghostManager.start();
 
     const startNode = this.currentTrack.route[0];
     const spawnPos = {
@@ -410,6 +442,7 @@ export class Game {
   private returnToImport(): void {
     this.audioEngine.stop();
     this.world.dispose();
+    this.ghostManager.dispose();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
     if (this.movementLab) {
@@ -529,6 +562,9 @@ export class Game {
         frameDelta
       );
 
+      // Update Ghosts
+      this.ghostManager.update(this.runElapsedTime, this.playerController.position, frameDelta);
+
       // Update HUD
       this.ui.hud.update(
         this.playerController.getSpeedUnits(),
@@ -564,7 +600,12 @@ export class Game {
             if (dx * dx + dz * dz < 12.0 * 12.0) {
               this.passedCheckpoints.add(cp.id);
               this.currentCheckpoint = cp;
-              this.ui.hud.showToast(`CHECKPOINT ${i + 1} REACHED`, 2000);
+              const split = this.ghostManager.onPlayerReachCheckpoint(i, this.runElapsedTime);
+              if (split) {
+                this.ui.hud.showSplit(split);
+              } else {
+                this.ui.hud.showToast(`CHECKPOINT ${i + 1} REACHED`, 2000);
+              }
             }
           }
         }

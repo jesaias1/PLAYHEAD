@@ -11,6 +11,7 @@ export class SettingsModal {
   private volInput: HTMLInputElement;
   private motionInput: HTMLInputElement;
   private bhopInput: HTMLInputElement;
+  private ghostSelect: HTMLSelectElement;
   private closeBtn: HTMLButtonElement;
 
   private onCloseCallback?: () => void;
@@ -48,6 +49,16 @@ export class SettingsModal {
           <input type="checkbox" id="set-bhop" />
         </div>
 
+        <div class="settings-row">
+          <label class="settings-label">GHOST RACING</label>
+          <select class="settings-select" id="set-ghost" style="background: var(--bg-surface-elevated); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px 8px; font-family: var(--font-mono); font-size: 0.8rem;">
+            <option value="ALL">PB + THE ECHO</option>
+            <option value="PB_ONLY">PB ONLY</option>
+            <option value="RIVAL_ONLY">THE ECHO ONLY</option>
+            <option value="OFF">OFF</option>
+          </select>
+        </div>
+
         <div style="margin-top: 24px; text-align: center;">
           <button class="primary" id="btn-set-close">CLOSE</button>
         </div>
@@ -59,6 +70,7 @@ export class SettingsModal {
     this.volInput = this.element.querySelector('#set-vol') as HTMLInputElement;
     this.motionInput = this.element.querySelector('#set-motion') as HTMLInputElement;
     this.bhopInput = this.element.querySelector('#set-bhop') as HTMLInputElement;
+    this.ghostSelect = this.element.querySelector('#set-ghost') as HTMLSelectElement;
     this.closeBtn = this.element.querySelector('#btn-set-close') as HTMLButtonElement;
 
     this.initValues();
@@ -86,6 +98,7 @@ export class SettingsModal {
     this.volInput.value = `${s.masterVolume}`;
     this.motionInput.checked = s.reduceMotion;
     this.bhopInput.checked = s.holdToBhop;
+    this.ghostSelect.value = s.ghostMode || 'ALL';
   }
 
   private initEvents(): void {
@@ -107,6 +120,10 @@ export class SettingsModal {
 
     this.bhopInput.addEventListener('change', () => {
       this.settingsManager.update({ holdToBhop: this.bhopInput.checked });
+    });
+
+    this.ghostSelect.addEventListener('change', () => {
+      this.settingsManager.update({ ghostMode: this.ghostSelect.value as any });
     });
 
     this.closeBtn.addEventListener('click', () => {

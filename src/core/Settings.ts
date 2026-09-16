@@ -2,6 +2,8 @@
  * Game settings with localStorage persistence
  */
 
+export type GhostMode = 'ALL' | 'PB_ONLY' | 'RIVAL_ONLY' | 'OFF';
+
 export interface GameSettings {
   mouseSensitivity: number;
   fov: number;
@@ -10,6 +12,7 @@ export interface GameSettings {
   holdToBhop: boolean;
   showDebug: boolean;
   visualQuality: 'HIGH' | 'PERFORMANCE';
+  ghostMode: GhostMode;
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -19,7 +22,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   reduceMotion: false,
   holdToBhop: true,
   showDebug: false,
-  visualQuality: 'HIGH'
+  visualQuality: 'HIGH',
+  ghostMode: 'ALL'
 };
 
 const STORAGE_KEY = 'trackrun_settings';
