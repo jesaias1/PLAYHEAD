@@ -10,7 +10,6 @@
  * - Air-Strafe Banking: Aerodynamic bank roll and lateral wind drift responding to [A]/[D] & lateral velocity.
  * - Jump Takeoff & Landing Compression: Scaled one-shot impacts with fluid bhop chain absorption.
  * - Surf Balance Stance: Ramp-aligned lean with aerodynamic tuck.
- * - Inspect Flourish: [F] key triggers a 360° ring spin flourish.
  */
 
 import * as THREE from 'three';
@@ -39,9 +38,15 @@ export class ViewmodelController {
   private readonly baseArmsPos = new THREE.Vector3(0, -1.58, 0);
   private readonly baseArmsRotY = Math.PI;
 
-  // Default Knife Transform relative to handR socket
-  private readonly defaultKnifePos = new THREE.Vector3(-0.015, 0.055, 0.015);
-  private readonly defaultKnifeRot = new THREE.Vector3(-Math.PI * 0.38, 0.15, -Math.PI * 0.26);
+  // Authoritative Knife Transform relative to handR socket (can be calibrated and persisted)
+  public knifeSocketPos = new THREE.Vector3(0.0105, 0.1101, 0.0009);
+  public knifeSocketRot = new THREE.Vector3(3.0159, 0.4466, 0.2277);
+  public knifeSocketScale = new THREE.Vector3(1.011, 1.011, 1.011);
+
+  // Default hardcoded references for reset
+  public static readonly DEFAULT_KNIFE_POS = new THREE.Vector3(0.0105, 0.1101, 0.0009);
+  public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.0159, 0.4466, 0.2277);
+  public static readonly DEFAULT_KNIFE_SCALE = new THREE.Vector3(1.011, 1.011, 1.011);
 
   // Spring Physics State (Damped Harmonic Oscillator)
   private swayPos = new THREE.Vector3();
@@ -66,11 +71,6 @@ export class ViewmodelController {
   // Surfing Balance Blend
   private surfBlend = 0;
   private surfSideTilt = 0;
-
-  // Inspect Flourish State
-  private isInspecting = false;
-  private inspectTimer = 0;
-  private readonly inspectDuration = 1.25; // seconds
 
   // Track Emissive Color
   private accentColor = new THREE.Color(0x00f0ff);
@@ -110,6 +110,9 @@ export class ViewmodelController {
     this.rootGroup.add(this.swayGroup);
     this.scene.add(this.rootGroup);
 
+    // Check for developer saved calibration in localStorage
+    this.loadSavedCalibration();
+
     // Initial temporary fallback rig while asynchronous assets load
     this.rigInstance = ViewmodelAssetLoader.buildFallbackRig(this.accentColor);
     this.applyRigBaseTransform();
@@ -120,6 +123,69 @@ export class ViewmodelController {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
+    }
+  }
+
+  public loadSavedCalibration(): boolean {
+    try {
+      if (typeof localStorage === 'undefined') return false;
+      const raw = localStorage.getItem('playhead.viewmodel.karambitCalibration');
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.position) && Array.isArray(data.rotationRad)) {
+        this.knifeSocketPos.set(data.position[0], data.position[1], data.position[2]);
+        this.knifeSocketRot.set(data.rotationRad[0], data.rotationRad[1], data.rotationRad[2]);
+        const s = typeof data.scale === 'number' ? data.scale : 1.0;
+        this.knifeSocketScale.set(s, s, s);
+        return true;
+      }
+    } catch (err) {
+      console.warn('[ViewmodelController] Failed to load saved calibration:', err);
+    }
+    return false;
+  }
+
+  public getKnifeGroup(): THREE.Group | null {
+    return this.rigInstance?.knifeGroup || null;
+  }
+
+  public getHandRBone(): THREE.Object3D | null {
+    return this.rigInstance?.handRBone || null;
+  }
+
+  /**
+   * Freezes viewmodel in pristine knife idle pose during developer calibration.
+   * Completely zeroes out mouse sway, strafe banking, bhop impact, and surf tilt.
+   */
+  public updateCalibrationPose(): void {
+    const settings = SettingsManager.getInstance().settings;
+    if (settings.viewmodelMode === 'OFF') return;
+
+    // Reset sway and spring velocity
+    this.swayPos.set(0, 0, 0);
+    this.swayPosVel.set(0, 0, 0);
+    this.swayRot.set(0, 0, 0, 'YXZ');
+    this.swayRotVel.set(0, 0, 0);
+    this.swayGroup.position.set(0, 0, 0);
+    this.swayGroup.rotation.set(0, 0, 0);
+
+    // Reset physics compression and air offsets
+    this.compressionY = 0;
+    this.compressionVelY = 0;
+    this.airOffset.set(0, 0, 0);
+    this.airRotOffset.set(0, 0, 0);
+    this.motionGroup.position.set(0, 0, 0);
+    this.motionGroup.rotation.set(0, 0, 0);
+
+    // Maintain knife socket attachment with current calibrated values
+    if (this.rigInstance.knifeGroup) {
+      this.rigInstance.knifeGroup.position.copy(this.knifeSocketPos);
+      this.rigInstance.knifeGroup.rotation.set(
+        this.knifeSocketRot.x,
+        this.knifeSocketRot.y,
+        this.knifeSocketRot.z
+      );
+      this.rigInstance.knifeGroup.scale.copy(this.knifeSocketScale);
     }
   }
 
@@ -146,26 +212,15 @@ export class ViewmodelController {
     }
     const knife = this.rigInstance.knifeGroup;
     if (knife) {
-      knife.position.copy(this.defaultKnifePos);
-      knife.rotation.set(this.defaultKnifeRot.x, this.defaultKnifeRot.y, this.defaultKnifeRot.z);
+      knife.position.copy(this.knifeSocketPos);
+      knife.rotation.set(this.knifeSocketRot.x, this.knifeSocketRot.y, this.knifeSocketRot.z);
+      knife.scale.copy(this.knifeSocketScale);
     }
   }
 
   public setAccentColor(col: THREE.Color): void {
     this.accentColor.copy(col);
     this.rigInstance.setAccentColor(col);
-  }
-
-  /**
-   * Triggers the [F] Karambit inspect flourish
-   */
-  public triggerInspect(): void {
-    this.isInspecting = true;
-    this.inspectTimer = 0;
-  }
-
-  public isInspectActive(): boolean {
-    return this.isInspecting;
   }
 
   /**
@@ -317,19 +372,15 @@ export class ViewmodelController {
       this.motionGroup.position.x += -this.surfSideTilt * 0.015 * this.surfBlend;
     }
 
-    // 8. Inspect Flourish Animation ([F] key)
-    if (this.isInspecting) {
-      this.updateInspectFlourish(dt);
-    } else {
-      // Reset knife transform relative to handR socket
-      if (this.rigInstance.knifeGroup) {
-        this.rigInstance.knifeGroup.position.copy(this.defaultKnifePos);
-        this.rigInstance.knifeGroup.rotation.set(
-          this.defaultKnifeRot.x,
-          this.defaultKnifeRot.y,
-          this.defaultKnifeRot.z
-        );
-      }
+    // 8. Knife Socket Attachment
+    if (this.rigInstance.knifeGroup) {
+      this.rigInstance.knifeGroup.position.copy(this.knifeSocketPos);
+      this.rigInstance.knifeGroup.rotation.set(
+        this.knifeSocketRot.x,
+        this.knifeSocketRot.y,
+        this.knifeSocketRot.z
+      );
+      this.rigInstance.knifeGroup.scale.copy(this.knifeSocketScale);
     }
 
     // 9. Minimal Mode Support (hides left hand)
@@ -342,69 +393,6 @@ export class ViewmodelController {
       if (this.rigInstance.handLBone) {
         this.rigInstance.handLBone.visible = true;
       }
-    }
-  }
-
-  /**
-   * Updates the karambit spin flourish animation around its finger ring
-   */
-  private updateInspectFlourish(dt: number): void {
-    this.inspectTimer += dt;
-    const progress = this.inspectTimer / this.inspectDuration;
-
-    if (progress >= 1.0) {
-      this.isInspecting = false;
-      this.inspectTimer = 0;
-      return;
-    }
-
-    const knife = this.rigInstance.knifeGroup;
-    if (!knife) return;
-
-    if (progress < 0.40) {
-      // Phase 1: Rapid 360° spin around the finger ring
-      const spinP = progress / 0.40;
-      const angle = spinP * Math.PI * 2;
-      knife.position.set(
-        this.defaultKnifePos.x,
-        this.defaultKnifePos.y + Math.sin(angle) * 0.015,
-        this.defaultKnifePos.z
-      );
-      knife.rotation.set(
-        this.defaultKnifeRot.x + angle,
-        this.defaultKnifeRot.y,
-        this.defaultKnifeRot.z
-      );
-    } else if (progress < 0.75) {
-      // Phase 2: Inverted blade display (angled towards camera displaying the hawkbill curve)
-      const displayP = (progress - 0.40) / 0.35;
-      const easeDisplay = Math.sin(displayP * Math.PI);
-      knife.position.set(
-        this.defaultKnifePos.x + 0.01 * easeDisplay,
-        this.defaultKnifePos.y + 0.015 * easeDisplay,
-        this.defaultKnifePos.z + 0.01 * easeDisplay
-      );
-      knife.rotation.set(
-        this.defaultKnifeRot.x + 0.3 * easeDisplay,
-        this.defaultKnifeRot.y + 0.25 * easeDisplay,
-        this.defaultKnifeRot.z + 0.2 * easeDisplay
-      );
-    } else {
-      // Phase 3: Snap cleanly back into combat ready grip
-      const snapP = (progress - 0.75) / 0.25;
-      const t = clamp(snapP, 0, 1);
-      const easeSnap = 1 - (1 - t) * (1 - t);
-
-      knife.position.set(
-        THREE.MathUtils.lerp(this.defaultKnifePos.x + 0.01, this.defaultKnifePos.x, easeSnap),
-        THREE.MathUtils.lerp(this.defaultKnifePos.y + 0.015, this.defaultKnifePos.y, easeSnap),
-        THREE.MathUtils.lerp(this.defaultKnifePos.z + 0.01, this.defaultKnifePos.z, easeSnap)
-      );
-      knife.rotation.set(
-        THREE.MathUtils.lerp(this.defaultKnifeRot.x + 0.3, this.defaultKnifeRot.x, easeSnap),
-        THREE.MathUtils.lerp(this.defaultKnifeRot.y + 0.25, this.defaultKnifeRot.y, easeSnap),
-        THREE.MathUtils.lerp(this.defaultKnifeRot.z + 0.2, this.defaultKnifeRot.z, easeSnap)
-      );
     }
   }
 

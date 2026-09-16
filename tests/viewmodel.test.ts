@@ -91,9 +91,6 @@ describe('Viewmodel System — Hands & Karambit', () => {
       vm.update(0.016, player, camCtrl, 0, 0);
     }
 
-    // Inspect active state
-    expect(vm.isInspectActive()).toBe(false);
-
     vm.dispose();
   });
 
@@ -174,28 +171,28 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
-  it('triggers and completes [F] karambit inspect flourish', () => {
+  it('maintains calibrated knife socket transform relative to right hand bone', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();
     const camCtrl = new CameraController(camera, {} as HTMLElement);
     const physics = new PhysicsWorld();
     const player = new PlayerController(camCtrl, physics);
 
-    expect(vm.isInspectActive()).toBe(false);
-    vm.triggerInspect();
-    expect(vm.isInspectActive()).toBe(true);
+    // Update viewmodel
+    vm.update(0.016, player, camCtrl, 0, 0);
 
-    // Advance 0.2s (Phase 1: 360° spin)
-    vm.update(0.2, player, camCtrl, 0, 0);
-    expect(vm.isInspectActive()).toBe(true);
-
-    // Advance 0.5s (Phase 2: Inverted blade display)
-    vm.update(0.5, player, camCtrl, 0, 0);
-    expect(vm.isInspectActive()).toBe(true);
-
-    // Advance to completion (> 1.5s total)
-    vm.update(1.0, player, camCtrl, 0, 0);
-    expect(vm.isInspectActive()).toBe(false); // Seamlessly returned to ready stance
+    // Verify knife socket position and rotation match calibrated handle grip
+    const knifeGroup = vm['rigInstance'].knifeGroup;
+    expect(knifeGroup).toBeDefined();
+    if (knifeGroup) {
+      expect(knifeGroup.position.x).toBeCloseTo(0.0105, 3);
+      expect(knifeGroup.position.y).toBeCloseTo(0.1101, 3);
+      expect(knifeGroup.position.z).toBeCloseTo(0.0009, 3);
+      expect(knifeGroup.rotation.x).toBeCloseTo(3.0159, 3);
+      expect(knifeGroup.rotation.y).toBeCloseTo(0.4466, 3);
+      expect(knifeGroup.rotation.z).toBeCloseTo(0.2277, 3);
+      expect(knifeGroup.scale.x).toBeCloseTo(1.011, 3);
+    }
 
     vm.dispose();
   });

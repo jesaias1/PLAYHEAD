@@ -95,30 +95,13 @@ async function runViewmodelPlaytest() {
     console.log('[VIEWMODEL TEST] Testing jump takeoff and landing compression...');
     await page.keyboard.down('Space');
     await new Promise(r => setTimeout(r, 150));
+    const jumpScreenshotPath = path.join(ARTIFACT_DIR, 'screenshot_viewmodel_jump.png');
+    await page.screenshot({ path: jumpScreenshotPath, fullPage: false });
+    console.log(`[VIEWMODEL TEST] Captured jump posture screenshot: ${jumpScreenshotPath}`);
     await page.keyboard.up('Space');
     await new Promise(r => setTimeout(r, 700)); // Allow landing compression
 
-    // 5. Test [F] Karambit Inspect Flourish
-    console.log('[VIEWMODEL TEST] Triggering [F] Karambit Inspect Flourish...');
-    await page.keyboard.press('KeyF');
-
-    // Wait 250ms into the 360° ring spin
-    await new Promise(r => setTimeout(r, 280));
-    const isInspecting = await page.evaluate(() => window.game.viewmodelController.isInspectActive());
-    console.log(`[VIEWMODEL TEST] Inspect active during spin: ${isInspecting}`);
-    if (!isInspecting) throw new Error('Inspect flourish failed to activate on KeyF');
-
-    // Capture Inspect Flourish Screenshot
-    const inspectScreenshotPath = path.join(ARTIFACT_DIR, 'screenshot_viewmodel_inspect.png');
-    await page.screenshot({ path: inspectScreenshotPath, fullPage: false });
-    console.log(`[VIEWMODEL TEST] Captured inspect flourish screenshot: ${inspectScreenshotPath}`);
-
-    // Wait for inspect to complete
-    await new Promise(r => setTimeout(r, 1400));
-    const inspectFinished = await page.evaluate(() => !window.game.viewmodelController.isInspectActive());
-    console.log(`[VIEWMODEL TEST] Inspect returned to ready stance: ${inspectFinished}`);
-
-    // 6. Test Surf Balance Posture by navigating to the Lab surf ramp
+    // 5. Test Surf Balance Posture by navigating to the Lab surf ramp
     console.log('[VIEWMODEL TEST] Testing surf balance posture on Lab surf ramp...');
     // Teleport or step player into surf ramp area
     await page.evaluate(() => {

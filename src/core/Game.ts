@@ -28,6 +28,7 @@ import { StrafeVisualizer } from '../player/StrafeVisualizer';
 import { SurfVisuals } from '../world/SurfVisuals';
 import { TrackCatalogEntry } from '../audio/MusicPack';
 import { ViewmodelController } from '../viewmodel/ViewmodelController';
+import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -38,6 +39,7 @@ export class Game {
   public cameraController: CameraController;
   public playerController: PlayerController;
   public viewmodelController: ViewmodelController;
+  public viewmodelCalibrator: ViewmodelCalibrator;
   public strafeVisualizer: StrafeVisualizer;
   public surfVisuals: SurfVisuals;
   public replayRecorder: ReplayRecorder;
@@ -89,6 +91,28 @@ export class Game {
 
     // 6. Dev Diagnostics Overlay
     this.devOverlay = new DevOverlay();
+
+    // 7. Dev Viewmodel Calibration Tool (F4)
+    this.viewmodelCalibrator = new ViewmodelCalibrator(
+      this.viewmodelController,
+      this.environment.renderer.domElement,
+      () => {
+        // On calibration activate: unlock pointer, pause audio if in race
+        this.cameraController.unlock();
+        if (this.stateMachine.is(GameState.PLAYING)) {
+          this.audioEngine.pause();
+        }
+      },
+      () => {
+        // On calibration deactivate: resume audio and relock pointer
+        if (this.stateMachine.is(GameState.PLAYING)) {
+          this.audioEngine.resume();
+          this.cameraController.lock();
+        } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
+          this.cameraController.lock();
+        }
+      }
+    );
 
     this.setupCallbacks();
     this.setupStateMachine();
@@ -484,6 +508,9 @@ export class Game {
 
   private setupInputHandlers(): void {
     this.environment.renderer.domElement.addEventListener('click', () => {
+      // Never re-engage pointer lock if calibration tool is active
+      if (this.viewmodelCalibrator?.isActive) return;
+
       if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         this.cameraController.lock();
       }
@@ -516,10 +543,15 @@ export class Game {
         if (this.stateMachine.is(GameState.PLAYING)) {
           this.jumpToNextCheckpoint();
         }
-      } else if (e.code === 'KeyF' && !e.repeat) {
-        // Viewmodel Inspect Karambit flourish
-        if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          this.viewmodelController.triggerInspect();
+      } else if (e.code === 'F4' && !e.repeat) {
+        // Dev shortcut: Toggle Viewmodel Calibration Tool
+        if (
+          this.stateMachine.is(GameState.PLAYING) ||
+          this.stateMachine.is(GameState.MOVEMENT_LAB) ||
+          this.stateMachine.is(GameState.COUNTDOWN)
+        ) {
+          e.preventDefault();
+          this.viewmodelCalibrator.toggle();
         }
       }
     });
@@ -547,6 +579,9 @@ export class Game {
     requestAnimationFrame(this.gameLoop);
 
     const { frameDelta } = this.clock.tick((dt) => {
+      // Freeze simulation during viewmodel calibration
+      if (this.viewmodelCalibrator.isActive) return;
+
       if (this.stateMachine.is(GameState.PLAYING)) {
         this.playerController.updateFixed(dt);
 
@@ -564,6 +599,14 @@ export class Game {
         this.playerController.updateFixed(dt);
       }
     });
+
+    // If dev calibration mode is active, freeze world updates and render calibrated viewmodel pose
+    if (this.viewmodelCalibrator.isActive) {
+      this.viewmodelController.updateCalibrationPose();
+      this.environment.render();
+      this.viewmodelController.render(this.environment.renderer);
+      return;
+    }
 
     // Variable render updates
     if (this.stateMachine.is(GameState.PLAYING)) {

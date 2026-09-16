@@ -108,6 +108,8 @@ export class ViewmodelAssetLoader {
     // Scale and orient knife for authentic FPS karambit hold
     const knifeScale = 0.85;
     knifeScene.scale.set(knifeScale, knifeScale, knifeScale);
+    // Shift knife local origin so the handle sits precisely inside the right hand palm tunnel
+    knifeScene.position.set(0.0, 0.025, 0.065);
 
     // Apply PLAYHEAD dark titanium / charcoal aesthetic and emissive channel
     const knifeMaterials: THREE.Material[] = [];
@@ -142,10 +144,11 @@ export class ViewmodelAssetLoader {
     // Attach karambit into right hand bone socket
     handRBone.add(knifeGroup);
 
-    // Fine-tuned socket transform:
-    // Aligns finger ring with index finger and curls blade down/forward in reverse combat grip
-    knifeGroup.position.set(-0.015, 0.055, 0.015);
-    knifeGroup.rotation.set(-Math.PI * 0.38, 0.15, -Math.PI * 0.26);
+    // Calibrated socket transform:
+    // Palm wraps securely around handle grooves, retention ring rests against heel of palm, blade curls forward/left
+    knifeGroup.position.set(0.0105, 0.1101, 0.0009);
+    knifeGroup.rotation.set(3.0159, 0.4466, 0.2277);
+    knifeGroup.scale.set(1.011, 1.011, 1.011);
 
     // Animation Mixer Setup
     let mixer: THREE.AnimationMixer | null = null;
