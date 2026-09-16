@@ -174,6 +174,10 @@ export class Hud {
     }, durationMs);
   }
 
+  public showOnboardingCue(msg: string, durationMs = 3800): void {
+    this.showToast(msg, durationMs);
+  }
+
   public showSplit(split: SplitResult, durationMs = 2600): void {
     if (this.splitTimeout) {
       clearTimeout(this.splitTimeout);

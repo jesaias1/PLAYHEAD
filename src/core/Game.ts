@@ -26,6 +26,7 @@ import { calculateLookYaw } from '../utils/math';
 import { MovementLab } from '../lab/MovementLab';
 import { StrafeVisualizer } from '../player/StrafeVisualizer';
 import { SurfVisuals } from '../world/SurfVisuals';
+import { TrackCatalogEntry } from '../audio/MusicPack';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -51,6 +52,9 @@ export class Game {
 
   private runElapsedTime = 0;
   private isFinished = false;
+
+  private isFirstContactCourse = false;
+  private shownOnboardingCues = new Set<string>();
 
   private movementLab: MovementLab | null = null;
   private previousStateBeforePause: GameState = GameState.PLAYING;
@@ -103,7 +107,8 @@ export class Game {
       (file) => this.handleFileSelected(file),
       (genre) => this.handleDevTrackSelected(genre),
       (err) => alert(err),
-      () => this.enterMovementLab()
+      () => this.enterMovementLab(),
+      (track) => this.handleCatalogTrackSelected(track)
     );
 
     // Analysis Screen
@@ -267,8 +272,25 @@ export class Game {
     });
   }
 
+  private async handleCatalogTrackSelected(trackEntry: TrackCatalogEntry): Promise<void> {
+    try {
+      this.isFirstContactCourse = !!trackEntry.isFirstContact;
+      this.stateMachine.transitionTo(GameState.ANALYSING);
+      this.ui.analysisScreen.setTrackTitle(trackEntry.title);
+      this.ui.analysisScreen.setStage(`SYNTHESIZING SIGNAL // ${trackEntry.genre}`);
+
+      const buffer = await trackEntry.generate();
+      await this.processBuffer(buffer, trackEntry.title);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Track synthesis failed';
+      alert(msg);
+      this.stateMachine.transitionTo(GameState.IMPORT);
+    }
+  }
+
   private async handleFileSelected(file: File): Promise<void> {
     try {
+      this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(file.name);
 
@@ -283,6 +305,7 @@ export class Game {
 
   private async handleDevTrackSelected(genre: SyntheticGenre = 'ELECTRONIC_DROP'): Promise<void> {
     try {
+      this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       const title = `DEV ${genre.replace('_', ' ')}`;
       this.ui.analysisScreen.setTrackTitle(title);
@@ -321,6 +344,7 @@ export class Game {
 
     this.currentCheckpoint = null;
     this.passedCheckpoints.clear();
+    this.shownOnboardingCues.clear();
     this.playerController.stats.reset();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
@@ -578,6 +602,20 @@ export class Game {
         this.playerController.surfState.isSurfing || this.playerController.isSurfing,
         this.playerController.surfState.surfSide
       );
+
+      // Onboarding Guidance for FIRST CONTACT
+      if (this.isFirstContactCourse) {
+        if (this.runElapsedTime >= 1.2 && !this.shownOnboardingCues.has('bhop')) {
+          this.shownOnboardingCues.add('bhop');
+          this.ui.hud.showOnboardingCue('BHOP FLOW // HOLD [SPACE] OR TAP ON LANDING', 3800);
+        } else if (this.runElapsedTime >= 14.0 && !this.shownOnboardingCues.has('strafe')) {
+          this.shownOnboardingCues.add('strafe');
+          this.ui.hud.showOnboardingCue('AIR STRAFE // TURN MOUSE IN AIR WHILE HOLDING [A] / [D]', 3800);
+        } else if (this.runElapsedTime >= 34.0 && !this.shownOnboardingCues.has('surf')) {
+          this.shownOnboardingCues.add('surf');
+          this.ui.hud.showOnboardingCue('SURF RAMP // HOLD [A] FOR LEFT RAMP / [D] FOR RIGHT', 3800);
+        }
+      }
 
       // Dynamic FOV based on speed
       const settings = SettingsManager.getInstance().settings;
