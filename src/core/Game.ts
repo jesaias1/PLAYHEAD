@@ -35,7 +35,7 @@ import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { RestoreReason } from '../player/RestorePolicy';
-import { movementDiagnostics } from './MovementDiagnostics';
+import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics } from './MovementDiagnostics';
 import { BUILD_LABEL } from './BuildInfo';
 
 export class Game {
@@ -111,6 +111,15 @@ export class Game {
     this.cameraController = new CameraController(this.environment.camera, this.environment.renderer.domElement);
     this.playerController = new PlayerController(this.cameraController, this.world.physics);
     this.viewmodelController = new ViewmodelController();
+
+    // Diagnostics: ?debugNoViewmodel=1 hides hands/knife ONLY, to isolate a
+    // viewmodel sway illusion from a real world-view snap. It does not alter
+    // camera, input, FOV, physics or collision.
+    if (MovementDiagnostics.isViewmodelHiddenRequested(
+      typeof window !== 'undefined' ? window.location.search : ''
+    )) {
+      this.viewmodelController.setDiagnosticHidden(true);
+    }
     this.strafeVisualizer = new StrafeVisualizer(this.environment.scene);
     this.surfVisuals = new SurfVisuals(this.environment.scene);
 
@@ -603,6 +612,11 @@ export class Game {
   /** Frames to skip after a load before the camera checks are trusted. */
   private diagSettleFrames = 0;
 
+  /** View-orientation discontinuity detector (active only in diagnostics mode). */
+  private viewSnapDetector = new ViewSnapDetector();
+  private lastViewSnapEvent: MovementDiagEvent | null = null;
+  private mouseHandlerCount = 0;
+
   /**
    * Pushes the authoritative world void boundary into the player.
    *
@@ -1031,11 +1045,7 @@ export class Game {
         this.playerController.restoreDiagnosticLogs.shift();
       }
 
-      // Surface automatic (non-manual) resets on the console so a rubberband
-      // can never be a mystery during playtesting.
-      if (reason !== RestoreReason.MANUAL_RESTORE) {
-        console.warn('[PLAYHEAD RESTORE]', diagnostic);
-      }
+      // Restore diagnostics are emitted by movementDiagnostics.record above.
 
       this.lastRestoreDiagnostic = diagnostic;
 
@@ -1161,6 +1171,70 @@ export class Game {
   }
 
   private setupInputHandlers(): void {
+    // ---- View-orientation diagnostics (opt-in via ?debugMovement=1) -------
+    // Pure observers: they read orientation state and never write it.
+    if (movementDiagnostics.isEnabled) {
+      this.mouseHandlerCount = this.cameraController.registeredHandlerCounts.mousemove;
+      this.cameraController.onRawMouseDelta = (mx, my) => {
+        this.viewSnapDetector.noteMouseDelta(mx, my);
+      };
+
+      this.cameraController.onOrientationFrame = (f) => {
+        const result = this.viewSnapDetector.endFrame({
+          yawBefore: f.yawBefore,
+          yawAfter: f.yawAfter,
+          pitchBefore: f.pitchBefore,
+          pitchAfter: f.pitchAfter,
+          quatYawBefore: f.quatYawBefore,
+          quatYawAfter: f.quatYawAfter,
+          quatPitchBefore: f.quatPitchBefore,
+          quatPitchAfter: f.quatPitchAfter,
+          sensitivity: this.cameraController.getSensitivity(),
+          baseSensitivity: 0.0022,
+          isLocked: f.isLocked,
+          justLocked: f.justLocked,
+          frameDeltaMs: this.lastFrameDeltaMs,
+          playerPos: {
+            x: this.playerController.position.x,
+            y: this.playerController.position.y,
+            z: this.playerController.position.z
+          },
+          displaySpeed: this.playerController.getSpeedUnits()
+        });
+
+      // Extend the view-snap report with the live handler registration count.
+      if (result.diagnosis) {
+        const wrap = (v: number) => (v * 180) / Math.PI;
+        movementDiagnostics.record(
+          'VIEW_SNAP',
+          result.diagnosis,
+          'CameraController.update (orientation discontinuity)',
+          {
+            rawX: result.rawX,
+            rawY: result.rawY,
+            mouseEvents: result.eventCount,
+            mouseHandlers: this.cameraController.registeredHandlerCounts.mousemove,
+            sensitivity: result.sensitivity,
+            yawBeforeDeg: wrap(result.yawBefore),
+            yawAfterDeg: wrap(result.yawAfter),
+            pitchBeforeDeg: wrap(result.pitchBefore),
+            pitchAfterDeg: wrap(result.pitchAfter),
+            expectedYawDeltaDeg: wrap(result.expectedYawDelta),
+            actualYawDeltaDeg: wrap(result.actualYawDelta),
+            expectedPitchDeltaDeg: wrap(result.expectedPitchDelta),
+            actualPitchDeltaDeg: wrap(result.actualPitchDelta),
+            pointerLocked: result.isLocked,
+            justLocked: result.justLocked,
+            frameDeltaMs: result.frameDeltaMs,
+            playerPos: `(${result.playerPos.x.toFixed(2)}, ${result.playerPos.y.toFixed(2)}, ${result.playerPos.z.toFixed(2)})`,
+            displaySpeed: result.displaySpeed
+          }
+        );
+        this.lastViewSnapEvent = movementDiagnostics.getLastEvent();
+      }
+      };
+    }
+
     this.cameraController.onUnlock = () => {
       this.pauseGame();
     };
@@ -1548,6 +1622,8 @@ export class Game {
     if (movementDiagnostics.isEnabled) {
       this.checkCameraTranslationDiagnostics();
       const vmCam = this.environment.camera;
+      const s = this.viewSnapDetector.lastSample;
+      const rad2deg = 180 / Math.PI;
       movementDiagnostics.update({
         buildLabel: BUILD_LABEL,
         speedUnits: this.playerController.getSpeedUnits(),
@@ -1561,7 +1637,26 @@ export class Game {
         fov: vmCam.fov,
         frameDeltaMs: this.lastFrameDeltaMs,
         voidDeathY: this.playerController.authoritativeKillY,
-        lastEvent: movementDiagnostics.getLastEvent()
+        lastEvent: movementDiagnostics.getLastEvent(),
+        orientation: s
+          ? {
+              rawX: s.rawX,
+              rawY: s.rawY,
+              mouseEvents: s.eventCount,
+              yawBeforeDeg: s.yawBefore * rad2deg,
+              yawAfterDeg: s.yawAfter * rad2deg,
+              pitchBeforeDeg: s.pitchBefore * rad2deg,
+              pitchAfterDeg: s.pitchAfter * rad2deg,
+              expectedYawDeg: s.expectedYawDelta * rad2deg,
+              expectedPitchDeg: s.expectedPitchDelta * rad2deg,
+              actualYawDeg: s.actualYawDelta * rad2deg,
+              actualPitchDeg: s.actualPitchDelta * rad2deg,
+              isLocked: s.isLocked,
+              justLocked: s.justLocked,
+              mouseHandlers: this.mouseHandlerCount
+            }
+          : undefined,
+        lastViewSnap: this.lastViewSnapEvent
       });
     }
 

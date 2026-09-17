@@ -216,9 +216,27 @@ export class ViewmodelController {
    * Freezes viewmodel in pristine knife idle pose during developer calibration.
    * Completely zeroes out mouse sway, strafe banking, bhop impact, and surf tilt.
    */
+  /**
+   * DIAGNOSTIC ONLY: hides the hands/knife to isolate whether an apparent view
+   * snap is the world view or a viewmodel sway illusion.
+   *
+   * This does NOT touch camera, input, physics, FOV or collision — it only
+   * suppresses the viewmodel's own update/render.
+   */
+  private diagnosticHidden = false;
+
+  public setDiagnosticHidden(hidden: boolean): void {
+    this.diagnosticHidden = hidden;
+    if (this.rootGroup) this.rootGroup.visible = !hidden;
+  }
+
+  private isSuppressed(): boolean {
+    return this.diagnosticHidden;
+  }
+
   public updateCalibrationPose(): void {
     const settings = SettingsManager.getInstance().settings;
-    if (settings.viewmodelMode === 'OFF') return;
+    if (this.isSuppressed() || settings.viewmodelMode === 'OFF') return;
 
     // Reset sway and spring velocity
     this.swayPos.set(0, 0, 0);
@@ -341,7 +359,7 @@ export class ViewmodelController {
     mouseDeltaY = 0
   ): void {
     const settings = SettingsManager.getInstance().settings;
-    if (settings.viewmodelMode === 'OFF') return;
+    if (this.isSuppressed() || settings.viewmodelMode === 'OFF') return;
 
     // Update skeletal animation mixer for idle finger breathing
     if (this.rigInstance.mixer) {
@@ -581,7 +599,7 @@ export class ViewmodelController {
    */
   public render(renderer: THREE.WebGLRenderer): void {
     const settings = SettingsManager.getInstance().settings;
-    if (settings.viewmodelMode === 'OFF') return;
+    if (this.isSuppressed() || settings.viewmodelMode === 'OFF') return;
 
     // Update camera FOV if adjusted in settings
     const targetFov = settings.viewmodelFov || 65;

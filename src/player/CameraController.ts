@@ -34,6 +34,11 @@ export class CameraController {
   private sensitivity = 1.0;
   private targetRoll = 0;
 
+  // Diagnostics scratch (never used for control flow).
+  private diagEuler = new THREE.Euler();
+  private diagQuatBefore = { x: 0, y: 0 };
+  private diagQuatAfter = { x: 0, y: 0 };
+
   // Base sensitivity: radians per raw mouse pixel
   private static readonly BASE_SENSITIVITY = 0.0022;
 
@@ -74,13 +79,67 @@ export class CameraController {
   }
 
   public update(dt: number): void {
+    // Capture orientation before this frame's update for diagnostics.
+    const diagYawBefore = this.yaw;
+    const diagPitchBefore = this.pitch;
+    this.getQuaternionOrientation(this.diagQuatBefore);
+
     if (this.cameraBankEnabled) {
       this.roll += (this.targetRoll - this.roll) * Math.min(1, dt * 10);
     } else {
       this.roll = 0;
     }
     this.updateCameraRotation();
+
+    // Report the frame to the view-snap detector (diagnostics only; this reads
+    // state and never writes yaw/pitch/quaternion).
+    if (this.onOrientationFrame) {
+      this.getQuaternionOrientation(this.diagQuatAfter);
+      this.onOrientationFrame({
+        yawBefore: diagYawBefore,
+        yawAfter: this.yaw,
+        pitchBefore: diagPitchBefore,
+        pitchAfter: this.pitch,
+        quatYawBefore: this.diagQuatBefore.x,
+        quatYawAfter: this.diagQuatAfter.x,
+        quatPitchBefore: this.diagQuatBefore.y,
+        quatPitchAfter: this.diagQuatAfter.y,
+        isLocked: this.isLocked,
+        justLocked: this.justLocked
+      });
+    }
   }
+
+  /**
+   * Extracts (yaw, pitch) from the LIVE camera quaternion, using the same YXZ
+   * convention the camera is built with. Used to prove the quaternion did not
+   * diverge from yaw/pitch (i.e. no second orientation writer).
+   */
+  public getQuaternionOrientation(out: { x: number; y: number }): void {
+    this.diagEuler.setFromQuaternion(this.camera.quaternion, 'YXZ');
+    out.x = this.diagEuler.y; // yaw
+    out.y = this.diagEuler.x; // pitch
+  }
+
+  /** Diagnostics hook: raw mouse delta as delivered by the browser. */
+  public onRawMouseDelta?: (movementX: number, movementY: number, justLocked: boolean) => void;
+
+  /** Counts of handler registrations performed by initEvents(). */
+  public registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0 };
+
+  /** Diagnostics hook, invoked once per CameraController.update(). */
+  public onOrientationFrame?: (frame: {
+    yawBefore: number;
+    yawAfter: number;
+    pitchBefore: number;
+    pitchAfter: number;
+    quatYawBefore: number;
+    quatYawAfter: number;
+    quatPitchBefore: number;
+    quatPitchAfter: number;
+    isLocked: boolean;
+    justLocked: boolean;
+  }) => void;
 
   public onUnlock?: () => void;
   /** Fired whenever pointer lock is actually acquired (true) or lost (false). */
@@ -207,6 +266,12 @@ export class CameraController {
   private initEvents(): void {
     if (typeof document === 'undefined') return;
 
+    // Count registrations so diagnostics can prove the listener lifecycle stays
+    // stable across Movement Lab enter/exit and pause/resume cycles (a duplicate
+    // mousemove handler would apply every delta twice → an apparent snap).
+    this.registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0 };
+
+    this.registeredHandlerCounts.pointerlockerror++;
     document.addEventListener('pointerlockerror', () => {
       this.isLockPending = false;
       const locked = document.pointerLockElement === this.domElement;
@@ -232,6 +297,7 @@ export class CameraController {
       }
     });
 
+    this.registeredHandlerCounts.pointerlockchange++;
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === this.domElement;
       const wasLocked = this.isLocked;
@@ -263,8 +329,15 @@ export class CameraController {
       }
     });
 
+    this.registeredHandlerCounts.mousemove++;
     document.addEventListener('mousemove', (e) => {
       if (!this.isLocked && !this.mouseLookEnabled) return;
+
+      // Record the raw delta BEFORE any filtering so diagnostics can prove
+      // whether the applied change matches what the browser delivered.
+      if (this.onRawMouseDelta) {
+        this.onRawMouseDelta(e.movementX, e.movementY, this.justLocked);
+      }
 
       if (this.justLocked) {
         this.justLocked = false;
@@ -278,6 +351,7 @@ export class CameraController {
       }
     });
 
+    this.registeredHandlerCounts.pointerdown++;
     document.addEventListener('pointerdown', () => {
       if (this.mouseLookEnabled && !this.isLocked) {
         this.lock();

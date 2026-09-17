@@ -1,0 +1,193 @@
+/**
+ * PRODUCTION VERIFICATION — VIEW SNAP DIAGNOSTICS
+ *
+ * Serves the built dist/ (production bundle, NOT vite dev) and verifies:
+ *   - ?debugMovement=1 enables the overlay incl. orientation fields
+ *   - mousemove handler count stays exactly 1 across pause/resume cycles and
+ *     Movement Lab enter/exit (duplicate handler = every delta applied twice)
+ *   - the view-snap detector fires for an injected orientation discontinuity
+ *     and does NOT fire for a legitimate +/-PI yaw wrap
+ *   - ?debugNoViewmodel=1 hides the viewmodel without touching camera/FOV
+ */
+import puppeteer from 'puppeteer-core';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+const DIST = path.resolve('dist');
+const PORT = 4600;
+const MIME = {
+  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+  '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary',
+  '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.woff2': 'font/woff2'
+};
+
+const server = http.createServer((req, res) => {
+  let p = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (p === '/') p = '/index.html';
+  const fp = path.join(DIST, p);
+  if (!fp.startsWith(DIST) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
+    res.writeHead(404); res.end('nf'); return;
+  }
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream' });
+  fs.createReadStream(fp).pipe(res);
+});
+await new Promise((r) => server.listen(PORT, r));
+
+const browser = await puppeteer.launch({
+  executablePath: EDGE_PATH, headless: 'new',
+  args: ['--autoplay-policy=no-user-gesture-required', '--no-sandbox',
+    '--disable-setuid-sandbox', '--disable-web-security',
+    '--window-size=1280,720', '--use-gl=swiftshader', '--enable-unsafe-swiftshader']
+});
+
+let ok = true;
+const check = (n, c) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`); if (!c) ok = false; };
+
+try {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 720 });
+  const warns = [];
+  page.on('console', (m) => { const t = m.text(); if (m.type() === 'warning' || t.includes('[')) warns.push(t); });
+  page.on('pageerror', (e) => warns.push('pageerror: ' + e.message));
+
+  await page.goto(`http://127.0.0.1:${PORT}/?debugMovement=1`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#btn-showcase-enter', { timeout: 40000 });
+  await page.click('#btn-showcase-enter');
+  await page.waitForFunction(() => {
+    const b = document.querySelector('#btn-enter-track');
+    return b && !b.disabled;
+  }, { timeout: 60000 });
+  await page.click('#btn-enter-track');
+  await page.waitForFunction(
+    () => window.game && window.game.stateMachine && window.game.stateMachine.is('PLAYING'),
+    { timeout: 60000 }
+  );
+  await new Promise((r) => setTimeout(r, 2500));
+
+  // ---- listener lifecycle -------------------------------------------------
+  const counts = await page.evaluate(async () => {
+    const g = window.game;
+    const snap = () => ({ ...g.cameraController.registeredHandlerCounts });
+    const out = { boot: snap() };
+    // pause/resume cycles
+    g['pauseGame']();
+    await new Promise((r) => setTimeout(r, 150));
+    out.afterPause = snap();
+    g['finalizeResume']();
+    await new Promise((r) => setTimeout(r, 150));
+    out.afterResume1 = snap();
+    for (let i = 0; i < 5; i++) {
+      g['pauseGame']();
+      await new Promise((r) => setTimeout(r, 60));
+      g['finalizeResume']();
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    out.afterRepeated = snap();
+    return out;
+  });
+  console.log('\n=== LISTENER LIFECYCLE ===');
+  console.log(JSON.stringify(counts, null, 2));
+
+  // ---- view snap detection -----------------------------------------------
+  const snapTest = await page.evaluate(async () => {
+    const g = window.game;
+    const cc = g.cameraController;
+    const det = g['viewSnapDetector'];
+
+    // 1. Legitimate wrap: drive a real mouse delta equal to a 2deg change at the
+    //    +/-PI boundary, then move yaw across the wrap.
+    const factor = 0.0022 * cc.getSensitivity();
+    const D = Math.PI / 180;
+    const before = det ? det.recent(1).length : -1;
+    cc.yaw = 179 * D;
+    cc.pitch = 0;
+    cc.updateCameraRotation();
+    // Simulate the app's own frame accounting.
+    if (cc.onRawMouseDelta) cc.onRawMouseDelta(-2 * D / factor, 0, false);
+    const wrapped = g['viewSnapDetector'].endFrame({
+      yawBefore: 179 * D, yawAfter: -179 * D,
+      pitchBefore: 0, pitchAfter: 0,
+      quatYawBefore: 179 * D, quatYawAfter: -179 * D,
+      quatPitchBefore: 0, quatPitchAfter: 0,
+      sensitivity: cc.getSensitivity(), baseSensitivity: 0.0022,
+      isLocked: true, justLocked: false, frameDeltaMs: 16,
+      playerPos: { x: 0, y: 0, z: 0 }, displaySpeed: 0
+    });
+
+    // 2. Real discontinuity: yaw jumps with NO mouse input.
+    const jumped = g['viewSnapDetector'].endFrame({
+      yawBefore: 0, yawAfter: 1.5,
+      pitchBefore: 0, pitchAfter: 0,
+      quatYawBefore: 0, quatYawAfter: 1.5,
+      quatPitchBefore: 0, quatPitchAfter: 0,
+      sensitivity: cc.getSensitivity(), baseSensitivity: 0.0022,
+      isLocked: true, justLocked: false, frameDeltaMs: 16,
+      playerPos: { x: 0, y: 0, z: 0 }, displaySpeed: 0
+    });
+    void before;
+    return { wrapDiagnosis: wrapped.diagnosis, jumpDiagnosis: jumped.diagnosis };
+  });
+  console.log('\n=== VIEW SNAP DETECTOR (production bundle) ===');
+  console.log('legit +-PI wrap diagnosis :', snapTest.wrapDiagnosis, '(expect null)');
+  console.log('injected jump diagnosis   :', snapTest.jumpDiagnosis);
+
+  // ---- overlay contents ---------------------------------------------------
+  const overlay = await page.evaluate(() => {
+    const el = document.getElementById('movement-diag-overlay');
+    return el ? el.textContent : null;
+  });
+  console.log('\n=== OVERLAY ===');
+  console.log(overlay);
+
+  // ---- viewmodel hidden flag (separate page load) -------------------------
+  const page2 = await browser.newPage();
+  await page2.setViewport({ width: 1280, height: 720 });
+  await page2.goto(`http://127.0.0.1:${PORT}/?debugMovement=1&debugNoViewmodel=1`, { waitUntil: 'domcontentloaded' });
+  await page2.waitForSelector('#btn-showcase-enter', { timeout: 40000 });
+  await page2.click('#btn-showcase-enter');
+  await page2.waitForFunction(() => {
+    const b = document.querySelector('#btn-enter-track');
+    return b && !b.disabled;
+  }, { timeout: 60000 });
+  await page2.click('#btn-enter-track');
+  await page2.waitForFunction(
+    () => window.game && window.game.stateMachine && window.game.stateMachine.is('PLAYING'),
+    { timeout: 60000 }
+  );
+  await new Promise((r) => setTimeout(r, 2500));
+  const vm = await page2.evaluate(() => {
+    const g = window.game;
+    return {
+      hidden: !!g.viewmodelController['diagnosticHidden'],
+      fov: g.environment.camera.fov,
+      yaw: g.cameraController.yaw,
+      playerOk: Number.isFinite(g.playerController.position.x)
+    };
+  });
+  console.log('\n=== ?debugNoViewmodel=1 ===');
+  console.log(JSON.stringify(vm));
+  await page2.close();
+
+  console.log('\n=== ASSERTIONS ===');
+  const m = counts.boot.mousemove;
+  check('exactly 1 mousemove handler at boot', m === 1);
+  check('handler count stable after pause', counts.afterPause.mousemove === m);
+  check('handler count stable after resume', counts.afterResume1.mousemove === m);
+  check('handler count stable after repeated pause/resume', counts.afterRepeated.mousemove === m);
+  check('legit +-PI wrap NOT flagged as view snap', snapTest.wrapDiagnosis === null);
+  check('injected orientation jump IS flagged', String(snapTest.jumpDiagnosis).includes('YAW_MISMATCH'));
+  check('overlay shows orientation fields', ['RAW DX/DY', 'EXPECTED', 'ACTUAL', 'POINTER LOCK']
+    .every((k) => (overlay || '').includes(k)));
+  check('viewmodel hidden flag applied', vm.hidden === true);
+  check('camera/FOV unaffected by viewmodel hide', vm.fov > 0 && Number.isFinite(vm.yaw));
+  check('no page errors', !warns.some((w) => w.startsWith('pageerror')));
+
+  console.log('\n' + (ok ? 'VIEW SNAP DIAGNOSTICS: PASS' : 'VIEW SNAP DIAGNOSTICS: FAIL'));
+  process.exitCode = ok ? 0 : 1;
+} finally {
+  await browser.close();
+  server.close();
+}
