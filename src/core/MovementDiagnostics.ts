@@ -18,6 +18,7 @@ export type MovementDiagEventKind =
   | 'PLAYER_CORRECTION'
   | 'CAMERA_DESYNC'
   | 'VIEW_SNAP'
+  | 'RAW_MOUSE_SPIKE'
   | 'OTHER';
 
 /**
@@ -219,8 +220,10 @@ export interface MovementDiagSnapshot {
     isLocked: boolean;
     justLocked: boolean;
     mouseHandlers: number;
+    rawInputActive: boolean;
   };
   lastViewSnap: MovementDiagEvent | null;
+  lastRawSpike: MovementDiagEvent | null;
 }
 
 const num = (v: number, digits = 3): string =>
@@ -305,7 +308,11 @@ export class MovementDiagnostics {
         ? '[PLAYER CORRECTION]'
         : kind === 'CAMERA_DESYNC'
           ? '[CAMERA DESYNC]'
-          : '[MOVEMENT DIAG]';
+          : kind === 'VIEW_SNAP'
+            ? '[VIEW SNAP]'
+            : kind === 'RAW_MOUSE_SPIKE'
+              ? '[RAW MOUSE SPIKE]'
+              : '[MOVEMENT DIAG]';
 
     // `reason` is inlined into the string so it is readable immediately in the
     // DevTools console without expanding the object. The full structured detail
@@ -380,7 +387,7 @@ export class MovementDiagnostics {
         `PITCH ${num(o.pitchBeforeDeg, 2)} -> ${num(o.pitchAfterDeg, 2)}`,
         `EXPECTED D ${num(o.expectedYawDeg, 3)} / ${num(o.expectedPitchDeg, 3)}`,
         `ACTUAL   D ${num(o.actualYawDeg, 3)} / ${num(o.actualPitchDeg, 3)}`,
-        `POINTER LOCK ${o.isLocked}   JUST LOCKED ${o.justLocked}`
+        `POINTER LOCK ${o.isLocked}   JUST LOCKED ${o.justLocked}   RAW INPUT ${o.rawInputActive}`
       );
     }
 
@@ -397,6 +404,18 @@ export class MovementDiagnostics {
         `LAST VIEW SNAP ${new Date(vs.timestamp).toISOString().slice(11, 23)}`,
         `VS REASON  ${vs.reason}`,
         Object.entries(vs.detail)
+          .slice(0, 12)
+          .map(([k, v]) => (typeof v === 'number' ? `${k}=${num(v)}` : `${k}=${JSON.stringify(v)}`))
+          .join('  ')
+      );
+    }
+
+    const rs = snapshot.lastRawSpike;
+    if (rs) {
+      lines.push(
+        `LAST RAW SPIKE ${new Date(rs.timestamp).toISOString().slice(11, 23)}`,
+        `RS REASON  ${rs.reason}`,
+        Object.entries(rs.detail)
           .slice(0, 12)
           .map(([k, v]) => (typeof v === 'number' ? `${k}=${num(v)}` : `${k}=${JSON.stringify(v)}`))
           .join('  ')
@@ -436,6 +455,200 @@ export class MovementDiagnostics {
       this.overlay.parentElement.removeChild(this.overlay);
     }
     this.overlay = null;
+  }
+}
+
+/**
+ * RAW MOUSE INPUT SPIKE DETECTOR
+ *
+ * Class B diagnosis: the raw browser `movementX/movementY` itself jumps, and the
+ * camera then CORRECTLY follows that bad input — so an actual-vs-expected
+ * orientation comparison reports nothing. This detector watches the raw stream
+ * instead, using robust statistics over recent history rather than a hard-coded
+ * threshold, so ordinary fast flicks are not flagged.
+ */
+export interface RawMouseSample {
+  timestamp: number;
+  movementX: number;
+  movementY: number;
+  magnitude: number;
+  eventsThisFrame: number;
+  sumXThisFrame: number;
+  sumYThisFrame: number;
+  maxAbsXThisFrame: number;
+  maxAbsYThisFrame: number;
+  sincePrevEventMs: number;
+  frameDeltaMs: number;
+  isLocked: boolean;
+  mouseLookEnabled: boolean;
+  gameState: string;
+}
+
+export interface RawSpikeReport {
+  reason: string;
+  sample: RawMouseSample;
+  medianMagnitude: number;
+  mad: number;
+  ratio: number;
+  windowSize: number;
+}
+
+export class RawMouseSpikeDetector {
+  private history: number[] = [];
+  private readonly maxHistory = 400;
+  private readonly minHistory = 30;
+
+  private frameEvents = 0;
+  private frameSumX = 0;
+  private frameSumY = 0;
+  private frameMaxAbsX = 0;
+  private frameMaxAbsY = 0;
+  private lastEventTime = 0;
+
+  private lastSample: RawMouseSample | null = null;
+
+  private median(values: number[]): number {
+    if (values.length === 0) return 0;
+    const s = [...values].sort((a, b) => a - b);
+    const mid = s.length >> 1;
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+
+  /** Records one raw DOM mouse event. Returns a report if it looks anomalous. */
+  public noteEvent(
+    movementX: number,
+    movementY: number,
+    ctx: {
+      frameDeltaMs: number;
+      isLocked: boolean;
+      mouseLookEnabled: boolean;
+      gameState: string;
+    }
+  ): RawSpikeReport | null {
+    const now = Date.now();
+    const magnitude = Math.hypot(movementX, movementY);
+    const sincePrev = this.lastEventTime ? now - this.lastEventTime : 0;
+    this.lastEventTime = now;
+
+    this.frameEvents++;
+    this.frameSumX += movementX;
+    this.frameSumY += movementY;
+    this.frameMaxAbsX = Math.max(this.frameMaxAbsX, Math.abs(movementX));
+    this.frameMaxAbsY = Math.max(this.frameMaxAbsY, Math.abs(movementY));
+
+    // Establish the "normal" distribution before judging anything.
+    const ready = this.history.length >= this.minHistory;
+    const med = this.median(this.history);
+    const deviations = this.history.map((v) => Math.abs(v - med));
+    const mad = this.median(deviations);
+
+    let report: RawSpikeReport | null = null;
+
+    if (ready && magnitude > 0) {
+      // Robust z-score. 1.4826 scales MAD to a standard-deviation equivalent.
+      const sigma = Math.max(mad * 1.4826, 1e-6);
+      const ratio = magnitude / Math.max(med, 1e-6);
+      const z = (magnitude - med) / sigma;
+
+      // Flag only genuinely extreme single-event outliers: a large robust z AND
+      // a large multiple of the recent typical magnitude. A fast flick is a
+      // sustained stream of moderate events, so it does not trip this.
+      if (z > 12 && ratio > 8 && magnitude > 120) {
+        report = {
+          reason: `SINGLE_EVENT_OUTLIER z=${z.toFixed(1)} ratio=${ratio.toFixed(1)}`,
+          sample: this.buildSample(movementX, movementY, magnitude, sincePrev, ctx),
+          medianMagnitude: med,
+          mad,
+          ratio,
+          windowSize: this.history.length
+        };
+      }
+    }
+
+    // Update history with the observed magnitude (floored so idle noise cannot
+    // shrink MAD to zero and make everything look like an outlier).
+    this.history.push(Math.max(magnitude, 1));
+    if (this.history.length > this.maxHistory) this.history.shift();
+
+    this.lastSample = this.buildSample(movementX, movementY, magnitude, sincePrev, ctx);
+    return report;
+  }
+
+  private buildSample(
+    movementX: number,
+    movementY: number,
+    magnitude: number,
+    sincePrev: number,
+    ctx: { frameDeltaMs: number; isLocked: boolean; mouseLookEnabled: boolean; gameState: string }
+  ): RawMouseSample {
+    return {
+      timestamp: Date.now(),
+      movementX,
+      movementY,
+      magnitude,
+      eventsThisFrame: this.frameEvents,
+      sumXThisFrame: this.frameSumX,
+      sumYThisFrame: this.frameSumY,
+      maxAbsXThisFrame: this.frameMaxAbsX,
+      maxAbsYThisFrame: this.frameMaxAbsY,
+      sincePrevEventMs: sincePrev,
+      frameDeltaMs: ctx.frameDeltaMs,
+      isLocked: ctx.isLocked,
+      mouseLookEnabled: ctx.mouseLookEnabled,
+      gameState: ctx.gameState
+    };
+  }
+
+  /**
+   * Called once per rendered frame. Reports an aggregate spike when a single
+   * frame accumulates an implausibly large angular displacement.
+   *
+   * `degPerPixel` converts the raw sum into the angular delta the camera will
+   * actually apply, so the threshold is expressed in real view terms.
+   */
+  public endFrame(degPerPixel: number): RawSpikeReport | null {
+    const sumMagnitude = Math.hypot(this.frameSumX, this.frameSumY);
+    const impliedDegrees = sumMagnitude * degPerPixel * (180 / Math.PI);
+
+    let report: RawSpikeReport | null = null;
+
+    // A single rendered frame implying an enormous turn (>170deg) from a large
+    // number of pixels is the signature of a discontinuity rather than a flick:
+    // a genuine flick is spread across many frames and many DOM events.
+    if (impliedDegrees > 170 && sumMagnitude > 400 && this.frameEvents <= 2) {
+      report = {
+        reason: `FRAME_ANGULAR_SPIKE impliedDeg=${impliedDegrees.toFixed(1)} events=${this.frameEvents} sumPx=${sumMagnitude.toFixed(1)}`,
+        sample: this.lastSample ?? {
+          timestamp: Date.now(),
+          movementX: 0, movementY: 0, magnitude: 0,
+          eventsThisFrame: this.frameEvents,
+          sumXThisFrame: this.frameSumX, sumYThisFrame: this.frameSumY,
+          maxAbsXThisFrame: this.frameMaxAbsX, maxAbsYThisFrame: this.frameMaxAbsY,
+          sincePrevEventMs: 0, frameDeltaMs: 0,
+          isLocked: false, mouseLookEnabled: false, gameState: 'UNKNOWN'
+        },
+        medianMagnitude: this.median(this.history),
+        mad: 0,
+        ratio: sumMagnitude / Math.max(this.median(this.history), 1e-6),
+        windowSize: this.history.length
+      };
+    }
+
+    this.frameEvents = 0;
+    this.frameSumX = 0;
+    this.frameSumY = 0;
+    this.frameMaxAbsX = 0;
+    this.frameMaxAbsY = 0;
+
+    return report;
+  }
+
+  public get last(): RawMouseSample | null {
+    return this.lastSample;
+  }
+
+  public get historySize(): number {
+    return this.history.length;
   }
 }
 

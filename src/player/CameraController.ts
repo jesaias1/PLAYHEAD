@@ -127,6 +127,9 @@ export class CameraController {
   /** Counts of handler registrations performed by initEvents(). */
   public registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0 };
 
+  /** True when the OS has confirmed raw (unaccelerated) pointer input is active. */
+  public rawInputActive = false;
+
   /** Diagnostics hook, invoked once per CameraController.update(). */
   public onOrientationFrame?: (frame: {
     yawBefore: number;
@@ -174,10 +177,67 @@ export class CameraController {
     this.isLockPending = true;
     this.lastLockAttempt = Date.now();
 
+    // RAW / UNACCELERATED MOUSE INPUT (Pointer Lock 2.0).
+    //
+    // By default the browser reports movementX/movementY AFTER OS mouse
+    // acceleration. On platforms with pointer acceleration that can turn a fast
+    // flick into a single very large delta, which the camera then faithfully
+    // applies as a large instantaneous turn — a view snap the raw-input spike
+    // detector reports as an outlier with no orientation mismatch.
+    //
+    // `unadjustedMovement: true` requests the raw device delta instead. It is
+    // feature-detected: when it is unsupported the request rejects (or the
+    // browser ignores the argument), and we fall back to a plain lock. The
+    // fallback is immediate so lock acquisition is never delayed.
+    this.requestPointerLockSafe();
+  }
+
+  /**
+   * Requests pointer lock, preferring raw (unadjusted) movement.
+   *
+   * Never throws and never leaves the lock pending: on any failure it falls
+   * back to the plain `requestPointerLock()` call.
+   */
+  private requestPointerLockSafe(): void {
+    const el = this.domElement as HTMLElement & {
+      requestPointerLock?: (options?: { unadjustedMovement?: boolean }) => Promise<void> | void;
+    };
+    if (!el || typeof el.requestPointerLock !== 'function') {
+      this.isLockPending = false;
+      return;
+    }
+
+    let result: Promise<void> | void;
     try {
-      const promise = this.domElement?.requestPointerLock?.();
-      if (promise && typeof (promise as any).catch === 'function') {
-        (promise as any).catch(() => {
+      result = el.requestPointerLock({ unadjustedMovement: true });
+    } catch {
+      this.plainRequestPointerLock(el);
+      return;
+    }
+
+    // Browsers that do not support the options argument return undefined and
+    // have already granted (or refused) the plain lock — nothing more to do.
+    if (!result || typeof (result as Promise<void>).then !== 'function') {
+      return;
+    }
+
+    (result as Promise<void>).then(
+      () => {
+        this.rawInputActive = true;
+      },
+      () => {
+        // NotSupportedError / SecurityError — retry with the plain call.
+        this.rawInputActive = false;
+        this.plainRequestPointerLock(el);
+      }
+    );
+  }
+
+  private plainRequestPointerLock(el: HTMLElement & { requestPointerLock?: () => unknown }): void {
+    try {
+      const p = el.requestPointerLock?.();
+      if (p && typeof (p as Promise<void>).then === 'function') {
+        (p as Promise<void>).then(undefined, () => {
           this.isLockPending = false;
         });
       }

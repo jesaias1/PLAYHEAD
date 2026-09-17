@@ -35,7 +35,7 @@ import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { RestoreReason } from '../player/RestorePolicy';
-import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics } from './MovementDiagnostics';
+import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics, RawMouseSpikeDetector } from './MovementDiagnostics';
 import { BUILD_LABEL } from './BuildInfo';
 
 export class Game {
@@ -614,6 +614,8 @@ export class Game {
 
   /** View-orientation discontinuity detector (active only in diagnostics mode). */
   private viewSnapDetector = new ViewSnapDetector();
+  private rawSpikeDetector = new RawMouseSpikeDetector();
+  private lastRawSpikeEvent: MovementDiagEvent | null = null;
   private lastViewSnapEvent: MovementDiagEvent | null = null;
   private mouseHandlerCount = 0;
 
@@ -1177,6 +1179,34 @@ export class Game {
       this.mouseHandlerCount = this.cameraController.registeredHandlerCounts.mousemove;
       this.cameraController.onRawMouseDelta = (mx, my) => {
         this.viewSnapDetector.noteMouseDelta(mx, my);
+
+        // Class B: watch the RAW stream itself, independent of orientation, so a
+        // browser-side movementX/movementY spike is caught even though the
+        // camera correctly follows it.
+        const report = this.rawSpikeDetector.noteEvent(mx, my, {
+          frameDeltaMs: this.lastFrameDeltaMs,
+          isLocked: this.cameraController.getIsLocked(),
+          mouseLookEnabled: this.cameraController.mouseLookEnabled,
+          gameState: String(this.stateMachine.getState())
+        });
+        if (report) {
+          movementDiagnostics.record('RAW_MOUSE_SPIKE', report.reason, 'CameraController mousemove (raw input)', {
+            movementX: report.sample.movementX,
+            movementY: report.sample.movementY,
+            magnitude: report.sample.magnitude,
+            medianMagnitude: report.medianMagnitude,
+            mad: report.mad,
+            ratio: report.ratio,
+            windowSize: report.windowSize,
+            eventsThisFrame: report.sample.eventsThisFrame,
+            timeSincePrevEventMs: report.sample.sincePrevEventMs,
+            frameDeltaMs: report.sample.frameDeltaMs,
+            pointerLocked: report.sample.isLocked,
+            mouseLookEnabled: report.sample.mouseLookEnabled,
+            gameState: report.sample.gameState
+          });
+          this.lastRawSpikeEvent = movementDiagnostics.getLastEvent();
+        }
       };
 
       this.cameraController.onOrientationFrame = (f) => {
@@ -1620,6 +1650,28 @@ export class Game {
 
     // ---- Movement diagnostics (opt-in via ?debugMovement=1) --------------
     if (movementDiagnostics.isEnabled) {
+      // Aggregate per-frame raw input check (batching / coalescing anomalies).
+      const degPerPixel = (0.0022 * this.cameraController.getSensitivity()) * (180 / Math.PI);
+      const frameSpike = this.rawSpikeDetector.endFrame(degPerPixel);
+      if (frameSpike) {
+        movementDiagnostics.record('RAW_MOUSE_SPIKE', frameSpike.reason, 'Game.gameLoop (per-frame raw input)', {
+          movementX: frameSpike.sample.sumXThisFrame,
+          movementY: frameSpike.sample.sumYThisFrame,
+          sumMagnitude: Math.hypot(frameSpike.sample.sumXThisFrame, frameSpike.sample.sumYThisFrame),
+          eventsThisFrame: frameSpike.sample.eventsThisFrame,
+          maxAbsX: frameSpike.sample.maxAbsXThisFrame,
+          maxAbsY: frameSpike.sample.maxAbsYThisFrame,
+          impliedDegrees: Math.hypot(frameSpike.sample.sumXThisFrame, frameSpike.sample.sumYThisFrame) * degPerPixel,
+          medianMagnitude: frameSpike.medianMagnitude,
+          ratio: frameSpike.ratio,
+          frameDeltaMs: this.lastFrameDeltaMs,
+          pointerLocked: frameSpike.sample.isLocked,
+          mouseLookEnabled: frameSpike.sample.mouseLookEnabled,
+          gameState: frameSpike.sample.gameState
+        });
+        this.lastRawSpikeEvent = movementDiagnostics.getLastEvent();
+      }
+
       this.checkCameraTranslationDiagnostics();
       const vmCam = this.environment.camera;
       const s = this.viewSnapDetector.lastSample;
@@ -1653,10 +1705,12 @@ export class Game {
               actualPitchDeg: s.actualPitchDelta * rad2deg,
               isLocked: s.isLocked,
               justLocked: s.justLocked,
-              mouseHandlers: this.mouseHandlerCount
+              mouseHandlers: this.mouseHandlerCount,
+              rawInputActive: this.cameraController.rawInputActive
             }
           : undefined,
-        lastViewSnap: this.lastViewSnapEvent
+        lastViewSnap: this.lastViewSnapEvent,
+        lastRawSpike: this.lastRawSpikeEvent
       });
     }
 
