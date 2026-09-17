@@ -343,7 +343,7 @@ export class PlayerController {
     const isSurfAirborne = this.lastTouchedSurfaceType === 'SURF';
     const isWatchdogTriggered = isSurfAirborne
       ? (this.freefallTimer > 8.0 && this.velocity.y < -5.0 && this.position.y < safeKillHorizon)
-      : (this.freefallTimer > 3.5 && this.velocity.y < -5.0);
+      : (this.freefallTimer > 3.5 && this.velocity.y < -5.0 && this.position.y < safeKillHorizon);
 
     // Secondary watchdog: failsafe against any edge case where position falls deep below kill plane
     const isCriticalVoid = this.authoritativeKillY !== null

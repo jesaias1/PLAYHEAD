@@ -24,6 +24,8 @@ export interface ViewmodelRigInstance {
   applySkin: (skinId: string) => void;
   accentColor: THREE.Color;
   setAccentColor: (col: THREE.Color) => void;
+  /** Weak musical accent applied to the hands' reflected-light shading. */
+  setAudioPulse: (pulse: number) => void;
   dispose: () => void;
 }
 
@@ -63,6 +65,32 @@ export class ViewmodelAssetLoader {
     const armsScene = armsGltf.scene as THREE.Group;
     armsScene.name = 'ArmsScene';
 
+    // Hands: preserve the natural glove/skin base material and apply the
+    // palette influence only as a reflected-light style contribution.
+    const armMaterials: THREE.MeshStandardMaterial[] = [];
+    const baseHandEmissive = new THREE.Color(0x39445c);
+    const baseHandEmissiveIntensity = 0.62;
+    let handAudioPulse = 0;
+    const activeArmAccent = new THREE.Color(0x00f0ff);
+
+    /** Strength of the palette's colour contribution to hand rim light. */
+    const HAND_ACCENT_STRENGTH = 0.55;
+
+    // Reused scratch colour so the per-frame accent update allocates nothing.
+    const armTintScratch = new THREE.Color();
+
+    const applyArmAccent = (col: THREE.Color) => {
+      // Blend from the neutral base toward the palette hue. At 0.55 the hands
+      // clearly read as "lit by the world" while skin and glove texture stay
+      // intact and the model stays readable.
+      armTintScratch.copy(baseHandEmissive).lerp(col, HAND_ACCENT_STRENGTH);
+      for (const mat of armMaterials) {
+        mat.emissive.copy(armTintScratch);
+        mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.42);
+      }
+      activeArmAccent.copy(col);
+    };
+
     // Configure Arms Materials and Textures
     if (gloveTexture) {
       gloveTexture.flipY = false;
@@ -80,10 +108,11 @@ export class ViewmodelAssetLoader {
               map: gloveTexture,
               roughness: 0.62,
               metalness: 0.18,
-              emissive: new THREE.Color(0x080c16), // Subtle ambient road bounce
-              emissiveIntensity: 0.35
+              emissive: baseHandEmissive.clone(),
+              emissiveIntensity: baseHandEmissiveIntensity
             });
             mesh.material = mat;
+            armMaterials.push(mat);
           }
         }
       });
@@ -191,15 +220,28 @@ export class ViewmodelAssetLoader {
     };
 
     const setAccentColor = (col: THREE.Color) => {
-      // Preserve canonical CYAN identity, subtly blending 15% of track accent into the emissive rim
-      const blendedCyan = new THREE.Color(0x00f0ff).lerp(col, 0.15);
-      activeAccent.copy(blendedCyan);
+      // Palette-dominant accent. The knife's canonical SIGNAL CYAN identity is
+      // retained as a minor 20% anchor rather than the dominant term, so the
+      // accent actually tracks the map (violet map -> violet, red -> crimson)
+      // while never snapping to a raw fully-saturated hue.
+      const canonicalAnchor = new THREE.Color(0x00f0ff);
+      const blended = col.clone().lerp(canonicalAnchor, 0.2);
+      activeAccent.copy(blended);
+
+      // Hands inherit the same palette-driven reflected light as the knife.
+      applyArmAccent(blended);
+
       if (cosmicMaterial) {
         const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
         if (equipped.profile.isCanonical) {
-          cosmicMaterial.uniforms.uRimColor.value.copy(blendedCyan);
+          cosmicMaterial.uniforms.uRimColor.value.copy(blended);
         }
       }
+    };
+
+    const setAudioPulse = (pulse: number) => {
+      handAudioPulse = Math.max(0, Math.min(0.32, pulse));
+      applyArmAccent(activeArmAccent);
     };
 
     const dispose = () => {
@@ -232,6 +274,7 @@ export class ViewmodelAssetLoader {
       applySkin,
       accentColor: activeAccent,
       setAccentColor,
+      setAudioPulse,
       dispose
     };
   }
@@ -276,6 +319,9 @@ export class ViewmodelAssetLoader {
       accentColor: accentColor.clone(),
       setAccentColor: (col: THREE.Color) => {
         cosmicMat.uniforms.uRimColor.value.copy(col);
+      },
+      setAudioPulse: () => {
+        // Headless fallback rig has no hand material to modulate.
       },
       dispose: () => {
         cosmicMat.dispose();

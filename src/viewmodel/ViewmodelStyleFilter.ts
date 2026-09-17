@@ -21,8 +21,9 @@ export const ViewmodelOverlayShader = {
     uResolution: { value: new THREE.Vector2(1920, 1080) },
     uDitherStrength: { value: 0.035 },      // Subtle dither on midtones
     uQuantizeLevels: { value: 48.0 },      // 48 levels: clean stepped tonal response
-    uSignalEdgeColor: { value: new THREE.Color(0x00f0ff) }, // Cyan signal rim
+    uSignalEdgeColor: { value: new THREE.Color(0x00f0ff) }, // Palette-driven signal rim
     uSignalEdgeStrength: { value: 0.28 },  // 1-pixel outer contour edge accent
+    uAudioPulse: { value: 0.0 },           // Subtle musical brightening (0..~0.5)
     uEnabled: { value: 1.0 }
   },
   vertexShader: `
@@ -40,6 +41,7 @@ export const ViewmodelOverlayShader = {
     uniform float uQuantizeLevels;
     uniform vec3 uSignalEdgeColor;
     uniform float uSignalEdgeStrength;
+    uniform float uAudioPulse;
     uniform float uEnabled;
 
     // 4x4 Ordered Bayer Matrix (identical to SignalRenderPass for stylistic family unification)
@@ -102,7 +104,13 @@ export const ViewmodelOverlayShader = {
         float aD = texture2D(tViewmodel, vUv + vec2(0.0, -texel.y)).a;
         float minNeighborA = min(min(aL, aR), min(aU, aD));
         float edge = clamp((base.a - minNeighborA) * 1.8, 0.0, 1.0);
-        col = mix(col, uSignalEdgeColor, edge * uSignalEdgeStrength);
+
+        // The rim lives on the silhouette only, so a strong transient briefly
+        // brightens the outline — the illusion of the glowing world catching
+        // the edge of the player's hands. The interior is never touched.
+        float rimStrength = uSignalEdgeStrength * (1.0 + uAudioPulse);
+        vec3 rimColor = uSignalEdgeColor * (1.0 + uAudioPulse * 0.28);
+        col = mix(col, min(rimColor, vec3(1.0)), edge * rimStrength);
       }
 
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), base.a);
@@ -176,11 +184,39 @@ export class ViewmodelStyleFilter {
     }
   }
 
+  /**
+   * ADAPTIVE VIEWMODEL ACCENT
+   *
+   * Derives the stylized rim colour from the CURRENT world/section palette so
+   * the hands read as being lit by the glowing world they are moving through:
+   * cyan map -> icy cyan, purple map -> violet, red map -> crimson, and so on.
+   *
+   * `primary` carries the map's identity hue, so it dominates the mix. A small
+   * amount of `secondary` keeps the rim from looking like a flat single-colour
+   * outline. Nothing here recolours the hand itself — only the silhouette rim.
+   */
   public setPalette(palette: { primary?: THREE.Color; secondary?: THREE.Color }): void {
-    // Subtle blend of cyan and track secondary for the outer silhouette rim
-    const secondary = palette.secondary || new THREE.Color(0xa855f7);
-    const rim = new THREE.Color(0x00f0ff).lerp(secondary, 0.25);
+    const primary = palette.primary;
+    if (!primary) return;
+
+    const secondary = palette.secondary;
+    const rim = primary.clone();
+    if (secondary) {
+      rim.lerp(secondary, 0.22);
+    }
     this.overlayMaterial.uniforms.uSignalEdgeColor.value.copy(rim);
+  }
+
+  /**
+   * Weak musical accent for the viewmodel rim.
+   *
+   * `pulse` is expected to be a small, already-shaped value (roughly 0..0.32).
+   * This intentionally sits far below the world-gate response: the viewmodel
+   * should feel integrated with the same lighting language, never compete
+   * with it or strobe on every beat.
+   */
+  public setAudioPulse(pulse: number): void {
+    this.overlayMaterial.uniforms.uAudioPulse.value = Math.max(0, Math.min(0.32, pulse));
   }
 
   public resize(width: number, height: number): void {

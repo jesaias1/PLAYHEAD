@@ -14,6 +14,7 @@ import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { ReactiveChannel } from './PlayheadSystem';
 
 export interface RouteEdgeItem {
   mesh: THREE.LineSegments;
@@ -21,10 +22,20 @@ export interface RouteEdgeItem {
   nodeTime: number;
 }
 
+/**
+ * A large architectural signal surface (gate frame, finish plane, accent trim)
+ * that is lit by the music rather than by the playhead's temporal state.
+ */
+export interface ReactiveBeaconItem {
+  mesh: THREE.Mesh;
+  channel: ReactiveChannel;
+}
+
 export interface BuiltWorldAssets {
   rootGroup: THREE.Group;
   decorativeGroup: THREE.Group;
   reactiveMaterials: THREE.MeshStandardMaterial[];
+  reactiveBeacons: ReactiveBeaconItem[];
   edgeLines: THREE.LineSegments[];
   routeEdgeItems: RouteEdgeItem[];
   dispose: () => void;
@@ -40,8 +51,22 @@ export class GeometryBuilder {
     decorativeGroup.name = 'BuiltWorldDecorativeGroup';
     rootGroup.add(decorativeGroup);
     const reactiveMaterials: THREE.MeshStandardMaterial[] = [];
+    const reactiveBeacons: ReactiveBeaconItem[] = [];
     const edgeLines: THREE.LineSegments[] = [];
     const routeEdgeItems: RouteEdgeItem[] = [];
+
+    /**
+     * Beacons share one material instance per channel, so only the first mesh
+     * per material is registered — every sibling shares the same animated
+     * result without paying for redundant per-frame writes.
+     */
+    const registeredBeaconMaterials = new Set<THREE.Material>();
+    const registerBeacon = (mesh: THREE.Mesh, channel: ReactiveChannel): void => {
+      const mat = mesh.material as THREE.Material;
+      if (registeredBeaconMaterials.has(mat)) return;
+      registeredBeaconMaterials.add(mat);
+      reactiveBeacons.push({ mesh, channel });
+    };
 
     // Authoritative Route Exclusion Corridor (including any optional skill lines and recovery shelves)
     const allRouteNodes = [
@@ -138,6 +163,47 @@ export class GeometryBuilder {
       side: THREE.DoubleSide
     });
 
+    // 8. Audio-Reactive Signal Beacons
+    // These are the monumental gate frames / finish planes / accent trims.
+    // They are authored to sit just BELOW the bloom threshold at rest, so a
+    // strong transient is what pushes them over the threshold and makes the
+    // architecture visibly answer the beat. Emissive is driven per-frame from
+    // the single authoritative MusicVisualController state (see PlayheadSystem).
+    const makeBeaconMaterial = (
+      color: number,
+      emissive: THREE.Color,
+      baseEmissive: number,
+      opacity = 1.0
+    ): THREE.MeshStandardMaterial => {
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive,
+        emissiveIntensity: baseEmissive,
+        roughness: 0.22,
+        metalness: 0.4,
+        transparent: opacity < 1.0,
+        opacity
+      });
+      reactiveMaterials.push(mat);
+      return mat;
+    };
+
+    // Major checkpoint gate frame: luminous wireframe lattice, strong transient answer.
+    const gateFrameMaterial = makeBeaconMaterial(0x05060a, secondaryCol.clone(), 0.55, 0.62);
+    gateFrameMaterial.wireframe = true;
+
+    // Finish signal plane: the large glowing portal wall the player runs through.
+    const finishPlaneMaterial = makeBeaconMaterial(0x0a0f18, primaryCol.clone(), 0.62, 0.5);
+    finishPlaneMaterial.side = THREE.DoubleSide;
+    finishPlaneMaterial.blending = THREE.AdditiveBlending;
+    finishPlaneMaterial.depthWrite = false;
+
+    // Secondary trim: finish pylon edge indicators + embedded ground signal line.
+    const accentTrimMaterial = makeBeaconMaterial(0x05060a, primaryCol.clone(), 0.42);
+
+    // Tertiary detailing: floating header signal bar.
+    const headerBarMaterial = makeBeaconMaterial(0x080c14, secondaryCol.clone(), 0.45, 0.8);
+
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
       const node = track.route[i];
@@ -214,13 +280,23 @@ export class GeometryBuilder {
 
       // Checkpoint Arch Gateway
       if (node.type === RouteNodeType.CHECKPOINT) {
-        const arch = createSteppedCheckpointArch(node, checkpointMaterial, secondaryCol);
+        const { group: arch, gateFrame } = createSteppedCheckpointArch(
+          node,
+          checkpointMaterial,
+          gateFrameMaterial
+        );
         rootGroup.add(arch);
+        registerBeacon(gateFrame, 'GATE_FRAME');
       }
 
       // Finish Portal Monument
       if (node.type === RouteNodeType.FINISH) {
-        const finishPortal = createFinishMonument(node, finishMaterial, primaryCol, secondaryCol);
+        const finishPortal = createFinishMonument(
+          node,
+          finishMaterial,
+          { plane: finishPlaneMaterial, trim: accentTrimMaterial, header: headerBarMaterial },
+          registerBeacon
+        );
         rootGroup.add(finishPortal);
       }
 
@@ -311,19 +387,22 @@ export class GeometryBuilder {
       });
     };
 
-    return { rootGroup, decorativeGroup, reactiveMaterials, edgeLines, routeEdgeItems, dispose };
+    return { rootGroup, decorativeGroup, reactiveMaterials, reactiveBeacons, edgeLines, routeEdgeItems, dispose };
   }
 }
 
 /**
  * Stepped Brutalist Checkpoint Gateway
  * Massive twin stelae pillars with double lintel crown and glowing signal frame.
+ *
+ * The gate frame is returned separately so the world can drive its emissive
+ * from the shared music state instead of leaving it as a static overlay.
  */
 function createSteppedCheckpointArch(
   node: RouteNode,
   material: THREE.Material,
-  accentColor: THREE.Color
-): THREE.Group {
+  gateFrameMaterial: THREE.MeshStandardMaterial
+): { group: THREE.Group; gateFrame: THREE.Mesh } {
   const group = new THREE.Group();
   group.position.set(node.position.x, node.position.y, node.position.z);
   group.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
@@ -381,20 +460,15 @@ function createSteppedCheckpointArch(
   upperLintel.position.set(0, archHeight + pillarWidth * 0.8, 0);
   group.add(upperLintel);
 
-  // Glowing Checkpoint Gate Frame
-  const gateBorder = new THREE.Mesh(
+  // Glowing Checkpoint Gate Frame (audio-reactive signal lattice)
+  const gateFrame = new THREE.Mesh(
     new THREE.BoxGeometry(node.dimensions.x * 0.95, archHeight * 0.85, 0.2),
-    new THREE.MeshBasicMaterial({
-      color: accentColor,
-      transparent: true,
-      opacity: 0.25,
-      wireframe: true
-    })
+    gateFrameMaterial
   );
-  gateBorder.position.set(0, archHeight * 0.45, 0);
-  group.add(gateBorder);
+  gateFrame.position.set(0, archHeight * 0.45, 0);
+  group.add(gateFrame);
 
-  return group;
+  return { group, gateFrame };
 }
 
 /**
@@ -405,8 +479,12 @@ function createSteppedCheckpointArch(
 function createFinishMonument(
   node: RouteNode,
   material: THREE.Material,
-  primaryColor: THREE.Color,
-  secondaryColor: THREE.Color
+  beaconMaterials: {
+    plane: THREE.MeshStandardMaterial;
+    trim: THREE.MeshStandardMaterial;
+    header: THREE.MeshStandardMaterial;
+  },
+  registerBeacon: (mesh: THREE.Mesh, channel: ReactiveChannel) => void
 ): THREE.Group {
   const group = new THREE.Group();
   group.position.set(node.position.x, node.position.y, node.position.z);
@@ -424,12 +502,12 @@ function createFinishMonument(
     pylon.position.set(px, planeHeight * 0.6, 0);
     group.add(pylon);
 
-    // Glowing vertical edge indicator
+    // Glowing vertical edge indicator (secondary reactive trim)
     const edgeGeom = new THREE.BoxGeometry(0.2, planeHeight * 1.15, 0.2);
-    const edgeMat = new THREE.MeshBasicMaterial({ color: primaryColor });
-    const edge = new THREE.Mesh(edgeGeom, edgeMat);
+    const edge = new THREE.Mesh(edgeGeom, beaconMaterials.trim);
     edge.position.set(px - side * (pylonWidth * 0.45), planeHeight * 0.6, pylonWidth * 0.7);
     group.add(edge);
+    registerBeacon(edge, 'ACCENT_TRIM');
 
     // Descending Foundation Pylon Leg extending 280m into the void
     const pylonLegDepth = 280.0;
@@ -445,41 +523,26 @@ function createFinishMonument(
   keel.position.set(0, -3.0, 0);
   group.add(keel);
 
-  // 2. Embedded Ground Signal Line
+  // 2. Embedded Ground Signal Line (secondary reactive trim)
   const lineGeom = new THREE.BoxGeometry(node.dimensions.x, 0.08, 0.45);
-  const lineMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.95
-  });
-  const lineMesh = new THREE.Mesh(lineGeom, lineMat);
+  const lineMesh = new THREE.Mesh(lineGeom, beaconMaterials.trim);
   lineMesh.position.set(0, node.dimensions.y * 0.5 + 0.05, 0);
   group.add(lineMesh);
+  registerBeacon(lineMesh, 'ACCENT_TRIM');
 
-  // 3. Vertical PLAYHEAD Signal Scan Plane
+  // 3. Vertical PLAYHEAD Signal Scan Plane (primary reactive portal wall)
   const gateGeom = new THREE.PlaneGeometry(node.dimensions.x, planeHeight);
-  const gateMat = new THREE.MeshBasicMaterial({
-    color: primaryColor,
-    transparent: true,
-    opacity: 0.5,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  });
-  const gateMesh = new THREE.Mesh(gateGeom, gateMat);
+  const gateMesh = new THREE.Mesh(gateGeom, beaconMaterials.plane);
   gateMesh.position.set(0, planeHeight * 0.5, 0);
   group.add(gateMesh);
+  registerBeacon(gateMesh, 'FINISH_PLANE');
 
-  // 4. Floating Header Signal Bar
+  // 4. Floating Header Signal Bar (tertiary reactive detailing)
   const headerGeom = new THREE.BoxGeometry(node.dimensions.x + pylonWidth * 2.0, 0.35, 0.6);
-  const headerMat = new THREE.MeshBasicMaterial({
-    color: secondaryColor,
-    transparent: true,
-    opacity: 0.8
-  });
-  const headerMesh = new THREE.Mesh(headerGeom, headerMat);
+  const headerMesh = new THREE.Mesh(headerGeom, beaconMaterials.header);
   headerMesh.position.set(0, planeHeight, 0);
   group.add(headerMesh);
+  registerBeacon(headerMesh, 'HEADER_BAR');
 
   return group;
 }

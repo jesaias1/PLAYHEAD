@@ -38,6 +38,11 @@ export class ViewmodelController {
   private audioImpact = 0;
   private audioBass = 0;
 
+  // Viewmodel musical accent (deliberately far weaker than the world gates)
+  private viewmodelAudioPulse = 0;
+  private transientPulse = 0;
+  private sustainedPulse = 0;
+
   public get isLoaded(): boolean {
     return this.isRigLoaded;
   }
@@ -261,7 +266,9 @@ export class ViewmodelController {
 
   public setPalette(palette: { surfaceDark?: THREE.Color; secondary?: THREE.Color; primary?: THREE.Color; highlight?: THREE.Color }): void {
     if (!palette) return;
-    this.styleFilter.setPalette(palette);
+    this.styleFilter.setPalette(
+      palette.primary ? { primary: palette.primary, secondary: palette.secondary } : {}
+    );
 
     if (palette.surfaceDark) {
       this.hemiLight.groundColor.copy(palette.surfaceDark).multiplyScalar(1.2);
@@ -269,7 +276,11 @@ export class ViewmodelController {
     if (palette.secondary) {
       this.fillLight.color.copy(palette.secondary).lerp(new THREE.Color(0xffffff), 0.65);
     }
-    const accentSource = palette.highlight || palette.primary || palette.secondary;
+
+    // ADAPTIVE VIEWMODEL ACCENT: the map's `primary` carries the section
+    // identity hue, so it drives the accent. Using `highlight` here washed the
+    // accent out to near-white on every palette.
+    const accentSource = palette.primary || palette.secondary || palette.highlight;
     if (accentSource) {
       this.targetAccentColor.copy(accentSource);
     }
@@ -501,20 +512,41 @@ export class ViewmodelController {
     }
 
     // 11. Adaptive Viewmodel Accent (ADAPTIVE, DEFAULT_CYAN, OFF)
+    // Viewmodel musical accent envelope: fast attack on transients, quick decay,
+    // plus a slow sustained term.
+    //
+    // Deliberately MUCH weaker than the world gates: `transientPulse` is the raw
+    // onset strength (0..1) and is scaled to at most 0.32 here, so a loud
+    // transient produces a faint rim/flourish lift rather than the gate's
+    // full bloom step. The viewmodel must never compete with the architecture.
+    this.transientPulse = Math.max(this.transientPulse - dt * 4.5, 0);
+    const pulseTarget = Math.min(
+      0.32,
+      this.transientPulse * 0.55 + this.sustainedPulse * 0.16
+    );
+    this.viewmodelAudioPulse += (pulseTarget - this.viewmodelAudioPulse) * Math.min(1.0, dt * 9.0);
+
     const vmAccent = settings.viewmodelAccent || 'ADAPTIVE';
     if (vmAccent === 'OFF') {
       this.rimLight.intensity = 0.0;
+      this.styleFilter.setAudioPulse(0);
+      this.rigInstance.setAudioPulse(0);
     } else if (vmAccent === 'DEFAULT_CYAN') {
       this.rimLight.intensity = 1.1;
       this.rimLight.color.set(0x00f0ff);
       this.accentColor.set(0x00f0ff);
       this.rigInstance.setAccentColor(this.accentColor);
+      this.styleFilter.setPalette({ primary: this.accentColor });
+      this.styleFilter.setAudioPulse(this.viewmodelAudioPulse);
+      this.rigInstance.setAudioPulse(this.viewmodelAudioPulse);
     } else {
       // ADAPTIVE: smoothly follow active map/track palette
-      this.rimLight.intensity = 1.1;
       this.accentColor.lerp(this.targetAccentColor, Math.min(1.0, dt * 6.0));
       this.rimLight.color.copy(this.accentColor);
+      this.rimLight.intensity = 1.1 * (1.0 + this.viewmodelAudioPulse * 0.35);
       this.rigInstance.setAccentColor(this.accentColor);
+      this.styleFilter.setAudioPulse(this.viewmodelAudioPulse);
+      this.rigInstance.setAudioPulse(this.viewmodelAudioPulse);
     }
   }
 
@@ -541,7 +573,17 @@ export class ViewmodelController {
     renderer.autoClear = origAutoClear;
   }
 
-  public setAudioLevels(impact: number, bass = 0): void {
+  /**
+   * Feeds the viewmodel the SAME authoritative music state the world uses.
+   *
+   * - impact   : sustained musical energy (artist 0..1)
+   * - transient: real onset/transient strength from the analyser
+   * - bass     : sub-bass energy, used by the karambit cosmic shader
+   */
+  public setAudioLevels(impact: number, transient = 0, bass = 0): void {
+    // Fast attack, slow-ish decay: preserves transient definition without jitter.
+    this.transientPulse = Math.max(this.transientPulse, transient);
+    this.sustainedPulse = impact;
     this.audioImpact = impact;
     this.audioBass = bass;
     if (this.rigInstance?.cosmicMaterial) {

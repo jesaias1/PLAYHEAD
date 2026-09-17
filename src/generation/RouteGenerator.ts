@@ -30,6 +30,10 @@ export class RouteGenerator {
     let cumulativeDistance = 0;
     let nodeId = 0;
 
+    // Velocity-aware platform sizing: track estimated arrival speed for next platform
+    let estimatedSpeed = refSpeed;
+    let consecutiveNarrow = 0; // Count consecutive narrow platforms for forced recovery
+
     // 1. Initial Start Platform (Safe orientation, broad runway)
     const startLength = 32.0;
     const startWidth = 14.0;
@@ -142,6 +146,8 @@ export class RouteGenerator {
           currentPos = getOffsetPosition(currentPos, currentYaw, platLen * 0.5);
           cumulativeDistance += platLen * 0.5;
           sectionCurrentDistance += platLen * 0.5;
+          estimatedSpeed = refSpeed; // Onboarding keeps baseline speed
+          consecutiveNarrow = 0;
 
         } else if (surfEvents.some(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id))) {
           // Dedicated planned musical surf event
@@ -171,6 +177,8 @@ export class RouteGenerator {
             cumulativeDistance = phrase.endArcLength;
             sectionCurrentDistance += distAdded;
             nodeId = phrase.nextNodeId;
+            estimatedSpeed = Math.max(estimatedSpeed, plannedSurf.entrySpeedTarget || 22.0);
+            consecutiveNarrow = 0;
           } else {
             const fallback = SurfValidator.createFallback(
               currentPos,
@@ -189,6 +197,8 @@ export class RouteGenerator {
             cumulativeDistance = fallback.endArcLength;
             sectionCurrentDistance += distAdded;
             nodeId = fallback.nextNodeId;
+            estimatedSpeed = Math.max(estimatedSpeed, 20.0);
+            consecutiveNarrow = 0;
           }
 
         } else if (theme === 'DROP' && sectionCurrentDistance < 20) {
@@ -224,6 +234,8 @@ export class RouteGenerator {
           currentPos = getOffsetPosition(currentPos, currentYaw, boostLen * 0.5);
           cumulativeDistance += boostLen * 0.5;
           sectionCurrentDistance += boostLen * 0.5;
+          estimatedSpeed = Math.max(estimatedSpeed, 14.0 + Math.sqrt(2 * 9.8 * dropHeight) + 10.0);
+          consecutiveNarrow = 0;
 
         } else if (theme === 'BUILDUP') {
           // Buildup: Route narrows and escalates steeply towards the crest
@@ -231,7 +243,10 @@ export class RouteGenerator {
           for (let st = 0; st < steps; st++) {
             const gap = rng.nextFloat(3.5, 5.0);
             const stepLen = 14.0;
-            const stepWidth = 9.5; // Widened for forgiving takeoff
+            // Velocity-aware: widen first step if arriving fast
+            const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
+            const widthBoost = (st === 0) ? Math.min(1.5, speedFactor) : 1.0;
+            const stepWidth = 9.5 * widthBoost; // Widened for forgiving takeoff
             const exitWidth = stepWidth * 1.65; // Substantially widened flared exit width
             const rise = 0.85;
 
@@ -261,6 +276,9 @@ export class RouteGenerator {
             currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
             cumulativeDistance += stepLen * 0.5;
             sectionCurrentDistance += stepLen * 0.5;
+            // Climbing costs speed
+            estimatedSpeed = estimatedSpeed * 0.88;
+            consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
           }
 
         } else if (theme === 'SURF' && phraseRoll < 0.6) {
@@ -293,6 +311,8 @@ export class RouteGenerator {
           cumulativeDistance = phrase.endArcLength;
           sectionCurrentDistance += distAdded;
           nodeId = phrase.nextNodeId;
+          estimatedSpeed = Math.max(estimatedSpeed, 20.0);
+          consecutiveNarrow = 0;
 
         } else if (theme === 'SPEED' || (section.intensity > 0.75 && phraseRoll < 0.45)) {
           // Boost Runway
@@ -325,6 +345,8 @@ export class RouteGenerator {
           currentPos = getOffsetPosition(currentPos, currentYaw, padLen * 0.5);
           cumulativeDistance += padLen * 0.5;
           sectionCurrentDistance += padLen * 0.5;
+          estimatedSpeed = Math.max(estimatedSpeed, 10.0 + 10.0); // boostSpeed + momentum
+          consecutiveNarrow = 0;
 
         } else if (theme === 'ASCENT') {
           // Escalating stepping platforms - flared for high-speed approach and clean takeoff
@@ -332,7 +354,11 @@ export class RouteGenerator {
           for (let st = 0; st < steps; st++) {
             const gap = rng.nextFloat(3.5, 5.0);
             const stepLen = rng.nextFloat(14.0, 18.0);
-            const stepWidth = rng.nextFloat(10.0, 13.0);
+            // Velocity-aware: widen first step if arriving fast
+            const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
+            const widthBoost = (st === 0) ? Math.min(1.5, speedFactor) : 1.0;
+            const baseWidth = rng.nextFloat(10.0, 13.0);
+            const stepWidth = baseWidth * widthBoost;
             const exitWidth = stepWidth * 1.65;
             const rise = rng.nextFloat(0.5, 0.85);
 
@@ -362,14 +388,28 @@ export class RouteGenerator {
             currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
             cumulativeDistance += stepLen * 0.5;
             sectionCurrentDistance += stepLen * 0.5;
+            // Climbing costs speed
+            estimatedSpeed = estimatedSpeed * 0.88;
+            consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
           }
 
         } else if (theme === 'DESCENT') {
           // Downward leap
           const gap = rng.nextFloat(4.5, 7.5);
-          const platLen = rng.nextFloat(16.0, 24.0);
-          const platWidth = rng.nextFloat(9.0, 12.0);
           const drop = rng.nextFloat(1.0, 2.0);
+
+          // Velocity-aware: descent adds gravitational speed, widen/lengthen landing platform
+          estimatedSpeed = Math.max(estimatedSpeed, refSpeed) + Math.sqrt(2 * 9.8 * drop);
+          const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
+          const widthBoost = Math.min(1.6, speedFactor);
+          const lengthBoost = Math.min(1.4, speedFactor * 0.85);
+          // Force recovery if too many consecutive narrow platforms
+          const forceRecovery = consecutiveNarrow >= 3;
+
+          const basePlatLen = rng.nextFloat(16.0, 24.0);
+          const basePlatWidth = rng.nextFloat(9.0, 12.0);
+          const platLen = forceRecovery ? Math.max(22.0, basePlatLen * lengthBoost) : basePlatLen * lengthBoost;
+          const platWidth = forceRecovery ? Math.max(12.0, basePlatWidth * widthBoost) : basePlatWidth * widthBoost;
 
           currentPos = getOffsetPosition(currentPos, currentYaw, gap + platLen * 0.5);
           currentPos.y -= drop;
@@ -396,12 +436,25 @@ export class RouteGenerator {
           currentPos = getOffsetPosition(currentPos, currentYaw, platLen * 0.5);
           cumulativeDistance += platLen * 0.5;
           sectionCurrentDistance += platLen * 0.5;
+          // Speed regresses partially after landing
+          estimatedSpeed = estimatedSpeed * 0.9 + refSpeed * 0.1;
+          consecutiveNarrow = (platWidth < 10.0) ? consecutiveNarrow + 1 : 0;
 
         } else {
           // Standard / Precision Flow
           const gap = rng.nextFloat(4.0, 7.0);
-          const platLen = rng.nextFloat(16.0, 26.0);
-          const platWidth = rng.nextFloat(8.0, 13.0);
+
+          // Velocity-aware: scale platform dimensions based on estimated arrival speed
+          const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
+          const widthBoost = Math.min(1.6, speedFactor);
+          const lengthBoost = Math.min(1.4, speedFactor * 0.85);
+          // Force recovery if too many consecutive narrow platforms
+          const forceRecovery = consecutiveNarrow >= 3;
+
+          const basePlatLen = rng.nextFloat(16.0, 26.0);
+          const basePlatWidth = rng.nextFloat(8.0, 13.0);
+          const platLen = forceRecovery ? Math.max(22.0, basePlatLen * lengthBoost) : basePlatLen * lengthBoost;
+          const platWidth = forceRecovery ? Math.max(12.0, basePlatWidth * widthBoost) : basePlatWidth * widthBoost;
 
           currentPos = getOffsetPosition(currentPos, currentYaw, gap + platLen * 0.5);
           cumulativeDistance += gap + platLen * 0.5;
@@ -427,6 +480,9 @@ export class RouteGenerator {
           currentPos = getOffsetPosition(currentPos, currentYaw, platLen * 0.5);
           cumulativeDistance += platLen * 0.5;
           sectionCurrentDistance += platLen * 0.5;
+          // Speed regresses toward baseline on each standard platform
+          estimatedSpeed = estimatedSpeed * 0.7 + refSpeed * 0.3;
+          consecutiveNarrow = (platWidth < 10.0) ? consecutiveNarrow + 1 : 0;
         }
       }
     }

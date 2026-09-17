@@ -83,6 +83,13 @@ export class World {
       );
     }
 
+    // Register major gate / finish / accent surfaces as always-present audio
+    // beacons. Their authored emissive is read as the rest luminance, then
+    // driven per-frame from the shared MusicVisualController state.
+    for (const beacon of this.builtAssets.reactiveBeacons) {
+      this.playheadSystem.registerReactive(beacon.mesh, beacon.channel);
+    }
+
     // 4. Build Distant Audio Skyline
     this.skyline = new SkylineArchitecture(this.scene, analysis, track);
 

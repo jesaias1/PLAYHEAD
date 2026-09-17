@@ -543,7 +543,7 @@ export class Game {
     this.cameraController.setSensitivity(settings.mouseSensitivity);
     this.environment.setBaseFov(settings.fov);
     this.audioEngine.setVolume(settings.masterVolume);
-    this.viewmodelController.setAccentColor(this.world.visualController.state.palette.primary);
+    // setPalette applies the map's primary hue to the adaptive viewmodel accent.
     this.viewmodelController.setPalette(this.world.visualController.state.palette);
   }
 
@@ -1028,13 +1028,17 @@ export class Game {
         frameDelta
       );
 
-      // Forward audio energy to viewmodel cosmic shader (calmed in overtime)
-      const reactiveEnergy = this.isOvertime ? 0 : this.world.visualController.state.energy;
-      const reactiveImpact = this.isOvertime ? 0 : this.world.visualController.state.dropImpact;
+      // Forward the SAME authoritative music state the world uses to the viewmodel.
+      // (calmed in overtime so the hands do not keep pulsing after the run)
+      const vmState = this.world.visualController.state;
+      const reactiveEnergy = this.isOvertime ? 0 : vmState.energy;
+      const reactiveTransient = this.isOvertime ? 0 : vmState.onsetPulse;
+      const reactiveBass = this.isOvertime ? 0 : vmState.bass;
 
       this.viewmodelController.setAudioLevels(
         reactiveEnergy,
-        reactiveImpact
+        reactiveTransient,
+        reactiveBass
       );
 
       // Update Ghosts
