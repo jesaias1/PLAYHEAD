@@ -100,6 +100,22 @@ export class AudioEngine {
     }
   }
 
+  public fadeOutAndStop(fadeDuration = 0.25): void {
+    if (!this.isPlaying || !this.ctx || !this.masterGain) {
+      this.stop();
+      return;
+    }
+    const currT = this.ctx.currentTime;
+    this.masterGain.gain.setValueAtTime(this.volume, currT);
+    this.masterGain.gain.linearRampToValueAtTime(0.001, currT + fadeDuration);
+    window.setTimeout(() => {
+      this.stop();
+      if (this.masterGain && this.ctx) {
+        this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+      }
+    }, fadeDuration * 1000 + 20);
+  }
+
   public stop(): void {
     this.stopSource();
     this.isPlaying = false;

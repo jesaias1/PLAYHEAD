@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "precompute-presets": "node scripts/precompute_presets.mjs"
   },
   "dependencies": {
     "three": "^0.174.0"

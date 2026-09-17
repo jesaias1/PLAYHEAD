@@ -60,8 +60,13 @@ export class RouteValidator {
         continue;
       }
 
-      // 1. Check upward elevation limit
-      if (dy > config.maxStepUp) {
+      // 1. Step-up Flow Rule: Flatten marginal accidental step-ups (0 < dy < 0.45m) between standard runways
+      if (current.type === RouteNodeType.RUNWAY && next.type === RouteNodeType.RUNWAY && dy > 0 && dy < 0.45) {
+        for (let k = i + 1; k < repaired.length; k++) {
+          repaired[k].position.y -= dy;
+        }
+        repairsCount++;
+      } else if (dy > config.maxStepUp) {
         // Lower next node and all downstream nodes to safe limit (rigid elevation propagation)
         const excess = dy - config.maxStepUp;
         for (let k = i + 1; k < repaired.length; k++) {
@@ -93,16 +98,20 @@ export class RouteValidator {
         }
 
         // Also widen landing platform for comfort
-        next.dimensions.x = Math.max(next.dimensions.x, 8.0);
-        next.dimensions.z = Math.max(next.dimensions.z, 10.0);
+        next.dimensions.x = Math.max(next.dimensions.x, 9.5);
+        next.dimensions.z = Math.max(next.dimensions.z, 14.0);
 
         repairsCount++;
+      } else if (horizontalGap > 5.5) {
+        // Forgiving landing pass on hard gaps: ensure ample width and runway depth
+        next.dimensions.x = Math.max(next.dimensions.x, 9.0);
+        next.dimensions.z = Math.max(next.dimensions.z, 15.0);
       }
 
       // 3. Prevent landing platforms from being razor-thin, with generous dimensions in the first 25 seconds
       const isEarlyOnboarding = next.time < 25.0;
-      const minWidth = isEarlyOnboarding ? 14.0 : 5.0;
-      const minLength = isEarlyOnboarding ? 14.0 : 6.0;
+      const minWidth = isEarlyOnboarding ? 14.0 : 6.0;
+      const minLength = isEarlyOnboarding ? 14.0 : 8.0;
 
       if (next.dimensions.x < minWidth) {
         next.dimensions.x = minWidth;

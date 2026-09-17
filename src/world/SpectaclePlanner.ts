@@ -9,11 +9,11 @@ import { GeneratedTrack } from '../generation/GenerationTypes';
 
 export type SpectacleType =
   | 'MONOLITH_SPLIT'
-  | 'CATHEDRAL_IGNITION'
   | 'VOID_REVEAL'
+  | 'CATHEDRAL_IGNITION'
   | 'STARFIELD_BLOOM'
   | 'WORLD_POWER_DOWN'
-  | 'SHOCKWAVE';
+  | 'SURF_CANYON_RELEASE';
 
 export interface SpectacleEvent {
   id: number;
@@ -52,7 +52,7 @@ export class SpectaclePlanner {
       nodeIndex: number;
       arcLength: number;
       weight: number;
-      preferredType?: SpectacleType;
+      preferredType: SpectacleType;
     }
 
     const candidates: Candidate[] = [];
@@ -67,11 +67,11 @@ export class SpectaclePlanner {
           nodeIndex: nodeIdx,
           arcLength: route[nodeIdx].arcLength,
           weight: 100 + sec.intensity * 50,
-          preferredType: 'VOID_REVEAL'
+          preferredType: (i % 2 === 0) ? 'VOID_REVEAL' : 'MONOLITH_SPLIT'
         });
       } else if (sec.theme === 'BUILDUP') {
-        // Buildup midpoint candidate for power-down or ignition
-        const midTime = sec.start + (sec.end - sec.start) * 0.7;
+        // Buildup midpoint candidate for power-down anticipation
+        const midTime = sec.start + (sec.end - sec.start) * 0.65;
         const nodeIdx = this.findNearestNodeIndex(route, midTime);
         candidates.push({
           time: midTime,
@@ -79,6 +79,17 @@ export class SpectaclePlanner {
           arcLength: route[nodeIdx].arcLength,
           weight: 70 + sec.intensity * 30,
           preferredType: 'WORLD_POWER_DOWN'
+        });
+      } else if (sec.theme === 'FLOW' || sec.theme === 'SPEED' || sec.theme === 'PRECISION') {
+        // Rhythmic sections for cathedral ignition
+        const midTime = sec.start + (sec.end - sec.start) * 0.5;
+        const nodeIdx = this.findNearestNodeIndex(route, midTime);
+        candidates.push({
+          time: midTime,
+          nodeIndex: nodeIdx,
+          arcLength: route[nodeIdx].arcLength,
+          weight: 60 + sec.intensity * 25,
+          preferredType: 'CATHEDRAL_IGNITION'
         });
       }
     }
@@ -90,23 +101,21 @@ export class SpectaclePlanner {
           time: route[i].time,
           nodeIndex: i,
           arcLength: route[i].arcLength,
-          weight: 85,
-          preferredType: 'MONOLITH_SPLIT'
+          weight: 90,
+          preferredType: 'SURF_CANYON_RELEASE'
         });
       }
     }
 
-    // 3. Strong musical peaks / onsets if more candidates needed
-    const sortedOnsets = [...analysis.onsets].sort((a, b) => b.strength - a.strength);
-    for (const onset of sortedOnsets.slice(0, 15)) {
-      if (onset.strength > 0.8) {
-        const nodeIdx = this.findNearestNodeIndex(route, onset.time);
+    // 3. Elevated scenic nodes for celestial bloom
+    for (let i = 5; i < route.length - 5; i += 12) {
+      if (route[i].position.y > 10.0 && !route[i].isSurf) {
         candidates.push({
-          time: onset.time,
-          nodeIndex: nodeIdx,
-          arcLength: route[nodeIdx].arcLength,
-          weight: 50 + onset.strength * 20,
-          preferredType: 'SHOCKWAVE'
+          time: route[i].time,
+          nodeIndex: i,
+          arcLength: route[i].arcLength,
+          weight: 65,
+          preferredType: 'STARFIELD_BLOOM'
         });
       }
     }
@@ -117,7 +126,7 @@ export class SpectaclePlanner {
     // Filter with cooldown constraint
     const selected: Candidate[] = [];
     for (const cand of candidates) {
-      if (cand.time < 5.0 || cand.time > duration - 6.0) continue; // Skip very beginning / end
+      if (cand.time < 6.0 || cand.time > duration - 8.0) continue; // Skip very beginning / end
       const tooClose = selected.some(s => Math.abs(s.time - cand.time) < minCooldown);
       if (!tooClose) {
         selected.push(cand);
@@ -128,6 +137,7 @@ export class SpectaclePlanner {
     // If fewer than 3, add evenly spaced candidates
     if (selected.length < 3) {
       const stepTime = duration / (targetCount + 1);
+      const fallbackTypes: SpectacleType[] = ['VOID_REVEAL', 'CATHEDRAL_IGNITION', 'STARFIELD_BLOOM', 'MONOLITH_SPLIT'];
       for (let s = 1; s <= targetCount; s++) {
         const t = s * stepTime;
         if (!selected.some(c => Math.abs(c.time - t) < minCooldown)) {
@@ -136,7 +146,8 @@ export class SpectaclePlanner {
             time: t,
             nodeIndex: nodeIdx,
             arcLength: route[nodeIdx].arcLength,
-            weight: 40
+            weight: 40,
+            preferredType: fallbackTypes[s % fallbackTypes.length]
           });
         }
       }
@@ -154,20 +165,29 @@ export class SpectaclePlanner {
     }
 
     // Available spectacle families
-    const families: SpectacleType[] = [
+    const allFamilies: SpectacleType[] = [
       'MONOLITH_SPLIT',
-      'CATHEDRAL_IGNITION',
       'VOID_REVEAL',
+      'CATHEDRAL_IGNITION',
       'STARFIELD_BLOOM',
       'WORLD_POWER_DOWN',
-      'SHOCKWAVE'
+      'SURF_CANYON_RELEASE'
     ];
 
-    // Build planned events
+    // Build planned events enforcing non-repetition
+    let lastType: SpectacleType | null = null;
     for (let i = 0; i < selected.length; i++) {
       const c = selected[i];
       const isSignature = (i === highestWeightIdx);
-      const type = c.preferredType || families[(i + Math.abs(analysis.seed)) % families.length];
+      let type = c.preferredType;
+
+      // Enforce event diversity: if type equals lastType, pick next distinct family
+      if (type === lastType) {
+        const alt = allFamilies.find(f => f !== lastType) || 'VOID_REVEAL';
+        type = alt;
+      }
+      lastType = type;
+
       const durationSec = isSignature ? 7.5 : 5.0;
 
       const evt: SpectacleEvent = {

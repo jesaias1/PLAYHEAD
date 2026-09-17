@@ -18,6 +18,8 @@ import { DropSetpiece } from './DropSetpiece';
 import { Environment } from './Environment';
 import { SongDirector } from './SongDirector';
 import { SpectacleRenderer } from './SpectacleRenderer';
+import { CelestialLandmarks } from './CelestialLandmarks';
+import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 
 export class World {
@@ -29,6 +31,7 @@ export class World {
   public spectacleRenderer: SpectacleRenderer;
 
   public skyline: SkylineArchitecture | null = null;
+  public celestialLandmarks: CelestialLandmarks | null = null;
   public spectralArchitecture: SpectralArchitecture | null = null;
   public dropSetpiece: DropSetpiece | null = null;
   public debugChainMesh: THREE.LineSegments | null = null;
@@ -63,7 +66,7 @@ export class World {
     }
 
     // 2. Build Physics Colliders (frozen authoritative physics)
-    this.physics.buildFromRoute(track.route);
+    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves);
 
     // 3. Build Procedural Route & Monolith Meshes
     this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette);
@@ -83,11 +86,36 @@ export class World {
     // 4. Build Distant Audio Skyline
     this.skyline = new SkylineArchitecture(this.scene, analysis, track);
 
-    // 5. Build Spatial Spectral Architecture (Waveform Canyons, Canopy, Onset Gates)
+    // 5. Build Celestial Landmarks (Giant low-res Moon / Eclipse / Halos in negative space)
+    this.celestialLandmarks = new CelestialLandmarks(
+      this.scene,
+      analysis,
+      track,
+      this.visualController.state.palette
+    );
+
+    // 6. Build Spatial Spectral Architecture (Waveform Canyons, Canopy, Onset Gates)
     this.spectralArchitecture = new SpectralArchitecture(this.scene, analysis, track);
 
     // 6. Build Major Drop Setpiece
     this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
+
+    // Final gameplay protection pass: validate all decorative architecture against route exclusion corridor
+    const allCorridorNodes = [
+      ...track.route,
+      ...(track.optionalRamps || []),
+      ...(track.recoveryShelves || [])
+    ];
+    const corridor = new RouteExclusionCorridor(allCorridorNodes);
+    corridor.validateDecorationAgainstGameplay(this.dropSetpiece.group);
+    corridor.validateDecorationAgainstGameplay(this.spectralArchitecture.group);
+    corridor.validateDecorationAgainstGameplay(this.skyline.group);
+    if (this.celestialLandmarks?.group) {
+      corridor.validateDecorationAgainstGameplay(this.celestialLandmarks.group);
+    }
+    if (this.builtAssets?.decorativeGroup) {
+      corridor.validateDecorationAgainstGameplay(this.builtAssets.decorativeGroup);
+    }
 
     // 7. Initialize Spectacle Visual Renderer
     this.spectacleRenderer.init(track);
@@ -102,7 +130,8 @@ export class World {
     playerYaw: number,
     dt: number,
     environment?: Environment,
-    playerSpeed = 0
+    playerSpeed = 0,
+    reduceMotion = false
   ): { arcProgress: number; syncDelta: number; progressRatio: number; targetSongTime: number } {
     const progress = this.getRouteProgress(playerPos);
     const totalDist = this.track && this.track.totalDistance > 0 ? this.track.totalDistance : 1;
@@ -123,12 +152,17 @@ export class World {
       environment.updateAtmosphere(vState, dt, directorState);
     }
 
-    // Update spectacle runtime renderer (shockwaves, ignition pulses)
-    this.spectacleRenderer.update(directorState.activeSpectacle, vState, playerPos);
+    // Update spectacle runtime renderer (6 distinct event families)
+    this.spectacleRenderer.update(directorState.activeSpectacle, vState, playerPos, reduceMotion);
 
     // Update skyline architecture
     if (this.skyline) {
       this.skyline.update(vState);
+    }
+
+    // Update celestial landmarks (moon, eclipse, halos, relics)
+    if (this.celestialLandmarks) {
+      this.celestialLandmarks.update(songTime, vState.bass, vState.dropImpact);
     }
 
     // Update spatial spectral architecture
@@ -212,6 +246,12 @@ export class World {
     if (this.skyline) {
       this.skyline.dispose();
       this.skyline = null;
+    }
+
+    if (this.celestialLandmarks) {
+      this.celestialLandmarks.dispose();
+      this.scene.remove(this.celestialLandmarks.group);
+      this.celestialLandmarks = null;
     }
 
     if (this.spectralArchitecture) {

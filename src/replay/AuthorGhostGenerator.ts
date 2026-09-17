@@ -48,10 +48,11 @@ export class AuthorGhostGenerator {
 
     // Initial frame at start node
     const startNode = route[0];
+    const startSurfaceY = startNode.position.y + (startNode.isSurf ? 0 : startNode.dimensions.y * 0.5);
     frames.push({
       time: 0,
       px: startNode.position.x,
-      py: startNode.position.y,
+      py: startSurfaceY,
       pz: startNode.position.z,
       yaw: startNode.yaw,
       pitch: 0,
@@ -100,22 +101,23 @@ export class AuthorGhostGenerator {
         const px = lerp(n0.position.x, n1.position.x, smoothU);
         const pz = lerp(n0.position.z, n1.position.z, smoothU);
 
-        // Vertical position handling with physics feel
+        // Vertical position handling with physics feel from top of platform surfaces
+        const surface0 = n0.position.y + (n0.isSurf ? 0 : n0.dimensions.y * 0.5);
+        const surface1 = n1.position.y + (n1.isSurf ? 0 : n1.dimensions.y * 0.5);
+        const basePy = lerp(surface0, surface1, u);
+
         let py: number;
 
         if (n0.isSurf && n1.isSurf) {
-          // On surf ramp: follow ramp slope cleanly with downhill acceleration
-          py = lerp(n0.position.y, n1.position.y, u);
-          // Slight surf lift
-          py += 0.2;
+          // On surf ramp: follow ramp slope cleanly with slight lift
+          py = basePy + 0.25;
         } else if (n1.type === RouteNodeType.GAP || n1.type === RouteNodeType.OFFSET_GAP || n1.type === RouteNodeType.STEP_DOWN) {
           // Parabolic jump arc over gap
           const jumpApex = Math.max(0.8, dist * 0.08);
           const arc = 4 * jumpApex * u * (1 - u);
-          py = lerp(n0.position.y, n1.position.y, u) + arc;
+          py = basePy + arc;
         } else {
           // Ground platform bhop hops: rhythmic slight bounce (0.4m apex)
-          const basePy = lerp(n0.position.y, n1.position.y, u);
           const hopPhase = (hopTimer % hopInterval) / hopInterval;
           const hopHeight = 0.45 * Math.sin(Math.PI * hopPhase);
           py = basePy + hopHeight;

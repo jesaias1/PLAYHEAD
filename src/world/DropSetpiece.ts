@@ -1,6 +1,6 @@
 /**
- * Major Drop Setpiece Generator for PLAYHEAD
- * Generates 5 deterministic architectural setpiece families around the primary buildup and drop:
+ * Major Drop Setpiece Generator for PLAYHEAD SIGNAL RENDER
+ * "Cosmic Pixel Brutalism" drop setpieces:
  * 1. SPLIT_MONOLITH
  * 2. SPECTRAL_CATHEDRAL
  * 3. VOID_BRIDGE
@@ -12,6 +12,9 @@ import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack, RouteNode } from '../generation/GenerationTypes';
 import { MusicVisualState } from './MusicVisualController';
+import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
+import { PixelTextureGenerator } from './PixelTextureGenerator';
+import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 
 export type DropSetpieceFamily = 'SPLIT_MONOLITH' | 'SPECTRAL_CATHEDRAL' | 'VOID_BRIDGE' | 'SIGNAL_GATE' | 'FRACTURE';
 
@@ -25,7 +28,6 @@ export class DropSetpiece {
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
     this.group = new THREE.Group();
 
-    // Deterministically pick family by seed
     const families: DropSetpieceFamily[] = [
       'SPLIT_MONOLITH',
       'SPECTRAL_CATHEDRAL',
@@ -43,11 +45,9 @@ export class DropSetpiece {
     const route = track.route;
     if (route.length < 5) return;
 
-    // Find the drop section
     const dropSection = analysis.sections.find(s => s.theme === 'DROP');
     if (!dropSection) return;
 
-    // Find route node closest to drop section start
     let bestDist = 999999;
     for (const node of route) {
       const d = Math.abs(node.time - dropSection.start);
@@ -59,24 +59,28 @@ export class DropSetpiece {
     if (!this.dropNode) return;
 
     const accentCol = new THREE.Color(analysis.visualAccent.hex);
+    const basaltTex = PixelTextureGenerator.getBlackBasaltTexture();
+    const concreteTex = PixelTextureGenerator.getDarkConcreteTexture();
 
-    // 70-85% Dark Brutalist Mass: Basalt concrete
+    // Dark Basalt Material
     const baseMat = new THREE.MeshStandardMaterial({
-      color: 0x080a10,
-      roughness: 0.88,
-      metalness: 0.2,
+      color: 0x05080e,
+      roughness: 0.9,
+      metalness: 0.15,
+      map: basaltTex,
       emissive: accentCol,
-      emissiveIntensity: 0.02
+      emissiveIntensity: 0.03
     });
     this.materials.push(baseMat);
 
-    // Dynamic inner core / accent gate
+    // Accent Gate Material
     const gateMat = new THREE.MeshStandardMaterial({
-      color: 0x101520,
-      roughness: 0.25,
-      metalness: 0.85,
+      color: 0x0a101d,
+      roughness: 0.3,
+      metalness: 0.8,
+      map: concreteTex,
       emissive: accentCol,
-      emissiveIntensity: 0.05
+      emissiveIntensity: 0.08
     });
     this.materials.push(gateMat);
 
@@ -86,112 +90,103 @@ export class DropSetpiece {
     this.group.position.set(center.x, center.y, center.z);
     this.group.rotation.y = yaw;
 
+    const corridor = new RouteExclusionCorridor(track.route);
+
     switch (this.family) {
       case 'SPLIT_MONOLITH':
-        this.buildSplitMonolith(baseMat, gateMat);
+        this.buildSplitMonolith(baseMat, gateMat, corridor);
         break;
       case 'SPECTRAL_CATHEDRAL':
         this.buildSpectralCathedral(baseMat, gateMat);
         break;
       case 'VOID_BRIDGE':
-        this.buildVoidBridge(baseMat, gateMat);
+        this.buildVoidBridge(baseMat, gateMat, corridor);
         break;
       case 'SIGNAL_GATE':
-        this.buildSignalGate(baseMat, gateMat);
+        this.buildSignalGate(baseMat, gateMat, corridor);
         break;
       case 'FRACTURE':
       default:
-        this.buildFracture(baseMat, gateMat);
+        this.buildFracture(baseMat, gateMat, corridor);
         break;
     }
   }
 
-  private buildSplitMonolith(baseMat: THREE.Material, _accentMat: THREE.Material): void {
-    // Twin colossal canyon walls leading up to the drop, terminating abruptly to reveal open space
-    const wallGeom = new THREE.BoxGeometry(8, 70, 60);
-    const leftWall = new THREE.Mesh(wallGeom, baseMat);
-    leftWall.position.set(-20, 25, -30);
-    this.group.add(leftWall);
-    this.animatedElements.push(leftWall);
+  private buildSplitMonolith(baseMat: THREE.Material, _accentMat: THREE.Material, _corridor: RouteExclusionCorridor): void {
+    // Twin colossal brutalist monoliths flanking the drop threshold with safe clearance
+    const lateralDist = 38.0;
+    const leftMonolith = BrutalistShapeLibrary.createMonolith(18.0, 95.0, 24.0, baseMat);
+    leftMonolith.position.set(-lateralDist, 0, -25.0);
+    this.group.add(leftMonolith);
+    this.animatedElements.push(leftMonolith);
 
-    const rightWall = new THREE.Mesh(wallGeom, baseMat);
-    rightWall.position.set(20, 25, -30);
-    this.group.add(rightWall);
-    this.animatedElements.push(rightWall);
+    const rightMonolith = BrutalistShapeLibrary.createMonolith(18.0, 95.0, 24.0, baseMat);
+    rightMonolith.position.set(lateralDist, 0, -25.0);
+    this.group.add(rightMonolith);
+    this.animatedElements.push(rightMonolith);
   }
 
   private buildSpectralCathedral(baseMat: THREE.Material, accentMat: THREE.Material): void {
-    // Repeating monumental arches that compress before the drop threshold
-    const ribCount = 6;
+    // Repeating sweeping cathedral arch ribs leading up to drop with wide clear passage
+    const ribCount = 5;
     for (let i = 0; i < ribCount; i++) {
-      const zOffset = -50 + i * 10;
-      const width = 22 + i * 4;
-      const height = 24 + i * 3;
+      const zOffset = -45.0 + i * 11.0;
+      const width = 42.0 + i * 4.0; // Wide clear passage
+      const height = 34.0 + i * 3.5;
 
-      const archGroup = new THREE.Group();
-      archGroup.position.set(0, 0, zOffset);
-
-      const colGeom = new THREE.BoxGeometry(2, height, 2);
-      const lCol = new THREE.Mesh(colGeom, baseMat);
-      lCol.position.set(-width * 0.5, height * 0.5, 0);
-      archGroup.add(lCol);
-
-      const rCol = new THREE.Mesh(colGeom, baseMat);
-      rCol.position.set(width * 0.5, height * 0.5, 0);
-      archGroup.add(rCol);
-
-      const beamGeom = new THREE.BoxGeometry(width + 4, 2, 2);
-      const beam = new THREE.Mesh(beamGeom, i === ribCount - 1 ? accentMat : baseMat);
-      beam.position.set(0, height, 0);
-      archGroup.add(beam);
-
-      this.group.add(archGroup);
-      this.animatedElements.push(archGroup);
+      const rib = BrutalistShapeLibrary.createCathedralRib(
+        width,
+        height,
+        5.0,
+        2.5,
+        i === ribCount - 1 ? accentMat : baseMat
+      );
+      rib.position.set(0, 0, zOffset);
+      this.group.add(rib);
+      this.animatedElements.push(rib);
     }
   }
 
-  private buildVoidBridge(baseMat: THREE.Material, accentMat: THREE.Material): void {
-    // Deep structural towers flanking the leap into the drop
-    for (const side of [-1, 1]) {
-      const pylonGeom = new THREE.BoxGeometry(10, 100, 10);
-      const pylon = new THREE.Mesh(pylonGeom, baseMat);
-      pylon.position.set(side * 28, 30, 0);
-      this.group.add(pylon);
+  private buildVoidBridge(baseMat: THREE.Material, _accentMat: THREE.Material, _corridor: RouteExclusionCorridor): void {
+    // Twin cantilever pylons flanking the drop jump with wide clearance
+    const lateralDist = 38.0;
+    const leftCant = BrutalistShapeLibrary.createCantilever(45.0, 16.0, 12.0, baseMat);
+    leftCant.position.set(-lateralDist, 0, 0);
+    leftCant.scale.x = -1;
+    this.group.add(leftCant);
+    this.animatedElements.push(leftCant);
 
-      const crossBeamGeom = new THREE.BoxGeometry(18, 3, 3);
-      const beam = new THREE.Mesh(crossBeamGeom, accentMat);
-      beam.position.set(side * 20, 50, 0);
-      this.group.add(beam);
-    }
+    const rightCant = BrutalistShapeLibrary.createCantilever(45.0, 16.0, 12.0, baseMat);
+    rightCant.position.set(lateralDist, 0, 0);
+    this.group.add(rightCant);
+    this.animatedElements.push(rightCant);
   }
 
-  private buildSignalGate(baseMat: THREE.Material, accentMat: THREE.Material): void {
-    // Massive monolithic gate frame directly marking the drop threshold
-    const gateColGeom = new THREE.BoxGeometry(5, 55, 6);
-    const lCol = new THREE.Mesh(gateColGeom, baseMat);
-    lCol.position.set(-22, 20, 0);
-    this.group.add(lCol);
+  private buildSignalGate(baseMat: THREE.Material, accentMat: THREE.Material, _corridor: RouteExclusionCorridor): void {
+    // Massive brutalist pylon stelae framing the threshold with wide top lintel
+    const lateralDist = 38.0;
+    const leftPylon = BrutalistShapeLibrary.createPylonStela(12.0, 75.0, 14.0, baseMat);
+    leftPylon.position.set(-lateralDist, 0, 0);
+    this.group.add(leftPylon);
 
-    const rCol = new THREE.Mesh(gateColGeom, baseMat);
-    rCol.position.set(22, 20, 0);
-    this.group.add(rCol);
+    const rightPylon = BrutalistShapeLibrary.createPylonStela(12.0, 75.0, 14.0, baseMat);
+    rightPylon.position.set(lateralDist, 0, 0);
+    this.group.add(rightPylon);
 
-    const lintelGeom = new THREE.BoxGeometry(54, 8, 8);
-    const lintel = new THREE.Mesh(lintelGeom, accentMat);
-    lintel.position.set(0, 48, 0);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(lateralDist * 2.2, 8.0, 12.0), accentMat);
+    lintel.position.set(0, 68.0, 0);
     this.group.add(lintel);
+    this.animatedElements.push(lintel);
   }
 
-  private buildFracture(baseMat: THREE.Material, _accentMat: THREE.Material): void {
-    // Segmented architectural slabs floating on both sides
-    const slabGeom = new THREE.BoxGeometry(6, 18, 14);
-    for (let i = 0; i < 8; i++) {
+  private buildFracture(baseMat: THREE.Material, _accentMat: THREE.Material, _corridor: RouteExclusionCorridor): void {
+    // Broken slabs and floating ruins hovering over the drop void outside playable path
+    for (let i = 0; i < 6; i++) {
       const side = (i % 2 === 0) ? -1 : 1;
-      const slab = new THREE.Mesh(slabGeom, baseMat);
-      slab.position.set(side * (22 + (i * 3)), 8 + (i * 2), -40 + (i * 12));
-      slab.rotation.set(0.1 * i, 0.15 * side, 0.05 * i);
-      this.group.add(slab);
-      this.animatedElements.push(slab);
+      const broken = BrutalistShapeLibrary.createBrokenSlab(24.0, 16.0, 18.0, baseMat);
+      broken.position.set(side * (36.0 + i * 5.0), 6.0 + i * 2.0, -35.0 + i * 14.0);
+      this.group.add(broken);
+      this.animatedElements.push(broken);
     }
   }
 
@@ -201,34 +196,32 @@ export class DropSetpiece {
     const buildup = visualState.buildup;
 
     if (this.materials[0]) {
-      this.materials[0].emissiveIntensity = (0.02 + buildup * 0.3 + dropPulse * 1.4) * reactMult;
+      this.materials[0].emissiveIntensity = (0.03 + buildup * 0.35 + dropPulse * 1.5) * reactMult;
       this.materials[0].emissive.copy(visualState.bassColor);
     }
     if (this.materials[1]) {
-      this.materials[1].emissiveIntensity = (0.05 + buildup * 0.7 + dropPulse * 2.8) * reactMult;
+      this.materials[1].emissiveIntensity = (0.08 + buildup * 0.75 + dropPulse * 2.8) * reactMult;
       this.materials[1].emissive.copy(visualState.palette.highlight);
     }
 
-    // Dynamic geometric motion based on family
+    // Dynamic geometric response based on setpiece family
     if (this.family === 'SPLIT_MONOLITH' && this.animatedElements.length >= 2) {
-      // Slit open laterally from 20m up to 36m on buildup & drop
-      const splitOffset = (buildup * 12.0 + dropPulse * 16.0) * reactMult;
-      this.animatedElements[0].position.x = -20 - splitOffset;
-      this.animatedElements[1].position.x = 20 + splitOffset;
+      // Monoliths split open laterally on buildup & drop from safe base distance 38.0m
+      const splitOffset = (buildup * 8.0 + dropPulse * 16.0) * reactMult;
+      this.animatedElements[0].position.x = -38.0 - splitOffset;
+      this.animatedElements[1].position.x = 38.0 + splitOffset;
     } else if (this.family === 'SPECTRAL_CATHEDRAL') {
-      // Arches rise slightly and breathe with bass
       for (let i = 0; i < this.animatedElements.length; i++) {
         const arch = this.animatedElements[i];
-        const phase = visualState.time * 2.0 + i * 0.5;
-        arch.position.y = Math.sin(phase) * 1.2 + dropPulse * 4.0;
+        const phase = visualState.time * 2.0 + i * 0.6;
+        arch.position.y = Math.sin(phase) * 1.0 + dropPulse * 4.5;
       }
     } else if (this.family === 'FRACTURE') {
-      // Slabs float and subtly rotate with low mid/bass
       for (let i = 0; i < this.animatedElements.length; i++) {
-        const slab = this.animatedElements[i];
+        const broken = this.animatedElements[i];
         const side = (i % 2 === 0) ? -1 : 1;
-        slab.rotation.y = 0.15 * side + Math.sin(visualState.time * 0.8 + i) * 0.1;
-        slab.position.y = 8 + (i * 2) + Math.sin(visualState.time * 1.5 + i * 0.8) * 1.5 + dropPulse * 3.0;
+        broken.rotation.y = 0.12 * side + Math.sin(visualState.time * 0.8 + i) * 0.08;
+        broken.position.y = 6.0 + (i * 2.0) + Math.sin(visualState.time * 1.4 + i * 0.7) * 1.2 + dropPulse * 3.5;
       }
     }
   }

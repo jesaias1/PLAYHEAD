@@ -1,0 +1,121 @@
+<USER_REQUEST>
+# PLAYHEAD — CONSOLIDATED POLISH / WORLD FLOW / TERMINAL UI / KARAMBIT ART PASS
+# FIX WHAT EXISTS — DO NOT REDESIGN THE GAME
+
+PLAYHEAD is now in a good overall direction.
+
+This pass is NOT a new game architecture phase.
+
+It is a focused correction + polish pass covering:
+
+1. compact main menu layout
+2. authentic terminal / command-console UI
+3. Armory cleanup
+4. final custom karambit textures
+5. correct gate support architecture
+6. bottomless skyscraper / megastructure treatment
+7. decorative geometry intrusion safety
+8. smoother procedural platform flow
+9. optional side-surf skill routes
+10. music-reactive stars
+11. preset Signal Pack consistency / instant loading
+12. small content/name cleanup
+
+DO NOT retune the approved movement.
+
+==================================================
+0. PROTECTED SYSTEMS
+==================================================
+
+DO NOT change:
+
+PLAYHEAD_MOVEMENT_V1
+
+including:
+- gravity
+- jump
+- ground acceleration
+- air acceleration
+- bhop behaviour
+- air strafing
+- friction
+- speed behaviour
+- camera controls
+
+Also preserve:
+- current surf physics
+- current calibrated hands
+- current calibrated karambit transform
+- current checkpoint behaviour
+- void fall failsafe
+- pointer-lock fixes
+- route continuity guarantees
+- existing Cosmic Pixel Brutalism direction
+- current subtle global grain/CRT integration unless specifically tuning it for quality
+
+NO walk bob.
+NO inspect animation.
+
+Do not solve visual or level-generation problems by modifying movement.
+
+==================================================
+1. MAIN MENU IS CURRENTLY FAR TOO TALL
+==================================================
+
+The Signal Pack page recently changed into a huge vertical list.
+
+This is wrong.
+
+At normal browser zoom / normal desktop resolution, the primary PLAYHEAD menu should fit comfortably on screen and remain usable WITHOUT requiring the player to zoom the browser out.
+
+Previously the menu was compact enough.
+Restor
+<truncated 46574 bytes>
+r
+- restore state
+- whether emergency fallback was required
+
+Do not spam production UI.
+
+This should make another rare occurrence diagnosable rather than mysterious.
+
+==================================================
+84. TEST THE FAILURE AGGRESSIVELY
+==================================================
+
+Stress-test many repeated falls.
+
+Include:
+
+- normal platform fall
+- surf fall
+- high-speed fall
+- falling while strafing
+- immediately after checkpoint activation
+- repeated deaths quickly
+- death after pause/resume
+- death around song/checkpoint seeking
+- falling extremely far below the map
+
+Run dozens/hundreds of automated restore cycles if practical.
+
+SUCCESS CONDITION:
+
+Once checkpoint restoration begins,
+the player ALWAYS ends up at the checkpoint.
+
+Infinite void falling must not be an allowed state.
+
+Also when you jump high in the air on the surf ramp you get send back to checkpoint because the game thinks you are falling in the void because you have been falling for so long, that cant happen. You should be able to go high om the surf ramps, but it shouldnt bug out so that you will fall forever in the void again, find a solution. Also there should be an option in settings to remove Game Hints/Tips, as they get annoying when you already know.
+
+Also i attached a new text logo for the main menu, and the normal logo of the mascot which is a face with a karambit as a mouth, which should also be the .favico for the website.
+Use the logo where it fits in the game, use it as an asset if it fits anywhere. And on the main menu.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-16T20:33:49+02:00.
+
+The user has uploaded 2 image(s):
+- C:/Users/lin4s/.gemini/antigravity/brain/ed6a93af-435f-4ce7-a35a-81381d79f4f6/.user_uploaded/media_1789583316033.png
+- C:/Users/lin4s/.gemini/antigravity/brain/ed6a93af-435f-4ce7-a35a-81381d79f4f6/.user_uploaded/media_1789583316082.png
+You can embed these images in an artifact if you need the USER to review them.
+</ADDITIONAL_METADATA>

@@ -47,8 +47,13 @@ export class GhostRunner {
     this.group = new THREE.Group();
     this.group.name = `Ghost_${config.name}`;
 
-    // Outer faceted geometric shell
-    const outerGeom = new THREE.CylinderGeometry(0.44, 0.44, 1.8, 6);
+    // Outer faceted geometric shell (increased by 25% with 0.08m ground clearance)
+    const height = 1.8 * 1.25; // 2.25m
+    const radius = 0.44 * 1.25; // 0.55m
+    const groundClearance = 0.08; // Sits cleanly above route surface
+    const centerY = height * 0.5 + groundClearance; // 1.205m
+
+    const outerGeom = new THREE.CylinderGeometry(radius, radius, height, 6);
     this.outerMat = new THREE.MeshBasicMaterial({
       color: config.primaryColor,
       wireframe: true,
@@ -58,11 +63,11 @@ export class GhostRunner {
       depthWrite: false
     });
     this.outerMesh = new THREE.Mesh(outerGeom, this.outerMat);
-    this.outerMesh.position.y = 0.9;
+    this.outerMesh.position.y = centerY;
     this.group.add(this.outerMesh);
 
     // Inner glowing core
-    const innerGeom = new THREE.OctahedronGeometry(0.28, 0);
+    const innerGeom = new THREE.OctahedronGeometry(0.28 * 1.25, 0);
     this.innerMat = new THREE.MeshBasicMaterial({
       color: config.emissiveColor,
       transparent: true,
@@ -71,7 +76,7 @@ export class GhostRunner {
       depthWrite: false
     });
     this.innerMesh = new THREE.Mesh(innerGeom, this.innerMat);
-    this.innerMesh.position.y = 0.9;
+    this.innerMesh.position.y = centerY;
     this.group.add(this.innerMesh);
 
     // Trailing momentum ribbon
@@ -164,7 +169,7 @@ export class GhostRunner {
     this.trailLine.visible = this.currentAlpha > 0.02;
 
     // Update trailing ribbon
-    this.updateTrail(current.px, current.py + 0.9, current.pz);
+    this.updateTrail(current.px, current.py + 1.205, current.pz);
   }
 
   private updateTrail(x: number, y: number, z: number): void {

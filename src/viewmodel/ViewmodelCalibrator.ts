@@ -24,9 +24,9 @@ export interface KnifeCalibrationData {
 }
 
 export const DEFAULT_KNIFE_CALIBRATION: KnifeCalibrationData = {
-  position: [0.0105, 0.1101, 0.0009],
-  rotationDeg: [172.8, 25.6, 13.0],
-  rotationRad: [3.0159, 0.4466, 0.2277],
+  position: [0.0093, 0.1107, 0.0033],
+  rotationDeg: [173.8, 21.4, 12.6],
+  rotationRad: [3.034, 0.3737, 0.2205],
   scale: 1.011
 };
 

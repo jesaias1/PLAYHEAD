@@ -3,6 +3,7 @@
  */
 
 import { formatSpeed } from '../utils/math';
+import { SettingsManager } from '../core/Settings';
 import { SplitResult } from '../replay/GhostManager';
 
 export class Hud {
@@ -14,6 +15,7 @@ export class Hud {
   private progressBarFill: HTMLElement;
   private toastElem: HTMLElement;
   private toastTimeout: number | null = null;
+  private isOvertimeActive = false;
 
   constructor() {
     this.element = document.createElement('div');
@@ -91,8 +93,14 @@ export class Hud {
   private splitBadgeLabelElem: HTMLElement;
   private splitBadgeValElem: HTMLElement;
   private splitTimeout: number | null = null;
+  private surfHintTimeout: number | null = null;
 
   public show(): void {
+    const hideHud = SettingsManager.getInstance().settings.hideHud;
+    if (hideHud) {
+      this.element.classList.add('hidden');
+      return;
+    }
     this.element.classList.remove('hidden');
   }
 
@@ -112,14 +120,46 @@ export class Hud {
     this.splitBadgeElem.classList.add('hidden');
   }
 
+  private sectionTimeout: number | null = null;
+  private currentSectionKey = '';
+
+  public showSectionTitle(text: string, durationMs = 2800): void {
+    if (this.sectionTimeout) {
+      clearTimeout(this.sectionTimeout);
+    }
+    this.sectionElem.textContent = text.toUpperCase();
+    this.sectionElem.classList.add('visible');
+
+    this.sectionTimeout = window.setTimeout(() => {
+      this.sectionElem.classList.remove('visible');
+      this.sectionTimeout = null;
+    }, durationMs);
+  }
+
   public setTrackInfo(title: string, sectionText: string): void {
     this.titleElem.textContent = title.toUpperCase();
-    this.sectionElem.textContent = sectionText.toUpperCase();
+    this.showSectionTitle(sectionText);
   }
 
   public update(speed: number, syncDelta: number, progressRatio: number, sectionTheme?: string, sectionNumber?: number): void {
+    const hideHud = SettingsManager.getInstance().settings.hideHud;
+    if (hideHud) {
+      if (!this.element.classList.contains('hidden')) {
+        this.element.classList.add('hidden');
+      }
+      return;
+    } else {
+      if (this.element.classList.contains('hidden')) {
+        this.element.classList.remove('hidden');
+      }
+    }
+
     if (sectionTheme && sectionNumber !== undefined) {
-      this.sectionElem.textContent = `SECTION ${sectionNumber} // ${sectionTheme}`;
+      const key = `${sectionNumber}_${sectionTheme}`;
+      if (key !== this.currentSectionKey) {
+        this.currentSectionKey = key;
+        this.showSectionTitle(`SECTION ${sectionNumber.toString().padStart(2, '0')} // ${sectionTheme}`);
+      }
     }
     this.speedElem.textContent = formatSpeed(speed);
 
@@ -149,18 +189,64 @@ export class Hud {
     this.progressBarFill.style.width = `${pct.toFixed(1)}%`;
   }
 
-  public updateSurfPrompt(isSurfing: boolean, surfSide: 'LEFT' | 'RIGHT' | 'NONE'): void {
-    if (isSurfing && (surfSide === 'LEFT' || surfSide === 'RIGHT')) {
-      const key = surfSide === 'LEFT' ? 'A' : 'D';
-      this.surfKeyElem.textContent = key;
-      this.surfTextElem.textContent = `HOLD [${key}] TO SURF`;
-      this.surfIndicatorElem.classList.remove('hidden');
-    } else {
+  public showSurfTutorialHint(durationMs = 3000): void {
+    const showHints = SettingsManager.getInstance().settings.showHints;
+    if (!showHints) return;
+
+    if (this.surfHintTimeout) {
+      clearTimeout(this.surfHintTimeout);
+    }
+    this.surfKeyElem.textContent = 'A / D';
+    this.surfTextElem.textContent = 'HOLD [A] OR [D] INTO RAMP TO SURF';
+    this.surfIndicatorElem.classList.remove('hidden');
+
+    this.surfHintTimeout = window.setTimeout(() => {
       this.surfIndicatorElem.classList.add('hidden');
+      this.surfHintTimeout = null;
+    }, durationMs);
+  }
+
+  public hideSurfTutorialHint(): void {
+    if (this.surfHintTimeout) {
+      clearTimeout(this.surfHintTimeout);
+      this.surfHintTimeout = null;
+    }
+    this.surfIndicatorElem.classList.add('hidden');
+  }
+
+  public updateSurfPrompt(_isSurfing: boolean, _surfSide: 'LEFT' | 'RIGHT' | 'NONE'): void {
+    // Deprecated in favor of post-fall tutorial hint
+  }
+
+  public setOvertimeStatus(isOvertime: boolean, overtimeSeconds = 0): void {
+    if (isOvertime) {
+      if (!this.isOvertimeActive) {
+        this.isOvertimeActive = true;
+        this.showToast('SIGNAL LOST // OVERTIME - UNRANKED', 3000);
+      }
+      this.sectionElem.textContent = 'SIGNAL LOST // OVERTIME';
+      this.sectionElem.classList.add('visible');
+      this.syncElem.textContent = `+${overtimeSeconds.toFixed(2)}s OVERTIME`;
+      this.syncElem.className = 'hud-sync-val overtime';
+    } else {
+      this.isOvertimeActive = false;
     }
   }
 
   public showToast(msg: string, durationMs = 2000): void {
+    const callouts = SettingsManager.getInstance().settings.terminalCallouts || 'MINIMAL';
+    if (callouts === 'OFF') return;
+    if (callouts === 'MINIMAL') {
+      const upper = msg.toUpperCase();
+      const isEssential = upper.includes('CHECKPOINT') ||
+                          upper.includes('SIGNAL LOST') ||
+                          upper.includes('OVERTIME') ||
+                          upper.includes('PB GHOST') ||
+                          upper.includes('BLACKSTAR') ||
+                          upper.includes('RESTORE');
+      if (!isEssential) return;
+    }
+
     if (this.toastTimeout) {
       clearTimeout(this.toastTimeout);
     }
@@ -175,6 +261,8 @@ export class Hud {
   }
 
   public showOnboardingCue(msg: string, durationMs = 3800): void {
+    const showHints = SettingsManager.getInstance().settings.showHints;
+    if (!showHints) return;
     this.showToast(msg, durationMs);
   }
 

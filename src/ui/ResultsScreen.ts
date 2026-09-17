@@ -1,5 +1,6 @@
 /**
- * Results screen showing run metrics, rank, and local personal bests
+ * Results screen showing run metrics, typographic rank, and personal bests
+ * "Editorial Graphic Design": Staged quick reveal over the completed world.
  */
 
 import { RunResults } from '../player/PlayerStats';
@@ -8,7 +9,10 @@ import { seedToHex } from '../utils/hash';
 
 export class ResultsScreen {
   public element: HTMLElement;
+  private trackTitleElem: HTMLElement;
   private rankElem: HTMLElement;
+  private rankSubElem: HTMLElement;
+
   private timeElem: HTMLElement;
   private targetElem: HTMLElement;
   private syncElem: HTMLElement;
@@ -17,6 +21,10 @@ export class ResultsScreen {
   private strafeEffElem: HTMLElement;
   private fallsElem: HTMLElement;
   private scoreElem: HTMLElement;
+  private rivalElem: HTMLElement;
+
+  private statsGrid: HTMLElement;
+  private actionsRow: HTMLElement;
 
   private replayBtn: HTMLButtonElement;
   private againBtn: HTMLButtonElement;
@@ -26,23 +34,31 @@ export class ResultsScreen {
   private onAgainCallback?: () => void;
   private onNewTrackCallback?: () => void;
 
+  private revealTimeouts: number[] = [];
+
   constructor() {
     this.element = document.createElement('div');
     this.element.className = 'screen results-screen hidden';
     this.element.innerHTML = `
       <div class="results-container">
-        <div class="results-header">
-          <h2 class="results-title">TRACK COMPLETE</h2>
-          <div class="rank-badge" id="res-rank">GOLD</div>
+        <div class="results-header" id="res-header">
+          <div class="results-title-group">
+            <h1 class="results-title">RUN COMPLETE</h1>
+            <div class="results-track-title" id="res-track-title">PLAYHEAD TRACK</div>
+          </div>
+          <div class="rank-group" id="res-rank-group">
+            <div class="rank-badge" id="res-rank">GOLD</div>
+            <div class="rank-tier-sub" id="res-rank-sub">// TIER III ACHIEVED</div>
+          </div>
         </div>
 
-        <div class="results-grid">
+        <div class="results-grid" id="res-grid">
           <div class="stat-card">
-            <div class="stat-label">TIME</div>
+            <div class="stat-label">COMPLETION TIME</div>
             <div class="stat-value" id="res-time">00:00.000</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">TARGET</div>
+            <div class="stat-label">TARGET TIME</div>
             <div class="stat-value" id="res-target">00:00.000</div>
           </div>
           <div class="stat-card">
@@ -62,7 +78,7 @@ export class ResultsScreen {
             <div class="stat-value" id="res-strafe">0%</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">FALLS</div>
+            <div class="stat-label">FALL COUNT</div>
             <div class="stat-value" id="res-falls">0</div>
           </div>
           <div class="stat-card">
@@ -73,21 +89,20 @@ export class ResultsScreen {
             <div class="stat-label">VS THE ECHO</div>
             <div class="stat-value" id="res-rival">—</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">GHOST RACING</div>
-            <div class="stat-value" id="res-ghost-status">RECORDED</div>
-          </div>
         </div>
 
-        <div class="results-actions">
-          <button class="primary" id="btn-res-replay">REPLAY RUN</button>
-          <button class="secondary" id="btn-res-again">RUN AGAIN</button>
-          <button class="secondary" id="btn-res-new">NEW TRACK</button>
+        <div class="results-actions" id="res-actions">
+          <button class="btn-hero" id="btn-res-again">RUN AGAIN</button>
+          <button class="btn-preview" id="btn-res-replay">REPLAY RUN</button>
+          <button class="btn-preview" id="btn-res-new">NEW TRACK</button>
         </div>
       </div>
     `;
 
+    this.trackTitleElem = this.element.querySelector('#res-track-title') as HTMLElement;
     this.rankElem = this.element.querySelector('#res-rank') as HTMLElement;
+    this.rankSubElem = this.element.querySelector('#res-rank-sub') as HTMLElement;
+
     this.timeElem = this.element.querySelector('#res-time') as HTMLElement;
     this.targetElem = this.element.querySelector('#res-target') as HTMLElement;
     this.syncElem = this.element.querySelector('#res-sync') as HTMLElement;
@@ -97,17 +112,16 @@ export class ResultsScreen {
     this.fallsElem = this.element.querySelector('#res-falls') as HTMLElement;
     this.scoreElem = this.element.querySelector('#res-score') as HTMLElement;
     this.rivalElem = this.element.querySelector('#res-rival') as HTMLElement;
-    this.ghostStatusElem = this.element.querySelector('#res-ghost-status') as HTMLElement;
 
-    this.replayBtn = this.element.querySelector('#btn-res-replay') as HTMLButtonElement;
+    this.statsGrid = this.element.querySelector('#res-grid') as HTMLElement;
+    this.actionsRow = this.element.querySelector('#res-actions') as HTMLElement;
+
     this.againBtn = this.element.querySelector('#btn-res-again') as HTMLButtonElement;
+    this.replayBtn = this.element.querySelector('#btn-res-replay') as HTMLButtonElement;
     this.newTrackBtn = this.element.querySelector('#btn-res-new') as HTMLButtonElement;
 
     this.initEvents();
   }
-
-  private rivalElem: HTMLElement;
-  private ghostStatusElem: HTMLElement;
 
   public setCallbacks(callbacks: {
     onReplay: () => void;
@@ -122,14 +136,52 @@ export class ResultsScreen {
   public showResults(
     results: RunResults,
     seed: number,
-    ghostInfo?: { rivalDelta?: number; isNewPB?: boolean }
+    ghostInfo?: { rivalDelta?: number; isNewPB?: boolean },
+    trackTitle = 'PLAYHEAD TRACK',
+    overtimeInfo?: { isOvertime: boolean; overtimeDuration: number }
   ): void {
-    this.rankElem.textContent = results.rank;
+    this.clearTimeouts();
+
+    this.trackTitleElem.textContent = trackTitle.toUpperCase();
+
+    // Format Typographic Rank & Overtime State
+    if (overtimeInfo?.isOvertime) {
+      this.rankElem.textContent = 'UNRANKED';
+      this.rankElem.className = 'rank-badge rank-unranked';
+      this.rankSubElem.textContent = '// TRACK SIGNAL EXPIRED // OVERTIME';
+      this.syncElem.textContent = `OVERTIME +${overtimeInfo.overtimeDuration.toFixed(2)}s`;
+      this.syncElem.style.color = '#f59e0b';
+    } else {
+      const rank = results.rank.toUpperCase();
+      this.rankElem.textContent = rank;
+      this.rankElem.className = `rank-badge rank-${rank.toLowerCase()}`;
+
+      switch (rank) {
+        case 'DIAMOND':
+          this.rankSubElem.textContent = '// TIER IV · OPTIMAL TRAVERSAL';
+          break;
+        case 'GOLD':
+          this.rankSubElem.textContent = '// TIER III · HIGH VELOCITY';
+          break;
+        case 'SILVER':
+          this.rankSubElem.textContent = '// TIER II · SOUND EXECUTION';
+          break;
+        case 'BRONZE':
+        default:
+          this.rankSubElem.textContent = '// TIER I · COURSE COMPLETED';
+          break;
+      }
+
+      const sign = results.syncDelta >= 0 ? '+' : '-';
+      this.syncElem.textContent = `${sign}${Math.abs(results.syncDelta).toFixed(2)}s`;
+      this.syncElem.style.color = '';
+
+      // Save Personal Best on valid ranked runs
+      this.savePersonalBest(seed, results);
+    }
+
     this.timeElem.textContent = formatTime(results.completionTime);
     this.targetElem.textContent = formatTime(results.targetTime);
-
-    const sign = results.syncDelta >= 0 ? '+' : '-';
-    this.syncElem.textContent = `${sign}${Math.abs(results.syncDelta).toFixed(2)}s`;
 
     this.maxSpeedElem.textContent = `${formatSpeed(results.maxSpeed)} u/s`;
     this.avgSpeedElem.textContent = `${formatSpeed(results.averageSpeed)} u/s`;
@@ -147,23 +199,44 @@ export class ResultsScreen {
       this.rivalElem.style.color = 'var(--text-primary)';
     }
 
-    if (ghostInfo?.isNewPB) {
-      this.ghostStatusElem.textContent = 'NEW PB GHOST';
-      this.ghostStatusElem.style.color = '#00f0ff';
-    } else {
-      this.ghostStatusElem.textContent = 'SYNCED';
-      this.ghostStatusElem.style.color = 'var(--text-secondary)';
-    }
-
-    // Check & Save Personal Best
-    this.savePersonalBest(seed, results);
-
+    // Staged Quick Reveal Sequence (Total ~700ms)
     this.element.classList.remove('hidden');
-    this.replayBtn.focus();
+
+    const rankGroup = this.element.querySelector('#res-rank-group') as HTMLElement;
+    rankGroup.style.opacity = '0';
+    this.statsGrid.style.opacity = '0';
+    this.actionsRow.style.opacity = '0';
+
+    // Step 1 (180ms): Stats grid slides in
+    this.revealTimeouts.push(window.setTimeout(() => {
+      this.statsGrid.style.transition = 'opacity var(--motion-normal)';
+      this.statsGrid.style.opacity = '1';
+    }, 180));
+
+    // Step 2 (440ms): Typographic rank reveals
+    this.revealTimeouts.push(window.setTimeout(() => {
+      rankGroup.style.transition = 'opacity var(--motion-normal)';
+      rankGroup.style.opacity = '1';
+    }, 440));
+
+    // Step 3 (660ms): Actions row appears and focuses
+    this.revealTimeouts.push(window.setTimeout(() => {
+      this.actionsRow.style.transition = 'opacity var(--motion-normal)';
+      this.actionsRow.style.opacity = '1';
+      this.againBtn.focus();
+    }, 660));
   }
 
   public hide(): void {
+    this.clearTimeouts();
     this.element.classList.add('hidden');
+  }
+
+  private clearTimeouts(): void {
+    for (const t of this.revealTimeouts) {
+      clearTimeout(t);
+    }
+    this.revealTimeouts = [];
   }
 
   private savePersonalBest(seed: number, results: RunResults): void {
@@ -184,8 +257,8 @@ export class ResultsScreen {
   }
 
   private initEvents(): void {
-    this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.againBtn.addEventListener('click', () => this.onAgainCallback?.());
+    this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.newTrackBtn.addEventListener('click', () => this.onNewTrackCallback?.());
   }
 }

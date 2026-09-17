@@ -1,11 +1,12 @@
 /**
- * Procedural Sky & Horizon Shader for PLAYHEAD
- * Monumental Audio Brutalism: Infinite architectural signal-space with sub-bass horizon glow,
- * drifting haze bands, and drop atmospheric expansion.
+ * Procedural Sky & Horizon Shader for PLAYHEAD SIGNAL RENDER
+ * "Cosmic Pixel Brutalism" skybox with ordered dithered atmospheric bands,
+ * clustered spatial starfields, tiered star classes, and sub-bass horizon breathing.
  */
 
 import * as THREE from 'three';
 import { MusicVisualState } from './MusicVisualController';
+import { TrackPalette } from '../audio/TrackPalettes';
 
 const SKY_VERTEX_SHADER = `
 varying vec3 vWorldPosition;
@@ -46,67 +47,130 @@ float hash31(vec3 p) {
   return fract((p.x + p.y) * p.z);
 }
 
-// Multi-tier procedural starfield (dim distant field + crisp mid stars + hero stars)
-float starfield(vec3 dir, float time, float high, float dropImpact, float starVis) {
-  if (dir.y < 0.02 || starVis <= 0.01) return 0.0;
+// 4x4 Bayer matrix for dithered atmospheric transitions
+float bayer4x4(vec2 p) {
+  vec2 coord = floor(mod(p, 4.0));
+  int x = int(coord.x);
+  int y = int(coord.y);
+  int index = y * 4 + x;
 
-  // Elevation fade (fade near horizon into haze)
-  float elevationFade = smoothstep(0.02, 0.25, dir.y);
+  if (index == 0) return 0.0 / 16.0;
+  if (index == 1) return 8.0 / 16.0;
+  if (index == 2) return 2.0 / 16.0;
+  if (index == 3) return 10.0 / 16.0;
+  if (index == 4) return 12.0 / 16.0;
+  if (index == 5) return 4.0 / 16.0;
+  if (index == 6) return 14.0 / 16.0;
+  if (index == 7) return 6.0 / 16.0;
+  if (index == 8) return 3.0 / 16.0;
+  if (index == 9) return 11.0 / 16.0;
+  if (index == 10) return 1.0 / 16.0;
+  if (index == 11) return 9.0 / 16.0;
+  if (index == 12) return 15.0 / 16.0;
+  if (index == 13) return 7.0 / 16.0;
+  if (index == 14) return 13.0 / 16.0;
+  return 5.0 / 16.0;
+}
 
-  // 1. Far dim stars (dense, subtle background carpet)
-  vec3 gridFar = floor(dir * 280.0);
-  float hFar = hash31(gridFar);
-  float farStars = (hFar > 0.975) ? (1.0 - smoothstep(0.0, 0.0030, length(dir - (gridFar + 0.5) / 280.0))) * 0.45 : 0.0;
+// Multi-tier procedural starfield with spatial clustering and 4 star classes
+vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float starVis, vec3 secColor, vec3 hiColor) {
+  if (dir.y < 0.015 || starVis <= 0.01) return vec3(0.0);
 
-  // 2. Mid stars (crisper, twinkling with highs)
-  vec3 gridMid = floor(dir * 180.0);
-  float hMid = hash31(gridMid);
-  float midTwinkle = sin(time * 2.2 + hMid * 6.28) * 0.3 + 0.7;
-  midTwinkle += high * 0.4 * sin(time * 6.0 + hMid * 10.0);
-  float midStars = (hMid > 0.988) ? (1.0 - smoothstep(0.0, 0.0035, length(dir - (gridMid + 0.5) / 180.0))) * midTwinkle * 0.8 : 0.0;
+  // Spatial variation: Clustered sky regions vs open cosmic void pockets
+  vec3 clusterGrid = floor(dir * 18.0);
+  float clusterDensity = pow(hash31(clusterGrid), 2.2); // Concentrates stars in clusters
+  if (clusterDensity < 0.15) return vec3(0.0); // Quiet void pockets
 
-  // 3. Hero stars (sparse bright anchor beacons)
-  vec3 gridHero = floor(dir * 95.0);
+  float elevationFade = smoothstep(0.015, 0.22, dir.y);
+
+  // 1. Pixel Dust (tiny dim 1px background carpet)
+  vec3 gridDust = floor(dir * 320.0);
+  float hDust = hash31(gridDust);
+  float dust = (hDust > 0.972) ? (1.0 - smoothstep(0.0, 0.0028, length(dir - (gridDust + 0.5) / 320.0))) * 0.4 : 0.0;
+
+  // 2. Bright Stars (twinkling points)
+  vec3 gridBright = floor(dir * 190.0);
+  float hBright = hash31(gridBright);
+  float twinkle = sin(time * 2.5 + hBright * 6.28) * 0.3 + 0.7;
+  twinkle += high * 0.5 * sin(time * 7.0 + hBright * 11.0);
+  float bright = (hBright > 0.989) ? (1.0 - smoothstep(0.0, 0.0036, length(dir - (gridBright + 0.5) / 190.0))) * twinkle * 0.9 : 0.0;
+
+  // 3. Color Stars (subtle palette secondary stars)
+  vec3 gridColor = floor(dir * 140.0);
+  float hColor = hash31(gridColor);
+  float colorStar = (hColor > 0.992) ? (1.0 - smoothstep(0.0, 0.0042, length(dir - (gridColor + 0.5) / 140.0))) * 1.1 : 0.0;
+
+  // 4. Hero Stars (rare cross beacons with music-reactive transient flares)
+  vec3 gridHero = floor(dir * 85.0);
   float hHero = hash31(gridHero);
-  float heroTwinkle = sin(time * 1.5 + hHero * 6.28) * 0.2 + 0.8;
-  heroTwinkle += high * 0.6 * sin(time * 9.0 + hHero * 14.0);
-  float heroStars = (hHero > 0.994) ? (1.0 - smoothstep(0.0, 0.0042, length(dir - (gridHero + 0.5) / 95.0))) * heroTwinkle * 1.6 : 0.0;
+  float hero = 0.0;
+  vec3 heroGlowCol = vec3(0.0);
+  if (hHero > 0.995) {
+    vec3 dHero = dir - (gridHero + 0.5) / 85.0;
+    float dist = length(dHero);
 
-  float totalStars = (farStars + midStars + heroStars) * elevationFade * (1.0 + dropImpact * 0.8) * starVis;
-  return totalStars;
+    // Transient reactivity: flare on high transients & drop impacts
+    float transientEnergy = dropImpact * 2.6 + high * 1.4;
+    float heroTwinkle = sin(time * 1.5 + hHero * 6.28) * 0.25 + 0.75;
+    float dynamicRadius = 0.0048 + clamp(transientEnergy * 0.0035, 0.0, 0.008);
+
+    // Core beacon
+    float core = (1.0 - smoothstep(0.0, dynamicRadius, dist)) * (1.6 + transientEnergy * 3.2);
+
+    // Diffraction cross flare spikes (visibly reacts to transients)
+    float flareLen = 0.015 + transientEnergy * 0.024;
+    float flareWidth = 0.0010;
+    float crossSpike = max(
+      max(1.0 - abs(dHero.x) / flareWidth, 0.0) * max(1.0 - abs(dHero.y) / flareLen, 0.0),
+      max(1.0 - abs(dHero.y) / flareWidth, 0.0) * max(1.0 - abs(dHero.x) / flareLen, 0.0)
+    );
+    float diagonalSpike = max(
+      max(1.0 - abs(dHero.x + dHero.y) * 0.7071 / flareWidth, 0.0) * max(1.0 - abs(dHero.x - dHero.y) * 0.7071 / (flareLen * 0.6), 0.0),
+      max(1.0 - abs(dHero.x - dHero.y) * 0.7071 / flareWidth, 0.0) * max(1.0 - abs(dHero.x + dHero.y) * 0.7071 / (flareLen * 0.6), 0.0)
+    ) * 0.45;
+
+    float flare = (crossSpike + diagonalSpike) * (0.35 + transientEnergy * 2.8);
+    hero = (core + flare) * heroTwinkle;
+    heroGlowCol = mix(vec3(1.0), hiColor, 0.35);
+  }
+
+  vec3 col = vec3(0.0);
+  col += vec3(0.85, 0.92, 1.0) * dust;
+  col += hiColor * bright;
+  col += secColor * colorStar;
+  col += heroGlowCol * hero;
+
+  return col * elevationFade * (1.0 + dropImpact * 0.4) * starVis * clusterDensity;
 }
 
 void main() {
   vec3 dir = normalize(vWorldPosition);
   float elevation = dir.y; // -1 to 1
 
-  // 1. Base Monumental Void: Dark basalt void at zenith, deep blue-black near ground
+  // 1. Base Monumental Void: Rich deep palette-based void at zenith
   float zenithGradient = smoothstep(-0.25, 0.85, elevation);
-  vec3 baseVoid = mix(uVoidColor * 1.15, uVoidColor * 0.28, zenithGradient);
+  vec3 baseVoid = mix(uVoidColor * 1.15, uVoidColor * 0.25, zenithGradient);
 
-  // 2. Sub-Bass Horizon Glow: Low concentrated electrical horizon swell
-  float horizonFactor = 1.0 - smoothstep(0.0, 0.16 + uDropImpact * 0.12, abs(elevation));
-  float bassPressure = (uSubBass * 0.85 + uBass * 0.35 + uSectionIntensity * 0.25) * uReactivity;
-  vec3 horizonGlow = uHorizonColor * horizonFactor * (0.32 + bassPressure * 1.25 + uDropImpact * 1.8);
+  // 2. Sub-Bass Horizon Glow with Ordered Dither
+  float horizonFactor = 1.0 - smoothstep(0.0, 0.18 + uDropImpact * 0.12, abs(elevation));
+  float bassPressure = (uSubBass * 0.9 + uBass * 0.4 + uSectionIntensity * 0.25) * uReactivity;
+
+  // Screen-space dither coordinate for atmospheric fog fade
+  float dither = (bayer4x4(gl_FragCoord.xy) - 0.5) * 0.08;
+  float steppedHorizon = clamp(horizonFactor + dither, 0.0, 1.0);
+
+  vec3 horizonGlow = uHorizonColor * steppedHorizon * (0.35 + bassPressure * 1.3 + uDropImpact * 1.8);
 
   // 3. Drifting Mid Atmospheric Haze Bands
-  float hazeBand1 = sin(elevation * 26.0 + uTime * 0.18) * 0.5 + 0.5;
-  float hazeBand2 = cos(elevation * 15.0 - uTime * 0.10) * 0.5 + 0.5;
-  float hazeFactor = (hazeBand1 * 0.6 + hazeBand2 * 0.4) * smoothstep(0.32, 0.0, abs(elevation)) * (0.10 + uLowMid * 0.28 * uReactivity);
+  float hazeBand = sin(elevation * 24.0 + uTime * 0.15) * 0.5 + 0.5;
+  float hazeFactor = hazeBand * smoothstep(0.30, 0.0, abs(elevation)) * (0.12 + uLowMid * 0.3 * uReactivity);
   vec3 haze = uHazeColor * hazeFactor;
 
-  // 4. Distant High-Frequency Signal Beacons: Sharp vertical column accents
-  float azimuth = atan(dir.z, dir.x);
-  float beaconCols = pow(sin(azimuth * 12.0) * 0.5 + 0.5, 24.0);
-  float beaconFactor = beaconCols * smoothstep(0.0, 0.22, elevation) * smoothstep(0.38, 0.08, elevation) * (uHigh * 0.65 + uDropImpact * 0.9) * uReactivity;
-  vec3 beacons = uHighlightColor * beaconFactor;
+  // 4. Clustered Multi-Tier Starfield
+  vec3 stars = renderStarfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility, uSecondaryColor, uHighlightColor);
 
-  // 5. Multi-Tier Starfield modulated by SongDirector
-  float stars = starfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility);
-  vec3 starColor = mix(uHighlightColor, vec3(0.92, 0.95, 1.0), 0.7) * stars * (0.9 + uHigh * 0.5);
-
-  // 6. Coordinated Composition
-  vec3 finalColor = baseVoid + horizonGlow + haze + beacons + starColor;
+  // 5. Compose Final Atmospheric Color
+  vec3 finalColor = baseVoid + horizonGlow + haze + stars;
 
   gl_FragColor = vec4(finalColor, 1.0);
 }
@@ -123,10 +187,10 @@ export class ProceduralSky {
       vertexShader: SKY_VERTEX_SHADER,
       fragmentShader: SKY_FRAGMENT_SHADER,
       uniforms: {
-        uVoidColor: { value: new THREE.Color(0x04060a) },
-        uHorizonColor: { value: new THREE.Color(0x101b2b) },
-        uSecondaryColor: { value: new THREE.Color(0x00a8ff) },
-        uHighlightColor: { value: new THREE.Color(0xafffff) },
+        uVoidColor: { value: new THREE.Color(0x040814) },
+        uHorizonColor: { value: new THREE.Color(0x0c1836) },
+        uSecondaryColor: { value: new THREE.Color(0xa78bfa) },
+        uHighlightColor: { value: new THREE.Color(0xf8fafc) },
         uHazeColor: { value: new THREE.Color(0x091018) },
         uTime: { value: 0.0 },
         uBass: { value: 0.0 },
@@ -140,27 +204,27 @@ export class ProceduralSky {
         uStarVisibility: { value: 0.5 }
       },
       side: THREE.BackSide,
-      depthWrite: false,
-      fog: false
+      depthWrite: false
     });
 
     this.mesh = new THREE.Mesh(geometry, this.material);
-    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = -1000;
     scene.add(this.mesh);
   }
 
-  public update(visualState: MusicVisualState, cameraPos: THREE.Vector3, starVisibility = 0.5): void {
-    // Follow camera position so sky remains at infinite apparent distance
-    this.mesh.position.copy(cameraPos);
+  public setPalette(palette: TrackPalette): void {
+    this.material.uniforms.uVoidColor.value.copy(palette.void);
+    this.material.uniforms.uHorizonColor.value.copy(palette.bassTint || palette.secondary);
+    this.material.uniforms.uSecondaryColor.value.copy(palette.secondary);
+    this.material.uniforms.uHighlightColor.value.copy(palette.highlight || palette.primary);
+    this.material.uniforms.uHazeColor.value.copy(palette.fogColor || palette.void);
+  }
 
-    // Update uniforms
+  public update(visualState: MusicVisualState, playerPos?: THREE.Vector3, starVisibilityMod = 1.0): void {
+    if (playerPos) {
+      this.mesh.position.copy(playerPos);
+    }
     const u = this.material.uniforms;
-    u.uVoidColor.value.copy(visualState.palette.void);
-    u.uHorizonColor.value.copy(visualState.activeHorizonColor);
-    u.uSecondaryColor.value.copy(visualState.palette.secondary);
-    u.uHighlightColor.value.copy(visualState.palette.highlight);
-    u.uHazeColor.value.copy(visualState.activeHazeColor);
-
     u.uTime.value = visualState.time;
     u.uBass.value = visualState.bass;
     u.uSubBass.value = visualState.subBass;
@@ -170,13 +234,24 @@ export class ProceduralSky {
     u.uBuildup.value = visualState.buildup;
     u.uSectionIntensity.value = visualState.sectionIntensity;
     u.uReactivity.value = visualState.reactivityMultiplier;
-    u.uStarVisibility.value = starVisibility;
+
+    let baseStarVis = 0.45;
+    if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {
+      baseStarVis = 1.0;
+    } else if (visualState.sectionTheme === 'BUILDUP') {
+      baseStarVis = 0.2;
+    } else if (visualState.sectionTheme === 'BREATH') {
+      baseStarVis = 0.7;
+    }
+
+    u.uStarVisibility.value = baseStarVis * starVisibilityMod;
+  }
+
+  public setCenter(pos: THREE.Vector3): void {
+    this.mesh.position.copy(pos);
   }
 
   public dispose(): void {
-    if (this.mesh.parent) {
-      this.mesh.parent.remove(this.mesh);
-    }
     this.mesh.geometry.dispose();
     this.material.dispose();
   }

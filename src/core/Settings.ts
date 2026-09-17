@@ -4,6 +4,8 @@
 
 export type GhostMode = 'ALL' | 'PB_ONLY' | 'RIVAL_ONLY' | 'OFF';
 export type ViewmodelMode = 'FULL' | 'MINIMAL' | 'OFF';
+export type ViewmodelAccent = 'ADAPTIVE' | 'DEFAULT_CYAN' | 'OFF';
+export type TerminalCallouts = 'FULL' | 'MINIMAL' | 'OFF';
 
 export interface GameSettings {
   mouseSensitivity: number;
@@ -12,11 +14,15 @@ export interface GameSettings {
   reduceMotion: boolean;
   holdToBhop: boolean;
   showDebug: boolean;
-  visualQuality: 'HIGH' | 'PERFORMANCE';
+  visualQuality: 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE';
   ghostMode: GhostMode;
   viewmodelMode: ViewmodelMode;
+  viewmodelAccent: ViewmodelAccent;
+  terminalCallouts: TerminalCallouts;
+  hideHud: boolean;
   viewmodelFov: number;
   viewmodelSway: number;
+  showHints: boolean;
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -26,11 +32,15 @@ const DEFAULT_SETTINGS: GameSettings = {
   reduceMotion: false,
   holdToBhop: true,
   showDebug: false,
-  visualQuality: 'HIGH',
+  visualQuality: 'SIGNAL',
   ghostMode: 'ALL',
   viewmodelMode: 'FULL',
+  viewmodelAccent: 'ADAPTIVE',
+  terminalCallouts: 'MINIMAL',
+  hideHud: false,
   viewmodelFov: 65,
-  viewmodelSway: 1.0
+  viewmodelSway: 1.0,
+  showHints: true
 };
 
 const STORAGE_KEY = 'trackrun_settings';

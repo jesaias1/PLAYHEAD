@@ -58,6 +58,10 @@ export interface RouteNode {
   surfNormal?: Vector3Like;    // Normal vector for surf plane
   isBoost: boolean;
   boostSpeed?: number;
+  isOptional?: boolean;
+  isLaunchVariant?: boolean;
+  exitWidth?: number;
+  isRecoveryShelf?: boolean;
 }
 
 export interface CheckpointDefinition {
@@ -79,6 +83,8 @@ export interface FinishDefinition {
 export interface GeneratedTrack {
   seed: number;
   route: RouteNode[];
+  optionalRamps?: RouteNode[];
+  recoveryShelves?: RouteNode[];
   checkpoints: CheckpointDefinition[];
   finish: FinishDefinition;
   totalDistance: number;

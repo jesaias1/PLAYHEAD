@@ -2,11 +2,13 @@
  * ViewmodelAssetLoader
  * Loads and prepares real licensed artist-made assets for the first-person viewmodel:
  * 1. PSX First Person Arms (Drillimpact, CC0) with hand-painted glove textures
- * 2. Low-Poly Karambit (alixor22, CC-BY 4.0) with PBR materials and track emissive channel
+ * 2. Low-Poly Karambit (alixor22, CC-BY 4.0) with PBR materials and cosmic shader integration
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { KarambitCosmicMaterial } from './KarambitCosmicShader';
+import { KarambitSkinSystem } from './KarambitSkinSystem';
 
 export interface ViewmodelRigInstance {
   rootGroup: THREE.Group;
@@ -18,6 +20,8 @@ export interface ViewmodelRigInstance {
   knifeIdleAction: THREE.AnimationAction | null;
   knifeDrawAction: THREE.AnimationAction | null;
   knifeMaterials: THREE.Material[];
+  cosmicMaterial: KarambitCosmicMaterial | null;
+  applySkin: (skinId: string) => void;
   accentColor: THREE.Color;
   setAccentColor: (col: THREE.Color) => void;
   dispose: () => void;
@@ -74,8 +78,10 @@ export class ViewmodelAssetLoader {
           if (mesh.material) {
             const mat = new THREE.MeshStandardMaterial({
               map: gloveTexture,
-              roughness: 0.55,
-              metalness: 0.25
+              roughness: 0.62,
+              metalness: 0.18,
+              emissive: new THREE.Color(0x080c16), // Subtle ambient road bounce
+              emissiveIntensity: 0.35
             });
             mesh.material = mat;
           }
@@ -111,9 +117,11 @@ export class ViewmodelAssetLoader {
     // Shift knife local origin so the handle sits precisely inside the right hand palm tunnel
     knifeScene.position.set(0.0, 0.025, 0.065);
 
-    // Apply PLAYHEAD dark titanium / charcoal aesthetic and emissive channel
+    // Apply Karambit Cosmic Shader & Tactical Titanium handle
+    let cosmicMaterial: KarambitCosmicMaterial | null = null;
     const knifeMaterials: THREE.Material[] = [];
-    const activeAccent = accentColor.clone();
+    const canonicalCyan = new THREE.Color(0x00f0ff);
+    const activeAccent = canonicalCyan.clone();
 
     knifeScene.traverse((obj: THREE.Object3D) => {
       if ((obj as THREE.Mesh).isMesh) {
@@ -122,19 +130,17 @@ export class ViewmodelAssetLoader {
         mesh.receiveShadow = false;
         if (mesh.material) {
           const origMat = mesh.material as THREE.MeshStandardMaterial;
-          const stylizedMat = new THREE.MeshStandardMaterial({
-            map: origMat.map || null,
-            normalMap: origMat.normalMap || null,
-            metalnessMap: origMat.metalnessMap || null,
-            roughnessMap: origMat.roughnessMap || null,
-            color: new THREE.Color(0x3a4250),
-            roughness: 0.22,
-            metalness: 0.88,
-            emissive: activeAccent,
-            emissiveIntensity: 0.35
-          });
-          mesh.material = stylizedMat;
-          knifeMaterials.push(stylizedMat);
+
+          cosmicMaterial = new KarambitCosmicMaterial();
+          cosmicMaterial.uniforms.tDiffuse.value = origMat.map || null;
+          cosmicMaterial.uniforms.tNormal.value = origMat.normalMap || null;
+          cosmicMaterial.uniforms.tMetallicRoughness.value = origMat.metalnessMap || origMat.roughnessMap || null;
+
+          // Initialize with currently equipped skin from KarambitSkinSystem
+          KarambitSkinSystem.getInstance().applyToMaterial(cosmicMaterial);
+
+          mesh.material = cosmicMaterial;
+          knifeMaterials.push(cosmicMaterial);
         }
       }
     });
@@ -146,8 +152,8 @@ export class ViewmodelAssetLoader {
 
     // Calibrated socket transform:
     // Palm wraps securely around handle grooves, retention ring rests against heel of palm, blade curls forward/left
-    knifeGroup.position.set(0.0105, 0.1101, 0.0009);
-    knifeGroup.rotation.set(3.0159, 0.4466, 0.2277);
+    knifeGroup.position.set(0.0093, 0.1107, 0.0033);
+    knifeGroup.rotation.set(3.034, 0.3737, 0.2205);
     knifeGroup.scale.set(1.011, 1.011, 1.011);
 
     // Animation Mixer Setup
@@ -178,13 +184,22 @@ export class ViewmodelAssetLoader {
 
     rootGroup.add(armsScene);
 
+    const applySkin = (skinId: string) => {
+      if (cosmicMaterial) {
+        KarambitSkinSystem.getInstance().applyToMaterial(cosmicMaterial, skinId);
+      }
+    };
+
     const setAccentColor = (col: THREE.Color) => {
-      activeAccent.copy(col);
-      knifeMaterials.forEach((m) => {
-        if ((m as THREE.MeshStandardMaterial).emissive) {
-          (m as THREE.MeshStandardMaterial).emissive.copy(col);
+      // Preserve canonical CYAN identity, subtly blending 15% of track accent into the emissive rim
+      const blendedCyan = new THREE.Color(0x00f0ff).lerp(col, 0.15);
+      activeAccent.copy(blendedCyan);
+      if (cosmicMaterial) {
+        const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
+        if (equipped.profile.isCanonical) {
+          cosmicMaterial.uniforms.uRimColor.value.copy(blendedCyan);
         }
-      });
+      }
     };
 
     const dispose = () => {
@@ -213,6 +228,8 @@ export class ViewmodelAssetLoader {
       knifeIdleAction,
       knifeDrawAction,
       knifeMaterials,
+      cosmicMaterial,
+      applySkin,
       accentColor: activeAccent,
       setAccentColor,
       dispose
@@ -239,11 +256,8 @@ export class ViewmodelAssetLoader {
     handRBone.add(knifeGroup);
     rootGroup.add(armsScene);
 
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x334455,
-      emissive: accentColor,
-      emissiveIntensity: 0.5
-    });
+    const cosmicMat = new KarambitCosmicMaterial();
+    KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat);
 
     return {
       rootGroup,
@@ -254,13 +268,17 @@ export class ViewmodelAssetLoader {
       mixer: null,
       knifeIdleAction: null,
       knifeDrawAction: null,
-      knifeMaterials: [mat],
+      knifeMaterials: [cosmicMat],
+      cosmicMaterial: cosmicMat,
+      applySkin: (skinId: string) => {
+        KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat, skinId);
+      },
       accentColor: accentColor.clone(),
       setAccentColor: (col: THREE.Color) => {
-        mat.emissive.copy(col);
+        cosmicMat.uniforms.uRimColor.value.copy(col);
       },
       dispose: () => {
-        mat.dispose();
+        cosmicMat.dispose();
       }
     };
   }

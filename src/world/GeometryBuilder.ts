@@ -1,12 +1,19 @@
 /**
- * Procedural Geometry Builder for Monumental Audio Brutalism
- * Constructs Three.js meshes, materials, and accent elements for the course
+ * Procedural Geometry Builder for PLAYHEAD SIGNAL RENDER
+ * "Cosmic Pixel Brutalism" architectural world builder.
+ *
+ * Constructs Three.js meshes, materials, and accent elements using
+ * BrutalistShapeLibrary, PixelTextureGenerator, and PixelArtLibrary.
  */
 
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
+import { PixelTextureGenerator } from './PixelTextureGenerator';
+import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
+import { PixelArtLibrary } from './PixelArtLibrary';
+import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 
 export interface RouteEdgeItem {
   mesh: THREE.LineSegments;
@@ -16,6 +23,7 @@ export interface RouteEdgeItem {
 
 export interface BuiltWorldAssets {
   rootGroup: THREE.Group;
+  decorativeGroup: THREE.Group;
   reactiveMaterials: THREE.MeshStandardMaterial[];
   edgeLines: THREE.LineSegments[];
   routeEdgeItems: RouteEdgeItem[];
@@ -28,111 +36,170 @@ export class GeometryBuilder {
     paletteOrAccent: TrackPalette | VisualAccent
   ): BuiltWorldAssets {
     const rootGroup = new THREE.Group();
+    const decorativeGroup = new THREE.Group();
+    decorativeGroup.name = 'BuiltWorldDecorativeGroup';
+    rootGroup.add(decorativeGroup);
     const reactiveMaterials: THREE.MeshStandardMaterial[] = [];
     const edgeLines: THREE.LineSegments[] = [];
     const routeEdgeItems: RouteEdgeItem[] = [];
 
-    // Shared Materials
+    // Authoritative Route Exclusion Corridor (including any optional skill lines and recovery shelves)
+    const allRouteNodes = [
+      ...track.route,
+      ...(track.optionalRamps || []),
+      ...(track.recoveryShelves || [])
+    ];
+    const corridor = new RouteExclusionCorridor(allRouteNodes);
+
+    // Shared Palette Colors
     const isPalette = 'primary' in paletteOrAccent;
-    const accentColor = isPalette
-      ? paletteOrAccent.primary
-      : new THREE.Color(paletteOrAccent.hex);
-    const surfaceColor = isPalette
-      ? paletteOrAccent.surface
-      : new THREE.Color(0x1a202c);
-    const voidColor = isPalette
-      ? paletteOrAccent.void
-      : new THREE.Color(0x090a0d);
+    const primaryCol = isPalette ? paletteOrAccent.primary : new THREE.Color(paletteOrAccent.hex);
+    const secondaryCol = isPalette ? paletteOrAccent.secondary : primaryCol.clone().offsetHSL(0.1, 0, 0);
+    const surfaceCol = isPalette ? paletteOrAccent.surface : new THREE.Color(0x0e141f);
+    const voidCol = isPalette ? paletteOrAccent.void : new THREE.Color(0x04060a);
 
-    // 0. Procedural Textures for Brutalist Surface Detail
-    const concreteTex = createProceduralConcreteTexture();
-    const surfTex = createProceduralSurfTexture();
+    const primaryHex = isPalette ? paletteOrAccent.primaryHex : paletteOrAccent.hex;
+    const secondaryHex = isPalette ? paletteOrAccent.secondaryHex : primaryHex;
 
-    // 1. Route Platform Material (Heavy cast brutalist concrete with micro-roughness)
+    // 0. Authored NearestFilter Pixel Textures
+    const concreteTex = PixelTextureGenerator.getDarkConcreteTexture();
+    const basaltTex = PixelTextureGenerator.getBlackBasaltTexture();
+    const surfTex = PixelTextureGenerator.getSurfSignalTexture(primaryHex);
+
+    // 1. Route Platform Material (Brutalist Cast Concrete with Pixel Aggregate)
     const platformMaterial = new THREE.MeshStandardMaterial({
-      color: surfaceColor,
-      roughness: 0.88,
+      color: surfaceCol,
+      roughness: 0.72,
       metalness: 0.12,
-      roughnessMap: concreteTex,
+      emissive: new THREE.Color(0x060910),
+      map: concreteTex,
       bumpMap: concreteTex,
-      bumpScale: 0.035
+      bumpScale: 0.04
     });
 
-    // 2. Surf Material (Polished dark metallic slate with directional glide sheen)
+    // 2. Surf Material (Directional Glide Chevrons + Edge Guide Rails)
     const surfMaterial = new THREE.MeshStandardMaterial({
-      color: 0x18202b,
-      emissive: isPalette ? paletteOrAccent.primary : new THREE.Color(0x00f0ff),
-      emissiveIntensity: 0.14,
-      roughness: 0.28,
-      metalness: 0.72,
-      roughnessMap: surfTex,
+      color: 0x141c2b,
+      emissive: primaryCol,
+      emissiveIntensity: 0.28,
+      roughness: 0.22,
+      metalness: 0.78,
+      map: surfTex,
       bumpMap: surfTex,
-      bumpScale: 0.02
+      bumpScale: 0.03
     });
     reactiveMaterials.push(surfMaterial);
 
     // 3. Audio-Reactive Accent Edge Material
     const accentMaterial = new THREE.MeshStandardMaterial({
-      color: 0x050608,
-      emissive: accentColor,
-      emissiveIntensity: 0.55,
-      roughness: 0.35,
-      metalness: 0.75
+      color: 0x05060a,
+      emissive: primaryCol,
+      emissiveIntensity: 0.75,
+      roughness: 0.25,
+      metalness: 0.85
     });
     reactiveMaterials.push(accentMaterial);
 
-    // 4. Checkpoint Emissive Material
+    // 4. Checkpoint Material
     const checkpointMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0a0c10,
-      emissive: accentColor,
-      emissiveIntensity: 1.5,
+      color: 0x080c14,
+      emissive: secondaryCol,
+      emissiveIntensity: 1.6,
       transparent: true,
-      opacity: 0.82,
-      roughness: 0.18
+      opacity: 0.88,
+      roughness: 0.15
     });
     reactiveMaterials.push(checkpointMaterial);
 
-    // 5. Finish Gate Material (Bright pristine monumental monolith)
+    // 5. Finish Gate Material
     const finishMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: accentColor,
-      emissiveIntensity: 1.9,
-      roughness: 0.12,
-      metalness: 0.88
+      color: 0xf8fafc,
+      emissive: primaryCol,
+      emissiveIntensity: 2.1,
+      roughness: 0.1,
+      metalness: 0.9
     });
     reactiveMaterials.push(finishMaterial);
 
-    // 6. Background Monument Material (Ultra-dark towering monolithic slabs)
+    // 6. Background Monumental Basalt Material
     const backgroundMonolithMaterial = new THREE.MeshStandardMaterial({
-      color: voidColor,
-      roughness: 0.94,
-      metalness: 0.1,
-      roughnessMap: concreteTex,
-      bumpMap: concreteTex,
-      bumpScale: 0.05
+      color: voidCol,
+      roughness: 0.92,
+      metalness: 0.12,
+      map: basaltTex,
+      bumpMap: basaltTex,
+      bumpScale: 0.06
+    });
+
+    // 7. Architectural Mural Material
+    const muralTex = PixelArtLibrary.getMuralTexture(primaryHex, secondaryHex);
+    const muralMaterial = new THREE.MeshBasicMaterial({
+      map: muralTex,
+      side: THREE.DoubleSide
     });
 
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
       const node = track.route[i];
 
-      // Platform Mesh
-      const geom = new THREE.BoxGeometry(node.dimensions.x, node.dimensions.y, node.dimensions.z);
-      const mat = node.isSurf ? surfMaterial : (node.type === RouteNodeType.FINISH ? finishMaterial : platformMaterial);
+      // Primary Platform Mesh (Strictly preserves node dimensions, handles flared trapezoids for STEP_UP)
+      let geom: THREE.BufferGeometry;
+      if (node.exitWidth && node.exitWidth > node.dimensions.x) {
+        geom = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
+        const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
+        const entryW = node.dimensions.x;
+        const exitW = node.exitWidth;
+        const h = node.dimensions.y;
+        const l = node.dimensions.z;
+        for (let v = 0; v < posAttr.count; v++) {
+          const zNorm = posAttr.getZ(v);
+          const xNorm = posAttr.getX(v);
+          const yNorm = posAttr.getY(v);
+          const width = zNorm > 0 ? exitW : entryW;
+          posAttr.setXYZ(v, xNorm * width, yNorm * h, zNorm * l);
+        }
+        geom.computeVertexNormals();
+        geom.computeBoundingBox();
+        geom.computeBoundingSphere();
+      } else {
+        geom = new THREE.BoxGeometry(node.dimensions.x, node.dimensions.y, node.dimensions.z);
+      }
+
+      // Surf face readability: top (+Y) gets glowing chevrons, bottom/sides get dark basalt
+      const surfMultiMat = [
+        accentMaterial,
+        accentMaterial,
+        surfMaterial,
+        backgroundMonolithMaterial,
+        accentMaterial,
+        accentMaterial
+      ];
+      const mat = node.isSurf
+        ? surfMultiMat
+        : (node.type === RouteNodeType.FINISH ? finishMaterial : platformMaterial);
       const mesh = new THREE.Mesh(geom, mat);
 
       mesh.position.set(node.position.x, node.position.y, node.position.z);
       mesh.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
       rootGroup.add(mesh);
 
+      // Descending Monolithic Foundation Pillars plunging into the deep void (320m - 540m)
+      if (!node.isSurf && node.type !== RouteNodeType.FINISH && i % 6 === 0) {
+        const pylonHeight = 320.0 + ((i * 31) % 220.0);
+        const pylonWidth = Math.min(3.4, node.dimensions.x * 0.45);
+        const pylonGeom = new THREE.BoxGeometry(pylonWidth, pylonHeight, pylonWidth * 1.2);
+        const pylonMesh = new THREE.Mesh(pylonGeom, backgroundMonolithMaterial);
+        pylonMesh.position.set(node.position.x, node.position.y - pylonHeight * 0.5 - node.dimensions.y * 1.5, node.position.z);
+        pylonMesh.rotation.set(0, node.yaw, 0);
+        rootGroup.add(pylonMesh);
+      }
+
       // Add Emissive Edge Trim on lateral sides
       const edgesGeom = new THREE.EdgesGeometry(geom);
       const lineMat = new THREE.LineBasicMaterial({
-        color: node.isSurf
-          ? (isPalette ? paletteOrAccent.secondary : accentColor)
-          : accentColor,
+        color: node.isSurf ? secondaryCol : primaryCol,
         transparent: true,
-        opacity: node.isSurf ? 0.95 : (node.isBoost ? 1.0 : 0.85)
+        opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.85)
       });
       const edges = new THREE.LineSegments(edgesGeom, lineMat);
       edges.position.copy(mesh.position);
@@ -147,25 +214,88 @@ export class GeometryBuilder {
 
       // Checkpoint Arch Gateway
       if (node.type === RouteNodeType.CHECKPOINT) {
-        const arch = createCheckpointArch(node, checkpointMaterial);
+        const arch = createSteppedCheckpointArch(node, checkpointMaterial, secondaryCol);
         rootGroup.add(arch);
       }
 
       // Finish Portal Monument
       if (node.type === RouteNodeType.FINISH) {
-        const finishPortal = createFinishPortal(node, finishMaterial, accentColor);
+        const finishPortal = createFinishMonument(node, finishMaterial, primaryCol, secondaryCol);
         rootGroup.add(finishPortal);
       }
 
-      // Procedural Background Brutalist Pylons (Every 4-5 nodes)
+      // Procedural Brutalist Landmarks framing the route (added to decorativeGroup for validation)
       if (i % 4 === 0 && node.type !== RouteNodeType.FINISH) {
-        const pylon = createBrutalistPylon(node, backgroundMonolithMaterial);
-        rootGroup.add(pylon);
+        const side = (i % 8 === 0 ? 1 : -1);
+        const landmark = createRouteLandmark(node, side, i, backgroundMonolithMaterial, muralMaterial, corridor);
+        if (landmark) decorativeGroup.add(landmark);
+      }
+
+      // Surf Canyon Walls framing surf sections (added to decorativeGroup for validation)
+      if (node.isSurf && i % 2 === 0) {
+        const canyon = createSurfFlank(node, backgroundMonolithMaterial, corridor);
+        if (canyon) decorativeGroup.add(canyon);
+      }
+    }
+
+    // Build Subtle Recovery Catch-Shelves (Subdued safety shelves under tricky sequences)
+    if (track.recoveryShelves) {
+      for (const shelf of track.recoveryShelves) {
+        const geom = new THREE.BoxGeometry(shelf.dimensions.x, shelf.dimensions.y, shelf.dimensions.z);
+        const mesh = new THREE.Mesh(geom, backgroundMonolithMaterial);
+        mesh.position.set(shelf.position.x, shelf.position.y, shelf.position.z);
+        mesh.rotation.set(shelf.pitch, shelf.yaw, shelf.roll, 'YXZ');
+        rootGroup.add(mesh);
+
+        // Subdued dark rim edge
+        const edgesGeom = new THREE.EdgesGeometry(geom);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: 0x1f293d,
+          transparent: true,
+          opacity: 0.6
+        });
+        const edges = new THREE.LineSegments(edgesGeom, lineMat);
+        edges.position.copy(mesh.position);
+        edges.rotation.copy(mesh.rotation);
+        rootGroup.add(edges);
+        edgeLines.push(edges);
+      }
+    }
+
+    // Build Optional Side-Surf Skill Ramps
+    if (track.optionalRamps) {
+      for (const ramp of track.optionalRamps) {
+        const geom = new THREE.BoxGeometry(ramp.dimensions.x, ramp.dimensions.y, ramp.dimensions.z);
+        const rampMultiMat = [
+          accentMaterial,
+          accentMaterial,
+          surfMaterial,
+          backgroundMonolithMaterial,
+          accentMaterial,
+          accentMaterial
+        ];
+        const mesh = new THREE.Mesh(geom, rampMultiMat);
+        mesh.position.set(ramp.position.x, ramp.position.y, ramp.position.z);
+        mesh.rotation.set(ramp.pitch, ramp.yaw, ramp.roll, 'YXZ');
+        rootGroup.add(mesh);
+
+
+        // Emissive edge trim
+        const edgesGeom = new THREE.EdgesGeometry(geom);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: secondaryCol,
+          transparent: true,
+          opacity: 0.98
+        });
+        const edges = new THREE.LineSegments(edgesGeom, lineMat);
+        edges.position.copy(mesh.position);
+        edges.rotation.copy(mesh.rotation);
+        rootGroup.add(edges);
+        edgeLines.push(edges);
       }
     }
 
     const dispose = () => {
-      // Traverse and dispose geometries/materials
       rootGroup.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.geometry.dispose();
@@ -181,230 +311,320 @@ export class GeometryBuilder {
       });
     };
 
-    return { rootGroup, reactiveMaterials, edgeLines, routeEdgeItems, dispose };
+    return { rootGroup, decorativeGroup, reactiveMaterials, edgeLines, routeEdgeItems, dispose };
   }
 }
 
 /**
- * Creates an elegant brutalist arch marking a checkpoint
- * Features stepped plinth footings and clean architectural proportions
+ * Stepped Brutalist Checkpoint Gateway
+ * Massive twin stelae pillars with double lintel crown and glowing signal frame.
  */
-function createCheckpointArch(node: RouteNode, material: THREE.Material): THREE.Group {
-  const archGroup = new THREE.Group();
-  archGroup.position.set(node.position.x, node.position.y, node.position.z);
-  archGroup.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
+function createSteppedCheckpointArch(
+  node: RouteNode,
+  material: THREE.Material,
+  accentColor: THREE.Color
+): THREE.Group {
+  const group = new THREE.Group();
+  group.position.set(node.position.x, node.position.y, node.position.z);
+  group.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
-  const archHeight = 8.5;
-  const pillarWidth = 1.2;
+  const archHeight = 9.5;
+  const pillarWidth = 1.6;
   const halfWidth = node.dimensions.x * 0.5;
 
-  // Stepped Plinth Footings (Left & Right)
-  const plinthGeom = new THREE.BoxGeometry(pillarWidth * 1.6, 0.8, pillarWidth * 1.6);
-  const plinthLeft = new THREE.Mesh(plinthGeom, material);
-  plinthLeft.position.set(-halfWidth + pillarWidth * 0.5, 0.4, 0);
-  archGroup.add(plinthLeft);
+  // Left & Right Stepped Plinths and Descending Support Legs
+  for (const side of [-1, 1]) {
+    const px = side * (halfWidth + pillarWidth * 0.4);
+    // Base Plinth
+    const plinth = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.5, 1.2, pillarWidth * 1.8), material);
+    plinth.position.set(px, 0.6, 0);
+    group.add(plinth);
 
-  const plinthRight = new THREE.Mesh(plinthGeom, material);
-  plinthRight.position.set(halfWidth - pillarWidth * 0.5, 0.4, 0);
-  archGroup.add(plinthRight);
+    // Main Column Stela
+    const stela = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, archHeight, pillarWidth * 1.2), material);
+    stela.position.set(px, archHeight * 0.5, 0);
+    group.add(stela);
 
-  // Left Pillar
-  const pLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, archHeight, pillarWidth), material);
-  pLeft.position.set(-halfWidth + pillarWidth * 0.5, archHeight * 0.5, 0);
-  archGroup.add(pLeft);
+    // Monumental Descending Support Leg (Anchors 125m down into the void)
+    const legDepth = 125.0;
+    const legWidth = pillarWidth * 1.35;
+    const legGeom = new THREE.BoxGeometry(legWidth, legDepth, pillarWidth * 1.5);
+    const leg = new THREE.Mesh(legGeom, material);
+    leg.position.set(px, -legDepth * 0.5, 0);
+    group.add(leg);
 
-  // Right Pillar
-  const pRight = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, archHeight, pillarWidth), material);
-  pRight.position.set(halfWidth - pillarWidth * 0.5, archHeight * 0.5, 0);
-  archGroup.add(pRight);
+    // Foundation collar below road level
+    const collarGeom = new THREE.BoxGeometry(legWidth * 1.3, 4.0, pillarWidth * 1.8);
+    const collar = new THREE.Mesh(collarGeom, material);
+    collar.position.set(px, -2.5, 0);
+    group.add(collar);
+  }
 
-  // Top Beam (Overhanging lintel)
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth, pillarWidth * 1.2, pillarWidth * 1.4), material);
-  beam.position.set(0, archHeight, 0);
-  archGroup.add(beam);
-
-  return archGroup;
-}
-
-/**
- * Monumental final portal structure
- * Multi-tiered brutalist monoliths with vertical accent core
- */
-function createFinishPortal(node: RouteNode, material: THREE.Material, accentColor: THREE.Color): THREE.Group {
-  const portalGroup = new THREE.Group();
-  portalGroup.position.set(node.position.x, node.position.y, node.position.z);
-  portalGroup.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
-
-  const portalHeight = 26.0;
-  const pillarWidth = 3.6;
-  const halfWidth = node.dimensions.x * 0.5;
-
-  // Colossal Twin Tiered Monoliths
-  // Base tier
-  const baseLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.3, portalHeight * 0.4, pillarWidth * 2.4), material);
-  baseLeft.position.set(-halfWidth - pillarWidth * 0.6, portalHeight * 0.2, 0);
-  portalGroup.add(baseLeft);
-
-  const baseRight = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.3, portalHeight * 0.4, pillarWidth * 2.4), material);
-  baseRight.position.set(halfWidth + pillarWidth * 0.6, portalHeight * 0.2, 0);
-  portalGroup.add(baseRight);
-
-  // Main columns
-  const pLeft = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, portalHeight, pillarWidth * 2), material);
-  pLeft.position.set(-halfWidth - pillarWidth * 0.5, portalHeight * 0.5, 0);
-  portalGroup.add(pLeft);
-
-  const pRight = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, portalHeight, pillarWidth * 2), material);
-  pRight.position.set(halfWidth + pillarWidth * 0.5, portalHeight * 0.5, 0);
-  portalGroup.add(pRight);
+  // Transverse Under-Road Monolithic Foundation Beam
+  const strutGeom = new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3.2, 4.0, pillarWidth * 1.6);
+  const strut = new THREE.Mesh(strutGeom, material);
+  strut.position.set(0, -2.5, 0);
+  group.add(strut);
 
   // Overhead Monolithic Double Lintel
-  const lowerLintel = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3.2, pillarWidth * 1.2, pillarWidth * 2.2), material);
-  lowerLintel.position.set(0, portalHeight + pillarWidth * 0.6, 0);
-  portalGroup.add(lowerLintel);
+  const lowerLintel = new THREE.Mesh(
+    new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3.0, pillarWidth * 0.9, pillarWidth * 1.4),
+    material
+  );
+  lowerLintel.position.set(0, archHeight, 0);
+  group.add(lowerLintel);
 
-  const upperLintel = new THREE.Mesh(new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 1.8, pillarWidth * 0.8, pillarWidth * 1.8), material);
-  upperLintel.position.set(0, portalHeight + pillarWidth * 1.6, 0);
-  portalGroup.add(upperLintel);
+  const upperLintel = new THREE.Mesh(
+    new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 1.8, pillarWidth * 0.6, pillarWidth * 1.1),
+    material
+  );
+  upperLintel.position.set(0, archHeight + pillarWidth * 0.8, 0);
+  group.add(upperLintel);
 
-  // Glowing Finish Energy Gateway (Center plane)
-  const gateGeom = new THREE.PlaneGeometry(node.dimensions.x, portalHeight);
-  const gateMat = new THREE.MeshBasicMaterial({
-    color: accentColor,
+  // Glowing Checkpoint Gate Frame
+  const gateBorder = new THREE.Mesh(
+    new THREE.BoxGeometry(node.dimensions.x * 0.95, archHeight * 0.85, 0.2),
+    new THREE.MeshBasicMaterial({
+      color: accentColor,
+      transparent: true,
+      opacity: 0.25,
+      wireframe: true
+    })
+  );
+  gateBorder.position.set(0, archHeight * 0.45, 0);
+  group.add(gateBorder);
+
+  return group;
+}
+
+/**
+ * PLAYHEAD END PLANE / SIGNAL LINE
+ * Distinct architectural finish threshold: an ultra-crisp vertical signal plane
+ * with embedded ground signal line and twin minimalist brutalist stelae.
+ */
+function createFinishMonument(
+  node: RouteNode,
+  material: THREE.Material,
+  primaryColor: THREE.Color,
+  secondaryColor: THREE.Color
+): THREE.Group {
+  const group = new THREE.Group();
+  group.position.set(node.position.x, node.position.y, node.position.z);
+  group.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
+
+  const planeHeight = 24.0;
+  const halfWidth = node.dimensions.x * 0.5;
+  const pylonWidth = 1.8;
+
+  // 1. Twin Minimalist Brutalist Stelae Framing the Signal Line with Descending Monolith Foundation
+  for (const side of [-1, 1]) {
+    const px = side * (halfWidth + pylonWidth * 0.6);
+    const pylonGeom = new THREE.BoxGeometry(pylonWidth, planeHeight * 1.2, pylonWidth * 1.6);
+    const pylon = new THREE.Mesh(pylonGeom, material);
+    pylon.position.set(px, planeHeight * 0.6, 0);
+    group.add(pylon);
+
+    // Glowing vertical edge indicator
+    const edgeGeom = new THREE.BoxGeometry(0.2, planeHeight * 1.15, 0.2);
+    const edgeMat = new THREE.MeshBasicMaterial({ color: primaryColor });
+    const edge = new THREE.Mesh(edgeGeom, edgeMat);
+    edge.position.set(px - side * (pylonWidth * 0.45), planeHeight * 0.6, pylonWidth * 0.7);
+    group.add(edge);
+
+    // Descending Foundation Pylon Leg extending 280m into the void
+    const pylonLegDepth = 280.0;
+    const pylonLegGeom = new THREE.BoxGeometry(pylonWidth * 1.35, pylonLegDepth, pylonWidth * 1.8);
+    const pylonLeg = new THREE.Mesh(pylonLegGeom, material);
+    pylonLeg.position.set(px, -pylonLegDepth * 0.5, 0);
+    group.add(pylonLeg);
+  }
+
+  // Transverse Under-Road Foundation Keel
+  const keelGeom = new THREE.BoxGeometry(node.dimensions.x + pylonWidth * 3.2, 5.0, pylonWidth * 2.2);
+  const keel = new THREE.Mesh(keelGeom, material);
+  keel.position.set(0, -3.0, 0);
+  group.add(keel);
+
+  // 2. Embedded Ground Signal Line
+  const lineGeom = new THREE.BoxGeometry(node.dimensions.x, 0.08, 0.45);
+  const lineMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide
+    opacity: 0.95
+  });
+  const lineMesh = new THREE.Mesh(lineGeom, lineMat);
+  lineMesh.position.set(0, node.dimensions.y * 0.5 + 0.05, 0);
+  group.add(lineMesh);
+
+  // 3. Vertical PLAYHEAD Signal Scan Plane
+  const gateGeom = new THREE.PlaneGeometry(node.dimensions.x, planeHeight);
+  const gateMat = new THREE.MeshBasicMaterial({
+    color: primaryColor,
+    transparent: true,
+    opacity: 0.5,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
   });
   const gateMesh = new THREE.Mesh(gateGeom, gateMat);
-  gateMesh.position.set(0, portalHeight * 0.5, 0);
-  portalGroup.add(gateMesh);
+  gateMesh.position.set(0, planeHeight * 0.5, 0);
+  group.add(gateMesh);
 
-  return portalGroup;
+  // 4. Floating Header Signal Bar
+  const headerGeom = new THREE.BoxGeometry(node.dimensions.x + pylonWidth * 2.0, 0.35, 0.6);
+  const headerMat = new THREE.MeshBasicMaterial({
+    color: secondaryColor,
+    transparent: true,
+    opacity: 0.8
+  });
+  const headerMesh = new THREE.Mesh(headerGeom, headerMat);
+  headerMesh.position.set(0, planeHeight, 0);
+  group.add(headerMesh);
+
+  return group;
 }
 
 /**
- * Distant massive brutalist pylon framing the negative space
- * Stepped monolith with central negative space slot
+ * Route Landmark: Places varied monumental architecture
+ * (Monoliths, Cantilevers, Cathedral Ribs, and Murals) along the outer perimeter,
+ * strictly verified against the RouteExclusionCorridor.
  */
-function createBrutalistPylon(node: RouteNode, material: THREE.Material): THREE.Group {
-  const pylonGroup = new THREE.Group();
-  const side = ((node.id % 2) === 0 ? 1 : -1);
-  const dist = 65.0 + (node.id % 5) * 12.0;
+function createRouteLandmark(
+  node: RouteNode,
+  side: number,
+  index: number,
+  basaltMaterial: THREE.Material,
+  muralMaterial: THREE.Material,
+  corridor: RouteExclusionCorridor
+): THREE.Group | null {
+  const type = index % 4;
 
-  const px = node.position.x + Math.cos(node.yaw) * side * dist;
-  const pz = node.position.z - Math.sin(node.yaw) * side * dist;
-  const py = node.position.y - 20.0;
+  // Scale clearance parameters according to structure type & dimension
+  let radius = 22.0;
+  let minY = -200.0;
+  let maxY = 85.0;
 
-  pylonGroup.position.set(px, py, pz);
-  pylonGroup.rotation.y = node.yaw + (side > 0 ? 0.3 : -0.3);
-
-  const height = 85.0 + (node.id % 4) * 25.0;
-  const width = 10.0 + (node.id % 3) * 4.0;
-  const depth = 14.0;
-
-  // Split monolith with central vertical negative space channel
-  const wingWidth = width * 0.42;
-  const slitOffset = (width - wingWidth) * 0.5;
-
-  const leftWing = new THREE.Mesh(new THREE.BoxGeometry(wingWidth, height, depth), material);
-  leftWing.position.set(-slitOffset, height * 0.5, 0);
-  pylonGroup.add(leftWing);
-
-  const rightWing = new THREE.Mesh(new THREE.BoxGeometry(wingWidth, height, depth), material);
-  rightWing.position.set(slitOffset, height * 0.5, 0);
-  pylonGroup.add(rightWing);
-
-  // Overhead crown cap connecting wings
-  const crown = new THREE.Mesh(new THREE.BoxGeometry(width, height * 0.08, depth * 1.1), material);
-  crown.position.set(0, height * 0.96, 0);
-  pylonGroup.add(crown);
-
-  return pylonGroup;
-}
-
-/**
- * Procedural concrete texture generator
- * Generates subtle formwork aggregate noise and fine striations
- */
-function createProceduralConcreteTexture(): THREE.Texture | null {
-  if (typeof document === 'undefined') return null;
-  try {
-    const size = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    ctx.fillStyle = '#808080';
-    ctx.fillRect(0, 0, size, size);
-
-    const imgData = ctx.getImageData(0, 0, size, size);
-    const data = imgData.data;
-
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const idx = (y * size + x) * 4;
-        const grain = (Math.random() - 0.5) * 28;
-        const formwork = Math.sin(y * 0.08) * 8 + Math.cos(x * 0.03) * 6;
-        const val = Math.max(0, Math.min(255, 128 + grain + formwork));
-        data[idx] = val;
-        data[idx + 1] = val;
-        data[idx + 2] = val;
-        data[idx + 3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(4, 4);
-    return texture;
-  } catch {
-    return null;
+  if (type === 0) {
+    // Colossal Monolith (18m wide, 95m tall)
+    radius = 20.0;
+    maxY = 110.0;
+  } else if (type === 1) {
+    // Massive Cantilever Overhang (aligned parallel to route)
+    radius = 30.0;
+    maxY = 45.0;
+  } else if (type === 2) {
+    // Cathedral Arch Rib
+    radius = 32.0;
+    maxY = 65.0;
+  } else {
+    // Fractured Broken Slab
+    radius = 26.0;
+    maxY = 45.0;
   }
+
+  const baseDist = 88.0 + ((index * 13) % 30);
+  const fwdX = Math.sin(node.yaw);
+  const fwdZ = Math.cos(node.yaw);
+  const rightDir = new THREE.Vector3(fwdZ * side, 0, -fwdX * side);
+  const origin = new THREE.Vector3(node.position.x, node.position.y - 10.0, node.position.z);
+
+  const safePos = corridor.findSafeOffsetPosition(
+    origin,
+    rightDir,
+    baseDist,
+    radius,
+    minY,
+    maxY,
+    8,
+    18.0
+  );
+
+  // If no safe position outside the route exclusion corridor can be found, discard candidate
+  if (!safePos) return null;
+
+  const group = new THREE.Group();
+  group.position.copy(safePos);
+  group.rotation.y = node.yaw + (side > 0 ? 0.2 : -0.2);
+
+  if (type === 0) {
+    // Colossal Monolith with Central Light Slot
+    const monolith = BrutalistShapeLibrary.createMonolith(18.0, 95.0, 18.0, basaltMaterial);
+    group.add(monolith);
+
+    // Architectural Mural attached to front face
+    const mural = new THREE.Mesh(new THREE.PlaneGeometry(16.0, 16.0), muralMaterial);
+    mural.position.set(0, 45.0, 9.2);
+    group.add(mural);
+  } else if (type === 1) {
+    // Massive Cantilever Overhang - rotated parallel to route so it never cuts into road
+    const cantilever = BrutalistShapeLibrary.createCantilever(45.0, 16.0, 10.0, basaltMaterial);
+    cantilever.rotation.y = Math.PI * 0.5;
+    group.add(cantilever);
+  } else if (type === 2) {
+    // Cathedral Arch Rib
+    const rib = BrutalistShapeLibrary.createCathedralRib(48.0, 55.0, 8.0, 3.5, basaltMaterial);
+    group.add(rib);
+  } else {
+    // Fractured Broken Slab
+    const broken = BrutalistShapeLibrary.createBrokenSlab(28.0, 35.0, 20.0, basaltMaterial);
+    group.add(broken);
+  }
+
+  // Deep descending void foundation trunk (grounded 340m-600m into the abyss)
+  const trunkDepth = 340.0 + ((index * 43) % 260.0);
+  const trunkGeom = new THREE.BoxGeometry(20.0, trunkDepth, 20.0);
+  const trunkMesh = new THREE.Mesh(trunkGeom, basaltMaterial);
+  trunkMesh.position.set(0, -trunkDepth * 0.5, 0);
+  group.add(trunkMesh);
+
+  return group;
 }
 
 /**
- * Procedural surf texture generator
- * Generates sleek directional micro-grooves and specular highlights
+ * Surf Flank: Non-colliding towering canyon walls framing safe surf routes.
+ * Grounded deep into the void and verified against the RouteExclusionCorridor.
  */
-function createProceduralSurfTexture(): THREE.Texture | null {
-  if (typeof document === 'undefined') return null;
-  try {
-    const size = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
+function createSurfFlank(
+  node: RouteNode,
+  material: THREE.Material,
+  corridor: RouteExclusionCorridor
+): THREE.Group | null {
+  const side = (node.yaw > 0 ? 1 : -1);
+  const baseDist = 58.0; // Pushed outward for safe lateral surf clearance
+  const radius = 28.0;
+  const minY = -200.0;
+  const maxY = 50.0;
 
-    ctx.fillStyle = '#606060';
-    ctx.fillRect(0, 0, size, size);
+  const fwdX = Math.sin(node.yaw);
+  const fwdZ = Math.cos(node.yaw);
+  const rightDir = new THREE.Vector3(fwdZ * side, 0, -fwdX * side);
+  const origin = new THREE.Vector3(node.position.x, node.position.y - 5.0, node.position.z);
 
-    const imgData = ctx.getImageData(0, 0, size, size);
-    const data = imgData.data;
+  const safePos = corridor.findSafeOffsetPosition(
+    origin,
+    rightDir,
+    baseDist,
+    radius,
+    minY,
+    maxY,
+    6,
+    16.0
+  );
 
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const idx = (y * size + x) * 4;
-        const groove = Math.sin(x * 0.5) * 25 + (Math.random() - 0.5) * 12;
-        const val = Math.max(0, Math.min(255, 96 + groove));
-        data[idx] = val;
-        data[idx + 1] = val;
-        data[idx + 2] = val;
-        data[idx + 3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
+  if (!safePos) return null;
 
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(2, 8);
-    return texture;
-  } catch {
-    return null;
-  }
+  const group = new THREE.Group();
+  group.position.copy(safePos);
+  group.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
+
+  const canyonWall = BrutalistShapeLibrary.createSurfCanyonWall(50.0, 40.0, 6.0, 0.25, material);
+  group.add(canyonWall);
+
+  // Plunging void foundation for canyon wall (grounded 320m into the abyss)
+  const flankDepth = 320.0;
+  const flankLeg = new THREE.Mesh(new THREE.BoxGeometry(48.0, flankDepth, 6.0), material);
+  flankLeg.position.set(0, -flankDepth * 0.5, 0);
+  group.add(flankLeg);
+
+  return group;
 }

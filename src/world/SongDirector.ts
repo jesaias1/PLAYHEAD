@@ -31,24 +31,29 @@ export interface SongDirectorState {
   spectralReactivity: number;
   activeSpectacle: SpectacleEvent | null;
   isSignatureActive: boolean;
+  announcement: string | null;
 }
 
 export class SongDirector {
   public state: SongDirectorState;
   public spectaclePlanner: SpectaclePlanner;
 
-  private smoothIntensity = 0.2;
-  private smoothStarVis = 0.3;
+  private smoothIntensity = 0.25;
+  private smoothStarVis = 0.4;
   private smoothFogNear = 45;
   private smoothFogFar = 380;
   private smoothBloom = 0.4;
   private smoothVignette = 0.35;
 
+  private lastAnnouncedSectionIndex = -1;
+  private lastAnnouncedTheme = '';
+  public onSectionAnnouncement?: (title: string) => void;
+
   constructor() {
     this.spectaclePlanner = new SpectaclePlanner();
     this.state = {
       phase: 'INTRO',
-      dramaticIntensity: 0.2,
+      dramaticIntensity: 0.25,
       starVisibility: 0.3,
       fogNear: 45,
       fogFar: 380,
@@ -56,18 +61,21 @@ export class SongDirector {
       vignetteIntensity: 0.35,
       spectralReactivity: 0.6,
       activeSpectacle: null,
-      isSignatureActive: false
+      isSignatureActive: false,
+      announcement: null
     };
   }
 
   public init(analysis: TrackAnalysis, track: GeneratedTrack): void {
     this.spectaclePlanner.plan(analysis, track);
-    this.smoothIntensity = 0.15;
-    this.smoothStarVis = 0.2;
-    this.smoothFogNear = 35;
-    this.smoothFogFar = 320;
+    this.smoothIntensity = 0.2;
+    this.smoothStarVis = 0.25;
+    this.smoothFogNear = 40;
+    this.smoothFogFar = 340;
     this.smoothBloom = 0.35;
     this.smoothVignette = 0.35;
+    this.lastAnnouncedSectionIndex = -1;
+    this.lastAnnouncedTheme = '';
   }
 
   public update(
@@ -84,108 +92,180 @@ export class SongDirector {
     // 2. Determine Experience Phase
     const currentPhase = this.determinePhase(songTime, visualState, nearestNode);
 
+    // Check for Section / Theme changes to trigger temporary HUD title
+    let pendingAnnouncement: string | null = null;
+    if (
+      visualState.sectionIndex !== this.lastAnnouncedSectionIndex ||
+      visualState.sectionTheme !== this.lastAnnouncedTheme
+    ) {
+      this.lastAnnouncedSectionIndex = visualState.sectionIndex;
+      this.lastAnnouncedTheme = visualState.sectionTheme;
+
+      const secNum = visualState.sectionIndex + 1;
+      const theme = visualState.sectionTheme;
+
+      if (theme === 'DROP') {
+        const mins = Math.floor(songTime / 60).toString().padStart(2, '0');
+        const secs = Math.floor(songTime % 60).toString().padStart(2, '0');
+        pendingAnnouncement = `${mins}:${secs} // THE DROP`;
+      } else if (theme === 'BREATH' || theme === 'BREAKDOWN') {
+        pendingAnnouncement = `SECTION ${secNum.toString().padStart(2, '0')} // BREATH`;
+      } else if (nearestNode && nearestNode.isSurf) {
+        pendingAnnouncement = `SECTION ${secNum.toString().padStart(2, '0')} // SURF CANYON`;
+      } else {
+        pendingAnnouncement = `SECTION ${secNum.toString().padStart(2, '0')} // ${theme}`;
+      }
+
+      this.onSectionAnnouncement?.(pendingAnnouncement);
+    }
+
     // 3. Compute Target Dramatic Intensity & Art Profiles based on Phase
-    let targetIntensity = 0.25;
-    let targetStarVis = 0.4;
+    // Calibrated ranges:
+    // Quiet: ~0.15 - 0.35
+    // Normal: ~0.35 - 0.55
+    // Energetic: ~0.55 - 0.75
+    // Major: ~0.75 - 0.90
+    // Signature: 1.0
+    let targetIntensity = 0.4;
+    let targetStarVis = 0.45;
     let targetFogNear = 45;
-    let targetFogFar = 380;
+    let targetFogFar = 400;
     let targetBloom = 0.45;
     let targetVignette = 0.35;
-    let spectralReactivity = 0.7;
+    let spectralReactivity = 0.75;
 
     switch (currentPhase) {
       case 'INTRO':
-        targetIntensity = 0.15 + visualState.energy * 0.1;
-        targetStarVis = 0.25; // Subtle emergence
+        // Quiet range: 0.15 - 0.30
+        targetIntensity = 0.20 + visualState.energy * 0.10;
+        targetStarVis = 0.30;
         targetFogNear = 35;
-        targetFogFar = 300;   // Restrained horizon
+        targetFogFar = 320;
         targetBloom = 0.35;
         targetVignette = 0.4;
-        spectralReactivity = 0.5; // Restrained
+        spectralReactivity = 0.55;
         break;
 
       case 'TRAVEL':
-        targetIntensity = 0.35 + visualState.energy * 0.25;
-        targetStarVis = 0.5;
+        // Normal range: 0.35 - 0.55
+        targetIntensity = 0.38 + visualState.energy * 0.16;
+        targetStarVis = 0.55;
         targetFogNear = 45;
-        targetFogFar = 400;
+        targetFogFar = 420;
         targetBloom = 0.45;
         targetVignette = 0.35;
         spectralReactivity = 0.75;
         break;
 
       case 'BUILDUP':
-        targetIntensity = 0.65 + visualState.buildup * 0.35;
-        targetStarVis = 0.2; // Dims as tension builds
-        targetFogNear = 25;  // Fog closes in
-        targetFogFar = 220;
-        targetBloom = 0.55 + visualState.buildup * 0.25;
+        // Energetic range: 0.55 - 0.75
+        targetIntensity = 0.55 + visualState.buildup * 0.20;
+        targetStarVis = 0.25; // Dims as tension builds
+        targetFogNear = 28;   // Fog draws closer
+        targetFogFar = 240;
+        targetBloom = 0.60;
         targetVignette = 0.45;
         spectralReactivity = 1.0;
+
+        // Intentional Pre-Drop Tension Dip: in the final breath of buildup, drop intensity sharply
+        if (visualState.buildup > 0.82) {
+          targetIntensity = 0.22; // Contrast dip
+          targetStarVis = 0.15;
+          targetFogFar = 190;
+        }
         break;
 
       case 'DROP':
-        targetIntensity = 0.95 + visualState.dropImpact * 0.05;
-        targetStarVis = 1.0; // Starfield ignition
-        targetFogNear = 65;  // Horizon opens wide
-        targetFogFar = 520;
-        targetBloom = 0.75 + visualState.dropImpact * 0.25;
-        targetVignette = 0.3;
+        // Major range: 0.78 - 0.92
+        targetIntensity = 0.82 + visualState.dropImpact * 0.10;
+        targetStarVis = 0.95;
+        targetFogNear = 65;
+        targetFogFar = 540;   // World bursts open
+        targetBloom = 0.75 + visualState.dropImpact * 0.20;
+        targetVignette = 0.30;
         spectralReactivity = 1.35;
         break;
 
       case 'SURF':
-        targetIntensity = 0.85 + visualState.energy * 0.15;
-        targetStarVis = 0.8;
+        // Major range: 0.75 - 0.88
+        targetIntensity = 0.78 + visualState.energy * 0.10;
+        targetStarVis = 0.85;
         targetFogNear = 55;
-        targetFogFar = 460;
+        targetFogFar = 480;
         targetBloom = 0.65;
-        targetVignette = 0.4; // Speed focus
-        spectralReactivity = 1.2;
+        targetVignette = 0.40;
+        spectralReactivity = 1.25;
         break;
 
       case 'BREAKDOWN':
-        targetIntensity = 0.15 + visualState.energy * 0.1;
-        targetStarVis = 0.3;
-        targetFogNear = 40;
-        targetFogFar = 340;
-        targetBloom = 0.3;
+        // Quiet range: 0.18 - 0.32
+        targetIntensity = 0.20 + visualState.energy * 0.08;
+        targetStarVis = 0.35;
+        targetFogNear = 42;
+        targetFogFar = 360;
+        targetBloom = 0.30;
         targetVignette = 0.35;
-        spectralReactivity = 0.4; // Quiet breathing room
+        spectralReactivity = 0.45;
         break;
 
       case 'CLIMAX':
-        targetIntensity = 1.0;
+        // Peak intensity: 0.90 - 1.0
+        targetIntensity = 0.95;
         targetStarVis = 1.0;
-        targetFogNear = 70;
-        targetFogFar = 550;
+        targetFogNear = 75;
+        targetFogFar = 580;
         targetBloom = 0.85;
-        targetVignette = 0.35;
-        spectralReactivity = 1.4;
+        targetVignette = 0.32;
+        spectralReactivity = 1.45;
         break;
 
       case 'OUTRO':
-        targetIntensity = 0.2;
-        targetStarVis = 0.7; // Stars remain in quiet resolution
-        targetFogNear = 50;
+        // Resolution: 0.20 - 0.30
+        targetIntensity = 0.22;
+        targetStarVis = 0.70; // Calmed stars remain
+        targetFogNear = 48;
         targetFogFar = 420;
         targetBloom = 0.35;
         targetVignette = 0.35;
-        spectralReactivity = 0.5;
+        spectralReactivity = 0.50;
         break;
     }
 
-    // Spectacle event overrides
+    // 4. Spectacle Event Overrides & Signature Moment
     if (activeSpectacle) {
-      if (activeSpectacle.type === 'VOID_REVEAL') {
-        targetFogFar = Math.max(targetFogFar, 580);
-      } else if (activeSpectacle.type === 'STARFIELD_BLOOM') {
+      if (isSignatureActive) {
+        targetIntensity = 1.0; // Peak signature moment
+        targetBloom = Math.max(targetBloom, 0.95);
         targetStarVis = 1.0;
-        targetBloom = Math.max(targetBloom, 0.8);
-      } else if (activeSpectacle.type === 'WORLD_POWER_DOWN') {
-        targetIntensity = 0.05;
-        targetBloom = 0.15;
-        targetStarVis = 0.1;
+      }
+
+      switch (activeSpectacle.type) {
+        case 'VOID_REVEAL':
+          targetFogFar = Math.max(targetFogFar, 640);
+          targetStarVis = 1.0;
+          break;
+        case 'STARFIELD_BLOOM':
+          targetStarVis = 1.0;
+          targetBloom = Math.max(targetBloom, 0.85);
+          break;
+        case 'WORLD_POWER_DOWN':
+          targetIntensity = 0.12;
+          targetBloom = 0.20;
+          targetStarVis = 0.15;
+          targetFogNear = 25;
+          targetFogFar = 220;
+          break;
+        case 'MONOLITH_SPLIT':
+          targetFogNear = Math.max(targetFogNear, 60);
+          targetFogFar = Math.max(targetFogFar, 500);
+          break;
+        case 'SURF_CANYON_RELEASE':
+          targetIntensity = Math.max(targetIntensity, 0.85);
+          targetVignette = 0.45;
+          break;
+        case 'CATHEDRAL_IGNITION':
+          targetBloom = Math.max(targetBloom, 0.70);
+          break;
       }
     }
 
@@ -208,7 +288,8 @@ export class SongDirector {
       vignetteIntensity: this.smoothVignette,
       spectralReactivity,
       activeSpectacle,
-      isSignatureActive
+      isSignatureActive,
+      announcement: pendingAnnouncement
     };
 
     return this.state;
@@ -219,12 +300,10 @@ export class SongDirector {
     visualState: MusicVisualState,
     nearestNode?: RouteNode
   ): ExperiencePhase {
-    // If player is surfing, SURF phase takes priority
     if (nearestNode && nearestNode.isSurf) {
       return 'SURF';
     }
 
-    // Song section theme mapping
     const theme = visualState.sectionTheme;
     const progress = visualState.progress;
 
@@ -235,8 +314,7 @@ export class SongDirector {
       return 'OUTRO';
     }
     if (theme === 'DROP' || visualState.dropImpact > 0.3) {
-      // If late in the song, this drop could be the CLIMAX
-      if (progress > 0.7) {
+      if (progress > 0.68) {
         return 'CLIMAX';
       }
       return 'DROP';
@@ -244,7 +322,7 @@ export class SongDirector {
     if (theme === 'BUILDUP' || visualState.buildup > 0.35) {
       return 'BUILDUP';
     }
-    if (theme === 'BREATH' || (theme === 'VERSE' && visualState.energy < 0.3)) {
+    if (theme === 'BREATH' || (theme === 'VERSE' && visualState.energy < 0.32)) {
       return 'BREAKDOWN';
     }
 

@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState } from './MusicVisualController';
+import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 
 export class SpectralArchitecture {
   public group: THREE.Group;
@@ -65,48 +66,72 @@ export class SpectralArchitecture {
     // ==========================================
     // 1. WAVEFORM CANYON (Left & Right Flanks)
     // ==========================================
-    const canyonCount = Math.min(route.length, 160);
+    const allCorridorNodes = track.optionalRamps ? [...track.route, ...track.optionalRamps] : track.route;
+    const corridor = new RouteExclusionCorridor(allCorridorNodes);
+
+    let minWorldY = 0;
+    for (const n of allCorridorNodes) {
+      if (n.position.y < minWorldY) minWorldY = n.position.y;
+    }
+    const globalAbyssBottom = minWorldY - 260.0;
+
+    const canyonCount = Math.min(route.length, 120);
     const canyonStep = Math.max(1, Math.floor(route.length / canyonCount));
-    const wallGeom = new THREE.BoxGeometry(6.0, 1.0, 12.0);
+    const wallGeom = new THREE.BoxGeometry(7.0, 1.0, 14.0);
 
     this.canyonWallsLeft = new THREE.InstancedMesh(wallGeom, this.canyonMaterial, canyonCount);
     this.canyonWallsRight = new THREE.InstancedMesh(wallGeom, this.canyonMaterial, canyonCount);
 
     const dummy = new THREE.Object3D();
-    const lateralOffset = 68.0; // Clear of gameplay route
-    let instIdx = 0;
+    const lateralOffset = 90.0; // Pushed far outward to prevent any gameplay corridor intersection
+    let leftCount = 0;
+    let rightCount = 0;
 
-    for (let i = 0; i < route.length && instIdx < canyonCount; i += canyonStep) {
+    for (let i = 0; i < route.length && (leftCount < canyonCount || rightCount < canyonCount); i += canyonStep) {
       const node = route[i];
       const timeRatio = Math.min(1, Math.max(0, node.time / analysis.duration));
       const waveIdx = Math.floor(timeRatio * (analysis.waveform.length - 1));
       const amp = analysis.waveform[waveIdx] || 0.25;
 
-      const wallHeight = Math.max(8.0, amp * 55.0);
+      const wallHeightAbove = Math.max(12.0, amp * 60.0);
+      const topY = node.position.y + wallHeightAbove;
+      const totalWallHeight = topY - globalAbyssBottom;
+      const centerY = globalAbyssBottom + totalWallHeight * 0.5;
+
       const rightX = Math.cos(node.yaw);
       const rightZ = -Math.sin(node.yaw);
 
-      // Left Wall
-      const lx = node.position.x - rightX * lateralOffset;
-      const lz = node.position.z - rightZ * lateralOffset;
-      dummy.position.set(lx, node.position.y + wallHeight * 0.5 - 5.0, lz);
-      dummy.scale.set(1.0, wallHeight, 1.0);
-      dummy.rotation.set(0, node.yaw, 0);
-      dummy.updateMatrix();
-      this.canyonWallsLeft.setMatrixAt(instIdx, dummy.matrix);
+      // Left Wall (Plunging into the deep abyss)
+      if (leftCount < canyonCount) {
+        const lx = node.position.x - rightX * lateralOffset;
+        const lz = node.position.z - rightZ * lateralOffset;
+        dummy.position.set(lx, centerY, lz);
+        dummy.scale.set(1.0, totalWallHeight, 1.0);
+        dummy.rotation.set(0, node.yaw, 0);
+        dummy.updateMatrix();
 
-      // Right Wall
-      const rx = node.position.x + rightX * lateralOffset;
-      const rz = node.position.z + rightZ * lateralOffset;
-      dummy.position.set(rx, node.position.y + wallHeight * 0.5 - 5.0, rz);
-      dummy.scale.set(1.0, wallHeight, 1.0);
-      dummy.rotation.set(0, node.yaw, 0);
-      dummy.updateMatrix();
-      this.canyonWallsRight.setMatrixAt(instIdx, dummy.matrix);
+        if (!corridor.isPointInsideCorridor(dummy.position, 12.0, globalAbyssBottom, topY)) {
+          this.canyonWallsLeft.setMatrixAt(leftCount++, dummy.matrix);
+        }
+      }
 
-      instIdx++;
+      // Right Wall (Plunging into the deep abyss)
+      if (rightCount < canyonCount) {
+        const rx = node.position.x + rightX * lateralOffset;
+        const rz = node.position.z + rightZ * lateralOffset;
+        dummy.position.set(rx, centerY, rz);
+        dummy.scale.set(1.0, totalWallHeight, 1.0);
+        dummy.rotation.set(0, node.yaw, 0);
+        dummy.updateMatrix();
+
+        if (!corridor.isPointInsideCorridor(dummy.position, 12.0, globalAbyssBottom, topY)) {
+          this.canyonWallsRight.setMatrixAt(rightCount++, dummy.matrix);
+        }
+      }
     }
 
+    this.canyonWallsLeft.count = leftCount;
+    this.canyonWallsRight.count = rightCount;
     this.canyonWallsLeft.instanceMatrix.needsUpdate = true;
     this.canyonWallsRight.instanceMatrix.needsUpdate = true;
     this.group.add(this.canyonWallsLeft);
@@ -114,9 +139,9 @@ export class SpectralArchitecture {
 
     // ==========================================
     // 2. OVERHEAD SPECTRAL CANOPY FINS
-    // High overhead (y > 22m above player)
+    // High overhead (y > 32m above player to guarantee clearance)
     // ==========================================
-    const finCount = Math.min(route.length, 90);
+    const finCount = Math.min(route.length, 80);
     const finStep = Math.max(1, Math.floor(route.length / finCount));
     const finGeom = new THREE.BoxGeometry(28.0, 1.2, 3.5);
 
@@ -129,7 +154,7 @@ export class SpectralArchitecture {
       const frameIdx = Math.floor(timeRatio * (analysis.frames.length - 1));
       const frame = analysis.frames[frameIdx] || { mid: 0.3, high: 0.3 };
 
-      const finHeight = 22.0 + frame.high * 16.0;
+      const finHeight = 32.0 + frame.high * 16.0;
       dummy.position.set(node.position.x, node.position.y + finHeight, node.position.z);
       dummy.scale.set(1.0, 1.0, 1.0);
       dummy.rotation.set(0, node.yaw + Math.PI * 0.5, 0);
@@ -143,16 +168,15 @@ export class SpectralArchitecture {
 
     // ==========================================
     // 3. ONSET GATES & RHYTHM FRAMES
-    // Generated at strong musical onsets
+    // Generated at strong musical onsets with wide portal span
     // ==========================================
     this.group.add(this.onsetFrames);
     const onsets = analysis.onsets.filter(o => o.strength > 0.65);
-    const maxGates = Math.min(35, onsets.length);
+    const maxGates = Math.min(30, onsets.length);
     const gateStep = Math.max(1, Math.floor(onsets.length / maxGates));
 
     for (let i = 0; i < onsets.length && this.frameMaterials.length < maxGates; i += gateStep) {
       const onset = onsets[i];
-      // Find nearest route node
       const targetTime = onset.time;
       let nearestNode = route[0];
       let minDist = 999999;
@@ -164,12 +188,28 @@ export class SpectralArchitecture {
         }
       }
 
-      // Create an architectural monumental portal arch
+      // Wide portal span ensuring zero platform or surf lane collision
+      const halfSpan = Math.max(20.0, (nearestNode.dimensions.x * 0.5) + 14.0);
+
+      // Verify portal clearance
+      const fwd = new THREE.Vector3(Math.sin(nearestNode.yaw), 0, Math.cos(nearestNode.yaw));
+      const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+      const nodePos = new THREE.Vector3(nearestNode.position.x, nearestNode.position.y, nearestNode.position.z);
+      const leftColPos = nodePos.clone().addScaledVector(right, -halfSpan);
+      const rightColPos = nodePos.clone().addScaledVector(right, halfSpan);
+
+      if (
+        corridor.isPointInsideCorridor(leftColPos, 3.0, nearestNode.position.y - 10, nearestNode.position.y + 20) ||
+        corridor.isPointInsideCorridor(rightColPos, 3.0, nearestNode.position.y - 10, nearestNode.position.y + 20)
+      ) {
+        continue; // Skip obstructed onset gate location
+      }
+
+      // Create architectural monumental portal arch
       const frameGroup = new THREE.Group();
       frameGroup.position.set(nearestNode.position.x, nearestNode.position.y, nearestNode.position.z);
       frameGroup.rotation.y = nearestNode.yaw;
 
-      // Base column material (70-85% dark basalt concrete mass)
       const colMat = new THREE.MeshStandardMaterial({
         color: 0x0a0d14,
         emissive: new THREE.Color(analysis.visualAccent.hex),
@@ -179,7 +219,6 @@ export class SpectralArchitecture {
       });
       this.frameMaterials.push(colMat);
 
-      // Overhead lintel beam material (excited into highlight)
       const lintelMat = new THREE.MeshStandardMaterial({
         color: 0x0e131d,
         emissive: new THREE.Color(analysis.visualAccent.hex),
@@ -189,21 +228,24 @@ export class SpectralArchitecture {
       });
       this.lintelMaterials.push(lintelMat);
 
-      // Left column
-      const colGeom = new THREE.BoxGeometry(1.5, 16.0, 1.5);
+      // Gate side support columns descending to globalAbyssBottom
+      const topReach = 18.0;
+      const totalColHeight = topReach + (nearestNode.position.y - globalAbyssBottom);
+      const colCenterY = topReach - totalColHeight * 0.5;
+
+      const colGeom = new THREE.BoxGeometry(2.0, totalColHeight, 2.0);
       const leftCol = new THREE.Mesh(colGeom, colMat);
-      leftCol.position.set(-11, 8, 0);
+      leftCol.position.set(-halfSpan, colCenterY, 0);
       frameGroup.add(leftCol);
 
-      // Right column
       const rightCol = new THREE.Mesh(colGeom, colMat);
-      rightCol.position.set(11, 8, 0);
+      rightCol.position.set(halfSpan, colCenterY, 0);
       frameGroup.add(rightCol);
 
       // Top lintel beam
-      const beamGeom = new THREE.BoxGeometry(24, 1.5, 1.5);
+      const beamGeom = new THREE.BoxGeometry(halfSpan * 2.0 + 4.0, 1.8, 2.0);
       const topBeam = new THREE.Mesh(beamGeom, lintelMat);
-      topBeam.position.set(0, 16, 0);
+      topBeam.position.set(0, topReach, 0);
       frameGroup.add(topBeam);
 
       this.onsetFrames.add(frameGroup);

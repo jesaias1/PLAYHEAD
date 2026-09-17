@@ -53,10 +53,10 @@ export class Environment {
     }
 
     // 5. Lighting: stark, high-contrast brutalist key light + cold ambient
-    this.hemiLight = new THREE.HemisphereLight(0x45556b, 0x111620, 0.9);
+    this.hemiLight = new THREE.HemisphereLight(0x45556b, 0x111620, 1.05);
     this.scene.add(this.hemiLight);
 
-    this.dirLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    this.dirLight = new THREE.DirectionalLight(0xffffff, 2.3);
     this.dirLight.position.set(50, 120, 60);
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
@@ -103,6 +103,10 @@ export class Environment {
       this.currentFov += (this.targetFov - this.currentFov) * Math.min(1, dt * 8);
       this.camera.fov = this.currentFov;
       this.camera.updateProjectionMatrix();
+    }
+
+    if (this.postProcessing) {
+      this.postProcessing.update(dt);
     }
   }
 
@@ -162,8 +166,8 @@ export class Environment {
     this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1.0, dt * 4.0);
   }
 
-  public render(): void {
-    this.postProcessing.render();
+  public render(viewmodelController?: { render: (renderer: THREE.WebGLRenderer) => void } | null): void {
+    this.postProcessing.render(viewmodelController);
   }
 
   private onResize = (): void => {

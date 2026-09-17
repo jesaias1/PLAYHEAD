@@ -27,11 +27,19 @@ export class BoxCollider {
   public nodeType: RouteNodeType;
   public surfNormal?: THREE.Vector3;
   public boundingRadius: number;
+  public entryHalfWidth: number;
+  public exitHalfWidth: number;
+  public isTrapezoid: boolean;
 
   constructor(node: RouteNode) {
     this.center.set(node.position.x, node.position.y, node.position.z);
     this.halfSize.set(node.dimensions.x * 0.5, node.dimensions.y * 0.5, node.dimensions.z * 0.5);
-    this.boundingRadius = this.halfSize.length();
+    this.entryHalfWidth = node.dimensions.x * 0.5;
+    this.exitHalfWidth = (node.exitWidth ?? node.dimensions.x) * 0.5;
+    this.isTrapezoid = this.exitHalfWidth > this.entryHalfWidth;
+
+    const maxHalfWidth = Math.max(this.entryHalfWidth, this.exitHalfWidth);
+    this.boundingRadius = Math.hypot(maxHalfWidth, this.halfSize.y, this.halfSize.z);
     this.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
     this.matrix.makeRotationFromEuler(this.rotation);
@@ -55,12 +63,25 @@ export class BoxCollider {
     // Transform sphere center into OBB local space
     const localPoint = sphereCenter.clone().applyMatrix4(this.invMatrix);
 
-    // Find closest point in local AABB
-    const clamped = new THREE.Vector3(
-      Math.max(-this.halfSize.x, Math.min(this.halfSize.x, localPoint.x)),
-      Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y)),
-      Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z))
-    );
+    // Find closest point in local AABB / trapezoid
+    let clamped: THREE.Vector3;
+    let currentHalfW = this.halfSize.x;
+
+    if (this.isTrapezoid) {
+      const clampedZ = Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z));
+      const spanZ = 2.0 * this.halfSize.z;
+      const t = spanZ > 0 ? (clampedZ + this.halfSize.z) / spanZ : 0.5;
+      currentHalfW = this.entryHalfWidth + (this.exitHalfWidth - this.entryHalfWidth) * t;
+      const clampedX = Math.max(-currentHalfW, Math.min(currentHalfW, localPoint.x));
+      const clampedY = Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y));
+      clamped = new THREE.Vector3(clampedX, clampedY, clampedZ);
+    } else {
+      clamped = new THREE.Vector3(
+        Math.max(-this.halfSize.x, Math.min(this.halfSize.x, localPoint.x)),
+        Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y)),
+        Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z))
+      );
+    }
 
     const localDiff = localPoint.clone().sub(clamped);
     const distSq = localDiff.lengthSq();
@@ -88,19 +109,25 @@ export class BoxCollider {
       penetration = radius - dist;
     } else {
       // Sphere center is inside box - find shallowest face
-      const dx = this.halfSize.x - Math.abs(localPoint.x);
-      const dy = this.halfSize.y - Math.abs(localPoint.y);
+      const dx = currentHalfW - Math.abs(localPoint.x);
+      const dy = this.halfSize.y - localPoint.y;
       const dz = this.halfSize.z - Math.abs(localPoint.z);
 
       if (dy <= dx && dy <= dz) {
-        localNormal = new THREE.Vector3(0, localPoint.y >= 0 ? 1 : -1, 0);
+        localNormal = new THREE.Vector3(0, 1, 0);
         penetration = radius + dy;
-      } else if (dx <= dz) {
-        localNormal = new THREE.Vector3(localPoint.x >= 0 ? 1 : -1, 0, 0);
-        penetration = radius + dx;
       } else {
-        localNormal = new THREE.Vector3(0, 0, localPoint.z >= 0 ? 1 : -1);
-        penetration = radius + dz;
+        const dyBottom = this.halfSize.y + localPoint.y;
+        if (dyBottom <= dx && dyBottom <= dz) {
+          localNormal = new THREE.Vector3(0, -1, 0);
+          penetration = radius + dyBottom;
+        } else if (dx <= dz) {
+          localNormal = new THREE.Vector3(localPoint.x >= 0 ? 1 : -1, 0, 0);
+          penetration = radius + dx;
+        } else {
+          localNormal = new THREE.Vector3(0, 0, localPoint.z >= 0 ? 1 : -1);
+          penetration = radius + dz;
+        }
       }
     }
 

@@ -52,6 +52,31 @@ export class PlayerController {
   public onFallCallback?: () => void;
   public onRestoreCallback?: () => void;
 
+  public lastTouchedSurfaceType: 'PLATFORM' | 'SURF' = 'PLATFORM';
+  public authoritativeKillY: number | null = null;
+  public isRestoring = false;
+  private freefallTimer = 0;
+
+  public restoreDiagnosticLogs: Array<{
+    reason: string;
+    cpId?: number;
+    before: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+    after: { x: number; y: number; z: number };
+    velBefore: { x: number; y: number; z: number };
+    emergencyFallback?: boolean;
+    timestamp: number;
+  }> = [];
+
+  public surfDiagnostics: Array<{
+    timestamp: number;
+    pos: { x: number; y: number; z: number };
+    vel: { x: number; y: number; z: number };
+    surfNormal: { x: number; y: number; z: number };
+    intoSurf: number;
+    clipped: boolean;
+  }> = [];
+
   constructor(cameraController: CameraController, physics: PhysicsWorld) {
     this.cameraController = cameraController;
     this.physics = physics;
@@ -68,7 +93,10 @@ export class PlayerController {
   public setPosition(pos: THREE.Vector3 | { x: number; y: number; z: number }): void {
     this.position.set(pos.x, pos.y, pos.z);
     this.velocity.set(0, 0, 0);
+    this.freefallTimer = 0;
     this.surfState.reset();
+    this.isSurfing = false;
+    this.isGrounded = true;
     this.syncCamera();
   }
 
@@ -98,6 +126,8 @@ export class PlayerController {
   }
 
   public updateFixed(dt: number): void {
+    if (this.isRestoring) return;
+
     // 1. Calculate input Wish Direction relative to Camera Yaw
     const forward = this.cameraController.getForwardVector();
     const right = this.cameraController.getRightVector();
@@ -243,6 +273,16 @@ export class PlayerController {
     this.isSurfing = colRes.isSurfing;
     this.isGrounded = colRes.isGrounded && !colRes.isSurfing;
     this.groundNormal.copy(colRes.groundNormal);
+    if (this.isGrounded) {
+      this.lastTouchedSurfaceType = 'PLATFORM';
+      this.freefallTimer = 0;
+    } else if (this.isSurfing) {
+      this.lastTouchedSurfaceType = 'SURF';
+      this.freefallTimer = 0;
+    } else {
+      this.freefallTimer += dt;
+    }
+
     if (colRes.isSurfing) {
       this.surfNormal.copy(colRes.surfNormal);
       this.surfState.contactPoint.copy(colRes.surfContactPoint);
@@ -250,9 +290,22 @@ export class PlayerController {
 
       // Clip velocity against surf normal immediately upon contact to avoid penetrating ramp
       const intoSurf = this.velocity.dot(colRes.surfNormal);
-      if (intoSurf < 0) {
+      const clipped = intoSurf < 0;
+      if (clipped) {
         this.velocity.addScaledVector(colRes.surfNormal, -intoSurf);
       }
+
+      if (this.surfDiagnostics.length >= 50) {
+        this.surfDiagnostics.shift();
+      }
+      this.surfDiagnostics.push({
+        timestamp: Date.now(),
+        pos: { x: this.position.x, y: this.position.y, z: this.position.z },
+        vel: { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z },
+        surfNormal: { x: colRes.surfNormal.x, y: colRes.surfNormal.y, z: colRes.surfNormal.z },
+        intoSurf,
+        clipped
+      });
     }
 
     if (this.isGrounded && !this.isSurfing && this.velocity.y < 0) {
@@ -280,9 +333,26 @@ export class PlayerController {
     // 6. Record Statistics
     this.stats.recordSpeed(this.getSpeedUnits());
 
-    // 7. Check Kill Plane (Fall)
-    if (this.physics.checkKillPlane(this.position)) {
+    // 7. Check Kill Plane (Fall) with Authoritative Multi-Layer Failsafe
+    const isBelowGlobalKillPlane = this.physics.checkKillPlane(this.position);
+    const isBelowAuthoritativeKillPlane = this.authoritativeKillY !== null && this.position.y < this.authoritativeKillY;
+
+    // Watchdog timer: If launching from surf, allow high soaring jumps (> 8.0s or until beneath route).
+    // From standard platforms, catch prolonged freefall (> 3.5s downward).
+    const safeKillHorizon = (this.authoritativeKillY !== null ? this.authoritativeKillY : this.physics.killPlaneY) + 5.0;
+    const isSurfAirborne = this.lastTouchedSurfaceType === 'SURF';
+    const isWatchdogTriggered = isSurfAirborne
+      ? (this.freefallTimer > 8.0 && this.velocity.y < -5.0 && this.position.y < safeKillHorizon)
+      : (this.freefallTimer > 3.5 && this.velocity.y < -5.0);
+
+    // Secondary watchdog: failsafe against any edge case where position falls deep below kill plane
+    const isCriticalVoid = this.authoritativeKillY !== null
+      ? (this.position.y < this.authoritativeKillY - 25.0)
+      : (this.position.y < this.physics.killPlaneY - 25.0);
+
+    if (isBelowGlobalKillPlane || isBelowAuthoritativeKillPlane || isWatchdogTriggered || isCriticalVoid) {
       this.stats.recordFall();
+      this.freefallTimer = 0;
       this.onFallCallback?.();
     }
 

@@ -17,6 +17,10 @@ import { PlayerController } from '../player/PlayerController';
 import { CameraController } from '../player/CameraController';
 import { SettingsManager } from '../core/Settings';
 import { ViewmodelAssetLoader, ViewmodelRigInstance } from './ViewmodelAssetLoader';
+import { ViewmodelStyleFilter } from './ViewmodelStyleFilter';
+import { QualityMode } from '../rendering/PostProcessing';
+import { KarambitSkinSystem } from './KarambitSkinSystem';
+import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
@@ -24,6 +28,15 @@ export class ViewmodelController {
   public camera: THREE.PerspectiveCamera;
   private rigInstance: ViewmodelRigInstance;
   private isRigLoaded = false;
+  private styleFilter: ViewmodelStyleFilter;
+  private hemiLight: THREE.HemisphereLight;
+  private fillLight: THREE.DirectionalLight;
+  private keyLight: THREE.DirectionalLight;
+  private rimLight: THREE.DirectionalLight;
+
+  private unsubscribeSkin?: () => void;
+  private audioImpact = 0;
+  private audioBass = 0;
 
   public get isLoaded(): boolean {
     return this.isRigLoaded;
@@ -33,20 +46,27 @@ export class ViewmodelController {
   private rootGroup: THREE.Group;
   private swayGroup: THREE.Group;
   private motionGroup: THREE.Group;
+  private actionGroup: THREE.Group;
 
   // Arms Base Transform (calibrated for Drillimpact PSX arms)
   private readonly baseArmsPos = new THREE.Vector3(0, -1.58, 0);
   private readonly baseArmsRotY = Math.PI;
 
-  // Authoritative Knife Transform relative to handR socket (can be calibrated and persisted)
-  public knifeSocketPos = new THREE.Vector3(0.0105, 0.1101, 0.0009);
-  public knifeSocketRot = new THREE.Vector3(3.0159, 0.4466, 0.2277);
+  // Authoritative Knife Transform relative to handR socket (calibrated and authoritative)
+  public knifeSocketPos = new THREE.Vector3(0.0093, 0.1107, 0.0033);
+  public knifeSocketRot = new THREE.Vector3(3.034, 0.3737, 0.2205);
   public knifeSocketScale = new THREE.Vector3(1.011, 1.011, 1.011);
 
   // Default hardcoded references for reset
-  public static readonly DEFAULT_KNIFE_POS = new THREE.Vector3(0.0105, 0.1101, 0.0009);
-  public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.0159, 0.4466, 0.2277);
+  public static readonly DEFAULT_KNIFE_POS = new THREE.Vector3(0.0093, 0.1107, 0.0033);
+  public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.034, 0.3737, 0.2205);
   public static readonly DEFAULT_KNIFE_SCALE = new THREE.Vector3(1.011, 1.011, 1.011);
+
+  // Viewmodel Actions (F signal pulse & Mouse1 cosmetic sweep)
+  private activeAction: 'NONE' | 'PULSE' | 'SWEEP' = 'NONE';
+  private actionTimer = 0;
+  private actionDuration = 0;
+  private targetAccentColor = new THREE.Color(0x00f0ff);
 
   // Spring Physics State (Damped Harmonic Oscillator)
   private swayPos = new THREE.Vector3();
@@ -85,27 +105,36 @@ export class ViewmodelController {
     this.camera.position.set(0, 0, 0);
     this.camera.quaternion.set(0, 0, 0, 1);
 
-    // 2. Dedicated Local Lighting
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x223040, 1.4);
-    this.scene.add(hemiLight);
+    // 2. Dedicated Local Lighting (with palette adaptability)
+    this.hemiLight = new THREE.HemisphereLight(0xffffff, 0x182030, 1.4);
+    this.scene.add(this.hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
-    keyLight.position.set(1.5, 2.5, 2.0);
-    this.scene.add(keyLight);
+    this.keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
+    this.keyLight.position.set(1.5, 2.5, 2.0);
+    this.scene.add(this.keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0x88ccff, 1.4);
-    fillLight.position.set(-2.0, 1.5, 1.5);
-    this.scene.add(fillLight);
+    this.fillLight = new THREE.DirectionalLight(0x88ccff, 1.4);
+    this.fillLight.position.set(-2.0, 1.5, 1.5);
+    this.scene.add(this.fillLight);
 
-    const rimLight = new THREE.DirectionalLight(0x00f0ff, 1.0);
-    rimLight.position.set(-1.0, -1.8, -1.2);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight(0x00f0ff, 1.1);
+    this.rimLight.position.set(-1.0, -1.8, -1.2);
+    this.scene.add(this.rimLight);
 
-    // 3. Hierarchy: scene -> rootGroup -> swayGroup -> motionGroup -> rigInstance.rootGroup
+    // 3. Viewmodel Style Filter (4x4 Bayer dither + 48-level quantization + 1px signal rim)
+    this.styleFilter = new ViewmodelStyleFilter();
+    const savedQuality = SettingsManager.getInstance().settings.visualQuality;
+    if (savedQuality) {
+      this.styleFilter.setQuality(savedQuality);
+    }
+
+    // 4. Hierarchy: scene -> rootGroup -> swayGroup -> motionGroup -> actionGroup -> rigInstance.rootGroup
     this.rootGroup = new THREE.Group();
     this.swayGroup = new THREE.Group();
     this.motionGroup = new THREE.Group();
+    this.actionGroup = new THREE.Group();
 
+    this.motionGroup.add(this.actionGroup);
     this.swayGroup.add(this.motionGroup);
     this.rootGroup.add(this.swayGroup);
     this.scene.add(this.rootGroup);
@@ -116,10 +145,15 @@ export class ViewmodelController {
     // Initial temporary fallback rig while asynchronous assets load
     this.rigInstance = ViewmodelAssetLoader.buildFallbackRig(this.accentColor);
     this.applyRigBaseTransform();
-    this.motionGroup.add(this.rigInstance.rootGroup);
+    this.actionGroup.add(this.rigInstance.rootGroup);
 
-    // 4. Asynchronously load real artist-made assets
+    // 5. Asynchronously load real artist-made assets
     this.loadRealAssets();
+
+    // 6. Subscribe to KarambitSkinSystem equip updates
+    this.unsubscribeSkin = KarambitSkinSystem.getInstance().addListener((skinId) => {
+      this.applySkin(skinId);
+    });
 
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
@@ -176,6 +210,8 @@ export class ViewmodelController {
     this.airRotOffset.set(0, 0, 0);
     this.motionGroup.position.set(0, 0, 0);
     this.motionGroup.rotation.set(0, 0, 0);
+    this.actionGroup.position.set(0, 0, 0);
+    this.actionGroup.rotation.set(0, 0, 0);
 
     // Maintain knife socket attachment with current calibrated values
     if (this.rigInstance.knifeGroup) {
@@ -192,12 +228,13 @@ export class ViewmodelController {
   private async loadRealAssets(): Promise<void> {
     try {
       const realRig = await ViewmodelAssetLoader.loadRig(this.accentColor);
-      this.motionGroup.remove(this.rigInstance.rootGroup);
+      this.actionGroup.remove(this.rigInstance.rootGroup);
       this.rigInstance.dispose();
 
       this.rigInstance = realRig;
       this.applyRigBaseTransform();
-      this.motionGroup.add(this.rigInstance.rootGroup);
+      this.rigInstance.applySkin(KarambitSkinSystem.getInstance().getEquippedSkinId());
+      this.actionGroup.add(this.rigInstance.rootGroup);
       this.isRigLoaded = true;
     } catch (err) {
       console.warn('[ViewmodelController] Asset load error, keeping fallback:', err);
@@ -218,9 +255,42 @@ export class ViewmodelController {
     }
   }
 
+  public setQuality(mode: QualityMode): void {
+    this.styleFilter.setQuality(mode);
+  }
+
+  public setPalette(palette: { surfaceDark?: THREE.Color; secondary?: THREE.Color; primary?: THREE.Color; highlight?: THREE.Color }): void {
+    if (!palette) return;
+    this.styleFilter.setPalette(palette);
+
+    if (palette.surfaceDark) {
+      this.hemiLight.groundColor.copy(palette.surfaceDark).multiplyScalar(1.2);
+    }
+    if (palette.secondary) {
+      this.fillLight.color.copy(palette.secondary).lerp(new THREE.Color(0xffffff), 0.65);
+    }
+    const accentSource = palette.highlight || palette.primary || palette.secondary;
+    if (accentSource) {
+      this.targetAccentColor.copy(accentSource);
+    }
+  }
+
   public setAccentColor(col: THREE.Color): void {
-    this.accentColor.copy(col);
-    this.rigInstance.setAccentColor(col);
+    this.targetAccentColor.copy(col);
+  }
+
+  public triggerSignalPulse(): void {
+    this.activeAction = 'PULSE';
+    this.actionTimer = 0;
+    this.actionDuration = 0.32;
+    this.audioImpact = Math.max(this.audioImpact, 1.8);
+  }
+
+  public triggerCosmeticSweep(): void {
+    this.activeAction = 'SWEEP';
+    this.actionTimer = 0;
+    this.actionDuration = 0.20;
+    this.audioImpact = Math.max(this.audioImpact, 1.4);
   }
 
   /**
@@ -240,6 +310,12 @@ export class ViewmodelController {
     // Update skeletal animation mixer for idle finger breathing
     if (this.rigInstance.mixer) {
       this.rigInstance.mixer.update(dt);
+    }
+
+    // Update cosmic shader elapsed time and audio pulse
+    if (this.rigInstance.cosmicMaterial) {
+      this.rigInstance.cosmicMaterial.updateTime(dt);
+      this.rigInstance.cosmicMaterial.setAudioImpact(this.audioImpact, this.audioBass);
     }
 
     const swayScale = settings.viewmodelSway !== undefined ? settings.viewmodelSway : 1.0;
@@ -394,11 +470,57 @@ export class ViewmodelController {
         this.rigInstance.handLBone.visible = true;
       }
     }
+
+    // 10. Action Motion on actionGroup (F Signal Pulse & Mouse1 Cosmetic Sweep)
+    // Moves hand + knife together through additive actionGroup, preserving calibrated knifeGroup transform
+    if (this.activeAction !== 'NONE') {
+      this.actionTimer += dt;
+      const progress = Math.min(1.0, this.actionTimer / this.actionDuration);
+      if (this.activeAction === 'PULSE') {
+        const p = Math.sin(progress * Math.PI);
+        this.actionGroup.position.set(0.002 * p, 0.014 * p, -0.012 * p);
+        this.actionGroup.rotation.set(-0.14 * p, 0.04 * p, -0.09 * p);
+      } else if (this.activeAction === 'SWEEP') {
+        const p = Math.sin(progress * Math.PI);
+        this.actionGroup.position.set(-0.022 * p, 0.006 * p, 0.008 * p);
+        this.actionGroup.rotation.set(0.05 * p, -0.16 * p, 0.16 * p);
+      }
+      if (progress >= 1.0) {
+        this.activeAction = 'NONE';
+        this.actionGroup.position.set(0, 0, 0);
+        this.actionGroup.rotation.set(0, 0, 0);
+      }
+    } else {
+      this.actionGroup.position.set(0, 0, 0);
+      this.actionGroup.rotation.set(0, 0, 0);
+    }
+
+    // Decay audio impact
+    if (this.audioImpact > 0) {
+      this.audioImpact = Math.max(0, this.audioImpact - dt * 3.5);
+    }
+
+    // 11. Adaptive Viewmodel Accent (ADAPTIVE, DEFAULT_CYAN, OFF)
+    const vmAccent = settings.viewmodelAccent || 'ADAPTIVE';
+    if (vmAccent === 'OFF') {
+      this.rimLight.intensity = 0.0;
+    } else if (vmAccent === 'DEFAULT_CYAN') {
+      this.rimLight.intensity = 1.1;
+      this.rimLight.color.set(0x00f0ff);
+      this.accentColor.set(0x00f0ff);
+      this.rigInstance.setAccentColor(this.accentColor);
+    } else {
+      // ADAPTIVE: smoothly follow active map/track palette
+      this.rimLight.intensity = 1.1;
+      this.accentColor.lerp(this.targetAccentColor, Math.min(1.0, dt * 6.0));
+      this.rimLight.color.copy(this.accentColor);
+      this.rigInstance.setAccentColor(this.accentColor);
+    }
   }
 
   /**
    * Renders the viewmodel scene with depth clear to prevent clipping into world geometry,
-   * while preserving the already rendered world color buffer.
+   * while compositing with the dedicated ViewmodelStyleFilter pass.
    */
   public render(renderer: THREE.WebGLRenderer): void {
     const settings = SettingsManager.getInstance().settings;
@@ -411,25 +533,50 @@ export class ViewmodelController {
       this.camera.updateProjectionMatrix();
     }
 
-    // Clear depth buffer so the first-person hands & karambit render cleanly on top of the world
+    // Clear depth buffer and render viewmodel with dedicated style filter
     const origAutoClear = renderer.autoClear;
     renderer.autoClear = false;
     renderer.clearDepth();
-    renderer.render(this.scene, this.camera);
+    this.styleFilter.render(renderer, this.scene, this.camera);
     renderer.autoClear = origAutoClear;
+  }
+
+  public setAudioLevels(impact: number, bass = 0): void {
+    this.audioImpact = impact;
+    this.audioBass = bass;
+    if (this.rigInstance?.cosmicMaterial) {
+      this.rigInstance.cosmicMaterial.setAudioImpact(impact, bass);
+    }
+  }
+
+  public applySkin(skinId: string): void {
+    if (this.rigInstance) {
+      this.rigInstance.applySkin(skinId);
+    }
+  }
+
+  public getCosmicMaterial(): KarambitCosmicMaterial | null {
+    return this.rigInstance?.cosmicMaterial || null;
   }
 
   private onResize = (): void => {
     if (typeof window !== 'undefined') {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
+      this.styleFilter.resize(w, h);
     }
   };
 
   public dispose(): void {
+    if (this.unsubscribeSkin) {
+      this.unsubscribeSkin();
+    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', this.onResize);
     }
+    this.styleFilter.dispose();
     this.rigInstance.dispose();
   }
 }

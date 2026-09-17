@@ -1,8 +1,5 @@
-/**
- * MusicPack: Curated multi-track production catalog for PLAYHEAD.
- * Synthesizes studio-quality audio directly via Web Audio OfflineAudioContext,
- * enabling instantaneous, zero-asset music playback and fast 5s preview auditioning.
- */
+import { SignalPackCatalog } from './SignalPackCatalog';
+import { AudioDecoder } from './AudioDecoder';
 
 export interface TrackCatalogEntry {
   id: string;
@@ -18,9 +15,11 @@ export interface TrackCatalogEntry {
   paletteKey: 'ICE' | 'EMBER' | 'SIGNAL_RED' | 'ACID' | 'ULTRAVIOLET' | 'GLACIER';
   tags: string[];
   isFirstContact?: boolean;
+  audioUrl?: string;
   generate: (sampleRate?: number) => Promise<AudioBuffer>;
   generatePreview: (sampleRate?: number) => Promise<AudioBuffer>;
 }
+
 
 // Synthesis utility functions
 function createNoiseBuffer(ctx: BaseAudioContext, duration: number): AudioBuffer {
@@ -136,7 +135,7 @@ function triggerSynth(
 // ------------------------------------------------------------------------------------------------
 // 1. FIRST CONTACT — Melodic Synthwave / Onboarding Flow (120 BPM, 72s)
 // ------------------------------------------------------------------------------------------------
-async function synthesizeFirstContact(duration = 72, sampleRate = 44100): Promise<AudioBuffer> {
+export async function synthesizeFirstContact(duration = 72, sampleRate = 44100): Promise<AudioBuffer> {
   const offlineCtx = new OfflineAudioContext(2, Math.floor(sampleRate * duration), sampleRate);
   const bpm = 120;
   const beatDuration = 60 / bpm; // 0.5s
@@ -236,7 +235,7 @@ async function synthesizeFirstContact(duration = 72, sampleRate = 44100): Promis
 // ------------------------------------------------------------------------------------------------
 // 2. HYPERDRIVE COLLIDER — Peak-Time Electro / Drop (128 BPM, 75s)
 // ------------------------------------------------------------------------------------------------
-async function synthesizeHyperdrive(duration = 75, sampleRate = 44100): Promise<AudioBuffer> {
+export async function synthesizeHyperdrive(duration = 75, sampleRate = 44100): Promise<AudioBuffer> {
   const offlineCtx = new OfflineAudioContext(2, Math.floor(sampleRate * duration), sampleRate);
   const bpm = 128;
   const beatDuration = 60 / bpm;
@@ -317,7 +316,7 @@ async function synthesizeHyperdrive(duration = 75, sampleRate = 44100): Promise<
 // ------------------------------------------------------------------------------------------------
 // 3. NEURAL DRIFT — Liquid Drum & Bass (174 BPM, 66s)
 // ------------------------------------------------------------------------------------------------
-async function synthesizeNeuralDrift(duration = 66, sampleRate = 44100): Promise<AudioBuffer> {
+export async function synthesizeNeuralDrift(duration = 66, sampleRate = 44100): Promise<AudioBuffer> {
   const offlineCtx = new OfflineAudioContext(2, Math.floor(sampleRate * duration), sampleRate);
   const bpm = 174;
   const beatDuration = 60 / bpm; // ~0.345s
@@ -377,7 +376,7 @@ async function synthesizeNeuralDrift(duration = 66, sampleRate = 44100): Promise
 // ------------------------------------------------------------------------------------------------
 // 4. CHRONO CATACLYSM — Industrial Half-Time / Bass (85 BPM, 76s)
 // ------------------------------------------------------------------------------------------------
-async function synthesizeChronoCataclysm(duration = 76, sampleRate = 44100): Promise<AudioBuffer> {
+export async function synthesizeChronoCataclysm(duration = 76, sampleRate = 44100): Promise<AudioBuffer> {
   const offlineCtx = new OfflineAudioContext(2, Math.floor(sampleRate * duration), sampleRate);
   const bpm = 85;
   const beatDuration = 60 / bpm; // ~0.706s
@@ -427,7 +426,7 @@ async function synthesizeChronoCataclysm(duration = 76, sampleRate = 44100): Pro
 // ------------------------------------------------------------------------------------------------
 // 5. VOIDWALKER — Celestial Ambient Flow (72 BPM, 70s)
 // ------------------------------------------------------------------------------------------------
-async function synthesizeVoidwalker(duration = 70, sampleRate = 44100): Promise<AudioBuffer> {
+export async function synthesizeVoidwalker(duration = 70, sampleRate = 44100): Promise<AudioBuffer> {
   const offlineCtx = new OfflineAudioContext(2, Math.floor(sampleRate * duration), sampleRate);
   const master = offlineCtx.createGain();
   master.gain.setValueAtTime(0.8, 0);
@@ -463,99 +462,38 @@ async function synthesizeVoidwalker(duration = 70, sampleRate = 44100): Promise<
 // Catalog Registry
 // ------------------------------------------------------------------------------------------------
 export class MusicPack {
-  private static catalog: TrackCatalogEntry[] = [
-    {
-      id: 'first-contact',
-      title: 'FIRST CONTACT [DEV / TEST AUDIO]',
-      artist: '[DEV / TEST AUDIO]',
-      genre: 'MELODIC SYNTH // FLOW',
-      bpm: 120,
-      duration: 72,
-      difficulty: 1,
-      difficultyLabel: 'FLOW',
-      description: '[DEV / TEST AUDIO — Final soundtrack will be provided by human developer] Onboarding test track with gentle rhythm hops and introductory surf glides.',
-      accentColor: '#00f0ff',
-      paletteKey: 'ICE',
-      tags: ['DEV / TEST AUDIO', 'ONBOARDING', 'SYNTHWAVE', 'FLOW'],
-      isFirstContact: true,
-      generate: (sr) => synthesizeFirstContact(72, sr),
-      generatePreview: (sr) => synthesizeFirstContact(6, sr)
-    },
-    {
-      id: 'hyperdrive-collider',
-      title: 'HYPERDRIVE COLLIDER [DEV / TEST AUDIO]',
-      artist: '[DEV / TEST AUDIO]',
-      genre: 'PEAK-TIME ELECTRO // DROP',
-      bpm: 128,
-      duration: 75,
-      difficulty: 3,
-      difficultyLabel: 'KINETIC',
-      description: '[DEV / TEST AUDIO] Peak-time electro test track with launch pads and surf ramps.',
-      accentColor: '#ff2a55',
-      paletteKey: 'SIGNAL_RED',
-      tags: ['DEV / TEST AUDIO', 'ELECTRO', 'SURF HEAVY'],
-      generate: (sr) => synthesizeHyperdrive(75, sr),
-      generatePreview: (sr) => synthesizeHyperdrive(6, sr)
-    },
-    {
-      id: 'neural-drift',
-      title: 'NEURAL DRIFT [DEV / TEST AUDIO]',
-      artist: '[DEV / TEST AUDIO]',
-      genre: 'LIQUID BREAKBEAT // D&B',
-      bpm: 174,
-      duration: 66,
-      difficulty: 4,
-      difficultyLabel: 'PRECISION',
-      description: '[DEV / TEST AUDIO] 174 BPM syncopated breakbeat test track for aerial strafe routes.',
-      accentColor: '#b8ff00',
-      paletteKey: 'ACID',
-      tags: ['DEV / TEST AUDIO', 'D&B', 'BREAKBEAT'],
-      generate: (sr) => synthesizeNeuralDrift(66, sr),
-      generatePreview: (sr) => synthesizeNeuralDrift(6, sr)
-    },
-    {
-      id: 'chrono-cataclysm',
-      title: 'CHRONO CATACLYSM [DEV / TEST AUDIO]',
-      artist: '[DEV / TEST AUDIO]',
-      genre: 'INDUSTRIAL HALF-TIME // BASS',
-      bpm: 85,
-      duration: 76,
-      difficulty: 5,
-      difficultyLabel: 'EXPERT',
-      description: '[DEV / TEST AUDIO] Half-time bass test track with technical surf curves.',
-      accentColor: '#ff9e00',
-      paletteKey: 'EMBER',
-      tags: ['DEV / TEST AUDIO', 'HALF-TIME', 'INDUSTRIAL'],
-      generate: (sr) => synthesizeChronoCataclysm(76, sr),
-      generatePreview: (sr) => synthesizeChronoCataclysm(6, sr)
-    },
-    {
-      id: 'voidwalker',
-      title: 'VOIDWALKER [DEV / TEST AUDIO]',
-      artist: '[DEV / TEST AUDIO]',
-      genre: 'CELESTIAL AMBIENT // FLOW',
-      bpm: 72,
-      duration: 70,
-      difficulty: 2,
-      difficultyLabel: 'ETHEREAL',
-      description: '[DEV / TEST AUDIO] Evolving ethereal pad test track.',
-      accentColor: '#c084fc',
-      paletteKey: 'ULTRAVIOLET',
-      tags: ['DEV / TEST AUDIO', 'AMBIENT', 'CHILL'],
-      generate: (sr) => synthesizeVoidwalker(70, sr),
-      generatePreview: (sr) => synthesizeVoidwalker(6, sr)
-    }
-  ];
+  private static catalog: TrackCatalogEntry[] = [];
 
   public static getCatalog(): TrackCatalogEntry[] {
+    if (this.catalog.length === 0) {
+      const signalTracks = SignalPackCatalog.getTracks();
+      this.catalog = signalTracks.map((t, idx) => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        genre: t.genre,
+        bpm: t.bpm,
+        duration: t.duration,
+        difficulty: t.difficulty,
+        difficultyLabel: t.difficultyLabel,
+        description: t.description,
+        accentColor: t.accentColor,
+        paletteKey: t.paletteKey,
+        tags: t.tags,
+        isFirstContact: idx === 0,
+        audioUrl: t.audioUrl,
+        generate: async (sr) => AudioDecoder.loadAudio(t.audioUrl, sr),
+        generatePreview: async (sr) => AudioDecoder.loadAudio(t.audioUrl, sr)
+      }));
+    }
     return this.catalog;
   }
 
   public static getTrackById(id: string): TrackCatalogEntry | undefined {
-    return this.catalog.find(t => t.id === id);
+    return this.getCatalog().find(t => t.id === id);
   }
 
   public static getFirstContact(): TrackCatalogEntry {
-    return this.catalog[0];
+    return this.getCatalog()[0];
   }
 }

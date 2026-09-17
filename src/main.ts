@@ -5,7 +5,9 @@
 import './styles/main.css';
 import { Game } from './core/Game';
 
-window.addEventListener('DOMContentLoaded', () => {
+import { PresetGenerator } from './audio/PresetGenerator';
+
+function init() {
   const canvasContainer = document.getElementById('canvas-container');
   const uiRoot = document.getElementById('ui-root');
 
@@ -15,6 +17,15 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   // Instantiate PLAYHEAD
-  new Game(canvasContainer, uiRoot);
+  const game = new Game(canvasContainer, uiRoot);
+  (window as unknown as { game: Game; PresetGenerator: typeof PresetGenerator }).game = game;
+  (window as unknown as { game: Game; PresetGenerator: typeof PresetGenerator }).PresetGenerator = PresetGenerator;
   console.log('[PLAYHEAD] System online. Drop a song to enter it.');
-});
+}
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+

@@ -2,6 +2,8 @@
  * Procedural route generator mapping musical analysis features into 3D brutalist course nodes
  */
 
+import * as THREE from 'three';
+import { OBB } from 'three/examples/jsm/math/OBB.js';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
 import { RouteValidator } from './RouteValidator';
@@ -229,7 +231,8 @@ export class RouteGenerator {
           for (let st = 0; st < steps; st++) {
             const gap = rng.nextFloat(3.5, 5.0);
             const stepLen = 14.0;
-            const stepWidth = 7.5; // Narrowed for spatial tension
+            const stepWidth = 9.5; // Widened for forgiving takeoff
+            const exitWidth = stepWidth * 1.65; // Substantially widened flared exit width
             const rise = 0.85;
 
             currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
@@ -242,6 +245,7 @@ export class RouteGenerator {
               time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
               position: { ...currentPos },
               dimensions: { x: stepWidth, y: 2.0, z: stepLen },
+              exitWidth,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -323,13 +327,14 @@ export class RouteGenerator {
           sectionCurrentDistance += padLen * 0.5;
 
         } else if (theme === 'ASCENT') {
-          // Escalating stepping platforms
+          // Escalating stepping platforms - flared for high-speed approach and clean takeoff
           const steps = rng.nextInt(2, 3);
           for (let st = 0; st < steps; st++) {
-            const gap = rng.nextFloat(3.5, 5.5);
-            const stepLen = rng.nextFloat(12.0, 16.0);
-            const stepWidth = rng.nextFloat(7.0, 10.0);
-            const rise = rng.nextFloat(0.5, 0.9);
+            const gap = rng.nextFloat(3.5, 5.0);
+            const stepLen = rng.nextFloat(14.0, 18.0);
+            const stepWidth = rng.nextFloat(10.0, 13.0);
+            const exitWidth = stepWidth * 1.65;
+            const rise = rng.nextFloat(0.5, 0.85);
 
             currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
             currentPos.y += rise;
@@ -341,6 +346,7 @@ export class RouteGenerator {
               time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
               position: { ...currentPos },
               dimensions: { x: stepWidth, y: 2.0, z: stepLen },
+              exitWidth,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -467,15 +473,281 @@ export class RouteGenerator {
       yaw: updatedFinishNode.yaw
     };
 
+    // 5. Generate Optional Side-Surf Skill Ramps alongside selected platform sequences
+    const optionalRamps = RouteGenerator.generateOptionalSideSurfs(repairedNodes, rng);
+
+    // 6. Generate Subtle Recovery Catch-Shelves under tricky platform sequences
+    const recoveryShelves = RouteGenerator.generateRecoveryShelves(repairedNodes, rng);
+
     return {
       seed: analysis.seed,
       route: repairedNodes,
+      optionalRamps,
+      recoveryShelves,
       checkpoints,
       finish,
       totalDistance: cumulativeDistance,
       targetDuration: analysis.duration,
       repairedJumpsCount: repairsCount
     };
+  }
+
+  /**
+   * Generates optional side-surf skill lines flanking selected platform sequences.
+   * Provides advanced speedrun alternatives that safely reconnect to the main route.
+   */
+  public static generateOptionalSideSurfs(nodes: RouteNode[], rng: SeededRandom): RouteNode[] {
+    const optionalRamps: RouteNode[] = [];
+    if (nodes.length < 12) return optionalRamps;
+
+    const maxRamps = Math.min(5, Math.max(3, Math.floor(nodes.length / 16)));
+    let lastRampIndex = -999;
+
+    for (let i = 3; i < nodes.length - 5; i++) {
+      if (i - lastRampIndex < 12) continue;
+      if (optionalRamps.length >= maxRamps) break;
+
+      const startPlatform = nodes[i];
+      const midPlatform = nodes[i + 1];
+      const endPlatform = nodes[i + 2];
+
+      if (
+        startPlatform.isSurf || midPlatform.isSurf || endPlatform.isSurf ||
+        startPlatform.type === RouteNodeType.FINISH || endPlatform.type === RouteNodeType.FINISH
+      ) {
+        continue;
+      }
+
+      const dy = endPlatform.position.y - startPlatform.position.y;
+      if (dy > 3.0 || dy < -16.0) continue;
+
+      const dx = endPlatform.position.x - startPlatform.position.x;
+      const dz = endPlatform.position.z - startPlatform.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 20.0 || dist > 68.0) continue;
+
+      // Target tricky small-platform sequences, rhythm-hop sequences, or step-up ascents
+      const isNarrow = (startPlatform.dimensions.x <= 7.0) || (midPlatform.dimensions.x <= 7.0);
+      const isStepUp = startPlatform.type === RouteNodeType.STEP_UP ||
+                       midPlatform.type === RouteNodeType.STEP_UP ||
+                       endPlatform.type === RouteNodeType.STEP_UP ||
+                       dy > 0.2;
+      const isRhythmHop = startPlatform.type === RouteNodeType.GAP ||
+                          startPlatform.type === RouteNodeType.OFFSET_GAP ||
+                          startPlatform.type === RouteNodeType.NARROW_FLOW ||
+                          (startPlatform.dimensions.z <= 28.0 && midPlatform.dimensions.z <= 28.0);
+
+      if (!isNarrow && !isStepUp && !isRhythmHop) continue;
+
+      const dirX = dx / dist;
+      const dirZ = dz / dist;
+      const rampYaw = Math.atan2(dirX, dirZ);
+
+      // SURF_LAUNCH variant (rare, ~20% of ramps) vs standard SIDE_SURF
+      const isLaunchVariant = rng.next() < 0.20;
+      const rampPitch = isLaunchVariant ? 0.16 : -0.06;
+      const rollAngle = isLaunchVariant ? 0.80 : 0.68;
+      const boostSpeed = isLaunchVariant ? 24.0 : undefined;
+
+      const rampLength = Math.min(42.0, Math.max(30.0, dist * 0.95));
+      const rampWidth = 8.0;
+      const rampThickness = 1.2;
+      const rampEffectiveHalfW = (rampWidth * 0.5) * Math.cos(rollAngle);
+      const edgeGap = 2.8;
+
+      const preferredSide = (rng.next() > 0.5 ? 1 : -1);
+      const sidesToTry = [preferredSide, -preferredSide];
+
+      for (const side of sidesToTry) {
+        const perpX = -dirZ * side;
+        const perpZ = dirX * side;
+
+        const startHalfW = (startPlatform.dimensions.x || 10.0) * 0.5;
+        const lateralOffset = startHalfW + rampEffectiveHalfW + edgeGap;
+
+        // Strictly guarantee no overlap
+        if (lateralOffset - rampEffectiveHalfW < startHalfW + 1.6) {
+          continue;
+        }
+
+        // Critical orientation: top face tilts inward toward the main course
+        const rampRoll = -side * rollAngle;
+
+        const midX = (startPlatform.position.x + endPlatform.position.x) * 0.5 + perpX * lateralOffset;
+        const midY = (startPlatform.position.y + endPlatform.position.y) * 0.5 - 0.2;
+        const midZ = (startPlatform.position.z + endPlatform.position.z) * 0.5 + perpZ * lateralOffset;
+
+        // Collision & Clearance Envelope Validation:
+        // Validate ramp 3D bounds against all nearby main route nodes
+        const rampCenter = new THREE.Vector3(midX, midY, midZ);
+        const rampHalfSize = new THREE.Vector3(rampWidth * 0.5, rampThickness * 0.5, rampLength * 0.5);
+        const rampFullEuler = new THREE.Euler(rampPitch, rampYaw, rampRoll, 'YXZ');
+        const rampRotMatrix = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(rampFullEuler));
+        const rampOBB = new OBB(rampCenter, rampHalfSize, rampRotMatrix);
+
+        let hasCollision = false;
+
+        // Check bounding box clearance against all nodes within 50m of the ramp
+        // Expand bounding box by 1.5m player clearance
+        for (let j = 0; j < nodes.length; j++) {
+          const node = nodes[j];
+          const dxN = node.position.x - midX;
+          const dyN = node.position.y - midY;
+          const dzN = node.position.z - midZ;
+          if (dxN * dxN + dyN * dyN + dzN * dzN > 50 * 50) continue;
+
+          const nodeCenter = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+          const clearance = 1.5;
+          const nodeHalfSize = new THREE.Vector3(
+            node.dimensions.x * 0.5 + clearance,
+            node.dimensions.y * 0.5 + clearance,
+            node.dimensions.z * 0.5 + clearance
+          );
+          const nodeEuler = new THREE.Euler(node.pitch, node.yaw, node.roll, 'YXZ');
+          const nodeRotMatrix = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(nodeEuler));
+          const nodeOBB = new OBB(nodeCenter, nodeHalfSize, nodeRotMatrix);
+
+          if (rampOBB.intersectsOBB(nodeOBB)) {
+            hasCollision = true;
+            break;
+          }
+        }
+
+        // Check clearance against already placed optional ramps
+        if (!hasCollision) {
+          for (const existingRamp of optionalRamps) {
+            const dxR = existingRamp.position.x - midX;
+            const dyR = existingRamp.position.y - midY;
+            const dzR = existingRamp.position.z - midZ;
+            if (dxR * dxR + dyR * dyR + dzR * dzR > 50 * 50) continue;
+
+            const existCenter = new THREE.Vector3(existingRamp.position.x, existingRamp.position.y, existingRamp.position.z);
+            const existHalfSize = new THREE.Vector3(
+              existingRamp.dimensions.x * 0.5,
+              existingRamp.dimensions.y * 0.5,
+              existingRamp.dimensions.z * 0.5
+            );
+            const existEuler = new THREE.Euler(existingRamp.pitch, existingRamp.yaw, existingRamp.roll, 'YXZ');
+            const existRotMatrix = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(existEuler));
+            const existOBB = new OBB(existCenter, existHalfSize, existRotMatrix);
+
+            if (rampOBB.intersectsOBB(existOBB)) {
+              hasCollision = true;
+              break;
+            }
+          }
+        }
+
+        if (hasCollision) {
+          continue;
+        }
+
+        // Compute surfNormal facing inward toward the main course
+        const normalLocal = new THREE.Vector3(side * Math.sin(rollAngle), Math.cos(rollAngle), 0);
+        const euler = new THREE.Euler(rampPitch, rampYaw, 0, 'YXZ');
+        const surfNormal = normalLocal.applyEuler(euler).normalize();
+
+        optionalRamps.push({
+          id: 90000 + optionalRamps.length,
+          time: startPlatform.time,
+          position: { x: midX, y: midY, z: midZ },
+          dimensions: { x: rampWidth, y: rampThickness, z: rampLength },
+          yaw: rampYaw,
+          pitch: rampPitch,
+          roll: rampRoll,
+          type: RouteNodeType.SURF_RAMP,
+          intensity: startPlatform.intensity,
+          sectionIndex: startPlatform.sectionIndex,
+          arcLength: startPlatform.arcLength,
+          isSurf: true,
+          isBoost: isLaunchVariant,
+          boostSpeed,
+          isOptional: true,
+          isLaunchVariant,
+          surfNormal: { x: surfNormal.x, y: surfNormal.y, z: surfNormal.z }
+        });
+
+        lastRampIndex = i;
+        break;
+      }
+    }
+
+    return optionalRamps;
+  }
+
+  /**
+   * Generates rare, isolated recovery catch-shelves beneath genuinely difficult platform gaps.
+   * Shelves are small, compact, laterally offset, and positioned well below landing platforms
+   * to ensure missed straight-down falls plunge into the void.
+   */
+  public static generateRecoveryShelves(nodes: RouteNode[], rng: SeededRandom): RouteNode[] {
+    const shelves: RouteNode[] = [];
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const a = nodes[i];
+      const b = nodes[i + 1];
+      if (a.isSurf || b.isSurf || a.type === RouteNodeType.FINISH || b.type === RouteNodeType.FINISH) continue;
+
+      const dx = b.position.x - a.position.x;
+      const dz = b.position.z - a.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      // Only generate rare, small, isolated recovery catch-shelves around genuinely difficult sections:
+      // - Difficult small-platform chains (a.dimensions.x <= 4.5 && b.dimensions.x <= 4.5) OR
+      // - High-gap / small-landing combinations (dist > 7.0 && b.dimensions.x <= 5.0) OR
+      // - Tricky uphill steps (a.type === RouteNodeType.STEP_UP && dist > 5.5)
+      const isDifficult = (
+        (a.dimensions.x <= 4.5 && b.dimensions.x <= 4.5) ||
+        (dist > 7.0 && b.dimensions.x <= 5.0) ||
+        (a.type === RouteNodeType.STEP_UP && dist > 5.5)
+      );
+
+      if (!isDifficult || rng.next() >= 0.35) continue;
+
+      // Small, compact shelf dimensions (width = 3.2m, height = 0.8m, length = 4.5m)
+      const shelfWidth = 3.2;
+      const shelfHeight = 0.8;
+      const shelfLength = 4.5;
+
+      // Perpendicular (sideways) direction relative to trajectory
+      let perpX: number;
+      let perpZ: number;
+      if (dist > 0.001) {
+        perpX = -dz / dist;
+        perpZ = dx / dist;
+      } else {
+        perpX = Math.cos(a.yaw);
+        perpZ = -Math.sin(a.yaw);
+      }
+
+      // Positioning: offset sideways by (rng.next() < 0.5 ? 1 : -1) * (a.dimensions.x * 0.5 + 2.4)
+      const side = (rng.next() < 0.5 ? 1 : -1);
+      const lateralOffset = side * (a.dimensions.x * 0.5 + 2.4);
+
+      const shelfPos = {
+        x: (a.position.x + b.position.x) * 0.5 + perpX * lateralOffset,
+        y: b.position.y - 4.5,
+        z: (a.position.z + b.position.z) * 0.5 + perpZ * lateralOffset
+      };
+
+      shelves.push({
+        id: 80000 + shelves.length,
+        time: a.time,
+        position: shelfPos,
+        dimensions: { x: shelfWidth, y: shelfHeight, z: shelfLength },
+        yaw: a.yaw,
+        pitch: 0,
+        roll: 0,
+        type: RouteNodeType.RUNWAY,
+        intensity: a.intensity * 0.5,
+        sectionIndex: a.sectionIndex,
+        arcLength: a.arcLength,
+        isSurf: false,
+        isBoost: false,
+        isOptional: true,
+        isRecoveryShelf: true
+      });
+    }
+    return shelves;
   }
 
   /**
@@ -611,6 +883,7 @@ export class RouteGenerator {
     return {
       seed: analysis.seed,
       route: nodes,
+      recoveryShelves: [],
       checkpoints,
       finish,
       totalDistance: cumulativeDistance,

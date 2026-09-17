@@ -40,6 +40,12 @@ export class CameraController {
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement) {
     this.camera = camera;
     this.domElement = domElement;
+    if (this.domElement) {
+      this.domElement.tabIndex = -1;
+      if (this.domElement.style) {
+        this.domElement.style.outline = 'none';
+      }
+    }
 
     this.initEvents();
   }
@@ -76,20 +82,74 @@ export class CameraController {
     this.updateCameraRotation();
   }
 
+  public onUnlock?: () => void;
+  public mouseLookEnabled = false;
+  private isLockPending = false;
+  private lastLockAttempt = 0;
+
   public lock(): void {
-    if (!this.isLocked) {
-      this.domElement.requestPointerLock?.();
+    this.mouseLookEnabled = true;
+
+    if (typeof document !== 'undefined' && document.body?.style) {
+      document.body.style.cursor = 'none';
+    }
+    if (this.domElement?.style) {
+      this.domElement.style.cursor = 'none';
+    }
+    if (typeof this.domElement?.focus === 'function') {
+      this.domElement.focus();
+    }
+
+    if (typeof document !== 'undefined' && document.pointerLockElement === this.domElement) {
+      this.isLocked = true;
+      this.isLockPending = false;
+      return;
+    }
+
+    if (this.isLockPending && Date.now() - this.lastLockAttempt < 300) {
+      return;
+    }
+
+    this.isLockPending = true;
+    this.lastLockAttempt = Date.now();
+
+    try {
+      const promise = this.domElement?.requestPointerLock?.();
+      if (promise && typeof (promise as any).catch === 'function') {
+        (promise as any).catch(() => {
+          this.isLockPending = false;
+        });
+      }
+    } catch {
+      this.isLockPending = false;
     }
   }
 
   public unlock(): void {
-    if (this.isLocked && document.pointerLockElement) {
-      document.exitPointerLock?.();
+    this.mouseLookEnabled = false;
+    this.isLockPending = false;
+    if (typeof document !== 'undefined' && document.body?.style) {
+      document.body.style.cursor = 'default';
     }
+    if (this.domElement?.style) {
+      this.domElement.style.cursor = 'default';
+    }
+    if (typeof document !== 'undefined' && document.pointerLockElement) {
+      try {
+        document.exitPointerLock?.();
+      } catch {
+        // Ignore if already unlocked
+      }
+    }
+    this.isLocked = false;
   }
 
   public getIsLocked(): boolean {
-    return this.isLocked;
+    return this.isLocked || (typeof document !== 'undefined' && document.pointerLockElement === this.domElement);
+  }
+
+  public isControlActive(): boolean {
+    return this.mouseLookEnabled || this.getIsLocked();
   }
 
   /**
@@ -145,17 +205,59 @@ export class CameraController {
   private initEvents(): void {
     if (typeof document === 'undefined') return;
 
-    document.addEventListener('pointerlockchange', () => {
+    document.addEventListener('pointerlockerror', () => {
+      this.isLockPending = false;
       const locked = document.pointerLockElement === this.domElement;
       this.isLocked = locked;
+      if (this.mouseLookEnabled) {
+        if (document.body?.style) {
+          document.body.style.cursor = 'none';
+        }
+        if (this.domElement?.style) {
+          this.domElement.style.cursor = 'none';
+        }
+      } else {
+        if (document.body?.style) {
+          document.body.style.cursor = 'default';
+        }
+        if (this.domElement?.style) {
+          this.domElement.style.cursor = 'default';
+        }
+      }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      const locked = document.pointerLockElement === this.domElement;
+      const wasLocked = this.isLocked;
+      this.isLocked = locked;
+      this.isLockPending = false;
       if (locked) {
+        this.mouseLookEnabled = true;
+        if (typeof document !== 'undefined' && document.body?.style) {
+          document.body.style.cursor = 'none';
+        }
+        if (this.domElement?.style) {
+          this.domElement.style.cursor = 'none';
+        }
         // Prevent first-frame giant delta snap when pointer lock engages
         this.justLocked = true;
+      } else {
+        if (!this.mouseLookEnabled) {
+          if (typeof document !== 'undefined' && document.body?.style) {
+            document.body.style.cursor = 'default';
+          }
+          if (this.domElement?.style) {
+            this.domElement.style.cursor = 'default';
+          }
+        }
+        if (wasLocked && !locked && !this.isLockPending) {
+          this.onUnlock?.();
+        }
       }
     });
 
     document.addEventListener('mousemove', (e) => {
-      if (!this.isLocked) return;
+      if (!this.isLocked && !this.mouseLookEnabled) return;
 
       if (this.justLocked) {
         this.justLocked = false;
@@ -163,6 +265,16 @@ export class CameraController {
       }
 
       this.applyMouseDelta(e.movementX, e.movementY);
+
+      if (this.mouseLookEnabled && !this.isLocked && !this.isLockPending && Date.now() - this.lastLockAttempt > 1200) {
+        this.lock();
+      }
+    });
+
+    document.addEventListener('pointerdown', () => {
+      if (this.mouseLookEnabled && !this.isLocked) {
+        this.lock();
+      }
     });
   }
 }

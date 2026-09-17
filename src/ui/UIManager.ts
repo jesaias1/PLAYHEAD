@@ -9,6 +9,8 @@ import { Hud } from './Hud';
 import { PauseScreen } from './PauseScreen';
 import { ResultsScreen } from './ResultsScreen';
 import { SettingsModal } from './SettingsModal';
+import { ArmoryModal } from './ArmoryModal';
+import { MovementLabSongModal } from './MovementLabSongModal';
 import { VisualAccent } from '../audio/AudioFeatures';
 
 export class UIManager {
@@ -19,6 +21,8 @@ export class UIManager {
   public pauseScreen: PauseScreen;
   public resultsScreen: ResultsScreen;
   public settingsModal: SettingsModal;
+  public armoryModal: ArmoryModal;
+  public movementLabSongModal: MovementLabSongModal;
 
   public root: HTMLElement;
 
@@ -32,6 +36,8 @@ export class UIManager {
     this.pauseScreen = new PauseScreen();
     this.resultsScreen = new ResultsScreen();
     this.settingsModal = new SettingsModal();
+    this.armoryModal = new ArmoryModal();
+    this.movementLabSongModal = new MovementLabSongModal();
 
     this.root.appendChild(this.importScreen.element);
     this.root.appendChild(this.analysisScreen.element);
@@ -40,6 +46,8 @@ export class UIManager {
     this.root.appendChild(this.pauseScreen.element);
     this.root.appendChild(this.resultsScreen.element);
     this.root.appendChild(this.settingsModal.element);
+    this.root.appendChild(this.armoryModal.element);
+    this.root.appendChild(this.movementLabSongModal.element);
   }
 
   public applyAccent(accent: VisualAccent): void {
@@ -57,5 +65,7 @@ export class UIManager {
     this.pauseScreen.hide();
     this.resultsScreen.hide();
     this.settingsModal.hide();
+    this.armoryModal.hide();
+    this.movementLabSongModal.hide();
   }
 }

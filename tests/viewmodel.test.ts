@@ -185,12 +185,12 @@ describe('Viewmodel System — Hands & Karambit', () => {
     const knifeGroup = vm['rigInstance'].knifeGroup;
     expect(knifeGroup).toBeDefined();
     if (knifeGroup) {
-      expect(knifeGroup.position.x).toBeCloseTo(0.0105, 3);
-      expect(knifeGroup.position.y).toBeCloseTo(0.1101, 3);
-      expect(knifeGroup.position.z).toBeCloseTo(0.0009, 3);
-      expect(knifeGroup.rotation.x).toBeCloseTo(3.0159, 3);
-      expect(knifeGroup.rotation.y).toBeCloseTo(0.4466, 3);
-      expect(knifeGroup.rotation.z).toBeCloseTo(0.2277, 3);
+      expect(knifeGroup.position.x).toBeCloseTo(0.0093, 3);
+      expect(knifeGroup.position.y).toBeCloseTo(0.1107, 3);
+      expect(knifeGroup.position.z).toBeCloseTo(0.0033, 3);
+      expect(knifeGroup.rotation.x).toBeCloseTo(3.034, 3);
+      expect(knifeGroup.rotation.y).toBeCloseTo(0.3737, 3);
+      expect(knifeGroup.rotation.z).toBeCloseTo(0.2205, 3);
       expect(knifeGroup.scale.x).toBeCloseTo(1.011, 3);
     }
 

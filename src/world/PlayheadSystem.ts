@@ -18,28 +18,8 @@ export interface PlayheadActivationMesh {
 export class PlayheadSystem {
   private activeItems: PlayheadActivationMesh[] = [];
 
-  // Playhead plane visualizer (subtle vertical accent line crossing the route at player position)
-  private nowLineGroup: THREE.Group;
-  private nowLineMaterial: THREE.LineBasicMaterial;
-
-  constructor(scene: THREE.Scene) {
-    this.nowLineGroup = new THREE.Group();
-
-    // A subtle horizontal line marker indicating the current playhead threshold
-    const lineGeom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-14, 0.15, 0),
-      new THREE.Vector3(14, 0.15, 0)
-    ]);
-    this.nowLineMaterial = new THREE.LineBasicMaterial({
-      color: 0x00f0ff,
-      transparent: true,
-      opacity: 0.7,
-      linewidth: 2
-    });
-    const line = new THREE.Line(lineGeom, this.nowLineMaterial);
-    this.nowLineGroup.add(line);
-
-    scene.add(this.nowLineGroup);
+  constructor(_scene: THREE.Scene) {
+    // Playhead activation manager initializes with the scene
   }
 
   public registerItem(
@@ -59,18 +39,12 @@ export class PlayheadSystem {
   }
 
   public update(
-    playerPos: THREE.Vector3,
+    _playerPos: THREE.Vector3,
     playerArcProgress: number,
-    playerYaw: number,
+    _playerYaw: number,
     visualState: MusicVisualState
   ): void {
-    // 1. Position Now-Line marker at player location facing movement orientation
-    this.nowLineGroup.position.set(playerPos.x, playerPos.y + 0.1, playerPos.z);
-    this.nowLineGroup.rotation.y = playerYaw;
-    this.nowLineMaterial.color.copy(visualState.palette.primary).lerp(visualState.palette.highlight, 0.35);
-    this.nowLineMaterial.opacity = 0.5 + visualState.energy * 0.4 + visualState.dropImpact * 0.5;
-
-    // 2. Process all registered items through Future / Present / Past states
+    // Process all registered items through Future / Present / Past states
     const songTime = visualState.time;
     const nowWindow = 65.0; // +/- 65 metres around player
     const reactMult = visualState.reactivityMultiplier;
@@ -166,9 +140,5 @@ export class PlayheadSystem {
 
   public dispose(): void {
     this.clear();
-    if (this.nowLineGroup.parent) {
-      this.nowLineGroup.parent.remove(this.nowLineGroup);
-    }
-    this.nowLineMaterial.dispose();
   }
 }

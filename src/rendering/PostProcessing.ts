@@ -1,60 +1,69 @@
 /**
- * PostProcessing pipeline for PLAYHEAD
- * Selective bloom + subtle vignette for premium visual quality.
- * Bloom targets only emissive/highlight geometry (threshold ~0.85).
- * Vignette adds subtle edge darkening for compositional focus.
+ * PostProcessing pipeline for PLAYHEAD SIGNAL RENDER
+ * Integrates selective UnrealBloom with SignalRenderPass, ViewmodelPass, and GrainScanlinePass.
+ *
+ * Execution sequence:
+ * 1. RenderPass (3D World Scene)
+ * 2. UnrealBloomPass (Selective Bloom on Emissive Signals)
+ * 3. SignalRenderPass (World Pixel Stepping, Bayer Dither, Quantization, Vignette)
+ * 4. ViewmodelPass (Composites Hands + Karambit into frame before final grain)
+ * 5. OutputPass (Tone Mapping & Color Space Conversion)
+ * 6. GrainScanlinePass (Global screen-space film grain & scanlines on top of EVERYTHING)
  */
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
+import { SignalRenderPass } from './SignalRenderPass';
+import { GrainScanlinePass } from './GrainScanlinePass';
 
-// Lightweight vignette shader
-const VignetteShader = {
-  uniforms: {
-    tDiffuse: { value: null as THREE.Texture | null },
-    uIntensity: { value: 0.35 },
-    uSmoothness: { value: 0.45 }
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float uIntensity;
-    uniform float uSmoothness;
-    varying vec2 vUv;
+export type QualityMode = 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE';
 
-    void main() {
-      vec4 color = texture2D(tDiffuse, vUv);
-      vec2 center = vUv - 0.5;
-      float dist = length(center);
-      float vignette = 1.0 - smoothstep(uSmoothness, uSmoothness + 0.35, dist) * uIntensity;
-      gl_FragColor = vec4(color.rgb * vignette, color.a);
-    }
-  `
-};
+export interface IViewmodelRenderable {
+  render: (renderer: THREE.WebGLRenderer) => void;
+}
 
-export type QualityMode = 'HIGH' | 'PERFORMANCE';
+export class ViewmodelComposerPass extends Pass {
+  public viewmodelController: IViewmodelRenderable | null = null;
+
+  constructor() {
+    super();
+    this.needsSwap = false;
+  }
+
+  public setSize(_width: number, _height: number): void {
+    // Viewmodel style filter manages its own render target resize on window resize
+  }
+
+  public render(
+    renderer: THREE.WebGLRenderer,
+    _writeBuffer: THREE.WebGLRenderTarget,
+    readBuffer: THREE.WebGLRenderTarget
+  ): void {
+    if (!this.enabled || !this.viewmodelController) return;
+
+    const currentTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(readBuffer);
+    this.viewmodelController.render(renderer);
+    renderer.setRenderTarget(currentTarget);
+  }
+}
 
 export class PostProcessing {
   public composer: EffectComposer;
   public bloomPass: UnrealBloomPass;
-  public vignettePass: ShaderPass;
-  public qualityMode: QualityMode = 'HIGH';
+  public signalPass: SignalRenderPass;
+  public viewmodelPass: ViewmodelComposerPass;
+  public grainPass: GrainScanlinePass;
+  public qualityMode: QualityMode = 'SIGNAL';
 
   private renderPass: RenderPass;
   private outputPass: OutputPass;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
-    // Create composer with HDR render target for bloom
     const size = renderer.getSize(new THREE.Vector2());
     const renderTarget = new THREE.WebGLRenderTarget(size.x, size.y, {
       type: THREE.HalfFloatType,
@@ -62,36 +71,75 @@ export class PostProcessing {
     });
     this.composer = new EffectComposer(renderer, renderTarget);
 
-    // 1. Scene render pass
+    // 1. Scene render pass (3D world)
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
 
-    // 2. Selective bloom — high threshold so only emissive geometry blooms
+    // 2. Selective bloom — high threshold so only emissive signals bloom
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      0.5,   // strength
-      0.4,   // radius
-      0.85   // threshold — only bright emissive surfaces bloom
+      0.45,   // strength
+      0.35,   // radius
+      0.82   // threshold
     );
     this.composer.addPass(this.bloomPass);
 
-    // 3. Subtle vignette
-    this.vignettePass = new ShaderPass(VignetteShader);
-    this.composer.addPass(this.vignettePass);
+    // 3. Signal Render Pass (Bayer dither + pixel stepping + quantization + vignette on world)
+    this.signalPass = new SignalRenderPass();
+    this.signalPass.setResolution(size.x, size.y);
+    this.signalPass.setPixelSize(2.0); // 2.0 = chunky retro pixel grid
+    this.signalPass.setDitherStrength(0.12);
+    this.signalPass.setQuantizeLevels(32.0);
+    this.composer.addPass(this.signalPass);
 
-    // 4. Output pass (tonemapping + color space conversion)
+    // 4. Viewmodel Pass (Composites hands + karambit directly into the stylized frame)
+    this.viewmodelPass = new ViewmodelComposerPass();
+    this.composer.addPass(this.viewmodelPass as any);
+
+    // 5. Output pass (Tone mapping & sRGB conversion)
     this.outputPass = new OutputPass();
     this.composer.addPass(this.outputPass);
+
+    // 6. Global Unified Grain & Scanlines Pass (Executes on top of the entire frame)
+    this.grainPass = new GrainScanlinePass();
+    this.grainPass.setResolution(size.x, size.y);
+    this.grainPass.setGrainIntensity(0.015);    // Restrained, subtle grain
+    this.grainPass.setScanlineIntensity(0.014); // Subtle scanlines
+    this.composer.addPass(this.grainPass);
+
+    // Default to SIGNAL mode
+    this.setQuality('SIGNAL');
+  }
+
+  public setViewmodelController(ctrl: IViewmodelRenderable | null): void {
+    this.viewmodelPass.viewmodelController = ctrl;
   }
 
   public setQuality(mode: QualityMode): void {
     this.qualityMode = mode;
     if (mode === 'PERFORMANCE') {
       this.bloomPass.enabled = false;
-      this.vignettePass.enabled = false;
-    } else {
+      this.signalPass.enabled = false;
+      this.grainPass.enabled = false;
+    } else if (mode === 'CLEAN' || mode === 'HIGH') {
       this.bloomPass.enabled = true;
-      this.vignettePass.enabled = true;
+      this.signalPass.enabled = true;
+      this.grainPass.enabled = true;
+      this.signalPass.setPixelSize(1.0);
+      this.signalPass.setDitherStrength(0.05);
+      this.signalPass.setQuantizeLevels(48.0);
+      this.grainPass.setGrainIntensity(0.008);
+      this.grainPass.setScanlineIntensity(0.008);
+    } else {
+      // SIGNAL mode (canonical Cosmic Pixel Brutalism)
+      this.bloomPass.enabled = true;
+      this.signalPass.enabled = true;
+      this.grainPass.enabled = true;
+      this.signalPass.setPixelSize(2.0);
+      this.signalPass.setDitherStrength(0.12);
+      this.signalPass.setQuantizeLevels(32.0);
+      this.grainPass.setGrainIntensity(0.015);
+      this.grainPass.setScanlineIntensity(0.014);
     }
   }
 
@@ -101,14 +149,32 @@ export class PostProcessing {
   }
 
   public setVignetteIntensity(intensity: number): void {
-    this.vignettePass.uniforms.uIntensity.value = Math.max(0, Math.min(0.7, intensity));
+    this.signalPass.setVignetteIntensity(intensity);
+  }
+
+  public setGrainIntensity(intensity: number): void {
+    this.grainPass.setGrainIntensity(intensity);
+  }
+
+  public setScanlineIntensity(intensity: number): void {
+    this.grainPass.setScanlineIntensity(intensity);
+  }
+
+  public update(dt: number): void {
+    this.grainPass.update(dt);
   }
 
   public resize(width: number, height: number): void {
     this.composer.setSize(width, height);
+    this.bloomPass.resolution.set(width, height);
+    this.signalPass.setResolution(width, height);
+    this.grainPass.setResolution(width, height);
   }
 
-  public render(): void {
+  public render(viewmodelController?: IViewmodelRenderable | null): void {
+    if (viewmodelController !== undefined) {
+      this.viewmodelPass.viewmodelController = viewmodelController;
+    }
     this.composer.render();
   }
 

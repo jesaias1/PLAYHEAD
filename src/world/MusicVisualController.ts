@@ -143,6 +143,10 @@ export class MusicVisualController {
     this.resetEnvelopes();
   }
 
+  public setPalette(palette: TrackPalette): void {
+    this.state.palette = palette;
+  }
+
   public resetEnvelopes(): void {
     this.smoothEnergy = 0;
     this.smoothSubBass = 0;

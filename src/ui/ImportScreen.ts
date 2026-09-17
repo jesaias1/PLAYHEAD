@@ -1,13 +1,15 @@
 /**
  * Import screen for PLAYHEAD
- * Features the Signal Showcase (curated 5-track production catalog),
- * interactive audio preview auditioning, custom drag-and-drop file import,
- * and direct entrance to the Movement Lab.
+ * Terminal / Signal Console Interface:
+ * Curated Signal Pack (14-track system catalog), interactive preview auditioning,
+ * dedicated Custom Audio signal injection terminal, direct Movement Lab console entry,
+ * and Karambit Armory & Cosmic Skins Profile.
  */
 
 import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
+import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -16,9 +18,14 @@ export class ImportScreen {
   private tabShowcaseBtn: HTMLButtonElement;
   private tabCustomBtn: HTMLButtonElement;
   private tabLabBtn: HTMLButtonElement;
+  private tabArmoryBtn: HTMLButtonElement;
 
   private showcasePanel: HTMLElement;
   private customPanel: HTMLElement;
+  private labPanel: HTMLElement;
+  private armoryPanel: HTMLElement;
+  private labMusicSelect: HTMLSelectElement;
+  private labEnterBtn: HTMLButtonElement;
 
   // Showcase Elements
   private showcaseTitleElem: HTMLElement;
@@ -39,85 +46,146 @@ export class ImportScreen {
   private fileInput: HTMLInputElement;
   private browseBtn: HTMLButtonElement;
 
+  // Armory Elements
+  private armoryGridElem: HTMLElement;
+  private armoryDevToggleBtn: HTMLButtonElement;
+
   // State
   private catalog: TrackCatalogEntry[];
   private selectedTrack: TrackCatalogEntry;
   private isPreviewPlaying = false;
   private previewCtx: AudioContext | null = null;
   private currentPreviewSource: AudioBufferSourceNode | null = null;
+  private skinSystem = KarambitSkinSystem.getInstance();
 
-  // Callbacks
   private onFileSelectedCallback?: (file: File) => void;
   private onCatalogTrackCallback?: (track: TrackCatalogEntry) => void;
   private onDevTrackCallback?: (genre?: SyntheticGenre) => void;
   private onErrorCallback?: (err: string) => void;
-  private onMovementLabCallback?: () => void;
+  private onMovementLabCallback?: (trackId?: string) => void;
 
   constructor() {
     this.catalog = MusicPack.getCatalog();
-    this.selectedTrack = this.catalog[0]; // Default: FIRST CONTACT
+    this.selectedTrack = this.catalog[0]; // Default track
 
     this.element = document.createElement('div');
     this.element.className = 'screen import-screen';
     this.element.innerHTML = `
-      <div class="import-container">
-        <div class="brand-badge">ARCHITECTURAL AUDIO ENGINE v1.1</div>
-        <h1 class="brand-title">PLAYHEAD</h1>
-        <p class="brand-subtitle">DROP A TRACK. ENTER THE SIGNAL.</p>
-
-        <div class="import-tabs">
-          <button class="import-tab-btn active" id="tab-btn-showcase">THE SIGNAL PACK</button>
-          <button class="import-tab-btn" id="tab-btn-custom">CUSTOM AUDIO FILE</button>
-          <button class="import-tab-btn" id="tab-btn-lab">MOVEMENT LAB</button>
+      <div class="import-container terminal-console">
+        <div class="terminal-top-telemetry">
+          <span class="telemetry-item">[SYS: ONLINE]</span>
+          <span class="telemetry-item">[DSP KERNEL: V2.4_STABLE]</span>
+          <span class="telemetry-item">[AUDIO PIPELINE: READY]</span>
+          <span class="telemetry-item signal">[STATUS: READY]</span>
         </div>
 
-        <!-- SHOWCASE PANEL -->
+        <div class="brand-header">
+          <div class="brand-eyebrow">// ARCHITECTURAL AUDIO SYSTEM · TERMINAL CONSOLE</div>
+          <div class="brand-title-wrap">
+            <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
+            <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
+          </div>
+          <p class="brand-tagline">> SELECT FREQUENCY. ENTER THE SIGNAL.</p>
+        </div>
+
+        <div class="import-tabs terminal-tabs">
+          <button class="import-tab-btn active" id="tab-btn-showcase">[ 01 // SIGNAL PACK ]</button>
+          <button class="import-tab-btn" id="tab-btn-custom">[ 02 // CUSTOM AUDIO ]</button>
+          <button class="import-tab-btn" id="tab-btn-lab">[ 03 // MOVEMENT LAB ]</button>
+          <button class="import-tab-btn" id="tab-btn-armory">[ 04 // KARAMBIT ARMORY ]</button>
+        </div>
+
+        <!-- 01: THE SIGNAL PACK PANEL -->
         <div class="showcase-container showcase-panel" id="panel-showcase">
-          <div class="showcase-card" id="showcase-card">
+          <div class="terminal-panel-header">// SELECTED SIGNAL TELEMETRY</div>
+          <div class="showcase-card terminal-card" id="showcase-card">
             <div class="showcase-header">
               <div class="showcase-title-group">
-                <div class="showcase-artist" id="showcase-artist">PLAYHEAD AUDIO LABS</div>
-                <div class="showcase-track-title" id="showcase-title">FIRST CONTACT</div>
+                <div class="showcase-artist" id="showcase-artist">SIGNAL ARCHIVES</div>
+                <div class="showcase-track-title" id="showcase-title">FLOW STATE</div>
               </div>
             </div>
 
             <div class="showcase-meta-row">
-              <span class="showcase-badge accent" id="showcase-genre">MELODIC SYNTH // FLOW</span>
-              <span class="showcase-badge" id="showcase-bpm">120 BPM</span>
+              <span class="showcase-badge accent" id="showcase-genre">CHILLWAVE // FLOW</span>
+              <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
               <span class="showcase-badge" id="showcase-duration">01:12</span>
-              <span class="showcase-badge" id="showcase-diff">★☆☆☆☆ FLOW</span>
+              <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
             </div>
 
             <div class="showcase-desc" id="showcase-desc">
-              Crafted as the quintessential onboarding course. Features gentle rhythm hops, smooth acceleration, and introductory downhill surf glides.
+              Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
             </div>
 
             <div class="showcase-actions">
-              <button class="primary btn-hero" id="btn-showcase-enter">ENTER TRACK</button>
-              <button class="btn-preview" id="btn-showcase-preview">
+              <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter">> EXEC TRACK</button>
+              <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
                 <span id="preview-icon">▶</span>
-                <span id="preview-text">PREVIEW AUDIO</span>
+                <span id="preview-text">> AUDITION // PREVIEW</span>
               </button>
             </div>
           </div>
 
-          <div class="showcase-selector-strip" id="showcase-strip"></div>
+          <div class="terminal-panel-header" style="margin-top: 8px;">// SYSTEM CATALOG MATRIX · 14 SIGNALS LOADED</div>
+          <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
+            <!-- Populated dynamically via buildStrip() -->
+          </div>
         </div>
 
-        <!-- CUSTOM FILE DROP PANEL -->
-        <div class="custom-file-panel hidden" id="panel-custom">
-          <div class="drop-zone" id="import-drop-zone">
-            <div class="signal-line"></div>
-            <div class="drop-prompt">DRAG AUDIO FILE HERE OR CLICK TO BROWSE</div>
-            <div class="drop-subtext">MP3 · WAV · FLAC · OGG · M4A — REAL-TIME PROCEDURAL GENERATION</div>
+        <!-- 02: CUSTOM AUDIO PANEL -->
+        <div class="custom-panel terminal-panel hidden" id="panel-custom">
+          <div class="terminal-panel-header">// EXTERNAL SIGNAL INJECTION</div>
+          <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone">
+            <div class="drop-icon terminal-glow-icon">⤓</div>
+            <div class="drop-title">INITIALIZE AUDIO STREAM</div>
+            <div class="drop-subtitle">> DRAG & DROP TRACK OR CLICK TO BROWSE</div>
+            <div class="drop-meta">[ FLAC / WAV / MP3 / OGG ]</div>
           </div>
-          <button class="primary btn-hero" id="btn-browse-file" style="margin-bottom: 20px;">BROWSE AUDIO FILE</button>
+
+          <div class="custom-actions">
+            <button class="btn-hero btn-terminal-exec" id="btn-browse-file">[ BROWSE AUDIO FILE ]</button>
+          </div>
+        </div>
+
+        <!-- 03: MOVEMENT LAB SETUP PANEL -->
+        <div class="showcase-container showcase-panel hidden" id="panel-lab">
+          <div class="terminal-panel-header">// MOVEMENT LAB · KINETIC CALIBRATION & SANDBOX</div>
+          <div class="terminal-card" style="padding: 20px 24px; max-width: 680px; margin: 16px auto; display: flex; flex-direction: column; gap: 16px; border-left: 4px solid #00f0ff;">
+            <div style="font-size: 0.85rem; color: #a0aec0; line-height: 1.5;">
+              Dedicated isolated physics sandbox for practicing bunny-hop timing, Source-inspired air strafing, and high-velocity surf ramp control.
+            </div>
+            <div class="settings-row" style="margin-top: 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+              <label class="settings-label" style="min-width: 160px; font-size: 0.8rem; font-family: var(--font-mono); color: #cbd5e1;">SIGNAL // SOUNDTRACK</label>
+              <select class="settings-select" id="lab-music-select" style="flex: 1; padding: 8px 12px; font-size: 0.8rem;">
+                <option value="NONE">NONE // SILENT SANDBOX</option>
+              </select>
+            </div>
+            <div style="font-size: 0.72rem; color: #718096; font-family: var(--font-mono); margin-top: 4px;">
+              [MODE: UNRESTRICTED TRAVERSAL] · [COLLISION: AUTHORITATIVE] · [PB GHOST: ACTIVE]
+            </div>
+            <div style="margin-top: 8px; display: flex; gap: 12px;">
+              <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">> ENTER MOVEMENT LAB</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 04: KARAMBIT ARMORY PANEL -->
+        <div class="showcase-container showcase-panel hidden" id="panel-armory">
+          <div class="terminal-panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>// KARAMBIT ARMORY · PERFORMANCE UNLOCKS & COSMIC SHADERS</span>
+            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
+              DEV PREVIEW: OFF
+            </button>
+          </div>
+          <div id="armory-skins-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 10px; max-height: 480px; overflow-y: auto; padding-right: 4px;">
+            <!-- Populated dynamically via renderArmory() -->
+          </div>
         </div>
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
 
-        <div class="privacy-notice">
-          HIGH-PRECISION CLIENT-SIDE DSP // ZERO ASSET DOWNLOADS // FULL PROCEDURAL GENERATION
+        <div class="privacy-notice terminal-footer-status">
+          [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
         </div>
       </div>
     `;
@@ -126,9 +194,14 @@ export class ImportScreen {
     this.tabShowcaseBtn = this.element.querySelector('#tab-btn-showcase') as HTMLButtonElement;
     this.tabCustomBtn = this.element.querySelector('#tab-btn-custom') as HTMLButtonElement;
     this.tabLabBtn = this.element.querySelector('#tab-btn-lab') as HTMLButtonElement;
+    this.tabArmoryBtn = this.element.querySelector('#tab-btn-armory') as HTMLButtonElement;
 
     this.showcasePanel = this.element.querySelector('#panel-showcase') as HTMLElement;
     this.customPanel = this.element.querySelector('#panel-custom') as HTMLElement;
+    this.labPanel = this.element.querySelector('#panel-lab') as HTMLElement;
+    this.armoryPanel = this.element.querySelector('#panel-armory') as HTMLElement;
+    this.labMusicSelect = this.element.querySelector('#lab-music-select') as HTMLSelectElement;
+    this.labEnterBtn = this.element.querySelector('#btn-lab-enter') as HTMLButtonElement;
 
     // Showcase elements
     this.showcaseTitleElem = this.element.querySelector('#showcase-title') as HTMLElement;
@@ -149,23 +222,37 @@ export class ImportScreen {
     this.fileInput = this.element.querySelector('#import-file-input') as HTMLInputElement;
     this.browseBtn = this.element.querySelector('#btn-browse-file') as HTMLButtonElement;
 
+    // Armory elements
+    this.armoryGridElem = this.element.querySelector('#armory-skins-grid') as HTMLElement;
+    this.armoryDevToggleBtn = this.element.querySelector('#btn-armory-dev-toggle') as HTMLButtonElement;
+
     this.buildStrip();
+    this.buildLabSelect();
     this.updateShowcaseCard(this.selectedTrack);
     this.initEvents();
+  }
+
+  private buildLabSelect(): void {
+    this.labMusicSelect.innerHTML = '<option value="NONE">NONE // SILENT SANDBOX</option>';
+    this.catalog.forEach((t, idx) => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = `[${(idx + 1).toString().padStart(2, '0')}] ${t.title} (${t.bpm} BPM // ${t.difficultyLabel})`;
+      this.labMusicSelect.appendChild(opt);
+    });
   }
 
   private buildStrip(): void {
     this.selectorStripElem.innerHTML = '';
     this.catalog.forEach((t, idx) => {
       const item = document.createElement('div');
-      item.className = `strip-item ${t.id === this.selectedTrack.id ? 'active' : ''}`;
+      item.className = `strip-item terminal-strip-item ${t.id === this.selectedTrack.id ? 'active' : ''}`;
       item.dataset.trackId = t.id;
 
-      const stars = '★'.repeat(t.difficulty) + '☆'.repeat(5 - t.difficulty);
       item.innerHTML = `
-        <div class="strip-item-num">0${idx + 1} // ${stars}</div>
+        <div class="strip-item-num">[${(idx + 1).toString().padStart(2, '0')}] // ${t.difficultyLabel}</div>
         <div class="strip-item-title">${t.title}</div>
-        <div class="strip-item-bpm">${t.bpm} BPM · ${t.difficultyLabel}</div>
+        <div class="strip-item-bpm">${t.bpm} BPM</div>
       `;
 
       item.addEventListener('click', () => {
@@ -202,24 +289,103 @@ export class ImportScreen {
     const secs = Math.floor(t.duration % 60);
     this.showcaseDurationElem.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-    const stars = '★'.repeat(t.difficulty) + '☆'.repeat(5 - t.difficulty);
-    this.showcaseDiffElem.textContent = `${stars} ${t.difficultyLabel}`;
-    this.showcaseDescElem.textContent = t.description;
+    this.showcaseDiffElem.textContent = `TIER ${'I'.repeat(Math.min(5, t.difficulty))} · ${t.difficultyLabel}`;
+    this.showcaseDescElem.textContent = `> ${t.description}`;
 
     const card = this.element.querySelector('#showcase-card') as HTMLElement;
     if (card) {
-      card.style.borderColor = `${t.accentColor}88`;
-      card.style.boxShadow = `0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px ${t.accentColor}22`;
+      card.style.borderLeftColor = t.accentColor;
     }
     this.showcaseGenreElem.style.borderColor = t.accentColor;
     this.showcaseGenreElem.style.color = t.accentColor;
+  }
+
+  public renderArmory(): void {
+    const isDev = this.skinSystem.isDevPreview();
+    this.armoryDevToggleBtn.textContent = `DEV PREVIEW: ${isDev ? 'ACTIVE' : 'OFF'}`;
+    this.armoryDevToggleBtn.style.color = isDev ? '#ffdd00' : '#00f0ff';
+    this.armoryDevToggleBtn.style.borderColor = isDev ? '#ffdd00' : '#00f0ff';
+
+    const equippedId = this.skinSystem.getEquippedSkinId();
+    const skins = this.skinSystem.getSkins();
+
+    this.armoryGridElem.innerHTML = '';
+    skins.forEach((skin) => {
+      const isEquipped = skin.id === equippedId;
+      const isUnlocked = this.skinSystem.isSkinUnlocked(skin.id);
+      const progress = this.skinSystem.getSkinProgress(skin.id);
+
+      const card = document.createElement('div');
+      card.className = 'terminal-card';
+      card.style.padding = '12px 14px';
+      card.style.background = isEquipped ? 'rgba(0, 240, 255, 0.08)' : 'var(--bg-surface-elevated)';
+      card.style.border = `1px solid ${isEquipped ? '#00f0ff' : 'var(--border-subtle)'}`;
+      card.style.borderLeft = `4px solid ${isEquipped ? '#00f0ff' : (isUnlocked ? '#ffffff' : '#444c5c')}`;
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.justifyContent = 'space-between';
+      card.style.gap = '10px';
+
+      card.innerHTML = `
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <div style="font-family: var(--font-mono); font-size: 0.88rem; font-weight: 700; color: ${isEquipped ? '#00f0ff' : (isUnlocked ? 'var(--text-primary)' : '#78889e')};">${skin.name}</div>
+              <div style="font-size: 0.68rem; color: #8899aa; font-family: var(--font-mono); margin-top: 2px;">${skin.codename}</div>
+            </div>
+            <span style="font-size: 0.65rem; font-family: var(--font-mono); color: #00f0ff; border: 1px solid rgba(0,240,255,0.3); padding: 2px 6px;">${skin.paletteTag}</span>
+          </div>
+          <div style="font-size: 0.72rem; color: #8a9bb2; margin-top: 8px; line-height: 1.35;">${skin.description}</div>
+        </div>
+
+        <div style="margin-top: 6px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+          <div style="font-size: 0.68rem; color: ${isUnlocked ? '#00e5a3' : '#a855f7'}; font-family: var(--font-mono); margin-bottom: 8px;">
+            ${isUnlocked ? `[READY // ${skin.shortRequirement}]` : `[REQUIREMENT: ${skin.unlockRequirement} · PROGRESS: ${progress.label}]`}
+          </div>
+          <div class="armory-action-slot"></div>
+        </div>
+      `;
+
+      const actionSlot = card.querySelector('.armory-action-slot') as HTMLElement;
+      if (isEquipped) {
+        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #00f0ff; background: rgba(0, 240, 255, 0.15); padding: 6px 10px; border: 1px solid #00f0ff; cursor: default;">[EQUIPPED IN LOADOUT]</button>`;
+      } else if (isUnlocked) {
+        const btn = document.createElement('button');
+        btn.textContent = '[▶ EQUIP // DEPLOY TO LOADOUT]';
+        btn.style.width = '100%';
+        btn.style.fontFamily = 'var(--font-mono)';
+        btn.style.fontSize = '0.78rem';
+        btn.style.padding = '6px 10px';
+        btn.style.background = 'transparent';
+        btn.style.border = '1px solid #00f0ff';
+        btn.style.color = '#00f0ff';
+        btn.style.cursor = 'pointer';
+        btn.addEventListener('mouseenter', () => {
+          btn.style.background = '#00f0ff';
+          btn.style.color = '#000000';
+        });
+        btn.addEventListener('mouseleave', () => {
+          btn.style.background = 'transparent';
+          btn.style.color = '#00f0ff';
+        });
+        btn.addEventListener('click', () => {
+          this.skinSystem.equipSkin(skin.id);
+          this.renderArmory();
+        });
+        actionSlot.appendChild(btn);
+      } else {
+        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.75rem; color: #5a6678; background: rgba(255,255,255,0.02); border: 1px solid #333a46; padding: 6px 10px; cursor: not-allowed;">[LOCKED // ACCESS RESTRICTED]</button>`;
+      }
+
+      this.armoryGridElem.appendChild(card);
+    });
   }
 
   public setCallbacks(
     onFileSelected: (file: File) => void,
     onDevTrack: (genre?: SyntheticGenre) => void,
     onError: (err: string) => void,
-    onMovementLab?: () => void,
+    onMovementLab?: (trackId?: string) => void,
     onCatalogTrack?: (track: TrackCatalogEntry) => void
   ): void {
     this.onFileSelectedCallback = onFileSelected;
@@ -230,6 +396,7 @@ export class ImportScreen {
   }
 
   public show(): void {
+    this.renderArmory();
     this.element.classList.remove('hidden');
   }
 
@@ -245,7 +412,7 @@ export class ImportScreen {
     }
 
     try {
-      this.previewTextElem.textContent = 'SYNTHESIZING...';
+      this.previewTextElem.textContent = '[ SYNTHESIZING... ]';
       this.showcasePreviewBtn.classList.add('playing');
 
       if (!this.previewCtx) {
@@ -276,7 +443,7 @@ export class ImportScreen {
       this.currentPreviewSource.start(0);
       this.isPreviewPlaying = true;
       this.previewIconElem.textContent = '■';
-      this.previewTextElem.textContent = 'STOP PREVIEW';
+      this.previewTextElem.textContent = '[ STOP PREVIEW ]';
     } catch (e) {
       console.warn('[ImportScreen] Failed to play preview:', e);
       this.stopPreview();
@@ -295,7 +462,7 @@ export class ImportScreen {
     }
     this.isPreviewPlaying = false;
     this.previewIconElem.textContent = '▶';
-    this.previewTextElem.textContent = 'PREVIEW AUDIO';
+    this.previewTextElem.textContent = '[ AUDITION // PREVIEW ]';
     this.showcasePreviewBtn?.classList.remove('playing');
   }
 
@@ -304,21 +471,60 @@ export class ImportScreen {
     this.tabShowcaseBtn.addEventListener('click', () => {
       this.tabShowcaseBtn.classList.add('active');
       this.tabCustomBtn.classList.remove('active');
+      this.tabLabBtn.classList.remove('active');
+      this.tabArmoryBtn.classList.remove('active');
       this.showcasePanel.classList.remove('hidden');
       this.customPanel.classList.add('hidden');
+      this.labPanel.classList.add('hidden');
+      this.armoryPanel.classList.add('hidden');
     });
 
     this.tabCustomBtn.addEventListener('click', () => {
       this.stopPreview();
       this.tabCustomBtn.classList.add('active');
       this.tabShowcaseBtn.classList.remove('active');
+      this.tabLabBtn.classList.remove('active');
+      this.tabArmoryBtn.classList.remove('active');
       this.customPanel.classList.remove('hidden');
       this.showcasePanel.classList.add('hidden');
+      this.labPanel.classList.add('hidden');
+      this.armoryPanel.classList.add('hidden');
     });
 
     this.tabLabBtn.addEventListener('click', () => {
       this.stopPreview();
-      this.onMovementLabCallback?.();
+      this.tabLabBtn.classList.add('active');
+      this.tabShowcaseBtn.classList.remove('active');
+      this.tabCustomBtn.classList.remove('active');
+      this.tabArmoryBtn.classList.remove('active');
+      this.labPanel.classList.remove('hidden');
+      this.showcasePanel.classList.add('hidden');
+      this.customPanel.classList.add('hidden');
+      this.armoryPanel.classList.add('hidden');
+    });
+
+    this.tabArmoryBtn.addEventListener('click', () => {
+      this.stopPreview();
+      this.tabArmoryBtn.classList.add('active');
+      this.tabShowcaseBtn.classList.remove('active');
+      this.tabCustomBtn.classList.remove('active');
+      this.tabLabBtn.classList.remove('active');
+      this.armoryPanel.classList.remove('hidden');
+      this.showcasePanel.classList.add('hidden');
+      this.customPanel.classList.add('hidden');
+      this.labPanel.classList.add('hidden');
+      this.renderArmory();
+    });
+
+    this.labEnterBtn.addEventListener('click', () => {
+      this.stopPreview();
+      const chosen = this.labMusicSelect.value;
+      this.onMovementLabCallback?.(chosen === 'NONE' ? undefined : chosen);
+    });
+
+    this.armoryDevToggleBtn.addEventListener('click', () => {
+      this.skinSystem.toggleDevPreview();
+      this.renderArmory();
     });
 
     // Showcase actions
@@ -327,7 +533,6 @@ export class ImportScreen {
       if (this.onCatalogTrackCallback) {
         this.onCatalogTrackCallback(this.selectedTrack);
       } else {
-        // Fallback to dev track callback
         this.onDevTrackCallback?.('ELECTRONIC_DROP');
       }
     });

@@ -11,9 +11,9 @@ export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
   public killPlaneY = -40.0; // Beneath lowest route structure
 
-  public buildFromRoute(route: RouteNode[]): void {
+  public buildFromRoute(route: RouteNode[], optionalRamps?: RouteNode[], recoveryShelves?: RouteNode[]): void {
     this.colliders = [];
-    let lowestY = 0;
+    let lowestY = Infinity;
 
     for (const node of route) {
       const col = new BoxCollider(node);
@@ -23,7 +23,25 @@ export class PhysicsWorld {
       if (bottomY < lowestY) lowestY = bottomY;
     }
 
-    this.killPlaneY = lowestY - 25.0;
+    if (optionalRamps) {
+      for (const ramp of optionalRamps) {
+        const col = new BoxCollider(ramp);
+        this.colliders.push(col);
+        const bottomY = ramp.position.y - ramp.dimensions.y * 0.5;
+        if (bottomY < lowestY) lowestY = bottomY;
+      }
+    }
+
+    if (recoveryShelves) {
+      for (const shelf of recoveryShelves) {
+        const col = new BoxCollider(shelf);
+        this.colliders.push(col);
+        const bottomY = shelf.position.y - shelf.dimensions.y * 0.5;
+        if (bottomY < lowestY) lowestY = bottomY;
+      }
+    }
+
+    this.killPlaneY = Number.isFinite(lowestY) ? (lowestY - 25.0) : -40.0;
   }
 
   public addCollider(col: BoxCollider): void {

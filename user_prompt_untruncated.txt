@@ -1,0 +1,1946 @@
+<USER_REQUEST>
+# PLAYHEAD — CONSOLIDATED POLISH / WORLD FLOW / TERMINAL UI / KARAMBIT ART PASS
+# FIX WHAT EXISTS — DO NOT REDESIGN THE GAME
+
+PLAYHEAD is now in a good overall direction.
+
+This pass is NOT a new game architecture phase.
+
+It is a focused correction + polish pass covering:
+
+1. compact main menu layout
+2. authentic terminal / command-console UI
+3. Armory cleanup
+4. final custom karambit textures
+5. correct gate support architecture
+6. bottomless skyscraper / megastructure treatment
+7. decorative geometry intrusion safety
+8. smoother procedural platform flow
+9. optional side-surf skill routes
+10. music-reactive stars
+11. preset Signal Pack consistency / instant loading
+12. small content/name cleanup
+
+DO NOT retune the approved movement.
+
+==================================================
+0. PROTECTED SYSTEMS
+==================================================
+
+DO NOT change:
+
+PLAYHEAD_MOVEMENT_V1
+
+including:
+- gravity
+- jump
+- ground acceleration
+- air acceleration
+- bhop behaviour
+- air strafing
+- friction
+- speed behaviour
+- camera controls
+
+Also preserve:
+- current surf physics
+- current calibrated hands
+- current calibrated karambit transform
+- current checkpoint behaviour
+- void fall failsafe
+- pointer-lock fixes
+- route continuity guarantees
+- existing Cosmic Pixel Brutalism direction
+- current subtle global grain/CRT integration unless specifically tuning it for quality
+
+NO walk bob.
+NO inspect animation.
+
+Do not solve visual or level-generation problems by modifying movement.
+
+==================================================
+1. MAIN MENU IS CURRENTLY FAR TOO TALL
+==================================================
+
+The Signal Pack page recently changed into a huge vertical list.
+
+This is wrong.
+
+At normal browser zoom / normal desktop resolution, the primary PLAYHEAD menu should fit comfortably on screen and remain usable WITHOUT requiring the player to zoom the browser out.
+
+Previously the menu was compact enough.
+Restore that compactness while preserving the improved visual identity.
+
+The problem is specifically that the Signal Pack catalogue now creates a long page extending far below the viewport.
+
+Fix this.
+
+==================================================
+2. SIGNAL PACK LAYOUT
+==================================================
+
+The Signal Pack page should behave more like a compact application interface than a long website.
+
+Preferred structure:
+
+TOP:
+PLAYHEAD branding + primary tabs
+
+MIDDLE:
+selected track detail
+
+BOTTOM / SIDE:
+compact selectable Signal Pack catalogue
+
+Do NOT make every track a giant full-width row stacked down the page.
+
+Good solutions include:
+- compact multi-column list
+- compact terminal rows
+- internal fixed-height scroll region
+- keyboard-navigable catalogue
+- selected track kept visible separately
+
+The entire PAGE itself should not become several screens tall.
+
+If 14 tracks exist, they should fit within a compact catalogue panel.
+
+The catalogue itself may scroll internally if necessary.
+
+==================================================
+3. MAIN NAVIGATION TABS
+==================================================
+
+Keep proper separation:
+
+01 // SIGNAL PACK
+02 // CUSTOM AUDIO
+03 // MOVEMENT LAB
+04 // KARAMBIT ARMORY
+
+These are separate modes.
+
+Do NOT mix functionality between them.
+
+==================================================
+4. SIGNAL PACK TAB
+==================================================
+
+SIGNAL PACK should contain:
+
+- official built-in tracks
+- selected track information
+- track preview
+- enter track
+- compact catalogue
+
+It must NOT contain:
+- custom file upload
+- drag/drop
+- Armory controls
+- Movement Lab controls
+
+==================================================
+5. CUSTOM AUDIO TAB
+==================================================
+
+CUSTOM AUDIO should contain:
+
+- drag & drop
+- browse audio
+- supported format information
+- analysis / generation flow
+
+Nothing else.
+
+==================================================
+6. MOVEMENT LAB TAB
+==================================================
+
+Movement Lab remains the movement/training/debug playground.
+
+Do not mix normal soundtrack/catalogue functionality into it.
+
+==================================================
+7. ARMORY CURRENTLY CONTAINS AUDIO UPLOAD UI
+==================================================
+
+The Armory currently displays:
+
+EXTERNAL SIGNAL INJECTION
+INITIALIZE AUDIO STREAM
+DRAG & DROP TRACK
+BROWSE AUDIO FILE
+
+This makes no sense.
+
+REMOVE all custom-audio/upload functionality from the KARAMBIT ARMORY.
+
+The Armory is ONLY for:
+
+- karambit skins
+- unlock requirements
+- equipped skin
+- cosmetic preview/status
+- future cosmetic visual preview slot
+
+Audio upload belongs exclusively in CUSTOM AUDIO.
+
+==================================================
+8. ARMORY NAVIGATION DURING GAMEPLAY
+==================================================
+
+Currently skin-changing is exposed through Settings during gameplay.
+
+Change this structure.
+
+The ESCAPE / pause menu should have a dedicated:
+
+ARMORY
+
+button.
+
+Example:
+
+RESUME
+RESTART CHECKPOINT
+RESTART TRACK
+ARMORY
+SETTINGS
+NEW TRACK
+
+Do NOT place karambit skin selection inside generic Settings.
+
+SETTINGS is for things such as:
+- sensitivity
+- FOV
+- audio
+- visual quality
+- motion options
+
+ARMORY is for:
+- cosmetic loadout
+- karambit skins
+
+Keep the main-menu Armory tab as well.
+
+During gameplay:
+ESCAPE → ARMORY
+should open the Armory interface cleanly.
+
+Returning from Armory should return to the pause menu / game predictably.
+
+Do not break pointer lock.
+
+==================================================
+9. FUTURE SKIN IMAGE PREVIEWS
+==================================================
+
+Eventually each Armory entry should include a blurred/mysterious preview image for locked skins.
+
+DO NOT spend time creating those preview renders in this pass unless trivial.
+
+However, structure the Armory card layout so a future image/thumbnail area can be added cleanly.
+
+Locked skins can remain text/status based for now.
+
+==================================================
+10. TERMINAL UI STILL DOES NOT FEEL LIKE A TERMINAL
+==================================================
+
+The current UI is technically styled and clean, but it still feels more like:
+
+a dark web dashboard
+
+than:
+
+a command terminal / shell / operating console.
+
+Push this significantly further.
+
+The target is:
+
+PLAYHEAD
+ARCHITECTURAL AUDIO SYSTEM
+COMMAND / SIGNAL TERMINAL
+
+Take inspiration from:
+- command shells
+- PowerShell
+- Unix terminal interfaces
+- debugging consoles
+- system monitors
+- operator terminals
+- code/build systems
+
+BUT keep PLAYHEAD's current visual identity and colors.
+
+Do NOT make it a green Matrix parody.
+
+==================================================
+11. TERMINAL LANGUAGE
+==================================================
+
+Use interface language such as:
+
+> system.boot
+> signal.load
+> catalogue.list
+> audio.decode
+> world.compile
+> route.mount
+> execute.track
+> armory.open
+> profile.load
+
+Possible prompt characters:
+
+>
+$
+//
+[]
+::
+
+Use sparingly and consistently.
+
+The interface should feel like the PLAYER IS OPERATING A SYSTEM.
+
+==================================================
+12. TERMINAL VISUAL STRUCTURE
+==================================================
+
+Use more:
+
+- text rows
+- prompt lines
+- cursor / caret language
+- command history feeling
+- terminal dividers
+- system-state readouts
+- fixed-width columns
+- bracketed selections
+- minimal rectangular framing
+- status output
+
+Use fewer:
+- generic website cards
+- large bordered panels
+- conventional dashboard tiles
+- web-app looking buttons
+
+Buttons can resemble executable commands.
+
+Example:
+
+> EXEC TRACK
+
+rather than a generic CTA.
+
+==================================================
+13. KEEP TERMINAL UI PREMIUM
+==================================================
+
+Do NOT fill the screen with nonsense.
+
+Avoid:
+- fake hacking spam
+- random hexadecimal garbage
+- dozens of scrolling logs
+- unreadably small text
+- excessive flickering
+
+It should feel:
+
+precise
+restrained
+technical
+expensive
+minimal
+
+not cheesy.
+
+==================================================
+14. TRACK DISPLAY NAMES
+==================================================
+
+The built-in files originated from filenames such as:
+
+Shiva TRACKNAME Treblo.ogg
+
+The user should NEVER see:
+
+SHIVA
+TREBLO
+
+as artist/source labels unless explicitly desired later.
+
+The in-game title should only be the real track title.
+
+Rules:
+
+remove:
+"Shiva "
+" Treblo"
+file extension
+
+Trim whitespace.
+
+Example:
+
+Shiva Gravity Line Treblo.ogg
+
+becomes:
+
+GRAVITY LINE
+
+Do this consistently:
+- catalogue
+- selected track
+- results
+- HUD
+- analysis
+- pause
+- anywhere else the title appears
+
+==================================================
+15. SIGNAL PACK MUSIC
+==================================================
+
+The official tracks are already located / sourced from:
+
+C:\Users\lin4s\Downloads\PLAYHEAD MUSIC
+
+They are .ogg files.
+
+OGG is fine.
+
+If they have not already been copied into proper project assets, do so.
+
+Runtime must not permanently depend on Downloads.
+
+Use a proper project audio directory.
+
+==================================================
+16. PRESET SIGNAL PACK LEVELS SHOULD BE INSTANT
+==================================================
+
+Signal Pack tracks are fixed first-party content.
+
+Do NOT fully:
+- decode
+- analyze
+- procedural-plan
+- regenerate
+
+the entire map from scratch every time a player selects one.
+
+Each official track should use validated precomputed/persisted generation data.
+
+Persist/version things such as:
+
+- analysis
+- BPM
+- sections
+- energy
+- onset summaries
+- deterministic seed
+- route plan
+- surf plan
+- checkpoints
+- visual profile
+- spectacle plan
+
+Runtime:
+
+select preset
+→ load preset data
+→ instantiate world
+→ start
+
+Custom audio continues to use full procedural analysis/generation.
+
+Provide a DEV/build-time regeneration command for intentionally rebuilding preset worlds.
+
+==================================================
+17. FINAL KARAMBIT TEXTURES
+==================================================
+
+Final custom artwork now exists for the five special skins here:
+
+C:\Users\lin4s\Downloads\PLAYHEAD KNIFE TEXTURES
+
+The files have been manually named for their corresponding skins.
+
+Integrate them into the existing shader-based karambit system.
+
+These are FINAL PRIMARY ART SOURCES for the current cosmic skins.
+
+Copy them into a proper project asset directory.
+
+Do not permanently load them from Downloads.
+
+==================================================
+18. DO NOT FLATTEN THE KARAMBIT SHADER
+==================================================
+
+The supplied images are NOT meant to replace the existing shader with a simple image texture.
+
+Use each image as the primary:
+
+galaxyBase
+nebulaBase
+cosmicBase
+
+or equivalent.
+
+Preserve the existing dimensional system:
+
+- blade mask
+- UV mapping
+- view-dependent parallax
+- secondary detail/star layer
+- subtle noise/flow
+- Fresnel
+- emissive response
+- sparkle
+- subtle music response if already implemented
+
+ART gives the visual identity.
+SHADER gives the dimensional illusion.
+
+==================================================
+19. TUNE EACH SKIN SEPARATELY
+==================================================
+
+Do not use identical shader settings for every texture.
+
+Tune individually:
+
+- UV scale
+- exposure
+- contrast
+- emission
+- parallax amount
+- Fresnel
+- secondary star strength
+- sparkle
+- flow speed
+
+Review each one in FIRST-PERSON gameplay.
+
+==================================================
+20. SKIN CHARACTER
+==================================================
+
+Maintain distinct personalities.
+
+ASTRAL:
+rich blue/cyan/violet celestial depth
+
+VOID SIGNAL:
+dark / sparse / signal-space character
+
+REDSHIFT:
+crimson/orange/magenta energetic nebula
+
+PRISM STATIC:
+lighter iridescent spectral cosmic treatment
+
+BLACKSTAR:
+darkest and most prestigious
+
+BLACKSTAR especially must NOT simply be brightened until it looks like Astral.
+
+It should feel:
+almost black
+deep
+restrained
+impossibly dimensional
+
+with sparse stars and cold highlights.
+
+==================================================
+21. GATE SUPPORTS — PREVIOUS FIX TARGETED WRONG OBJECTS
+==================================================
+
+Be precise.
+
+The objects needing the architectural support treatment are:
+
+THE RECTANGULAR GATE / FRAME STRUCTURES
+THE PLAYER PHYSICALLY RUNS THROUGH.
+
+They often look like:
+
+two vertical posts
++
+one horizontal top beam
+
+These are visible directly along the gameplay route.
+
+They currently look like floating frames.
+
+Do NOT reinterpret this as all generic pillars in the world.
+
+==================================================
+22. GATE LEGS SHOULD DESCEND DEEP INTO THE VOID
+==================================================
+
+For route gates/frames:
+
+extend the SIDE SUPPORT LEGS far downward.
+
+They should appear to continue:
+- tens/hundreds of meters downward
+- eventually disappearing into darkness / haze
+
+The player should perceive them as enormous architectural structures intersecting the playable elevation.
+
+NOT:
+a small floating arch.
+
+The top beam can remain at route height.
+
+The side columns should visually continue far beneath it.
+
+Vary depth where useful.
+
+==================================================
+23. SKYSCRAPERS / MONOLITHS ALSO NEED BOTTOMLESS SCALE
+==================================================
+
+Many environmental towers currently appear to terminate close beneath the route.
+
+This makes them look like floating blocks.
+
+Instead:
+
+large skyscraper / monolith structures should often descend far below the player.
+
+Concept:
+
+THE PLAYABLE ROUTE EXISTS HALFWAY UP A BOTTOMLESS MEGASTRUCTURE.
+
+Some buildings should disappear into:
+- black void
+- atmospheric fog
+- dark color falloff
+
+Their bases should not normally be visible.
+
+Make them feel:
+absurdly tall
+monumental
+vertical
+impossible in scale
+
+==================================================
+24. VARY ARCHITECTURAL DEPTH
+==================================================
+
+Do NOT simply extend every building to the exact same Y coordinate.
+
+That will create another artificial floor.
+
+Use varied depth.
+
+Some:
+- very deep
+
+Some:
+- essentially bottomless
+
+Some:
+- suspended intentionally
+
+But major skyscraper silhouettes should generally feel anchored deep below the playable space.
+
+==================================================
+25. PRESERVE VOID-FALL GAMEPLAY
+==================================================
+
+The architectural extensions are VISUAL.
+
+Do not accidentally create:
+- unintended platforms
+- collision surfaces
+- places the player can land far below route
+- interference with death detection
+
+If necessary, extended architecture can be:
+visual-only
+non-collidable
+
+where appropriate.
+
+Preserve the authoritative void-fall recovery system.
+
+==================================================
+26. DECORATIVE BUILDINGS STILL ENTER SURF ROUTES
+==================================================
+
+A large building/structure has appeared directly in the middle of an active surf ramp/path.
+
+This means the decorative exclusion system is still insufficient.
+
+Fix it robustly.
+
+==================================================
+27. SURF ROUTE EXCLUSION MUST USE PLAYER TRAVEL VOLUME
+==================================================
+
+Do NOT only protect the physical ramp mesh.
+
+Protect the space the player actually travels through.
+
+For mandatory surf phrases calculate / approximate:
+
+SURF TRAVEL CORRIDOR
+
+including:
+- ramp surface
+- lateral player movement
+- entry trajectory
+- likely transfer trajectory
+- exit trajectory
+- reasonable vertical clearance
+
+NO decorative object may overlap this volume.
+
+==================================================
+28. GENERAL GAMEPLAY EXCLUSION VOLUMES
+==================================================
+
+Likewise protect:
+
+- route platform
+- jump arc
+- landing volume
+- checkpoint
+- surf path
+- optional surf rejoin point
+- player head clearance
+
+Large decorative structures require particularly large margins.
+
+If decoration conflicts:
+
+REJECT
+REPOSITION
+or REGENERATE DECORATION
+
+Never move the mandatory gameplay path to accommodate decoration.
+
+==================================================
+29. ADD A FINAL DECORATION VALIDATION PASS
+==================================================
+
+After all:
+- route generation
+- surf insertion
+- optional surf insertion
+- visual architecture placement
+- spectacle placement
+
+run a final validation:
+
+validateDecorationAgainstGameplay()
+
+Check decorative bounds against protected gameplay volumes.
+
+This should happen AFTER transformations/repairs as well.
+
+==================================================
+30. AWKWARD SLIGHTLY-HIGH PLATFORM TRANSITIONS
+==================================================
+
+Some generated routes contain platform transitions where the next platform is only slightly higher than the previous one.
+
+These are technically possible but feel awkward and interrupt movement flow.
+
+This is especially undesirable in FLOW / standard traversal sections.
+
+Do NOT globally make the game easy.
+
+Instead improve generation quality.
+
+==================================================
+31. STEP-UP FLOW RULE
+==================================================
+
+For normal FLOW traversal:
+
+avoid repeated marginal step-ups that sit near the uncomfortable limit.
+
+Prefer one of:
+
+- mostly level continuation
+- a clearly designed ascent
+- a readable staircase/ascent chain
+- a jump with an obvious height change and appropriate distance
+
+Avoid:
+
+random small vertical bumps between sequential platforms.
+
+The player should feel intentional rhythm, not procedural unevenness.
+
+==================================================
+32. DO NOT CHANGE MOVEMENT TO FIX STEP-UPS
+==================================================
+
+Do NOT:
+- increase jump height
+- increase coyote time
+- increase air control
+- reduce gravity
+
+Fix the level geometry/generation.
+
+==================================================
+33. OPTIONAL SIDE-SURF ROUTES
+==================================================
+
+Add a new OPTIONAL advanced movement feature:
+
+occasionally place surf ramps BESIDE an otherwise valid normal platform route.
+
+The main route must remain fully playable without surfing.
+
+A skilled player may:
+
+main platform
+→ jump sideways onto optional surf ramp
+→ surf for speed/style
+→ launch back toward the mandatory route
+→ rejoin safely
+
+This should function as:
+
+OPTIONAL MOVEMENT TECH
+OPTIONAL SPEED LINE
+OPTIONAL SKILL EXPRESSION
+
+not mandatory progression.
+
+==================================================
+34. OPTIONAL SURF DESIGN
+==================================================
+
+Side surf lines should:
+
+- be visually readable before committing
+- have safe entry opportunities
+- provide a meaningful speed advantage when executed well
+- have a readable rejoin point
+- not punish players for ignoring them
+- never disconnect the main route
+- never require surfing for Bronze/basic completion
+
+They can become useful for:
+- Gold
+- Diamond
+- PB chasing
+
+This creates route mastery.
+
+==================================================
+35. OPTIONAL SURF FREQUENCY
+==================================================
+
+Do NOT put them everywhere.
+
+Use them selectively.
+
+Perhaps:
+- a few opportunities per normal track
+- concentrated in suitable high-energy/movement sections
+
+Avoid making every platform sequence visually cluttered with surf ramps.
+
+==================================================
+36. OPTIONAL SURF MUST REMAIN REAL SURF
+==================================================
+
+Use the existing approved surf physics.
+
+No spline movement.
+No auto-steering.
+No forced boost rails.
+
+The speed advantage must come from skillful use of the actual surf system.
+
+==================================================
+37. OPTIONAL SURF SAFETY
+==================================================
+
+Validate:
+
+entry
+surface
+exit
+rejoin
+
+Ensure decorations cannot intersect optional surf travel volumes either.
+
+If an optional line fails validation:
+remove it.
+
+The normal route must remain untouched.
+
+==================================================
+38. MUSIC-REACTIVE STARS
+==================================================
+
+The starfield is good.
+
+Add subtle musical life to it.
+
+ONLY A SMALL SUBSET of stars should react.
+
+Do NOT make the entire sky flash to the beat.
+
+==================================================
+39. STAR RESPONSE DESIGN
+==================================================
+
+Possible mapping:
+
+high-frequency transients / onsets:
+→ tiny short brightness twinkle on selected small stars
+
+strong musical events:
+→ rare brighter "hero star" briefly intensifies
+
+high energy:
+→ slightly increased subtle stellar activity
+
+quiet/BREATH:
+→ calmer sky
+
+Use existing audio analysis.
+
+==================================================
+40. DIFFERENT STAR CLASSES
+==================================================
+
+If compatible with current system, distinguish roughly:
+
+PIXEL_DUST
+ordinary background
+
+BRIGHT_STAR
+occasionally music reactive
+
+HERO_STAR
+rare, larger, reacts only to meaningful musical moments
+
+COLOR_STAR
+rare accent stars tied to current palette
+
+Most stars should remain stable.
+
+==================================================
+41. STAR REACTION MUST BE ELEGANT
+==================================================
+
+Avoid:
+- synchronized blinking everywhere
+- disco ceiling
+- giant lens flares
+- harsh flashes
+- distracting gameplay effects
+
+The desired feeling is:
+
+the universe is subtly listening to the music.
+
+==================================================
+42. GLOBAL CRT / GRAIN
+==================================================
+
+The current grain/CRT-style unification is useful for helping the hands integrate with the world.
+
+Preserve it.
+
+However:
+do NOT increase it aggressively.
+
+Ensure:
+- platforms remain clear
+- thin edges remain readable
+- distant landings remain visible
+- knife texture detail remains visible
+
+If current grain creates excessive noise, tune it slightly down.
+
+The effect should unify,
+not obscure.
+
+==================================================
+43. ARMORY VISUAL POLISH
+==================================================
+
+The existing two-column Armory structure is acceptable as a starting point.
+
+Refine it toward the terminal style.
+
+It should look like:
+an equipment subsystem inside the PLAYHEAD operating environment.
+
+Possible structure:
+
+> armory.list
+
+[00] SIGNAL CYAN
+STATUS: EQUIPPED
+
+[01] ASTRAL
+STATUS: AVAILABLE
+REQUIREMENT: COMPLETE 1 SIGNAL
+
+etc.
+
+Do not make it feel like an ecommerce product grid.
+
+==================================================
+44. DEV PREVIEW
+==================================================
+
+Development preview for all skins is useful.
+
+Keep it DEVELOPMENT ONLY.
+
+Do not expose unlocked cosmetics to normal builds incorrectly.
+
+==================================================
+45. CURRENT UNLOCK PROGRESSION
+==================================================
+
+Preserve the performance-based unlock philosophy.
+
+Use actual current rank system.
+
+Concept remains:
+
+Default
+→ always
+
+Astral
+→ basic completion milestone
+
+Void Signal
+→ Silver-level progression
+
+Redshift
+→ Gold-level progression
+
+Prism Static
+→ strong Signal Pack mastery
+
+Blackstar
+→ highest prestige / top-rank mastery
+
+Do not introduce XP grind or random drops.
+
+==================================================
+46. PERFORMANCE / SAVE DATA
+==================================================
+
+Continue persisting:
+
+- best Signal Pack results
+- best ranks
+- cosmetic unlocks
+- equipped skin
+
+Do not reset player progress as part of this pass.
+
+==================================================
+47. ARTSTYLE
+==================================================
+
+Preserve the current Cosmic Pixel Brutalism / signal-world identity.
+
+Do not turn this into:
+- realistic city
+- generic cyberpunk
+- glossy sci-fi
+- synthwave city
+- realistic architecture
+
+The huge vertically extending buildings should still be stylized brutalist/signal forms.
+
+==================================================
+48. IMPLEMENTATION ORDER
+==================================================
+
+Work in this order:
+
+1. safety checkpoint
+2. integrate final knife textures
+3. fix Armory audio contamination + pause-menu navigation
+4. compact Signal Pack main-menu layout
+5. stronger authentic terminal-shell styling
+6. clean track names
+7. verify preset instant-loading architecture
+8. correct route-gate vertical supports
+9. extend skyscraper/monolith vertical scale
+10. strengthen gameplay/decorative exclusion
+11. improve awkward step-up generation
+12. implement optional side-surf skill lines
+13. add selective music-reactive stars
+14. tune grain/CRT readability
+15. regression test
+
+Do not rush through everything merely to say it is complete.
+
+Run and visually inspect actual results.
+
+==================================================
+49. VISUAL REVIEW
+==================================================
+
+Manually inspect:
+
+MAIN MENU at normal 100% browser zoom
+
+SIGNAL PACK
+- catalogue fits sensibly
+- no ridiculous page height
+
+CUSTOM AUDIO
+- only audio upload
+
+ARMORY
+- no audio upload controls
+- correct terminal styling
+- knife cosmetics only
+
+GAMEPLAY
+- route gate supports visibly descend deep into void
+- skyscrapers look impossibly tall rather than floating
+- no buildings inside surf paths
+- standard jumps feel intentional
+- optional side surf is readable
+- star reactivity is subtle
+- knife textures look dimensional rather than flat
+
+==================================================
+50. ROUTE TESTING
+==================================================
+
+Generate / inspect many routes or seeds.
+
+Specifically search for:
+
+- decoration inside surf
+- decoration inside jump paths
+- blocked landings
+- awkward small upward steps
+- optional surf with impossible rejoin
+- optional surf intersecting decoration
+- route frame collision issues
+
+Save regression seeds for failures.
+
+==================================================
+51. DO NOT BREAK PREVIOUS FIXES
+==================================================
+
+Retest:
+
+- one Escape opens pause
+- pointer lock returns correctly
+- void falls always recover
+- surf hint only appears after relevant surf-related death
+- route remains connected
+- mandatory surf remains reachable
+- no giant decorations occupy mandatory path
+- calibrated karambit placement unchanged
+
+==================================================
+52. VALIDATION
+==================================================
+
+Run:
+
+npm run typecheck
+npm run test
+npm run build
+
+plus relevant browser/E2E tests.
+
+Add targeted tests where practical for:
+
+- track-name sanitization
+- Signal Pack UI tab isolation
+- Armory has no upload UI
+- cosmetic persistence
+- decoration/gameplay exclusion
+- optional surf validation
+- preset loading
+- void recovery regression
+
+==================================================
+53. FINAL RESPONSE — KEEP IT CONCISE
+==================================================
+
+When done report:
+
+## MENU / TERMINAL
+What changed and how normal 100% zoom now behaves.
+
+## ARMORY
+What was removed/moved and how gameplay access works.
+
+## KARAMBIT TEXTURES
+Which final images were integrated and how the shader uses them.
+
+## SIGNAL PACK
+Track naming + preset loading status.
+
+## WORLD SCALE
+Gate supports + skyscraper/monolith treatment.
+
+## ROUTE SAFETY
+How decorative intrusion is now prevented.
+
+## FLOW
+How awkward step-ups were improved.
+
+## OPTIONAL SURF
+How optional side-surf routes work and how they are validated.
+
+## REACTIVE SKY
+How stars respond to music.
+
+## REGRESSION SAFETY
+Confirm movement/surf/viewmodel/calibration unchanged.
+
+## VALIDATION
+Actual commands/tests run.
+
+## HUMAN RETEST
+Give exactly 10 short tests for me.
+
+## STILL WEAK
+Anything that genuinely still needs work.
+
+Do not give numerical quality scores.
+
+==================================================
+FINAL DIRECTIVE
+==================================================
+
+Do not reinterpret the task into another visual redesign.
+
+PLAYHEAD already has its core identity.
+
+This pass should make it:
+
+more coherent
+more intentional
+more vertical
+more expressive
+more terminal-like
+more reliable
+
+The route should feel suspended halfway up an impossible,
+bottomless audio megastructure.
+
+The UI should feel like operating that machine.
+
+The optional surf lines should reward movement mastery.
+
+The stars should subtly respond to the music.
+
+And the new karambit textures should finally make the cosmic skins feel
+like rare dimensional artifacts rather than recolored blades.
+
+==================================================
+54. RACE GHOST / PACE MARKER VISUAL FIX
+==================================================
+
+The small pink/purple wireframe object the player races against is visually good.
+KEEP its current wireframe/signal aesthetic.
+
+However:
+
+1. It sometimes clips halfway through the platform/ground.
+2. It is slightly too small.
+
+Fix ONLY its visual placement/scale.
+
+Requirements:
+
+- increase its visual size moderately, roughly 20–30%
+- keep the same proportions and pink/purple wireframe style
+- ensure the BOTTOM of the visible object sits slightly ABOVE the current route surface
+- it must never appear embedded halfway inside the platform
+- this must also work on platforms at different heights/slopes
+
+Do not rely on a fragile arbitrary world-Y value.
+
+Use the marker's actual visual bounds and the route/surface position so its base is consistently placed just above the surface.
+
+If appropriate, use:
+- geometry bounding box / half-height
+- route surface height
+- or a lightweight downward surface query/raycast
+
+Add only a very small hover clearance so it still looks connected to the route rather than floating obviously.
+
+IMPORTANT:
+
+DO NOT change:
+- ghost/race timing
+- path
+- speed
+- interpolation
+- race logic
+- PB logic
+- synchronization
+
+This is VISUAL ONLY:
+
+same race ghost
+→ slightly larger
+→ properly sitting above the track
+→ no ground clipping.
+
+==================================================
+55. TRACK END / OVERTIME BEHAVIOUR
+==================================================
+
+Do NOT restart or loop the song if the player is too slow and the track ends before they reach the finish.
+
+That feels wrong for PLAYHEAD.
+
+Instead implement an OVERTIME state.
+
+Desired behaviour:
+
+If the track reaches its natural end before the player crosses the finish:
+
+- let the song stop naturally
+- keep the level playable
+- do NOT kill the player
+- do NOT restart the track
+- do NOT move the finish
+- do NOT alter movement
+
+Enter:
+
+SIGNAL LOST // OVERTIME
+
+The player may continue and finish the level.
+
+However, once overtime begins:
+
+- the run becomes unranked
+- no new medal/rank can be earned
+- no PB should be recorded from that run
+- results should clearly show that the player finished after signal expiration
+
+Example result:
+
+RUN COMPLETE
+03:42.18
+OVERTIME +18.44
+UNRANKED
+TRACK SIGNAL EXPIRED
+
+==================================================
+56. OVERTIME PRESENTATION
+==================================================
+
+When the song ends and overtime begins, transition the world into a subtle post-signal state.
+
+Suggested presentation:
+
+- music-reactive effects stop
+- most reactive stars calm down
+- architecture dims slightly
+- signal pulses stop
+- world remains completely readable
+- route remains visible and fair
+- optional faint ambient system hum / movement audio may remain if already available
+
+The feeling should be:
+
+the player is running through the remains of a song whose signal has ended.
+
+Do NOT add a second soundtrack.
+
+==================================================
+57. PRESET LEVEL TIMING
+==================================================
+
+Official Signal Pack levels should be calibrated so a reasonably competent player can normally finish before the track ends.
+
+The track duration should function as a meaningful performance deadline,
+not an impossible timer.
+
+Use the existing ranks / target times so:
+
+- basic completion before track end is achievable
+- better ranks require stronger movement
+- optional surf lines and movement mastery can save time
+
+If normal players consistently enter overtime, fix preset route/timing calibration rather than restarting the song.
+
+==================================================
+58. CUSTOM AUDIO TIMING
+==================================================
+
+For custom generated tracks, use song duration when estimating route length.
+
+The generator should aim for a normal successful run to finish before the audio ends, with reasonable safety margin.
+
+Consider:
+
+- track duration
+- expected average traversal speed
+- jump delays
+- surf sections
+- section structure
+
+Overtime remains the safety mechanism if generation is imperfect.
+
+==================================================
+59. SYNC DELTA / PLAYHEAD MEANING
+==================================================
+
+Use the existing sync delta/timeline where appropriate so the player can understand whether they are ahead of or behind the intended song progression.
+
+As the player falls behind near track end, the interface may communicate that the signal is running out.
+
+Keep this subtle and readable.
+
+Do not spam warnings.
+
+==================================================
+60. OVERTIME SAFETY
+==================================================
+
+Overtime must NOT break:
+
+- checkpoints
+- respawn
+- pointer lock
+- pause menu
+- finish logic
+- results
+- route safety
+
+The player should always be able to complete the level after entering overtime.
+
+This is a presentation/ranking state, not a gameplay physics change.
+
+==================================================
+61. HARD GAP SECTIONS / FORGIVENESS PASS
+==================================================
+
+Some route sections are currently too unforgiving, especially when they combine:
+
+- small landing platforms
+- large gaps / void space
+- variable incoming player speed from bhop/surf momentum
+
+This can make the route feel too punishing and inconsistent for normal play.
+
+Do NOT remove all challenge.
+
+Instead, improve fairness and flow.
+
+==================================================
+62. FORGIVING LANDING DESIGN
+==================================================
+
+For harder jump sections like:
+small platform → large gap → small platform
+
+add more forgiveness where appropriate.
+
+Possible tools:
+
+- slightly widen the primary landing platform
+- add small side catch platforms / recovery ledges
+- add subtle fallback shelves near the landing zone
+- reduce unnecessarily punishing gap-to-landing ratios
+- improve approach readability
+
+The main intended fast route should remain best.
+
+But if the player is slightly too fast or slightly too slow,
+the section should not instantly become an unavoidable death as often as it currently does.
+
+==================================================
+63. CATCH PLATFORMS / SAFETY LEDGES
+==================================================
+
+In selected harder sections, allow small secondary landing options beside or slightly below the main landing.
+
+These can function as:
+
+- catch ledges
+- side recovery shelves
+- forgiving backup platforms
+
+They should help the player survive and continue,
+even if the jump is not perfectly paced.
+
+These must not trivialize the route.
+
+They should be a fallback,
+not a superior main line.
+
+==================================================
+64. PRESERVE SKILL EXPRESSION
+==================================================
+
+Good movement should still be rewarded.
+
+A clean fast line should remain:
+- faster
+- smoother
+- more direct
+
+The forgiving platforms should mainly prevent frustration,
+not replace mastery.
+
+==================================================
+65. WHERE TO APPLY THIS
+==================================================
+
+Apply this especially to sections where playtesting shows:
+
+- repeated overshooting
+- repeated undershooting
+- high failure rate caused by inconsistent incoming speed
+- tiny landing pads after big gaps
+- mandatory jumps that feel more annoying than satisfying
+
+Use judgment.
+
+Do not add recovery shelves everywhere.
+
+Focus on the sections that currently feel unfair rather than exciting.
+
+==================================================
+66. PERSONAL BEST GHOST RACING
+==================================================
+
+Add a proper PERSONAL BEST ghost system for PLAYHEAD.
+
+The player should be able to race against their own best run on a given track.
+
+This should work for:
+- official Signal Pack tracks
+- Movement Lab sessions where a track is selected
+- custom audio tracks where a stable comparable run identity exists
+
+The ghost should follow the player's recorded best trajectory for that specific track/run context.
+
+Use the existing replay/trajectory infrastructure if available.
+
+Do NOT create a fake approximation if precise recorded data already exists.
+
+==================================================
+67. PB GHOST BEHAVIOUR
+==================================================
+
+The PB ghost should:
+
+- represent the player's best valid ranked run for that specific track
+- move through the level using the recorded run data
+- remain visually readable but non-intrusive
+- never collide with the player
+- never affect gameplay physics
+- never obstruct visibility too heavily
+
+If the existing pink/purple wireframe runner is already the race marker/ghost direction,
+extend that into a proper PB ghost system rather than inventing a completely different aesthetic.
+
+Keep the ghost in the same overall PLAYHEAD signal style.
+
+==================================================
+68. PB GHOST CONDITIONS
+==================================================
+
+Only valid successful ranked runs should become PB ghosts.
+
+Do NOT save ghost data from:
+- overtime runs
+- invalid/unranked runs
+- failed runs that never reached the finish
+
+If a player beats their PB with a valid run:
+- update the stored PB ghost
+- replace the previous one cleanly
+
+==================================================
+69. PB GHOST TOGGLE
+==================================================
+
+Allow the player to enable/disable ghost racing.
+
+Suggested places:
+- pre-run menu for a selected track
+- Movement Lab controls
+- pause menu / quick run options if appropriate
+
+Possible labels:
+- RACE PB GHOST
+- SHOW PB GHOST
+- GHOST: ON / OFF
+
+Default behaviour can be:
+- ON if a PB exists
+- OFF if no PB exists
+
+Use whichever feels best.
+
+==================================================
+70. PB GHOST STORAGE
+==================================================
+
+Persist:
+- best completion time
+- associated track identity
+- ghost trajectory/replay data
+- whether the run was ranked/valid
+
+Use the existing persistence/save format where possible.
+
+Do not create unnecessary duplicate save systems.
+
+==================================================
+71. MOVEMENT LAB SONG SELECTOR
+==================================================
+
+Add a proper song selector to MOVEMENT LAB.
+
+Movement Lab should not be locked to a single default audio context.
+
+The player should be able to choose one of the available built-in Signal Pack songs for Movement Lab practice.
+
+This allows them to practice movement with music they know,
+without having to leave Movement Lab.
+
+==================================================
+72. MOVEMENT LAB SONG SELECTION UX
+==================================================
+
+Provide a clean way to switch the active Movement Lab song.
+
+A good solution would be:
+- a dedicated selector in the Movement Lab UI
+and/or
+- a hotkey that opens a compact song-selection overlay
+
+The user specifically wants a quick key-based way if possible.
+
+So implement a keybind that opens a compact song chooser while in Movement Lab.
+
+Examples:
+- press a key to open song list
+- choose from built-in songs
+- confirm selection
+- load/apply the selected song
+
+Use a key that does not conflict with core movement controls.
+
+==================================================
+73. MOVEMENT LAB SONG SELECTOR RULES
+==================================================
+
+The Movement Lab song chooser should:
+
+- list available built-in songs clearly
+- display clean track titles
+- not show raw filenames
+- let the player switch tracks without leaving Movement Lab
+- preserve overall Movement Lab simplicity
+
+If needed, reinitialize the lab cleanly after a song change.
+
+Do not create confusing multi-page UI for this.
+
+A compact overlay / terminal-style chooser is preferred.
+
+==================================================
+74. MOVEMENT LAB + PB GHOST
+==================================================
+
+If practical, allow Movement Lab to also use the PB ghost for the currently selected song/context,
+provided a valid PB exists for that route/setup.
+
+If there is no compatible PB, simply show no ghost.
+
+Do not break normal Movement Lab flow if ghost data is unavailable.
+
+==================================================
+75. VALIDATION
+==================================================
+
+Verify:
+
+- PB ghost only appears when a valid PB exists
+- PB ghost updates when a new PB is set
+- PB ghost does not collide or interfere with gameplay
+- overtime/unranked runs do not overwrite PB ghost
+- Movement Lab has a working song selector
+- Movement Lab song titles display cleanly
+- keybind opens song chooser reliably
+- switching songs in Movement Lab works cleanly
+- no movement controls are broken by the new keybind
+
+==================================================
+76. DROPDOWN / SELECT READABILITY BUG
+==================================================
+
+Some dropdown menus are unreadable unless the option is hovered.
+
+Example:
+the viewmodel dropdown shows light text on a light/white option background,
+so entries like:
+
+FULL (BOTH HANDS + KARAMBIT)
+MINIMAL (RIGHT HAND ONLY)
+OFF (DISABLED)
+
+are barely visible until hover/selection.
+
+Fix ALL native/select-style dropdowns across PLAYHEAD.
+
+Requirements:
+
+- selected option must always be readable
+- unselected options must always be readable
+- hover state must remain readable
+- focused state must remain readable
+- disabled state must remain distinguishable
+- dark/light browser defaults must not override PLAYHEAD styling unpredictably
+
+Use explicit styling for:
+
+select
+option
+optgroup
+focus
+hover where supported
+disabled
+
+Keep the terminal/console aesthetic.
+
+Preferred visual direction:
+
+background:
+dark near-black / deep navy
+
+text:
+off-white / light gray
+
+selected/accent:
+current PLAYHEAD cyan or active palette accent
+
+border:
+subtle signal-line gray/cyan
+
+Do NOT rely on browser default white option menus if avoidable.
+
+Also inspect every existing dropdown in:
+- Settings
+- Movement Lab
+- Ghost/PB options
+- Viewmodel options
+- Audio options
+- Quality options
+- any new Armory/terminal controls
+
+Goal:
+every dropdown is immediately readable at normal 100% zoom without needing to hover.
+
+==================================================
+77. CRITICAL REGRESSION — RARE INFINITE VOID AFTER "RESTORED TO CHECKPOINT"
+==================================================
+
+Infinite falling still occurs very rarely.
+
+IMPORTANT NEW OBSERVATION:
+
+During one failed case, the UI displayed:
+
+RESTORED TO CHECKPOINT
+
+but the player was STILL falling deep in the void.
+
+This suggests the death/checkpoint event may be firing successfully while the
+actual player transform / physics state occasionally fails to complete the restore.
+
+Do not treat this only as a missing kill plane.
+
+Investigate the COMPLETE respawn transaction.
+
+==================================================
+78. CHECKPOINT RESTORE MUST BE ATOMIC
+==================================================
+
+A restore should behave conceptually as ONE authoritative operation:
+
+1. enter restoring state
+2. stop normal movement simulation
+3. clear current velocity / acceleration / surf state
+4. move authoritative player body to checkpoint position
+5. restore checkpoint camera orientation if appropriate
+6. update any previous/current physics positions used by fixed timestep/interpolation
+7. synchronize collider / controller transform
+8. clear stale fall/death state
+9. verify player is actually at the valid checkpoint
+10. only then display RESTORED TO CHECKPOINT
+11. resume simulation
+
+Do not display the successful restore message before the physical restore has
+actually succeeded.
+
+==================================================
+79. CHECK FIXED-STEP / INTERPOLATION STATE
+==================================================
+
+Because PLAYHEAD uses fixed-step movement, inspect whether teleporting only one
+position representation leaves another stale.
+
+Check things such as:
+
+- player.position
+- physics body position
+- previousPosition
+- currentPosition
+- interpolated render position
+- capsule/controller transform
+- camera rig parent
+- velocity
+- vertical velocity
+- grounded state
+- surf contact state
+
+A stale previous/current state must not immediately pull the player back toward
+the old void position after a checkpoint teleport.
+
+==================================================
+80. VERIFY RESTORE ON NEXT SIMULATION FRAME
+==================================================
+
+After restoring, add a safety verification.
+
+If the player is not within a reasonable distance of the intended checkpoint on
+the next simulation frame:
+
+FORCE the authoritative checkpoint transform again
+and clear movement state.
+
+Do not allow a failed teleport to silently continue.
+
+==================================================
+81. SECONDARY WATCHDOG
+==================================================
+
+Keep the numerical out-of-bounds failsafe.
+
+Additionally:
+
+if player Y remains below the absolute safe kill threshold AFTER a restore was
+supposed to occur, immediately perform an emergency restore.
+
+Never permit:
+
+restore event fired
++
+player still below world
++
+simulation continues falling forever
+
+That state should be impossible.
+
+==================================================
+82. PREVENT RESPAWN RACES
+==================================================
+
+Investigate possible races involving:
+
+- repeated death triggers
+- checkpoint restore called twice
+- restore occurring during pause/resume
+- restore during surf/contact cleanup
+- audio/checkpoint seek callbacks
+- asynchronous state changes
+- fixed-update vs render-update ordering
+
+Use one restore transaction / state guard.
+
+Ignore duplicate death requests while restoration is already in progress.
+
+==================================================
+83. DEBUG / REGRESSION LOGGING
+==================================================
+
+Because this bug is rare, add development-only diagnostics when a restore occurs.
+
+Record:
+
+- reason for death
+- checkpoint ID
+- player position before restore
+- target checkpoint position
+- player position immediately after restore
+- player position next fixed frame
+- velocity before/after
+- restore state
+- whether emergency fallback was required
+
+Do not spam production UI.
+
+This should make another rare occurrence diagnosable rather than mysterious.
+
+==================================================
+84. TEST THE FAILURE AGGRESSIVELY
+==================================================
+
+Stress-test many repeated falls.
+
+Include:
+
+- normal platform fall
+- surf fall
+- high-speed fall
+- falling while strafing
+- immediately after checkpoint activation
+- repeated deaths quickly
+- death after pause/resume
+- death around song/checkpoint seeking
+- falling extremely far below the map
+
+Run dozens/hundreds of automated restore cycles if practical.
+
+SUCCESS CONDITION:
+
+Once checkpoint restoration begins,
+the player ALWAYS ends up at the checkpoint.
+
+Infinite void falling must not be an allowed state.
+
+Also when you jump high in the air on the surf ramp you get send back to checkpoint because the game thinks you are falling in the void because you have been falling for so long, that cant happen. You should be able to go high om the surf ramps, but it shouldnt bug out so that you will fall forever in the void again, find a solution. Also there should be an option in settings to remove Game Hints/Tips, as they get annoying when you already know.
+
+Also i attached a new text logo for the main menu, and the normal logo of the mascot which is a face with a karambit as a mouth, which should also be the .favico for the website.
+Use the logo where it fits in the game, use it as an asset if it fits anywhere. And on the main menu.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-16T20:33:49+02:00.
+
+The user has uploaded 2 image(s):
+- C:/Users/lin4s/.gemini/antigravity/brain/ed6a93af-435f-4ce7-a35a-81381d79f4f6/.user_uploaded/media_1789583316033.png
+- C:/Users/lin4s/.gemini/antigravity/brain/ed6a93af-435f-4ce7-a35a-81381d79f4f6/.user_uploaded/media_1789583316082.png
+You can embed these images in an artifact if you need the USER to review them.
+</ADDITIONAL_METADATA>
