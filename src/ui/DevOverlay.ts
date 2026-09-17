@@ -7,6 +7,8 @@ import { PlayerController } from '../player/PlayerController';
 import { World } from '../world/World';
 import { AudioEngine } from '../audio/AudioEngine';
 import { TrackGenerator } from '../generation/TrackGenerator';
+import { Environment } from '../world/Environment';
+import { BUILD_LABEL } from '../core/BuildInfo';
 
 export class DevOverlay {
   public element: HTMLElement;
@@ -62,7 +64,13 @@ export class DevOverlay {
     this.element.style.display = 'none';
   }
 
-  public update(player: PlayerController, world: World, audio: AudioEngine): void {
+  public update(
+    player: PlayerController,
+    world: World,
+    audio: AudioEngine,
+    environment?: Environment,
+    fps = 0
+  ): void {
     if (!this.isVisible) return;
 
     world.setDebugChainVisible(this.isVisible);
@@ -72,6 +80,22 @@ export class DevOverlay {
     const speed = player.getSpeedUnits();
     const vs = world.visualController.state;
 
+    // --- Performance / build block ---------------------------------------
+    let perfBlock = `${BUILD_LABEL}`;
+    if (environment) {
+      const info = environment.renderer.info;
+      const scale = environment.getRenderScaleInfo();
+      const preset = environment.activePreset;
+      perfBlock =
+        `${BUILD_LABEL} | TIER: ${environment.qualityTier}` +
+        (environment.qualityTier === 'AUTO' ? ` -> ${environment.resolvedTier}` : '') +
+        `\nFPS: ${fps.toFixed(0)} | DRAW CALLS: ${info.render.calls} | TRIS: ${info.render.triangles}` +
+        `\nRENDER SCALE: ${scale.effectiveRatio.toFixed(2)}x (${scale.bufferWidth}x${scale.bufferHeight}) | DPR: ${window.devicePixelRatio.toFixed(2)} cap ${preset.dprCap}` +
+        `\nGPU MEM: ${info.memory.geometries} geo / ${info.memory.textures} tex | PROGRAMS: ${info.programs ? info.programs.length : 'n/a'}` +
+        `\nDECOR LOD: ${preset.decorationLodDistance > 0 ? preset.decorationLodDistance + 'm' : 'off'}` +
+        `\nADAPTIVE FPS: ${environment.averageFps > 0 ? environment.averageFps.toFixed(0) : 'n/a'}`;
+    }
+
     const conn = TrackGenerator.lastReport?.connectivity;
     const connStatus = conn
       ? (conn.isValid ? `100% VALID (${conn.totalEdgesChecked}/${conn.totalEdgesChecked} edges | max gap: ${conn.maxObservedHorizontalGap.toFixed(1)}m | max step: +${conn.maxObservedStepUp.toFixed(2)}m)` : `FAIL (${conn.brokenEdges.length} BROKEN EDGES!)`)
@@ -79,6 +103,7 @@ export class DevOverlay {
 
     const lines = [
       '=== PLAYHEAD DEV DIAGNOSTICS (F3) ===',
+      perfBlock,
       `ROUTE CHAIN: ${connStatus}`,
       `PALETTE: ${vs.palette.name} | THEME: ${vs.sectionTheme} (#${vs.sectionIndex + 1}) | REACTIVITY: ${vs.reactivityMultiplier.toFixed(1)}x`,
       `COLOR MIX: PRI=${vs.primaryMix.toFixed(2)} SEC=${vs.secondaryMix.toFixed(2)} HI=${vs.highlightMix.toFixed(2)}`,

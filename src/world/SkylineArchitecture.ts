@@ -22,6 +22,14 @@ export class SkylineArchitecture {
 
   private towerMaterials: THREE.MeshStandardMaterial[] = [];
 
+  // Authored per-instance transforms, retained so distance culling can restore
+  // them exactly (never regenerating geometry or changing silhouettes).
+  private primaryBase: THREE.Matrix4[] = [];
+  private supportBase: THREE.Matrix4[] = [];
+  private ridgeBase: THREE.Matrix4[] = [];
+  private hiddenFlags: Map<THREE.InstancedMesh, boolean[]> = new Map();
+  private cullingActive = false;
+
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
     this.group = new THREE.Group();
     this.build(analysis, track);
@@ -214,6 +222,22 @@ export class SkylineArchitecture {
     this.supportStelae.instanceMatrix.needsUpdate = true;
     this.backgroundRidges.instanceMatrix.needsUpdate = true;
 
+    // Retain authored transforms for distance culling.
+    const capture = (mesh: THREE.InstancedMesh | null): THREE.Matrix4[] => {
+      if (!mesh) return [];
+      const out: THREE.Matrix4[] = [];
+      const tmp = new THREE.Matrix4();
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, tmp);
+        out.push(tmp.clone());
+      }
+      this.hiddenFlags.set(mesh, new Array(mesh.count).fill(false));
+      return out;
+    };
+    this.primaryBase = capture(this.primaryMonoliths);
+    this.supportBase = capture(this.supportStelae);
+    this.ridgeBase = capture(this.backgroundRidges);
+
     this.group.add(this.primaryMonoliths);
     this.group.add(this.supportStelae);
     this.group.add(this.backgroundRidges);
@@ -223,6 +247,75 @@ export class SkylineArchitecture {
     const baseEmissive = 0.03 + visualState.bass * 0.12 + visualState.dropImpact * 0.35;
     for (const mat of this.towerMaterials) {
       mat.emissiveIntensity = Math.min(1.0, baseEmissive * visualState.reactivityMultiplier);
+    }
+  }
+
+  /**
+   * Distance-based visibility for purely decorative skyline clusters.
+   *
+   * These sit 155-260m+ out and plunge hundreds of metres, so at long range
+   * they are a large amount of fill for very little on-screen contribution.
+   * Culling individual instances (rather than a whole layer) keeps the
+   * silhouette continuous, and because the cutoff is generous and gradual there
+   * is no popping near the player.
+   *
+   * `maxDistance <= 0` disables culling entirely (HIGH / ULTRA).
+   */
+  public applyDistanceCulling(cameraPos: THREE.Vector3, maxDistance: number): void {
+    if (maxDistance <= 0) {
+      if (this.cullingActive) {
+        this.restoreAllInstances();
+        this.cullingActive = false;
+      }
+      return;
+    }
+
+    this.cullingActive = true;
+
+    const targets: Array<{ mesh: THREE.InstancedMesh; base: THREE.Matrix4[] }> = [
+      { mesh: this.primaryMonoliths!, base: this.primaryBase },
+      { mesh: this.supportStelae!, base: this.supportBase },
+      { mesh: this.backgroundRidges!, base: this.ridgeBase }
+    ];
+
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    const pos = new THREE.Vector3();
+
+    for (const { mesh, base } of targets) {
+      if (!mesh) continue;
+      let dirty = false;
+      // Fade band: hide only clearly beyond the cutoff so nothing pops in.
+      const cutoffSq = maxDistance * maxDistance;
+      for (let i = 0; i < mesh.count; i++) {
+        const m = base[i];
+        if (!m) continue;
+        pos.setFromMatrixPosition(m);
+        const far = pos.distanceToSquared(cameraPos) > cutoffSq;
+        const current = this.hiddenFlags.get(mesh)![i];
+        if (current === far) continue;
+        this.hiddenFlags.get(mesh)![i] = far;
+        mesh.setMatrixAt(i, far ? hidden : m);
+        dirty = true;
+      }
+      if (dirty) mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Restores every instance to its authored transform. */
+  private restoreAllInstances(): void {
+    const pairs: Array<{ mesh: THREE.InstancedMesh | null; base: THREE.Matrix4[] }> = [
+      { mesh: this.primaryMonoliths, base: this.primaryBase },
+      { mesh: this.supportStelae, base: this.supportBase },
+      { mesh: this.backgroundRidges, base: this.ridgeBase }
+    ];
+    for (const { mesh, base } of pairs) {
+      if (!mesh) continue;
+      for (let i = 0; i < mesh.count; i++) {
+        if (base[i]) mesh.setMatrixAt(i, base[i]);
+      }
+      const flags = this.hiddenFlags.get(mesh);
+      if (flags) flags.fill(false);
+      mesh.instanceMatrix.needsUpdate = true;
     }
   }
 

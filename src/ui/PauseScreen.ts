@@ -78,7 +78,11 @@ export class PauseScreen {
 
   private initEvents(): void {
     this.resumeBtn.addEventListener('click', () => {
-      this.hide();
+      // NOTE: deliberately does NOT hide the screen here. Resuming requires
+      // re-acquiring pointer lock, which the browser only grants from a user
+      // gesture. If that lock fails we must stay visibly paused instead of
+      // resuming with a free cursor and no mouse look. Game.finalizeResume()
+      // hides this screen once the lock is actually confirmed.
       this.onResumeCallback?.();
     });
     this.restartCpBtn.addEventListener('click', () => this.onRestartCpCallback?.());

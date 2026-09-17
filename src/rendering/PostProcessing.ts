@@ -19,8 +19,15 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { SignalRenderPass } from './SignalRenderPass';
 import { GrainScanlinePass } from './GrainScanlinePass';
+import { QualityPreset, QualityTier, resolvePreset } from './QualityPresets';
 
-export type QualityMode = 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE';
+/**
+ * Legacy quality mode names, retained for saved settings compatibility.
+ * They now resolve through the unified QualityPresets table.
+ */
+export type QualityMode = 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE' | 'ULTRA';
+
+const clampBloom = (v: number): number => Math.max(0.15, Math.min(1.2, v));
 
 export interface IViewmodelRenderable {
   render: (renderer: THREE.WebGLRenderer) => void;
@@ -59,6 +66,9 @@ export class PostProcessing {
   public viewmodelPass: ViewmodelComposerPass;
   public grainPass: GrainScanlinePass;
   public qualityMode: QualityMode = 'SIGNAL';
+
+  /** Currently applied concrete preset (single source of truth for cost). */
+  public preset: QualityPreset | null = null;
 
   private renderPass: RenderPass;
   private outputPass: OutputPass;
@@ -117,35 +127,45 @@ export class PostProcessing {
 
   public setQuality(mode: QualityMode): void {
     this.qualityMode = mode;
-    if (mode === 'PERFORMANCE') {
-      this.bloomPass.enabled = false;
-      this.signalPass.enabled = false;
-      this.grainPass.enabled = false;
-    } else if (mode === 'CLEAN' || mode === 'HIGH') {
-      this.bloomPass.enabled = true;
-      this.signalPass.enabled = true;
-      this.grainPass.enabled = true;
-      this.signalPass.setPixelSize(1.0);
-      this.signalPass.setDitherStrength(0.05);
-      this.signalPass.setQuantizeLevels(48.0);
-      this.grainPass.setGrainIntensity(0.008);
-      this.grainPass.setScanlineIntensity(0.008);
-    } else {
-      // SIGNAL mode (canonical Cosmic Pixel Brutalism)
-      this.bloomPass.enabled = true;
-      this.signalPass.enabled = true;
-      this.grainPass.enabled = true;
-      this.signalPass.setPixelSize(2.0);
-      this.signalPass.setDitherStrength(0.12);
-      this.signalPass.setQuantizeLevels(32.0);
-      this.grainPass.setGrainIntensity(0.015);
-      this.grainPass.setScanlineIntensity(0.014);
+    // Legacy quality mode now maps onto the unified preset table, so there is
+    // exactly one source of truth for postprocessing cost.
+    const tierMap: Record<QualityMode, Exclude<QualityTier, 'AUTO'>> = {
+      PERFORMANCE: 'LOW',
+      CLEAN: 'MEDIUM',
+      HIGH: 'HIGH',
+      SIGNAL: 'HIGH',
+      ULTRA: 'ULTRA'
+    };
+    this.applyPreset(resolvePreset(tierMap[mode] ?? 'HIGH'));
+  }
+
+  /** Applies a concrete quality preset to the postprocessing chain. */
+  public applyPreset(preset: QualityPreset): void {
+    this.preset = preset;
+
+    // Bloom is NEVER disabled — audio-reactive gate glow is core identity.
+    this.bloomPass.enabled = true;
+    this.bloomPass.strength = clampBloom(0.45 * preset.bloomScale);
+
+    this.signalPass.enabled = preset.signalPassEnabled;
+    if (preset.signalPassEnabled) {
+      this.signalPass.setPixelSize(preset.signalPixelSize);
+      this.signalPass.setDitherStrength(preset.signalDither);
+      this.signalPass.setQuantizeLevels(preset.signalQuantize);
+    }
+
+    const grainOn = preset.grainScale > 0.01;
+    this.grainPass.enabled = grainOn;
+    if (grainOn) {
+      this.grainPass.setGrainIntensity(0.015 * preset.grainScale);
+      this.grainPass.setScanlineIntensity(0.014 * preset.grainScale);
     }
   }
 
   /** Update bloom intensity based on dramatic arc / section */
   public setBloomIntensity(strength: number): void {
-    this.bloomPass.strength = Math.max(0.15, Math.min(1.2, strength));
+    const scale = this.preset ? this.preset.bloomScale : 1.0;
+    this.bloomPass.strength = clampBloom(strength * scale);
   }
 
   public setVignetteIntensity(intensity: number): void {

@@ -530,10 +530,23 @@ export class RouteGenerator {
     };
 
     // 5. Generate Optional Side-Surf Skill Ramps alongside selected platform sequences
-    const optionalRamps = RouteGenerator.generateOptionalSideSurfs(repairedNodes, rng);
+    const optionalRampsRaw = RouteGenerator.generateOptionalSideSurfs(repairedNodes, rng);
 
     // 6. Generate Subtle Recovery Catch-Shelves under tricky platform sequences
     const recoveryShelves = RouteGenerator.generateRecoveryShelves(repairedNodes, rng);
+
+    // 7. FINAL AUTHORITATIVE RAMP CLIPPING VALIDATION
+    //
+    // Candidate selection earlier in generation reasons about ramps using
+    // conservative proxies and the main route only. This pass instead measures
+    // the ramp's REAL rotated oriented bounding box against the final geometry
+    // of every piece of gameplay it could intersect, and rejects any ramp that
+    // genuinely overlaps. Gameplay is never moved to accommodate a ramp.
+    const optionalRamps = RouteGenerator.rejectClippingRamps(
+      optionalRampsRaw,
+      repairedNodes,
+      recoveryShelves
+    );
 
     return {
       seed: analysis.seed,
@@ -546,6 +559,81 @@ export class RouteGenerator {
       targetDuration: analysis.duration,
       repairedJumpsCount: repairsCount
     };
+  }
+
+  /**
+   * Builds an oriented bounding box from a route node's final transform.
+   *
+   * Honours exitWidth (flared trapezoid ascent platforms) by using the widest
+   * footprint, and applies a small negative inflation so that surfaces which
+   * merely touch are not treated as intersecting.
+   */
+  private static nodeOBB(node: RouteNode, inflate = -0.05): OBB {
+    const maxHalfX = Math.max(node.dimensions.x, node.exitWidth ?? node.dimensions.x) * 0.5;
+    const halfSize = new THREE.Vector3(
+      maxHalfX + inflate,
+      node.dimensions.y * 0.5 + inflate,
+      node.dimensions.z * 0.5 + inflate
+    );
+    const euler = new THREE.Euler(node.pitch, node.yaw, node.roll, 'YXZ');
+    const rot = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(euler));
+    return new OBB(new THREE.Vector3(node.position.x, node.position.y, node.position.z), halfSize, rot);
+  }
+
+  /**
+   * Rejects optional surf ramps that genuinely intersect other gameplay
+   * geometry in final world space.
+   *
+   * Checks against the main route, mandatory surf, recovery shelves and the
+   * other surviving optional ramps (so two ramps cannot overlap each other).
+   */
+  public static rejectClippingRamps(
+    ramps: RouteNode[],
+    route: RouteNode[],
+    recoveryShelves: RouteNode[] = []
+  ): RouteNode[] {
+    if (ramps.length === 0) return ramps;
+
+    const routeBoxes = route.map((n) => RouteGenerator.nodeOBB(n));
+    const shelfBoxes = recoveryShelves.map((n) => RouteGenerator.nodeOBB(n));
+    const accepted: RouteNode[] = [];
+    const acceptedBoxes: OBB[] = [];
+
+    for (const ramp of ramps) {
+      const rampBox = RouteGenerator.nodeOBB(ramp);
+
+      // 1. Main route (includes mandatory surf and flared ascent platforms).
+      let clips = false;
+      for (const box of routeBoxes) {
+        if (box.intersectsOBB(rampBox)) { clips = true; break; }
+      }
+
+      // 2. Recovery shelves.
+      if (!clips) {
+        for (const box of shelfBoxes) {
+          if (box.intersectsOBB(rampBox)) { clips = true; break; }
+        }
+      }
+
+      // 3. Previously accepted optional ramps (ramp vs ramp).
+      if (!clips) {
+        for (const box of acceptedBoxes) {
+          if (box.intersectsOBB(rampBox)) { clips = true; break; }
+        }
+      }
+
+      if (clips) continue; // REJECT — a ramp may never intersect gameplay
+
+      accepted.push(ramp);
+      acceptedBoxes.push(rampBox);
+    }
+
+    const rejected = ramps.length - accepted.length;
+    if (rejected > 0) {
+      console.log(`[RouteGenerator] Rejected ${rejected} optional surf ramp(s) clipping gameplay geometry.`);
+    }
+
+    return accepted;
   }
 
   /**
@@ -592,7 +680,11 @@ export class RouteGenerator {
     const maxSpan = Math.min(96.0, Math.max(68.0, typicalSpan * 1.12));
 
     for (let i = 3; i < nodes.length - 5; i++) {
-      if (i - lastRampIndex < 12) continue;
+      // Spacing keeps ramps well apart (contract requires >= 10 nodes apart).
+      // Kept at 11 rather than 12 so a short course still has enough discrete
+      // slots to reach the 3-ramp minimum when some candidates are rejected
+      // for clipping.
+      if (i - lastRampIndex < 11) continue;
       if (optionalRamps.length >= maxRamps) break;
 
       const startPlatform = nodes[i];
@@ -676,25 +768,49 @@ export class RouteGenerator {
 
         let hasCollision = false;
 
-        // Check bounding box clearance against all nodes within 50m of the ramp
-        // Expand bounding box by 1.5m player clearance
+        // Exact oriented-box clipping test against every route node.
+        //
+        // A previous proximity gate only considered nodes within 50m of the
+        // ramp's CENTRE, but a ramp is up to 42m long — so route platforms near
+        // its ends were never tested and the ramp could cut straight through
+        // them. The gate is replaced by a correct broad phase: the ramp's own
+        // bounding sphere against each node's bounding sphere, which is cheap
+        // and cannot miss a real overlap.
+        const rampHalfDiag = Math.hypot(rampWidth * 0.5, rampThickness * 0.5, rampLength * 0.5);
+
         for (let j = 0; j < nodes.length; j++) {
           const node = nodes[j];
+
+          // Broad phase: skip nodes whose bounding sphere cannot reach ours.
+          const nodeHalfDiag = Math.hypot(
+            node.dimensions.x * 0.5,
+            node.dimensions.y * 0.5,
+            node.dimensions.z * 0.5
+          );
+          const reach = rampHalfDiag + nodeHalfDiag + 2.0;
           const dxN = node.position.x - midX;
           const dyN = node.position.y - midY;
           const dzN = node.position.z - midZ;
-          if (dxN * dxN + dyN * dyN + dzN * dzN > 50 * 50) continue;
+          if (dxN * dxN + dyN * dyN + dzN * dzN > reach * reach) continue;
 
-          const nodeCenter = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
-          const clearance = 1.5;
-          const nodeHalfSize = new THREE.Vector3(
-            node.dimensions.x * 0.5 + clearance,
-            node.dimensions.y * 0.5 + clearance,
-            node.dimensions.z * 0.5 + clearance
-          );
           const nodeEuler = new THREE.Euler(node.pitch, node.yaw, node.roll, 'YXZ');
           const nodeRotMatrix = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(nodeEuler));
-          const nodeOBB = new OBB(nodeCenter, nodeHalfSize, nodeRotMatrix);
+
+          // Honour the flared trapezoid exit width of ascent platforms, and keep
+          // the intended 1.5m player clearance margin around route geometry so a
+          // ramp never clips or brushes the course.
+          const CLEARANCE = 1.5;
+          const maxHalfX = Math.max(node.dimensions.x, node.exitWidth ?? node.dimensions.x) * 0.5;
+          const nodeHalfSize = new THREE.Vector3(
+            maxHalfX + CLEARANCE,
+            node.dimensions.y * 0.5 + CLEARANCE,
+            node.dimensions.z * 0.5 + CLEARANCE
+          );
+          const nodeOBB = new OBB(
+            new THREE.Vector3(node.position.x, node.position.y, node.position.z),
+            nodeHalfSize,
+            nodeRotMatrix
+          );
 
           if (rampOBB.intersectsOBB(nodeOBB)) {
             hasCollision = true;

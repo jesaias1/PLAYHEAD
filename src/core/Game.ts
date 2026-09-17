@@ -6,6 +6,7 @@
 import { GameState, StateMachine } from './StateMachine';
 import { GameClock } from './Clock';
 import { SettingsManager } from './Settings';
+import { GraphicsTier } from './Settings';
 import { AudioEngine } from '../audio/AudioEngine';
 import { AudioLoader } from '../audio/AudioLoader';
 import { AudioAnalyzer } from '../audio/AudioAnalyzer';
@@ -162,6 +163,11 @@ export class Game {
     this.ui.settingsModal.setOnClose(() => {
       this.ghostManager.applySettingsVisibility();
     });
+
+    // Apply a GRAPHICS tier change immediately, without needing a restart.
+    this.ui.settingsModal.onGraphicsChanged = (tier) => {
+      this.environment.applyQualityTier(tier as GraphicsTier, false);
+    };
 
     // Pause Screen
     this.ui.pauseScreen.setCallbacks({
@@ -560,6 +566,12 @@ export class Game {
    */
   public lastRestoreDiagnostic: Record<string, unknown> | null = null;
 
+  /** True while a paused->playing resume is waiting for pointer lock. */
+  private awaitingResumeLock = false;
+
+  /** Smoothed FPS for the dev diagnostics overlay. */
+  private smoothedFps = 0;
+
   /**
    * Pushes the authoritative world void boundary into the player.
    *
@@ -821,26 +833,62 @@ export class Game {
     }
   }
 
+/**
+   * Resumes gameplay.
+   *
+   * POINTER LOCK POLICY: browsers refuse to re-acquire pointer lock without a
+   * user gesture, so resuming is a two-step transaction:
+   *   1. the click on RESUME requests pointer lock (that click IS the gesture)
+   *   2. gameplay actually resumes only once the lock is confirmed
+   *
+   * If the lock fails, the game stays paused with the cursor free rather than
+   * pretending to resume and leaving the player without mouse control.
+   */
   private resumeGame(): void {
-    if (this.stateMachine.is(GameState.PAUSED)) {
-      this.lastResumeTime = performance.now();
-      if (typeof document !== 'undefined') {
-        if (document.activeElement && typeof (document.activeElement as HTMLElement).blur === 'function') {
-          (document.activeElement as HTMLElement).blur();
-        }
-        document.body.style.cursor = 'none';
+    if (!this.stateMachine.is(GameState.PAUSED)) return;
+
+    this.lastResumeTime = performance.now();
+
+    // If pointer lock is not held, request it and defer the state transition
+    // until onLockChange confirms it. The current call stack is still inside
+    // the user's click, so the request is a valid user-gesture lock.
+    if (!this.cameraController.getIsLocked()) {
+      this.awaitingResumeLock = true;
+      this.cameraController.lock();
+      // Fallback: if the browser neither confirms nor errors (rare), resume
+      // anyway so the player is never trapped on the pause screen.
+      window.setTimeout(() => {
+        if (!this.awaitingResumeLock) return;
+        this.awaitingResumeLock = false;
+        this.finalizeResume();
+      }, 600);
+      return;
+    }
+
+    this.awaitingResumeLock = false;
+    this.finalizeResume();
+  }
+
+  /** Performs the actual paused -> playing transition. */
+  private finalizeResume(): void {
+    if (!this.stateMachine.is(GameState.PAUSED)) return;
+
+    if (typeof document !== 'undefined') {
+      if (document.activeElement && typeof (document.activeElement as HTMLElement).blur === 'function') {
+        (document.activeElement as HTMLElement).blur();
       }
-      if (this.environment?.renderer?.domElement) {
-        this.environment.renderer.domElement.style.cursor = 'none';
-      }
-      this.ui.pauseScreen.hide();
-      this.ui.settingsModal.hide();
-      this.ui.armoryModal.hide();
-      if (this.previousStateBeforePause === GameState.MOVEMENT_LAB) {
-        this.stateMachine.transitionTo(GameState.MOVEMENT_LAB);
-      } else {
-        this.stateMachine.transitionTo(GameState.PLAYING);
-      }
+      document.body.style.cursor = 'none';
+    }
+    if (this.environment?.renderer?.domElement) {
+      this.environment.renderer.domElement.style.cursor = 'none';
+    }
+    this.ui.pauseScreen.hide();
+    this.ui.settingsModal.hide();
+    this.ui.armoryModal.hide();
+    if (this.previousStateBeforePause === GameState.MOVEMENT_LAB) {
+      this.stateMachine.transitionTo(GameState.MOVEMENT_LAB);
+    } else {
+      this.stateMachine.transitionTo(GameState.PLAYING);
     }
   }
 
@@ -876,6 +924,18 @@ export class Game {
   private setupInputHandlers(): void {
     this.cameraController.onUnlock = () => {
       this.pauseGame();
+    };
+
+    // Pointer lock became available only after the user gesture; complete the
+    // deferred resume. A failure keeps the game paused (cursor stays free).
+    this.cameraController.onLockChange = (locked) => {
+      if (!this.awaitingResumeLock) return;
+      if (locked) {
+        this.awaitingResumeLock = false;
+        this.finalizeResume();
+      }
+      // On failure: intentionally do nothing. The pause screen stays up, so it
+      // is obvious that gameplay has not resumed and a further click retries.
     };
 
     window.addEventListener('click', (e) => {
@@ -1018,6 +1078,14 @@ export class Game {
     const { frameDelta } = this.clock.tick((dt) => {
       // Freeze simulation during viewmodel calibration
       if (this.viewmodelCalibrator.isActive) return;
+
+      // Smoothed FPS for developer diagnostics (never used for gameplay).
+      if (dt > 0) {
+        const instFps = 1 / dt;
+        this.smoothedFps = this.smoothedFps === 0
+          ? instFps
+          : this.smoothedFps + (instFps - this.smoothedFps) * 0.08;
+      }
 
       // Atomic Restore Verification on next simulation frame
       if (this.pendingRestoreVerification) {
@@ -1167,7 +1235,7 @@ export class Game {
       );
 
       // Dev Diagnostics update
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps);
 
       // Checkpoint passing check
       if (this.currentTrack) {
@@ -1214,7 +1282,7 @@ export class Game {
         this.world.visualController.state,
         frameDelta
       );
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps);
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       this.replayPlayer.update(frameDelta);
       const songTime = this.audioEngine.getCurrentTime();

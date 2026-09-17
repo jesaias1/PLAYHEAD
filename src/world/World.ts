@@ -150,6 +150,25 @@ export class World {
       );
     }
 
+    // ==========================================================
+    // STATIC TRANSFORM FREEZE
+    //
+    // The vast majority of world decoration never moves after placement, yet
+    // every mesh defaults to matrixAutoUpdate = true, which makes Three.js
+    // recompute its local matrix and re-multiply the world matrix every frame.
+    // Freezing genuinely-static subtrees removes that per-frame CPU cost.
+    //
+    // Only subtrees whose transforms are never touched at runtime are frozen.
+    // Animated groups (drop setpiece, spectral canyon/onset, celestial
+    // landmarks, playhead edges) are deliberately left alone.
+    // ==========================================================
+    const staticRoots: THREE.Object3D[] = [this.skyline.group];
+    if (this.builtAssets?.decorativeGroup) staticRoots.push(this.builtAssets.decorativeGroup);
+    const frozen = this.freezeStaticTransforms(staticRoots);
+    if (frozen > 0) {
+      console.log(`[World] Froze ${frozen} static world transforms.`);
+    }
+
     // 7. Initialize Spectacle Visual Renderer
     this.spectacleRenderer.init(track);
 
@@ -169,6 +188,8 @@ export class World {
     playerSpeed = 0,
     reduceMotion = false
   ): { arcProgress: number; syncDelta: number; progressRatio: number; targetSongTime: number } {
+    // Decoration LOD distance is owned by the quality system (0 = never cull).
+    const lodDistance = environment ? environment.decorationLodDistance : 0;
     const progress = this.getRouteProgress(playerPos);
     const totalDist = this.track && this.track.totalDistance > 0 ? this.track.totalDistance : 1;
     const progressRatio = progress.arcProgress / totalDist;
@@ -194,6 +215,9 @@ export class World {
     // Update skyline architecture
     if (this.skyline) {
       this.skyline.update(vState);
+      // Purely decorative: safe to thin by distance. Gameplay surfaces are
+      // never touched by this path.
+      this.skyline.applyDistanceCulling(playerPos, lodDistance);
     }
 
     // Update celestial landmarks (moon, eclipse, halos, relics)
@@ -331,6 +355,27 @@ export class World {
   }
 
   /**
+   * Bakes world matrices for subtrees that never move, then disables per-frame
+   * matrix recomputation on them. Safe only for genuinely static decoration.
+   */
+  private freezeStaticTransforms(roots: THREE.Object3D[]): number {
+    let frozen = 0;
+    for (const root of roots) {
+      if (!root) continue;
+      root.updateWorldMatrix(true, true);
+      root.traverse((obj) => {
+        // Keep the root itself dynamic (cheap, and avoids surprising callers).
+        if (obj === root) return;
+        if (obj.matrixAutoUpdate) {
+          obj.matrixAutoUpdate = false;
+          frozen++;
+        }
+      });
+    }
+    return frozen;
+  }
+
+  /**
    * DEV-ONLY: visualize the authoritative gameplay protection region.
    *
    * Draws the protected volume around every gameplay node so a screenshot can
@@ -343,8 +388,7 @@ export class World {
     return visible;
   }
 
-  public buildCorridorDebug(): void {
-    if (this.debugCorridorGroup) {
+  public buildCorridorDebug(): void {    if (this.debugCorridorGroup) {
       this.scene.remove(this.debugCorridorGroup);
       this.debugCorridorGroup.traverse((o) => {
         const m = o as THREE.Mesh;

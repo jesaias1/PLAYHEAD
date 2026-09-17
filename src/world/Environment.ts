@@ -6,6 +6,14 @@ import * as THREE from 'three';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { PostProcessing, QualityMode } from '../rendering/PostProcessing';
 import { SettingsManager } from '../core/Settings';
+import {
+  AdaptiveQuality,
+  QualityPreset,
+  QualityTier,
+  resolvePreset,
+  scaledRenderSize,
+  effectivePixelRatio
+} from '../rendering/QualityPresets';
 
 export class Environment {
   public scene: THREE.Scene;
@@ -15,9 +23,20 @@ export class Environment {
   public hemiLight: THREE.HemisphereLight;
   public postProcessing: PostProcessing;
 
+  /** Resolved quality tier currently in effect (AUTO resolves to a concrete tier). */
+  public qualityTier: QualityTier = 'AUTO';
+  public resolvedTier: Exclude<QualityTier, 'AUTO'> = 'HIGH';
+  public activePreset: QualityPreset = resolvePreset('HIGH');
+
+  private adaptive: AdaptiveQuality = new AdaptiveQuality('HIGH');
+
   private defaultFov = 75;
   private currentFov = 75;
   private targetFov = 75;
+
+  private viewmodelControllerRef: { render: (renderer: THREE.WebGLRenderer) => void; applyQuality?: (p: QualityPreset) => void } | null = null;
+  /** Decoration LOD callback, supplied by World. */
+  public decorationLodDistance = 0;
 
   constructor(container: HTMLElement) {
     // 1. Scene & Monumental Brutalist Fog (readable at distance)
@@ -37,8 +56,6 @@ export class Environment {
       alpha: false,
       stencil: false
     });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
@@ -47,12 +64,13 @@ export class Environment {
 
     // 4. PostProcessing pipeline (selective bloom + subtle vignette)
     this.postProcessing = new PostProcessing(this.renderer, this.scene, this.camera);
-    const savedQuality = SettingsManager.getInstance().settings.visualQuality;
-    if (savedQuality) {
-      this.postProcessing.setQuality(savedQuality);
-    }
 
-    // 5. Lighting: stark, high-contrast brutalist key light + cold ambient
+    // 5. Quality: resolve the saved tier and apply render scale / DPR cap.
+    //    CSS and UI stay native resolution; only the 3D target scales.
+    const savedTier = (SettingsManager.getInstance().settings.graphics as QualityTier) || 'AUTO';
+    this.applyQualityTier(savedTier, false);
+
+    // 6. Lighting: stark, high-contrast brutalist key light + cold ambient
     this.hemiLight = new THREE.HemisphereLight(0x45556b, 0x111620, 1.05);
     this.scene.add(this.hemiLight);
 
@@ -64,9 +82,94 @@ export class Environment {
     window.addEventListener('resize', this.onResize);
   }
 
+  /**
+   * Resolves and applies a quality tier.
+   *
+   * This is the single entry point for all render-cost scaling. It only ever
+   * changes rendering parameters — never gameplay geometry, collision, physics
+   * timestep, movement, or route generation.
+   */
+  public applyQualityTier(tier: QualityTier, persist = true): void {
+    this.qualityTier = tier;
+
+    if (tier === 'AUTO') {
+      this.adaptive.reset();
+      this.adaptive.tier = this.resolvedTier;
+      this.resolvedTier = this.adaptive.tier;
+    } else {
+      this.resolvedTier = tier;
+    }
+
+    const preset = resolvePreset(this.resolvedTier);
+    this.activePreset = preset;
+
+    // --- 1. Render resolution (cheapest large win) ------------------------
+    this.applyRenderScale(preset);
+
+    // --- 2. Postprocessing cost ------------------------------------------
+    this.postProcessing.applyPreset(preset);
+    this.viewmodelControllerRef?.applyQuality?.(preset);
+
+    // --- 3. Distant decoration detail ------------------------------------
+    this.decorationLodDistance = preset.decorationLodDistance;
+
+    // --- 4. Secondary effects --------------------------------------------
+    // (handled inside postProcessing.applyPreset via grainScale)
+
+    if (persist) {
+      SettingsManager.getInstance().update({ graphics: tier });
+    }
+  }
+
+  /**
+   * Applies render scale + DPR cap.
+   *
+   * `renderer.setSize` with `updateStyle` keeps the canvas stretched to the CSS
+   * size, so the 3D scene renders at a lower internal resolution and is
+   * upscaled by the browser — the UI/CSS layer is unaffected.
+   */
+  private applyRenderScale(preset: QualityPreset): void {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    // Set DPR to the preset's cap directly (render scale is folded into the
+    // explicit drawing-buffer size below), avoiding double-scaling.
+    const baseRatio = effectivePixelRatio(window.devicePixelRatio, preset);
+    this.renderer.setPixelRatio(baseRatio);
+    const target = scaledRenderSize(width, height, window.devicePixelRatio, preset);
+    // setSize multiplies by the pixel ratio internally, so convert the desired
+    // drawing-buffer size back into CSS units before calling it.
+    this.renderer.setSize(
+      Math.max(2, Math.floor(target.width / baseRatio)),
+      Math.max(2, Math.floor(target.height / baseRatio)),
+      true
+    );
+    this.postProcessing.resize(target.width, target.height);
+  }
+
+  /** Current effective render scale, for diagnostics. */
+  public getRenderScaleInfo(): { effectiveRatio: number; bufferWidth: number; bufferHeight: number } {
+    return {
+      effectiveRatio: this.renderer.getPixelRatio() * this.activePreset.renderScale,
+      bufferWidth: this.renderer.domElement.width,
+      bufferHeight: this.renderer.domElement.height
+    };
+  }
+
+  /** Averaged FPS tracked by the adaptive controller (diagnostics). */
+  public get averageFps(): number {
+    return this.adaptive.averageFps;
+  }
+
   public setQuality(mode: QualityMode): void {
-    this.postProcessing.setQuality(mode);
-    SettingsManager.getInstance().update({ visualQuality: mode });
+    // Legacy entry point, routed through the unified tier system.
+    const tierMap: Record<QualityMode, QualityTier> = {
+      PERFORMANCE: 'LOW',
+      CLEAN: 'MEDIUM',
+      HIGH: 'HIGH',
+      SIGNAL: 'HIGH',
+      ULTRA: 'ULTRA'
+    };
+    this.applyQualityTier(tierMap[mode] ?? 'HIGH');
   }
 
   public setBaseFov(fov: number): void {
@@ -107,6 +210,18 @@ export class Environment {
 
     if (this.postProcessing) {
       this.postProcessing.update(dt);
+    }
+
+    // --- Adaptive quality (AUTO only) -------------------------------------
+    // Each frame's delta feeds an averaging window; the controller applies a
+    // dead band plus a minimum number of frames between changes, so the tier
+    // cannot oscillate. Cheap: one array push/shift per frame.
+    if (this.qualityTier === 'AUTO' && dt > 0 && dt < 0.5) {
+      const changed = this.adaptive.sample(dt);
+      if (changed) {
+        this.resolvedTier = changed;
+        this.applyQualityTier('AUTO', false);
+      }
     }
   }
 
@@ -166,7 +281,10 @@ export class Environment {
     this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1.0, dt * 4.0);
   }
 
-  public render(viewmodelController?: { render: (renderer: THREE.WebGLRenderer) => void } | null): void {
+  public render(viewmodelController?: { render: (renderer: THREE.WebGLRenderer) => void; applyQuality?: (p: QualityPreset) => void } | null): void {
+    if (viewmodelController !== undefined) {
+      this.viewmodelControllerRef = viewmodelController;
+    }
     this.postProcessing.render(viewmodelController);
   }
 
@@ -175,8 +293,8 @@ export class Environment {
     const height = window.innerHeight;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
-    this.postProcessing.resize(width, height);
+    // Re-apply render scale so the drawing buffer tracks the new CSS size.
+    this.applyRenderScale(this.activePreset);
   };
 
   public dispose(): void {

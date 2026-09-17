@@ -15,6 +15,7 @@ export class SettingsModal {
   private hintsInput: HTMLInputElement;
   private ghostSelect: HTMLSelectElement;
   private vmModeSelect: HTMLSelectElement;
+  private graphicsSelect: HTMLSelectElement;
   private vmAccentSelect: HTMLSelectElement;
   private calloutsSelect: HTMLSelectElement;
   private hideHudInput: HTMLInputElement;
@@ -24,6 +25,8 @@ export class SettingsModal {
   private closeBtn: HTMLButtonElement;
 
   private onCloseCallback?: () => void;
+  /** Called when the GRAPHICS tier changes, so it can be applied live. */
+  public onGraphicsChanged?: (tier: string) => void;
   private settingsManager = SettingsManager.getInstance();
 
   constructor() {
@@ -61,6 +64,17 @@ export class SettingsModal {
         <div class="settings-row">
           <label class="settings-label">GAME HINTS / TIPS</label>
           <input type="checkbox" id="set-hints" />
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">GRAPHICS</label>
+          <select class="settings-select" id="set-graphics">
+            <option value="AUTO">AUTO (ADAPTIVE)</option>
+            <option value="LOW">LOW (BEST PERFORMANCE)</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="HIGH">HIGH (REFERENCE LOOK)</option>
+            <option value="ULTRA">ULTRA (SHARPEST)</option>
+          </select>
         </div>
 
         <div class="settings-row">
@@ -136,6 +150,7 @@ export class SettingsModal {
     this.hintsInput = this.element.querySelector('#set-hints') as HTMLInputElement;
     this.ghostSelect = this.element.querySelector('#set-ghost') as HTMLSelectElement;
     this.vmModeSelect = this.element.querySelector('#set-vm-mode') as HTMLSelectElement;
+    this.graphicsSelect = this.element.querySelector('#set-graphics') as HTMLSelectElement;
     this.vmAccentSelect = this.element.querySelector('#set-vm-accent') as HTMLSelectElement;
     this.calloutsSelect = this.element.querySelector('#set-callouts') as HTMLSelectElement;
     this.hideHudInput = this.element.querySelector('#set-hide-hud') as HTMLInputElement;
@@ -176,6 +191,7 @@ export class SettingsModal {
     this.hintsInput.checked = s.showHints !== false;
     this.ghostSelect.value = s.ghostMode || 'ALL';
     this.vmModeSelect.value = s.viewmodelMode || 'FULL';
+    this.graphicsSelect.value = s.graphics || 'AUTO';
     this.vmAccentSelect.value = s.viewmodelAccent || 'ADAPTIVE';
     this.calloutsSelect.value = s.terminalCallouts || 'MINIMAL';
     this.hideHudInput.checked = !!s.hideHud;
@@ -218,6 +234,13 @@ export class SettingsModal {
 
     this.vmAccentSelect.addEventListener('change', () => {
       this.settingsManager.update({ viewmodelAccent: this.vmAccentSelect.value as any });
+    });
+
+    this.graphicsSelect.addEventListener('change', () => {
+      const tier = this.graphicsSelect.value as any;
+      this.settingsManager.update({ graphics: tier });
+      // Apply immediately so the change is visible without restarting.
+      this.onGraphicsChanged?.(tier);
     });
 
     this.calloutsSelect.addEventListener('change', () => {

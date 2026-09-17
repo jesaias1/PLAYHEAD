@@ -275,6 +275,16 @@ export class PlayerController {
     // 4. Integrate Position
     this.position.addScaledVector(this.velocity, dt);
 
+    // --- DEV: collision correction telemetry -----------------------------
+    // Records the pre-collision integrated position so a depenetration that
+    // throws the player BACKWARD along its travel direction can be identified.
+    // This is diagnostics only (bounded ring buffer) and never alters movement.
+    const preCollisionX = this.position.x;
+    const preCollisionY = this.position.y;
+    const preCollisionZ = this.position.z;
+    const preCollisionVx = this.velocity.x;
+    const preCollisionVz = this.velocity.z;
+
     // 5. Physics Collision Resolution
     const colRes = this.physics.resolveCapsule(
       this.position,
@@ -283,6 +293,51 @@ export class PlayerController {
     );
 
     this.position.copy(colRes.adjustedPos);
+
+    // Detect a large backward displacement caused purely by depenetration.
+    {
+      const dx = this.position.x - preCollisionX;
+      const dz = this.position.z - preCollisionZ;
+      const dy = this.position.y - preCollisionY;
+      const corrLen = Math.hypot(dx, dy, dz);
+      const vhn = Math.hypot(preCollisionVx, preCollisionVz);
+      if (corrLen > 0.05 && vhn > 1e-4) {
+        const ux = preCollisionVx / vhn;
+        const uz = preCollisionVz / vhn;
+        const backward = -((dx) * ux + (dz) * uz);
+        // Only record genuinely significant backward correction.
+        if (backward > 0.25) {
+          if (this.collisionCorrectionLogs.length >= 20) this.collisionCorrectionLogs.shift();
+          this.collisionCorrectionLogs.push({
+            backward,
+            correctionLen: corrLen,
+            horizontalSpeed: vhn * this.config.speedUnitScale,
+            preCollision: { x: preCollisionX, y: preCollisionY, z: preCollisionZ },
+            postCollision: { x: this.position.x, y: this.position.y, z: this.position.z },
+            velocity: { x: this.velocity.x, y: this.velocity.y, z: this.velocity.z },
+            grounded: colRes.isGrounded,
+            surfing: colRes.isSurfing,
+            hitWall: colRes.hitWall,
+            timestamp: Date.now()
+          });
+          if (typeof console !== 'undefined') {
+            console.warn('[PLAYER CORRECTION]', {
+              reason: 'COLLISION_DEPENETRATION',
+              source: 'PlayerController.updateFixed -> PhysicsWorld.resolveCapsule',
+              backward,
+              correctionLen: corrLen,
+              horizontalSpeed: vhn * this.config.speedUnitScale,
+              preCollision: { x: preCollisionX, y: preCollisionY, z: preCollisionZ },
+              postCollision: { x: this.position.x, y: this.position.y, z: this.position.z },
+              grounded: colRes.isGrounded,
+              surfing: colRes.isSurfing,
+              hitWall: colRes.hitWall
+            });
+          }
+        }
+      }
+    }
+
     this.isSurfing = colRes.isSurfing;
     this.isGrounded = colRes.isGrounded && !colRes.isSurfing;
     this.groundNormal.copy(colRes.groundNormal);
@@ -389,6 +444,27 @@ export class PlayerController {
   public isBelowVoidDeathPlane(): boolean {
     return this.authoritativeKillY !== null && this.position.y < this.authoritativeKillY;
   }
+
+  /**
+   * Recent significant backward collision corrections (DEV diagnostics).
+   *
+   * A rubberband caused by depenetration appears here with the exact
+   * pre/post-collision positions; a rubberband caused by a restore appears in
+   * `restoreDiagnosticLogs` instead. Together they make every automatic
+   * backward position change attributable.
+   */
+  public collisionCorrectionLogs: Array<{
+    backward: number;
+    correctionLen: number;
+    horizontalSpeed: number;
+    preCollision: { x: number; y: number; z: number };
+    postCollision: { x: number; y: number; z: number };
+    velocity: { x: number; y: number; z: number };
+    grounded: boolean;
+    surfing: boolean;
+    hitWall: boolean;
+    timestamp: number;
+  }> = [];
 
   private initInputListeners(): void {
     if (typeof window === 'undefined') return;

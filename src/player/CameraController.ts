@@ -83,7 +83,9 @@ export class CameraController {
   }
 
   public onUnlock?: () => void;
-  public mouseLookEnabled = false;
+  /** Fired whenever pointer lock is actually acquired (true) or lost (false). */
+  public onLockChange?: (locked: boolean) => void;
+  mouseLookEnabled = false;
   private isLockPending = false;
   private lastLockAttempt = 0;
 
@@ -209,6 +211,10 @@ export class CameraController {
       this.isLockPending = false;
       const locked = document.pointerLockElement === this.domElement;
       this.isLocked = locked;
+      // A failed lock must NOT leave the game pretending it is playable while
+      // the cursor is free and mouse look is dead. Report the failure so the
+      // owner can keep the game paused and ask the user again.
+      this.onLockChange?.(false);
       if (this.mouseLookEnabled) {
         if (document.body?.style) {
           document.body.style.cursor = 'none';
@@ -231,6 +237,7 @@ export class CameraController {
       const wasLocked = this.isLocked;
       this.isLocked = locked;
       this.isLockPending = false;
+      this.onLockChange?.(locked);
       if (locked) {
         this.mouseLookEnabled = true;
         if (typeof document !== 'undefined' && document.body?.style) {

@@ -65,31 +65,35 @@ export class ViewmodelAssetLoader {
     const armsScene = armsGltf.scene as THREE.Group;
     armsScene.name = 'ArmsScene';
 
-    // Hands: preserve the natural glove/skin base material and apply the
-    // palette influence only as a reflected-light style contribution.
-    const armMaterials: THREE.MeshStandardMaterial[] = [];
-    const baseHandEmissive = new THREE.Color(0x39445c);
-    const baseHandEmissiveIntensity = 0.62;
-    let handAudioPulse = 0;
-    const activeArmAccent = new THREE.Color(0x00f0ff);
+    // Hands: PRESERVE the underlying glove/skin appearance. The palette must read
+// as coloured light falling on the hands, never as a recolour of the hands.
+//
+// The failure mode this guards against: emissive is ADDED to the shaded result
+// and multiplied by emissiveIntensity, so a strong palette tint at high
+// intensity floods the whole limb (the "entire hand is pink" artifact). Both
+// the tint strength and the intensity therefore stay low here, and the visible
+// coloured light is carried mainly by the dedicated rim light and the
+// silhouette rim in ViewmodelStyleFilter.
+const armMaterials: THREE.MeshStandardMaterial[] = [];
+const baseHandEmissive = new THREE.Color(0x39445c);
+const baseHandEmissiveIntensity = 0.30;
+let handAudioPulse = 0;
+const activeArmAccent = new THREE.Color(0x00f0ff);
 
-    /** Strength of the palette's colour contribution to hand rim light. */
-    const HAND_ACCENT_STRENGTH = 0.55;
+/** How far the hands' base tonal response may drift toward the palette hue. */
+const HAND_ACCENT_STRENGTH = 0.22;
 
-    // Reused scratch colour so the per-frame accent update allocates nothing.
-    const armTintScratch = new THREE.Color();
+// Reused scratch colour so the per-frame accent update allocates nothing.
+const armTintScratch = new THREE.Color();
 
-    const applyArmAccent = (col: THREE.Color) => {
-      // Blend from the neutral base toward the palette hue. At 0.55 the hands
-      // clearly read as "lit by the world" while skin and glove texture stay
-      // intact and the model stays readable.
-      armTintScratch.copy(baseHandEmissive).lerp(col, HAND_ACCENT_STRENGTH);
-      for (const mat of armMaterials) {
-        mat.emissive.copy(armTintScratch);
-        mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.42);
-      }
-      activeArmAccent.copy(col);
-    };
+const applyArmAccent = (col: THREE.Color) => {
+  armTintScratch.copy(baseHandEmissive).lerp(col, HAND_ACCENT_STRENGTH);
+  for (const mat of armMaterials) {
+    mat.emissive.copy(armTintScratch);
+    mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.4);
+  }
+  activeArmAccent.copy(col);
+};
 
     // Configure Arms Materials and Textures
     if (gloveTexture) {

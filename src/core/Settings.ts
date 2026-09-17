@@ -6,6 +6,8 @@ export type GhostMode = 'ALL' | 'PB_ONLY' | 'RIVAL_ONLY' | 'OFF';
 export type ViewmodelMode = 'FULL' | 'MINIMAL' | 'OFF';
 export type ViewmodelAccent = 'ADAPTIVE' | 'DEFAULT_CYAN' | 'OFF';
 export type TerminalCallouts = 'FULL' | 'MINIMAL' | 'OFF';
+/** Unified graphics tier. AUTO scales render cost to sustained performance. */
+export type GraphicsTier = 'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
 
 export interface GameSettings {
   mouseSensitivity: number;
@@ -14,7 +16,9 @@ export interface GameSettings {
   reduceMotion: boolean;
   holdToBhop: boolean;
   showDebug: boolean;
+  /** @deprecated superseded by `graphics`; retained for saved-settings compat. */
   visualQuality: 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE';
+  graphics: GraphicsTier;
   ghostMode: GhostMode;
   viewmodelMode: ViewmodelMode;
   viewmodelAccent: ViewmodelAccent;
@@ -33,6 +37,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   holdToBhop: true,
   showDebug: false,
   visualQuality: 'SIGNAL',
+  graphics: 'AUTO',
   ghostMode: 'ALL',
   viewmodelMode: 'FULL',
   viewmodelAccent: 'ADAPTIVE',

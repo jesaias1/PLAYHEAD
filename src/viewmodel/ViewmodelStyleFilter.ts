@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import { QualityMode } from '../rendering/PostProcessing';
+import { QualityPreset, QualityTier, resolvePreset } from '../rendering/QualityPresets';
 
 export const ViewmodelOverlayShader = {
   name: 'ViewmodelOverlayShader',
@@ -120,6 +121,10 @@ export const ViewmodelOverlayShader = {
 
 export class ViewmodelStyleFilter {
   private renderTarget: THREE.WebGLRenderTarget | null = null;
+  /** Exposed for dev diagnostics / framing verification. */
+  public get target(): THREE.WebGLRenderTarget | null {
+    return this.renderTarget;
+  }
   private overlayScene: THREE.Scene;
   private overlayCamera: THREE.OrthographicCamera;
   private overlayMaterial: THREE.ShaderMaterial;
@@ -152,14 +157,15 @@ export class ViewmodelStyleFilter {
     }
   }
 
-  private initRenderTarget(width: number, height: number): void {
+  private initRenderTarget(width: number, height: number, samples = 4): void {
     if (this.renderTarget) {
       this.renderTarget.dispose();
     }
     this.renderTarget = new THREE.WebGLRenderTarget(width, height, {
       format: THREE.RGBAFormat,
       type: THREE.HalfFloatType,
-      samples: 4, // 4x MSAA for smooth finger & knife silhouette edges
+      // MSAA is expensive at high resolution; low tiers drop it to 1 (off).
+      samples: Math.max(1, samples),
       depthBuffer: true,
       stencilBuffer: false
     });
@@ -167,21 +173,31 @@ export class ViewmodelStyleFilter {
     this.overlayMaterial.uniforms.uResolution.value.set(width, height);
   }
 
-  public setQuality(mode: QualityMode): void {
-    if (mode === 'PERFORMANCE') {
-      this.overlayMaterial.uniforms.uEnabled.value = 0.0;
-    } else if (mode === 'CLEAN' || mode === 'HIGH') {
-      this.overlayMaterial.uniforms.uEnabled.value = 1.0;
-      this.overlayMaterial.uniforms.uDitherStrength.value = 0.018;
-      this.overlayMaterial.uniforms.uQuantizeLevels.value = 64.0;
-      this.overlayMaterial.uniforms.uSignalEdgeStrength.value = 0.18;
-    } else {
-      // SIGNAL mode (default)
-      this.overlayMaterial.uniforms.uEnabled.value = 1.0;
-      this.overlayMaterial.uniforms.uDitherStrength.value = 0.035;
-      this.overlayMaterial.uniforms.uQuantizeLevels.value = 48.0;
-      this.overlayMaterial.uniforms.uSignalEdgeStrength.value = 0.28;
+  /**
+   * Applies a quality preset. HIGH matches the original reference look exactly.
+   */
+  public applyPreset(preset: QualityPreset): void {
+    this.overlayMaterial.uniforms.uEnabled.value = 1.0;
+    this.overlayMaterial.uniforms.uDitherStrength.value = preset.signalDither * 0.3;
+    this.overlayMaterial.uniforms.uQuantizeLevels.value = preset.signalQuantize;
+    // Lower tiers thin the stylized silhouette rim slightly to save fill.
+    this.overlayMaterial.uniforms.uSignalEdgeStrength.value = preset.signalPassEnabled ? 0.28 : 0.18;
+
+    // Re-create the target so the MSAA sample count follows the preset.
+    if (this.renderTarget && this.renderTarget.samples !== Math.max(1, preset.viewmodelSamples)) {
+      this.initRenderTarget(this.width, this.height, preset.viewmodelSamples);
     }
+  }
+
+  public setQuality(mode: QualityMode): void {
+    const tierMap: Record<QualityMode, Exclude<QualityTier, 'AUTO'>> = {
+      PERFORMANCE: 'LOW',
+      CLEAN: 'MEDIUM',
+      HIGH: 'HIGH',
+      SIGNAL: 'HIGH',
+      ULTRA: 'ULTRA'
+    };
+    this.applyPreset(resolvePreset(tierMap[mode] ?? 'HIGH'));
   }
 
   /**
