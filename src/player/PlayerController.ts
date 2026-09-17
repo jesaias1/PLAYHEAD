@@ -11,6 +11,7 @@ import { PlayerStats } from './PlayerStats';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { SettingsManager } from '../core/Settings';
 import { SurfState } from './SurfState';
+import { decideRestore, RestoreReason } from './RestorePolicy';
 
 export class PlayerController {
   public position = new THREE.Vector3();
@@ -49,16 +50,28 @@ export class PlayerController {
   private jumpPressedLastTick = false;
   private prevYaw = 0;
 
-  public onFallCallback?: () => void;
+  public onFallCallback?: (reason: RestoreReason) => void;
   public onRestoreCallback?: () => void;
 
   public lastTouchedSurfaceType: 'PLATFORM' | 'SURF' = 'PLATFORM';
+
+  /**
+   * AUTHORITATIVE VOID DEATH BOUNDARY (world Y).
+   *
+   * Normal falling death is fundamentally "position.y crosses below this".
+   * It is derived from final legitimate gameplay geometry minus a generous
+   * margin (see PhysicsWorld.getVoidDeathY) and is deliberately NOT tied to the
+   * current checkpoint or the current platform: a player who is airborne, fast,
+   * far away, or below their local platform must keep flying as long as they
+   * are above this plane.
+   */
   public authoritativeKillY: number | null = null;
+
   public isRestoring = false;
   private freefallTimer = 0;
 
   public restoreDiagnosticLogs: Array<{
-    reason: string;
+    reason: RestoreReason | string;
     cpId?: number;
     before: { x: number; y: number; z: number };
     target: { x: number; y: number; z: number };
@@ -333,27 +346,26 @@ export class PlayerController {
     // 6. Record Statistics
     this.stats.recordSpeed(this.getSpeedUnits());
 
-    // 7. Check Kill Plane (Fall) with Authoritative Multi-Layer Failsafe
-    const isBelowGlobalKillPlane = this.physics.checkKillPlane(this.position);
-    const isBelowAuthoritativeKillPlane = this.authoritativeKillY !== null && this.position.y < this.authoritativeKillY;
+    // 7. Fall / Void Death Decision
+    //
+    // There is exactly ONE gameplay death rule: cross below the authoritative
+    // world void boundary. A long freefall timer, high speed, large horizontal
+    // distance, being far from the nearest platform, skipping platforms, being
+    // below the local platform, or missing ground contact must NEVER by
+    // themselves restore the player — expert players are allowed arbitrarily
+    // long high-speed transfers.
+    //
+    // Numerically broken state (NaN / infinite / absurd coordinates) routes to
+    // a SEPARATE emergency path and is never treated as a gameplay kill zone.
+    const restoreReason = decideRestore(
+      { position: this.position, velocity: this.velocity },
+      this.authoritativeKillY
+    );
 
-    // Watchdog timer: If launching from surf, allow high soaring jumps (> 8.0s or until beneath route).
-    // From standard platforms, catch prolonged freefall (> 3.5s downward).
-    const safeKillHorizon = (this.authoritativeKillY !== null ? this.authoritativeKillY : this.physics.killPlaneY) + 5.0;
-    const isSurfAirborne = this.lastTouchedSurfaceType === 'SURF';
-    const isWatchdogTriggered = isSurfAirborne
-      ? (this.freefallTimer > 8.0 && this.velocity.y < -5.0 && this.position.y < safeKillHorizon)
-      : (this.freefallTimer > 3.5 && this.velocity.y < -5.0 && this.position.y < safeKillHorizon);
-
-    // Secondary watchdog: failsafe against any edge case where position falls deep below kill plane
-    const isCriticalVoid = this.authoritativeKillY !== null
-      ? (this.position.y < this.authoritativeKillY - 25.0)
-      : (this.position.y < this.physics.killPlaneY - 25.0);
-
-    if (isBelowGlobalKillPlane || isBelowAuthoritativeKillPlane || isWatchdogTriggered || isCriticalVoid) {
+    if (restoreReason !== null) {
       this.stats.recordFall();
       this.freefallTimer = 0;
-      this.onFallCallback?.();
+      this.onFallCallback?.(restoreReason);
     }
 
     // Synchronize visual camera
@@ -366,6 +378,16 @@ export class PlayerController {
       this.position.y + this.config.eyeHeight,
       this.position.z
     );
+  }
+
+  /** Seconds of continuous airborne time. Telemetry only — never a kill rule. */
+  public getFreefallTime(): number {
+    return this.freefallTimer;
+  }
+
+  /** True only when the player has genuinely crossed the world void boundary. */
+  public isBelowVoidDeathPlane(): boolean {
+    return this.authoritativeKillY !== null && this.position.y < this.authoritativeKillY;
   }
 
   private initInputListeners(): void {

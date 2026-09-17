@@ -36,8 +36,14 @@ export class World {
   public dropSetpiece: DropSetpiece | null = null;
   public debugChainMesh: THREE.LineSegments | null = null;
 
+  /** DEV-only debug visualization of the protected gameplay region. */
+  public debugCorridorGroup: THREE.Group | null = null;
+
   public track: GeneratedTrack | null = null;
   public analysis: TrackAnalysis | null = null;
+
+  /** Authoritative gameplay protection region for the loaded track. */
+  public corridor: RouteExclusionCorridor | null = null;
 
   private scene: THREE.Scene;
   private builtAssets: BuiltWorldAssets | null = null;
@@ -107,21 +113,41 @@ export class World {
     // 6. Build Major Drop Setpiece
     this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
 
-    // Final gameplay protection pass: validate all decorative architecture against route exclusion corridor
+    // ==========================================================
+    // FINAL AUTHORITATIVE GAMEPLAY-SAFETY PASS
+    //
+    // This runs AFTER every system that can affect decoration placement
+    // (route generation, route repair, surf insertion, optional surf, recovery
+    // geometry, scaling, rotation, translation, skyline, brutalist landmarks,
+    // spectral architecture, drop setpiece, celestial landmarks).
+    //
+    // It operates on FINAL WORLD-SPACE GEOMETRY, measuring each individual
+    // mesh's real bounding box rather than any declared proxy radius, so it
+    // cannot be defeated by stale bounds, pre-scale/pre-rotation bounds, or
+    // nested groups. Invalid decoration is REJECTED; gameplay is never moved
+    // or deformed to accommodate decoration. Gameplay wins.
+    // ==========================================================
     const allCorridorNodes = [
       ...track.route,
       ...(track.optionalRamps || []),
       ...(track.recoveryShelves || [])
     ];
-    const corridor = new RouteExclusionCorridor(allCorridorNodes);
-    corridor.validateDecorationAgainstGameplay(this.dropSetpiece.group);
-    corridor.validateDecorationAgainstGameplay(this.spectralArchitecture.group);
-    corridor.validateDecorationAgainstGameplay(this.skyline.group);
-    if (this.celestialLandmarks?.group) {
-      corridor.validateDecorationAgainstGameplay(this.celestialLandmarks.group);
-    }
-    if (this.builtAssets?.decorativeGroup) {
-      corridor.validateDecorationAgainstGameplay(this.builtAssets.decorativeGroup);
+    this.corridor = new RouteExclusionCorridor(allCorridorNodes);
+
+    const decorationRoots: THREE.Object3D[] = [
+      this.dropSetpiece.group,
+      this.spectralArchitecture.group,
+      this.skyline.group
+    ];
+    if (this.celestialLandmarks?.group) decorationRoots.push(this.celestialLandmarks.group);
+    if (this.builtAssets?.decorativeGroup) decorationRoots.push(this.builtAssets.decorativeGroup);
+
+    const report = this.corridor.validateDecorations(decorationRoots);
+    if (report.total > 0) {
+      console.log(
+        `[World] Gameplay-safety pass rejected ${report.total} decorative elements ` +
+        `intruding into protected route volumes.`
+      );
     }
 
     // 7. Initialize Spectacle Visual Renderer
@@ -129,6 +155,9 @@ export class World {
 
     // 8. Authoritative Route Continuity Debug Chain
     this.buildDebugChain(track);
+
+    // 9. DEV-only protected-corridor visualization (hidden by default)
+    this.buildCorridorDebug();
   }
 
   public update(
@@ -278,9 +307,19 @@ export class World {
       this.debugChainMesh = null;
     }
 
+    if (this.debugCorridorGroup) {
+      this.scene.remove(this.debugCorridorGroup);
+      this.debugCorridorGroup.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+      });
+      this.debugCorridorGroup = null;
+    }
+
     this.playheadSystem.clear();
     this.songDirector.dispose();
     this.physics.dispose();
+    this.corridor = null;
     this.track = null;
     this.analysis = null;
   }
@@ -289,6 +328,74 @@ export class World {
     if (this.debugChainMesh) {
       this.debugChainMesh.visible = visible;
     }
+  }
+
+  /**
+   * DEV-ONLY: visualize the authoritative gameplay protection region.
+   *
+   * Draws the protected volume around every gameplay node so a screenshot can
+   * immediately show whether a piece of decoration sits inside gameplay space.
+   * Off by default and never enabled in normal play.
+   */
+  public setCorridorDebugVisible(visible: boolean): boolean {
+    if (!this.corridor || !this.debugCorridorGroup) return false;
+    this.debugCorridorGroup.visible = visible;
+    return visible;
+  }
+
+  public buildCorridorDebug(): void {
+    if (this.debugCorridorGroup) {
+      this.scene.remove(this.debugCorridorGroup);
+      this.debugCorridorGroup.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+      });
+      this.debugCorridorGroup = null;
+    }
+    if (!this.corridor || !this.track) return;
+
+    const group = new THREE.Group();
+    group.name = 'CorridorDebug';
+    group.visible = false;
+
+    const route = this.track.route;
+    for (let i = 0; i < route.length; i++) {
+      const node = route[i];
+      const isSurf = !!node.isSurf;
+      const isStepUp = node.type === 'STEP_UP';
+      const halfBreadth = (node.dimensions.x || 10) * 0.5;
+
+      // Representative clearance for a mid-size structure, so the drawn volume
+      // matches what large decoration is actually measured against.
+      const proxyRadius = 20.0;
+      let margin: number;
+      if (isSurf) margin = Math.max(38.0, 46.0) + 0.85 * proxyRadius;
+      else if (isStepUp) margin = 32.0 + 0.7 * proxyRadius;
+      else margin = 26.0 + 0.65 * proxyRadius;
+      const radius = halfBreadth + proxyRadius + margin;
+
+      const color = isSurf ? 0xff4488 : (isStepUp ? 0xffcc00 : 0x00ff88);
+
+      const geom = new THREE.CylinderGeometry(radius, radius, 1.0, 16, 1, true);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false
+      });
+      const h = RouteExclusionCorridor.JUMP_CORRIDOR_ABOVE + RouteExclusionCorridor.JUMP_CORRIDOR_BELOW;
+      const marker = new THREE.Mesh(geom, mat);
+      marker.position.set(node.position.x, node.position.y, node.position.z);
+      marker.scale.y = h;
+      // Centre the band on the protected envelope: [-BELOW, +ABOVE] around y.
+      marker.position.y += (RouteExclusionCorridor.JUMP_CORRIDOR_ABOVE - RouteExclusionCorridor.JUMP_CORRIDOR_BELOW) * 0.5;
+      group.add(marker);
+    }
+
+    this.debugCorridorGroup = group;
+    this.scene.add(group);
+    console.log(`[World] Corridor debug built: ${route.length} protected volumes (radius ~= node footprint + clearance).`);
   }
 
   private buildDebugChain(track: GeneratedTrack): void {

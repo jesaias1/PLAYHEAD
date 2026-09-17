@@ -11,6 +11,36 @@ export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
   public killPlaneY = -40.0; // Beneath lowest route structure
 
+  /**
+   * Generous safety margin below the LOWEST legitimate gameplay geometry.
+   *
+   * This is the only thing standing between a player and a normal void restore,
+   * so it is deliberately generous: it must swallow an entire long high-speed
+   * transfer without ever reading as "you should have landed by now".
+   */
+  public static readonly VOID_MARGIN = 40.0;
+
+  /** Lowest legitimate gameplay Y found by the most recent buildFromRoute. */
+  public lowestGameplayY = Infinity;
+
+  /**
+   * AUTHORITATIVE VOID DEATH BOUNDARY.
+   *
+   * Derived from FINAL legitimate gameplay geometry (main route + mandatory
+   * surf + optional surf + recovery shelves), then pushed down by VOID_MARGIN.
+   *
+   * Normal falling death is fundamentally "player crosses below this Y".
+   * It is intentionally NOT tied to the current platform or the current
+   * checkpoint, so it stays correct on vertically complex maps and never
+   * punishes a player who is merely below their local platform while still
+   * flying high above the true void.
+   */
+  public getVoidDeathY(): number {
+    return Number.isFinite(this.lowestGameplayY)
+      ? this.lowestGameplayY - PhysicsWorld.VOID_MARGIN
+      : this.killPlaneY;
+  }
+
   public buildFromRoute(route: RouteNode[], optionalRamps?: RouteNode[], recoveryShelves?: RouteNode[]): void {
     this.colliders = [];
     let lowestY = Infinity;
@@ -41,7 +71,10 @@ export class PhysicsWorld {
       }
     }
 
-    this.killPlaneY = Number.isFinite(lowestY) ? (lowestY - 25.0) : -40.0;
+    this.lowestGameplayY = lowestY;
+    this.killPlaneY = Number.isFinite(lowestY)
+      ? (lowestY - PhysicsWorld.VOID_MARGIN)
+      : -40.0;
   }
 
   public addCollider(col: BoxCollider): void {

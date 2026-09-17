@@ -559,6 +559,38 @@ export class RouteGenerator {
     const maxRamps = Math.min(5, Math.max(3, Math.floor(nodes.length / 16)));
     let lastRampIndex = -999;
 
+    // ------------------------------------------------------------------
+    // SIZE-AWARE CANDIDATE CLASSIFICATION
+    //
+    // Candidate selection must be measured against the route's OWN platform
+    // sizing. A fixed "narrow" width threshold silently stops matching as soon
+    // as platform dimensions change, which starves ramp generation. Both the
+    // narrowness test and the inter-platform span bound are therefore derived
+    // from the actual distribution on this route.
+    // ------------------------------------------------------------------
+    const widths = nodes
+      .map((n) => n.dimensions.x || 10.0)
+      .slice()
+      .sort((a, b) => a - b);
+    const medianWidth = widths.length > 0 ? widths[Math.floor(widths.length / 2)] : 10.0;
+    // "Narrow" = meaningfully tighter than a typical platform on this course.
+    const narrowWidth = Math.max(8.0, medianWidth * 0.82);
+
+    const spanLengths = [];
+    for (let i = 0; i < nodes.length - 2; i++) {
+      const a = nodes[i];
+      const b = nodes[i + 2];
+      spanLengths.push(Math.hypot(b.position.x - a.position.x, b.position.z - a.position.z));
+    }
+    spanLengths.sort((a, b) => a - b);
+    // A ramp spans roughly this distance, so cap it near the route's own
+    // characteristic 2-platform span rather than a constant that platform
+    // sizing changes can invalidate.
+    const typicalSpan = spanLengths.length > 0
+      ? spanLengths[Math.floor(spanLengths.length * 0.75)]
+      : 60.0;
+    const maxSpan = Math.min(96.0, Math.max(68.0, typicalSpan * 1.12));
+
     for (let i = 3; i < nodes.length - 5; i++) {
       if (i - lastRampIndex < 12) continue;
       if (optionalRamps.length >= maxRamps) break;
@@ -580,10 +612,11 @@ export class RouteGenerator {
       const dx = endPlatform.position.x - startPlatform.position.x;
       const dz = endPlatform.position.z - startPlatform.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < 20.0 || dist > 68.0) continue;
+      if (dist < 20.0 || dist > maxSpan) continue;
 
       // Target tricky small-platform sequences, rhythm-hop sequences, or step-up ascents
-      const isNarrow = (startPlatform.dimensions.x <= 7.0) || (midPlatform.dimensions.x <= 7.0);
+      const isNarrow = (startPlatform.dimensions.x <= narrowWidth) ||
+        (midPlatform.dimensions.x <= narrowWidth);
       const isStepUp = startPlatform.type === RouteNodeType.STEP_UP ||
                        midPlatform.type === RouteNodeType.STEP_UP ||
                        endPlatform.type === RouteNodeType.STEP_UP ||
@@ -757,7 +790,7 @@ export class RouteGenerator {
         (a.type === RouteNodeType.STEP_UP && dist > 5.5)
       );
 
-      if (!isDifficult || rng.next() >= 0.35) continue;
+      if (!isDifficult || rng.next() >= 0.18) continue;
 
       // Small, compact shelf dimensions (width = 3.2m, height = 0.8m, length = 4.5m)
       const shelfWidth = 3.2;
@@ -775,9 +808,16 @@ export class RouteGenerator {
         perpZ = -Math.sin(a.yaw);
       }
 
-      // Positioning: offset sideways by (rng.next() < 0.5 ? 1 : -1) * (a.dimensions.x * 0.5 + 2.4)
+      // Positioning: clearly BESIDE the route, not beneath the fall line.
+      //
+      // A shelf only just past the platform edge still catches a player who
+      // simply misses an ordinary gap, which turns recovery geometry into a
+      // safety net under the course. Pushing it a further few metres sideways
+      // means reaching it requires a deliberate lateral move, so an ordinary
+      // miss keeps falling toward the true void as intended.
       const side = (rng.next() < 0.5 ? 1 : -1);
-      const lateralOffset = side * (a.dimensions.x * 0.5 + 2.4);
+      const maxHalfWidth = Math.max(a.dimensions.x, b.dimensions.x) * 0.5;
+      const lateralOffset = side * (maxHalfWidth + 7.5);
 
       const shelfPos = {
         x: (a.position.x + b.position.x) * 0.5 + perpX * lateralOffset,

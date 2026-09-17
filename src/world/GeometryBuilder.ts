@@ -549,8 +549,15 @@ function createFinishMonument(
 
 /**
  * Route Landmark: Places varied monumental architecture
- * (Monoliths, Cantilevers, Cathedral Ribs, and Murals) along the outer perimeter,
- * strictly verified against the RouteExclusionCorridor.
+ * (Monoliths, Cantilevers, Cathedral Ribs, and Murals) along the outer perimeter.
+ *
+ * AUTHORITATIVE PLACEMENT RULE: a landmark is built at its FULL final size and
+ * orientation first, then its real world-space bounding box is measured against
+ * the corridor. A proxy radius is never trusted, because a rotated or scaled
+ * structure's true footprint can be several times larger than the nominal
+ * dimension (a 45m cantilever arm rotated across the route produces a ~146m
+ * lateral AABB half-extent). Candidates that fail are rejected outright —
+ * gameplay is never moved to accommodate decoration.
  */
 function createRouteLandmark(
   node: RouteNode,
@@ -562,51 +569,21 @@ function createRouteLandmark(
 ): THREE.Group | null {
   const type = index % 4;
 
-  // Scale clearance parameters according to structure type & dimension
-  let radius = 22.0;
-  let minY = -200.0;
-  let maxY = 85.0;
-
-  if (type === 0) {
-    // Colossal Monolith (18m wide, 95m tall)
-    radius = 20.0;
-    maxY = 110.0;
-  } else if (type === 1) {
-    // Massive Cantilever Overhang (aligned parallel to route)
-    radius = 30.0;
-    maxY = 45.0;
-  } else if (type === 2) {
-    // Cathedral Arch Rib
-    radius = 32.0;
-    maxY = 65.0;
-  } else {
-    // Fractured Broken Slab
-    radius = 26.0;
-    maxY = 45.0;
-  }
-
-  const baseDist = 88.0 + ((index * 13) % 30);
+  const baseDist = 92.0 + ((index * 13) % 30);
   const fwdX = Math.sin(node.yaw);
   const fwdZ = Math.cos(node.yaw);
   const rightDir = new THREE.Vector3(fwdZ * side, 0, -fwdX * side);
   const origin = new THREE.Vector3(node.position.x, node.position.y - 10.0, node.position.z);
 
-  const safePos = corridor.findSafeOffsetPosition(
-    origin,
-    rightDir,
-    baseDist,
-    radius,
-    minY,
-    maxY,
-    8,
-    18.0
+  // Arrive at a candidate position using the configured lateral offset.
+  const candidate = new THREE.Vector3(
+    origin.x + rightDir.x * baseDist,
+    origin.y,
+    origin.z + rightDir.z * baseDist
   );
 
-  // If no safe position outside the route exclusion corridor can be found, discard candidate
-  if (!safePos) return null;
-
   const group = new THREE.Group();
-  group.position.copy(safePos);
+  group.position.copy(candidate);
   group.rotation.y = node.yaw + (side > 0 ? 0.2 : -0.2);
 
   if (type === 0) {
@@ -619,8 +596,11 @@ function createRouteLandmark(
     mural.position.set(0, 45.0, 9.2);
     group.add(mural);
   } else if (type === 1) {
-    // Massive Cantilever Overhang - rotated parallel to route so it never cuts into road
-    const cantilever = BrutalistShapeLibrary.createCantilever(45.0, 16.0, 10.0, basaltMaterial);
+    // Massive Cantilever Overhang.
+    // The 45m overhanging arm is oriented PARALLEL to the route so it sweeps
+    // along the corridor rather than across it — an arm aimed at the route
+    // would reach the flight path from any lateral distance.
+    const cantilever = BrutalistShapeLibrary.createCantilever(34.0, 16.0, 10.0, basaltMaterial);
     cantilever.rotation.y = Math.PI * 0.5;
     group.add(cantilever);
   } else if (type === 2) {
@@ -639,6 +619,13 @@ function createRouteLandmark(
   const trunkMesh = new THREE.Mesh(trunkGeom, basaltMaterial);
   trunkMesh.position.set(0, -trunkDepth * 0.5, 0);
   group.add(trunkMesh);
+
+  // AUTHORITATIVE CHECK on the real final geometry.
+  group.updateWorldMatrix(true, true);
+  const finalBox = new THREE.Box3().setFromObject(group);
+  if (corridor.evaluateVolume(finalBox, 28.0)) {
+    return null; // REJECT — decoration must never occupy gameplay airspace
+  }
 
   return group;
 }

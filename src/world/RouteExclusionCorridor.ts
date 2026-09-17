@@ -15,7 +15,37 @@ export interface ObjectBoundingVolume {
   maxY: number;
 }
 
+export interface DecorationValidationReport {
+  /** Meshes rejected because they penetrated the protected gameplay volume. */
+  rejected: Array<{ name: string; penetration: number; nearNode: number }>;
+  total: number;
+}
+
+/**
+ * Height of the protected vertical band above a route node.
+ *
+ * This is the player's usable airspace: a generous jump/launch apex plus
+ * headroom. Architecture may pass overhead ABOVE this band, but nothing may
+ * occupy it near the flight path.
+ */
+export const JUMP_CORRIDOR_ABOVE = 55.0;
+
+/** Depth of protected airspace below a route node. */
+export const JUMP_CORRIDOR_BELOW = 25.0;
+
 export class RouteExclusionCorridor {
+  /**
+   * Height of the protected vertical band above a route node.
+   *
+   * This is the player's usable airspace: a generous jump/launch apex plus
+   * headroom. Architecture may pass overhead ABOVE this band, but nothing may
+   * occupy it near the flight path.
+   */
+  public static readonly JUMP_CORRIDOR_ABOVE = JUMP_CORRIDOR_ABOVE;
+
+  /** Depth of protected airspace below a route node. */
+  public static readonly JUMP_CORRIDOR_BELOW = JUMP_CORRIDOR_BELOW;
+
   private route: RouteNode[];
 
   constructor(route: RouteNode[]) {
@@ -53,9 +83,9 @@ export class RouteExclusionCorridor {
       }
       const requiredDist = trackHalfBreadth + objectRadius + safetyMargin;
 
-      // Vertical clearance envelope: from 25m below platform to 55m above
-      const routeMinY = node.position.y - 25.0;
-      const routeMaxY = node.position.y + 55.0;
+      // Vertical clearance envelope: usable player airspace around the route
+      const routeMinY = node.position.y - JUMP_CORRIDOR_BELOW;
+      const routeMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
 
       const verticalOverlap = !(maxY < routeMinY || minY > routeMaxY);
       if (verticalOverlap) {
@@ -104,8 +134,8 @@ export class RouteExclusionCorridor {
         const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
 
         // Jump trajectory vertical clearance: player arcs upward or downward
-        const jumpMinY = interpY - 25.0;
-        const jumpMaxY = interpY + 55.0;
+        const jumpMinY = interpY - JUMP_CORRIDOR_BELOW;
+        const jumpMaxY = interpY + JUMP_CORRIDOR_ABOVE;
 
         const segVerticalOverlap = !(maxY < jumpMinY || minY > jumpMaxY);
         if (segVerticalOverlap) {
@@ -161,81 +191,212 @@ export class RouteExclusionCorridor {
   }
 
   /**
-   * Final authoritative validation pass checking decorative meshes against protected gameplay volumes.
-   * Traverses decorative objects and safely removes any elements that intrude into surf or route corridors.
-   * Supports both regular Mesh hierarchies and InstancedMesh instances.
+   * Final authoritative validation pass checking decorative meshes against
+   * protected gameplay volumes.
+   *
+   * AUTHORITATIVE RULE: this operates on FINAL WORLD-SPACE GEOMETRY. It walks
+   * the hierarchy recursively and measures each individual mesh's real world
+   * AABB, so it cannot be defeated by:
+   *   - a proxy radius that is smaller than the final rotated/scaled geometry
+   *   - nested groups (e.g. a frame's meshes inside a sub-group)
+   *   - bounds captured before scaling or rotation
+   *
+   * Only genuinely decorative leaves are rejected. Gameplay geometry is never
+   * moved or deformed to accommodate decoration.
    */
   public validateDecorationAgainstGameplay(group: THREE.Group, extraSurfMargin = 28.0): number {
-    let prunedCount = 0;
-    const toRemove: THREE.Object3D[] = [];
-    const worldPos = new THREE.Vector3();
-    const box = new THREE.Box3();
+    return this.validateDecorations([group], extraSurfMargin).total;
+  }
 
-    group.updateWorldMatrix(true, true);
+  /**
+   * Validates several decoration roots at once and returns a report.
+   */
+  public validateDecorations(roots: THREE.Object3D[], extraSurfMargin = 28.0): DecorationValidationReport {
+    const rejected: Array<{ name: string; penetration: number; nearNode: number }> = [];
+    let total = 0;
 
-    for (let i = 0; i < group.children.length; i++) {
-      const child = group.children[i];
+    for (const root of roots) {
+      root.updateWorldMatrix(true, true);
+      const leaves: THREE.Mesh[] = [];
+      collectDecorationLeaves(root, leaves, 0);
 
-      if ((child as any).isInstancedMesh) {
-        const inst = child as THREE.InstancedMesh;
-        const geom = inst.geometry;
-        if (!geom.boundingBox) geom.computeBoundingBox();
-        const geomBox = geom.boundingBox || new THREE.Box3();
+      // Deepest first so nested children are evaluated individually rather than
+      // collapsing an entire hierarchy into one oversized bounding box.
+      for (let i = leaves.length - 1; i >= 0; i--) {
+        const mesh = leaves[i];
+        if (!mesh.parent) continue;
+        if ((mesh as any).isInstancedMesh) continue; // handled below
+
+        const box = new THREE.Box3().setFromObject(mesh);
+        if (box.isEmpty()) continue;
+
+        const hit = this.evaluateVolume(box, extraSurfMargin);
+        if (hit) {
+          mesh.parent.remove(mesh);
+          rejected.push({
+            name: mesh.name || `mesh@${box.getCenter(new THREE.Vector3()).toArray().map((v) => v.toFixed(0)).join(',')}`,
+            penetration: hit.penetration,
+            nearNode: hit.nodeIndex
+          });
+          total++;
+        }
+      }
+
+      // Instanced decorations (skyline clusters, canyon walls, fins)
+      const instanced: THREE.InstancedMesh[] = [];
+      collectInstanced(root, instanced);
+      for (const inst of instanced) {
+        const geomBox = inst.geometry.boundingBox || (inst.geometry.computeBoundingBox(), inst.geometry.boundingBox);
+        if (!geomBox) continue;
         const instanceMatrix = new THREE.Matrix4();
         const instanceBox = new THREE.Box3();
-        const instPos = new THREE.Vector3();
         let modified = false;
 
         for (let j = 0; j < inst.count; j++) {
           inst.getMatrixAt(j, instanceMatrix);
-          instanceBox.copy(geomBox).applyMatrix4(instanceMatrix);
-          instanceBox.applyMatrix4(inst.matrixWorld);
-
-          instanceBox.getCenter(instPos);
-          const radius = Math.max(
-            (instanceBox.max.x - instanceBox.min.x) * 0.5,
-            (instanceBox.max.z - instanceBox.min.z) * 0.5
-          );
-
-          if (this.isPointInsideCorridor(instPos, radius, instanceBox.min.y, instanceBox.max.y, extraSurfMargin)) {
-            // Remove colliding instance by zeroing scale and displacing outside world
+          instanceBox.copy(geomBox).applyMatrix4(instanceMatrix).applyMatrix4(inst.matrixWorld);
+          const hit = this.evaluateVolume(instanceBox, extraSurfMargin);
+          if (hit) {
             const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
             zeroMatrix.setPosition(0, -99999, 0);
             inst.setMatrixAt(j, zeroMatrix);
             modified = true;
-            prunedCount++;
+            rejected.push({ name: `${inst.name || 'instanced'}[${j}]`, penetration: hit.penetration, nearNode: hit.nodeIndex });
+            total++;
           }
         }
-        if (modified) {
-          inst.instanceMatrix.needsUpdate = true;
-        }
+        if (modified) inst.instanceMatrix.needsUpdate = true;
+      }
+    }
+
+    if (total > 0) {
+      const worst = rejected.reduce((a, b) => (b.penetration > a.penetration ? b : a), rejected[0]);
+      console.log(
+        `[RouteExclusionCorridor] Rejected ${total} decorative elements intruding into the gameplay corridor ` +
+        `(worst: ${worst.penetration.toFixed(1)}m at node ${worst.nearNode}).`
+      );
+    }
+
+    return { rejected, total };
+  }
+
+  /**
+   * Measures one world-space volume against the protected corridor.
+   * Returns the penetration depth (metres inside the protected volume) and the
+   * offending node, or null when the volume is clear.
+   */
+  public evaluateVolume(box: THREE.Box3, extraSurfMargin = 28.0): { penetration: number; nodeIndex: number } | null {
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(
+      (box.max.x - box.min.x) * 0.5,
+      (box.max.z - box.min.z) * 0.5
+    );
+
+    let worst: { penetration: number; nodeIndex: number } | null = null;
+
+    for (let i = 0; i < this.route.length; i++) {
+      const node = this.route[i];
+      const isSurf = !!node.isSurf;
+      const isStepUp = node.type === RouteNodeType.STEP_UP ||
+        (i < this.route.length - 1 && this.route[i + 1].type === RouteNodeType.STEP_UP);
+      const trackHalfBreadth = (node.dimensions.x || 10.0) * 0.5;
+
+      let safetyMargin: number;
+      if (isSurf) {
+        safetyMargin = Math.max(38.0, 18.0 + extraSurfMargin) + 0.85 * radius;
+      } else if (isStepUp) {
+        safetyMargin = 32.0 + 0.7 * radius;
       } else {
-        box.setFromObject(child);
-        if (box.isEmpty()) continue;
+        safetyMargin = 26.0 + 0.65 * radius;
+      }
+      const requiredDist = trackHalfBreadth + radius + safetyMargin;
 
-        box.getCenter(worldPos);
-        const radius = Math.max(
-          (box.max.x - box.min.x) * 0.5,
-          (box.max.z - box.min.z) * 0.5
-        );
+      const routeMinY = node.position.y - JUMP_CORRIDOR_BELOW;
+      const routeMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
 
-        // Check center and horizontal bounding extremes against corridor
-        const penetrates = this.isPointInsideCorridor(worldPos, radius, box.min.y, box.max.y, extraSurfMargin);
-        if (penetrates) {
-          toRemove.push(child);
+      if (!(box.max.y < routeMinY || box.min.y > routeMaxY)) {
+        const dx = center.x - node.position.x;
+        const dz = center.z - node.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const penetration = requiredDist - dist;
+        if (penetration > 0 && (!worst || penetration > worst.penetration)) {
+          worst = { penetration, nodeIndex: i };
+        }
+      }
+
+      // Flight trajectory segment to next node
+      if (i < this.route.length - 1) {
+        const nextNode = this.route[i + 1];
+        const isSurfSection = isSurf || !!nextNode.isSurf;
+        const isStepUpSection = node.type === RouteNodeType.STEP_UP || nextNode.type === RouteNodeType.STEP_UP;
+
+        let segMargin: number;
+        if (isSurfSection) {
+          segMargin = Math.max(40.0, 18.0 + extraSurfMargin) + 0.85 * radius;
+        } else if (isStepUpSection) {
+          segMargin = 32.0 + 0.7 * radius;
+        } else {
+          segMargin = 30.0 + 0.7 * radius;
+        }
+        const segHalfBreadth = Math.max(trackHalfBreadth, ((nextNode.dimensions.x || 10.0) * 0.5));
+        const segRequiredDist = segHalfBreadth + radius + segMargin;
+
+        const ax = node.position.x;
+        const az = node.position.z;
+        const abx = nextNode.position.x - ax;
+        const abz = nextNode.position.z - az;
+        const segLenSq = abx * abx + abz * abz;
+
+        let t = 0;
+        if (segLenSq > 0.0001) {
+          t = ((center.x - ax) * abx + (center.z - az) * abz) / segLenSq;
+          t = Math.max(0, Math.min(1, t));
+        }
+
+        const closestX = ax + t * abx;
+        const closestZ = az + t * abz;
+        const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
+
+        const jumpMinY = interpY - JUMP_CORRIDOR_BELOW;
+        const jumpMaxY = interpY + JUMP_CORRIDOR_ABOVE;
+
+        if (!(box.max.y < jumpMinY || box.min.y > jumpMaxY)) {
+          const cdx = center.x - closestX;
+          const cdz = center.z - closestZ;
+          const dist = Math.sqrt(cdx * cdx + cdz * cdz);
+          const penetration = segRequiredDist - dist;
+          if (penetration > 0 && (!worst || penetration > worst.penetration)) {
+            worst = { penetration, nodeIndex: i };
+          }
         }
       }
     }
 
-    for (const obj of toRemove) {
-      group.remove(obj);
-      prunedCount++;
-    }
+    return worst;
+  }
+}
 
-    if (prunedCount > 0) {
-      console.log(`[RouteExclusionCorridor] Pruned ${prunedCount} conflicting decorative elements from route corridor.`);
-    }
+/** Recursively collects decorative mesh leaves (bounded depth). */
+function collectDecorationLeaves(obj: THREE.Object3D, out: THREE.Mesh[], depth: number): void {
+  if (depth > 8) return;
+  const asMesh = obj as THREE.Mesh;
+  if (asMesh.isMesh && !(obj as any).isInstancedMesh) {
+    out.push(asMesh);
+    return;
+  }
+  for (const child of obj.children) {
+    collectDecorationLeaves(child, out, depth + 1);
+  }
+}
 
-    return prunedCount;
+/** Recursively collects instanced meshes (bounded depth). */
+function collectInstanced(obj: THREE.Object3D, out: THREE.InstancedMesh[], depth = 0): void {
+  if (depth > 8) return;
+  if ((obj as any).isInstancedMesh) {
+    out.push(obj as THREE.InstancedMesh);
+    return;
+  }
+  for (const child of obj.children) {
+    collectInstanced(child, out, depth + 1);
   }
 }

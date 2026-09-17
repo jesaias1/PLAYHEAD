@@ -5,6 +5,14 @@ import { CameraController } from '../src/player/CameraController';
 import { PhysicsWorld } from '../src/physics/PhysicsWorld';
 import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
 
+/**
+ * VOID FALL REGRESSION
+ *
+ * Governing rule: the ONLY gameplay death is crossing the authoritative world
+ * void boundary (final legitimate geometry minus a generous margin). Airborne
+ * duration, speed, distance, platform proximity and route progression are never
+ * kill rules. See tests/VoidRestorePolicy.test.ts for the full policy suite.
+ */
 describe('VoidFallRegression', () => {
   function setupPlayer() {
     const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 1000);
@@ -37,7 +45,7 @@ describe('VoidFallRegression', () => {
     expect(fallCalled).toBe(true);
   });
 
-  it('triggers freefall watchdog timer when falling continuously for > 3.5 seconds', () => {
+  it('NO freefall timer kill: prolonged falling above the void plane is safe', () => {
     const { player } = setupPlayer();
     let fallCalled = false;
     player.onFallCallback = () => {
@@ -45,20 +53,24 @@ describe('VoidFallRegression', () => {
     };
 
     player.setPosition({ x: 0, y: 1000, z: 0 });
-    player.authoritativeKillY = -500; // Far below
+    player.authoritativeKillY = -500; // Authoritative world void boundary, far below
 
-    // Simulate 3.4 seconds of falling with negative vertical velocity
+    // 3.4 seconds of falling with negative vertical velocity
     player.velocity.y = -20;
     for (let i = 0; i < 3.4 * 60; i++) {
       player.updateFixed(1 / 60);
     }
     expect(fallCalled).toBe(false);
 
-    // Step past 3.5s threshold
-    for (let i = 0; i < 0.2 * 60; i++) {
+    // Well past the old 3.5s watchdog threshold — still no kill, because
+    // airborne duration must never by itself restore the player.
+    player.velocity.y = -20;
+    for (let i = 0; i < 10 * 60; i++) {
+      player.position.y = 1000 - i * 0.01; // stay far above the boundary
+      player.velocity.y = -20;
       player.updateFixed(1 / 60);
     }
-    expect(fallCalled).toBe(true);
+    expect(fallCalled).toBe(false);
   });
 
   it('correctly tracks lastTouchedSurfaceType for surf vs platform', () => {
@@ -136,8 +148,9 @@ describe('VoidFallRegression', () => {
 
     physics.buildFromRoute(highRoute);
     // lowest bottomY is 120 - 1 = 119
-    // killPlaneY must be 119 - 25 = 94, NOT -25!
-    expect(physics.killPlaneY).toBe(94);
+    // killPlaneY must be 119 - VOID_MARGIN (40) = 79, NOT -25!
+    expect(physics.killPlaneY).toBe(119 - PhysicsWorld.VOID_MARGIN);
+    expect(physics.getVoidDeathY()).toBe(119 - PhysicsWorld.VOID_MARGIN);
   });
 
   it('allows high surf jumps (> 5 seconds airtime) above track level without false void fall', () => {
@@ -165,20 +178,25 @@ describe('VoidFallRegression', () => {
     expect(fallCalled).toBe(false);
   });
 
-  it('triggers secondary watchdog failsafe when player is deep below kill plane regardless of conditions', () => {
+  it('reports NORMAL_VOID when the player crosses the authoritative void boundary', () => {
     const { player } = setupPlayer();
-    let fallCalled = false;
-    player.onFallCallback = () => {
-      fallCalled = true;
+    const reasons: string[] = [];
+    player.onFallCallback = (reason) => {
+      reasons.push(reason);
     };
 
     player.setPosition({ x: 0, y: 0, z: 0 });
-    player.authoritativeKillY = -20.0;
+    player.authoritativeKillY = -500.0; // World void boundary, far below the route
 
-    // Player falls 40m below authoritativeKillY
-    player.position.y = -65.0;
+    // Far below the local platform but still above the true void boundary:
+    // no restore.
+    player.position.y = -60.0;
     player.updateFixed(1 / 120);
+    expect(reasons).toEqual([]);
 
-    expect(fallCalled).toBe(true);
+    // Genuinely crosses the boundary.
+    player.position.y = -500.5;
+    player.updateFixed(1 / 120);
+    expect(reasons).toEqual(['NORMAL_VOID']);
   });
 });

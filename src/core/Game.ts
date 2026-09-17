@@ -32,6 +32,7 @@ import { ViewmodelController } from '../viewmodel/ViewmodelController';
 import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
+import { RestoreReason } from '../player/RestorePolicy';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -73,6 +74,7 @@ export class Game {
     targetPos: { x: number; y: number; z: number };
     yaw: number;
     wasSurf: boolean;
+    reason: RestoreReason | string;
     attempts: number;
   } | null = null;
 
@@ -211,7 +213,7 @@ export class Game {
     });
 
     // Player fall / restore
-    this.playerController.onFallCallback = () => this.handlePlayerFall();
+    this.playerController.onFallCallback = (reason) => this.handlePlayerFall(reason);
     this.playerController.onRestoreCallback = () => this.handlePlayerManualRestore();
 
     // Replay finished
@@ -527,7 +529,7 @@ export class Game {
       z: startNode.position.z - Math.cos(startNode.yaw) * backDist
     };
     this.playerController.setPosition(spawnPos);
-    this.playerController.authoritativeKillY = startNode.position.y - 25.0;
+    this.syncAuthoritativeVoidBoundary();
     this.playerController.lastTouchedSurfaceType = 'PLATFORM';
 
     const targetNode = this.currentTrack.route[1] || startNode;
@@ -549,6 +551,58 @@ export class Game {
 
   private isRestoringCheckpoint = false;
 
+  /** Reason for the most recent restore — diagnostics only. */
+  public lastRestoreReason: RestoreReason | string | null = null;
+
+  /**
+   * Full diagnostic record of the most recent automatic position reset.
+   * DEV-facing only; used to make any rubberband attributable to its source.
+   */
+  public lastRestoreDiagnostic: Record<string, unknown> | null = null;
+
+  /**
+   * Pushes the authoritative world void boundary into the player.
+   *
+   * The boundary is derived from FINAL legitimate gameplay geometry (see
+   * PhysicsWorld.getVoidDeathY). It is deliberately re-derived here rather than
+   * being recomputed from the current checkpoint: tying the kill plane to the
+   * current checkpoint's Y is what previously produced false restores for
+   * players legitimately flying below an elevated checkpoint.
+   */
+  private syncAuthoritativeVoidBoundary(): void {
+    this.playerController.authoritativeKillY = this.world.physics.getVoidDeathY();
+  }
+
+  /**
+   * Displays the restore notification (only after the restore is physically
+   * confirmed) while keeping the player-facing message clean.
+   *
+   * Reason detail stays in diagnostics: emergency numeric recovery is surfaced
+   * through the dev overlay rather than the production HUD.
+   */
+  private announceRestore(reason: RestoreReason | string, wasSurf: boolean, fallback = false): void {
+    const isEmergency =
+      reason === RestoreReason.INVALID_NUMERIC_STATE ||
+      reason === RestoreReason.EMERGENCY_OUT_OF_BOUNDS;
+
+    if (isEmergency) {
+      console.warn(`[PLAYHEAD RESTORE] Emergency recovery triggered: ${reason}${fallback ? ' (fallback)' : ''}`);
+    }
+
+    // Always record the reason for diagnostics, independent of hint settings.
+    this.lastRestoreReason = reason;
+
+    const settings = SettingsManager.getInstance().settings;
+    if (!settings.showHints) return;
+
+    if (wasSurf) {
+      this.ui.hud.showSurfTutorialHint(3000);
+      return;
+    }
+    this.ui.hud.hideSurfTutorialHint();
+    this.ui.hud.showToast('RESTORED TO CHECKPOINT', 1500);
+  }
+
   private handleFinishSequence(): void {
     if (this.isFinished) return;
     this.isFinished = true;
@@ -561,31 +615,31 @@ export class Game {
     }, 380);
   }
 
-  private handlePlayerFall(): void {
+  private handlePlayerFall(reason: RestoreReason = RestoreReason.OTHER): void {
     if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-      this.restoreToCheckpoint('FALL_LAB');
+      this.restoreToCheckpoint(RestoreReason.OTHER, false);
       return;
     }
     if (this.stateMachine.is(GameState.COUNTDOWN)) {
-      this.restoreToCheckpoint('FALL_COUNTDOWN');
+      this.restoreToCheckpoint(RestoreReason.OTHER, false);
       return;
     }
     if (!this.stateMachine.is(GameState.PLAYING)) return;
 
     const wasSurf = this.playerController.lastTouchedSurfaceType === 'SURF';
-    this.restoreToCheckpoint('VOID_FALL', wasSurf);
+    this.restoreToCheckpoint(reason, wasSurf);
   }
 
   private handlePlayerManualRestore(): void {
     if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-      this.restoreToCheckpoint('MANUAL_LAB');
+      this.restoreToCheckpoint(RestoreReason.MANUAL_RESTORE, false);
       return;
     }
     if (!this.stateMachine.is(GameState.PLAYING)) return;
-    this.restoreToCheckpoint('MANUAL_R', false);
+    this.restoreToCheckpoint(RestoreReason.MANUAL_RESTORE, false);
   }
 
-  private restoreToCheckpoint(reason = 'RESTORE', wasSurf = false): void {
+  private restoreToCheckpoint(reason: RestoreReason | string = RestoreReason.OTHER, wasSurf = false): void {
     if (this.isRestoringCheckpoint) return; // Prevent respawn races
     this.isRestoringCheckpoint = true;
     this.playerController.isRestoring = true;
@@ -595,8 +649,6 @@ export class Game {
         if (this.movementLab) {
           this.movementLab.resetPlayer();
         }
-        this.playerController.authoritativeKillY = -25.0;
-        this.playerController.lastTouchedSurfaceType = 'PLATFORM';
         this.playerController.isRestoring = false;
         this.isRestoringCheckpoint = false;
         if (this.stateMachine.is(GameState.PAUSED)) {
@@ -613,6 +665,8 @@ export class Game {
 
       const beforePos = { ...this.playerController.position };
       const velBefore = { ...this.playerController.velocity };
+      const wasGroundedBefore = this.playerController.isGrounded;
+      const hadCheckpoint = this.currentCheckpoint !== null;
 
       let spawnPos: { x: number; y: number; z: number };
       let spawnYaw: number;
@@ -629,7 +683,6 @@ export class Game {
             y: cpNode.position.y + cpNode.dimensions.y * 0.5 + 0.05,
             z: cpNode.position.z - Math.cos(cpNode.yaw) * backDist
           };
-          this.playerController.authoritativeKillY = cpNode.position.y - 25.0;
 
           const nextNode = (cpNodeIdx < this.currentTrack.route.length - 1)
             ? this.currentTrack.route[cpNodeIdx + 1]
@@ -646,7 +699,6 @@ export class Game {
             y: this.currentCheckpoint.position.y + 1.05,
             z: this.currentCheckpoint.position.z
           };
-          this.playerController.authoritativeKillY = this.currentCheckpoint.position.y - 25.0;
           spawnYaw = this.currentCheckpoint.yaw;
         }
 
@@ -661,7 +713,6 @@ export class Game {
           y: startNode.position.y + startNode.dimensions.y * 0.5 + 0.05,
           z: startNode.position.z - Math.cos(startNode.yaw) * backDist
         };
-        this.playerController.authoritativeKillY = startNode.position.y - 25.0;
 
         const targetNode = this.currentTrack.route[1] || startNode;
         const lookTarget = targetNode === startNode ? {
@@ -678,7 +729,44 @@ export class Game {
       this.playerController.lastTouchedSurfaceType = 'PLATFORM';
       this.playerController.resetKeys();
 
-      // Debug / regression logging
+      // ==========================================================
+      // RESTORE DIAGNOSTICS
+      //
+      // Every automatic position reset is recorded with enough context to
+      // identify exactly which system issued it and why. This is what makes a
+      // mystery rubberband impossible: if the player snaps, the log names the
+      // reason, the source, the speed and the displacement that triggered it.
+      // Diagnostics only — never surfaced in normal production UI.
+      // ==========================================================
+      const hp = Math.hypot(velBefore.x, velBefore.z);
+      const ddx = beforePos.x - spawnPos.x;
+      const ddy = beforePos.y - spawnPos.y;
+      const ddz = beforePos.z - spawnPos.z;
+      const displacementToTarget = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+
+      const diagnostic = {
+        reason,
+        source: 'Game.restoreToCheckpoint',
+        cpId: this.currentCheckpoint?.id ?? null,
+        resolvedTo: hadCheckpoint ? 'CURRENT_CHECKPOINT' : 'LEVEL_START',
+        before: beforePos,
+        target: spawnPos,
+        after: { ...this.playerController.position },
+        velBefore,
+        horizontalSpeedBefore: hp,
+        displacementToTarget,
+        wasGrounded: wasGroundedBefore,
+        wasSurfing: wasSurf,
+        lastTouchedSurfaceType: this.playerController.lastTouchedSurfaceType,
+        voidDeathY: this.playerController.authoritativeKillY,
+        lowestGameplayY: this.world.physics.lowestGameplayY,
+        finite: Number.isFinite(beforePos.x) && Number.isFinite(beforePos.y) &&
+          Number.isFinite(beforePos.z) && Number.isFinite(velBefore.x),
+        gameState: this.stateMachine.getState(),
+        timestamp: Date.now()
+      };
+
+      // Always record in the rolling diagnostic buffer.
       this.playerController.restoreDiagnosticLogs.push({
         reason,
         cpId: this.currentCheckpoint?.id,
@@ -686,17 +774,27 @@ export class Game {
         target: spawnPos,
         after: { ...this.playerController.position },
         velBefore,
+        emergencyFallback: false,
         timestamp: Date.now()
       });
       if (this.playerController.restoreDiagnosticLogs.length > 20) {
         this.playerController.restoreDiagnosticLogs.shift();
       }
 
+      // Surface automatic (non-manual) resets on the console so a rubberband
+      // can never be a mystery during playtesting.
+      if (reason !== RestoreReason.MANUAL_RESTORE) {
+        console.warn('[PLAYHEAD RESTORE]', diagnostic);
+      }
+
+      this.lastRestoreDiagnostic = diagnostic;
+
       // Schedule atomic next-frame verification before showing restore notification
       this.pendingRestoreVerification = {
         targetPos: spawnPos,
         yaw: spawnYaw,
         wasSurf,
+        reason,
         attempts: 0
       };
     } catch (e) {
@@ -866,6 +964,17 @@ export class Game {
         const next = current < 0.9 ? 1.0 : (current < 1.4 ? 1.5 : 0.5);
         this.world.visualController.setReactivityMultiplier(next);
         this.ui.hud.showToast(`AUDIO REACTIVITY: ${next.toFixed(1)}X`, 1500);
+      } else if (e.code === 'KeyC' && e.shiftKey && !e.repeat) {
+        // Dev shortcut: toggle the protected gameplay-corridor visualization
+        if (this.world.debugCorridorGroup) {
+          const next = !this.world.debugCorridorGroup.visible;
+          this.world.setCorridorDebugVisible(next);
+          this.ui.hud.showToast(`CORRIDOR DEBUG: ${next ? 'ON' : 'OFF'}`, 1500);
+        } else {
+          this.world.buildCorridorDebug();
+          this.world.setCorridorDebugVisible(true);
+          this.ui.hud.showToast('CORRIDOR DEBUG: ON', 1500);
+        }
       } else if (e.code === 'KeyN' && e.shiftKey && !e.repeat) {
         // Dev shortcut: Jump to next checkpoint
         if (this.stateMachine.is(GameState.PLAYING)) {
@@ -925,17 +1034,9 @@ export class Game {
           this.playerController.isRestoring = false;
           this.isRestoringCheckpoint = false;
           const wasSurf = this.pendingRestoreVerification.wasSurf;
+          const reason = this.pendingRestoreVerification.reason;
           this.pendingRestoreVerification = null;
-
-          const settings = SettingsManager.getInstance().settings;
-          if (settings.showHints) {
-            if (wasSurf) {
-              this.ui.hud.showSurfTutorialHint(3000);
-            } else {
-              this.ui.hud.hideSurfTutorialHint();
-              this.ui.hud.showToast('RESTORED TO CHECKPOINT', 1500);
-            }
-          }
+          this.announceRestore(reason, wasSurf);
         } else {
           // Failed or displaced on frame: re-force authoritative transform
           this.pendingRestoreVerification.attempts++;
@@ -946,16 +1047,10 @@ export class Game {
             this.playerController.isRestoring = false;
             this.isRestoringCheckpoint = false;
             const wasSurf = this.pendingRestoreVerification.wasSurf;
+            const reason = this.pendingRestoreVerification.reason;
             this.pendingRestoreVerification = null;
-            console.warn('[PLAYHEAD WATCHDOG] Emergency fallback restore completed');
-            const settings = SettingsManager.getInstance().settings;
-            if (settings.showHints) {
-              if (wasSurf) {
-                this.ui.hud.showSurfTutorialHint(3000);
-              } else {
-                this.ui.hud.showToast('RESTORED TO CHECKPOINT', 1500);
-              }
-            }
+            console.warn('[PLAYHEAD RESTORE] Emergency fallback restore completed');
+            this.announceRestore(reason, wasSurf, true);
           }
         }
       }
@@ -1086,7 +1181,10 @@ export class Game {
             if (dx * dx + dz * dz < 12.0 * 12.0 && Math.abs(dy) < 6.0 && this.playerController.position.y >= cp.position.y - 2.0) {
               this.passedCheckpoints.add(cp.id);
               this.currentCheckpoint = cp;
-              this.playerController.authoritativeKillY = cp.position.y - 25.0;
+              // NOTE: the void boundary is intentionally NOT re-derived from the
+              // checkpoint. It is a world constant (final geometry - margin), so
+              // an elevated checkpoint can never raise the death plane above the
+              // route below it.
               const split = this.ghostManager.onPlayerReachCheckpoint(i, this.runElapsedTime);
               if (split) {
                 this.ui.hud.showSplit(split);

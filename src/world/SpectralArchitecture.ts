@@ -139,14 +139,26 @@ export class SpectralArchitecture {
 
     // ==========================================
     // 2. OVERHEAD SPECTRAL CANOPY FINS
-    // High overhead (y > 32m above player to guarantee clearance)
+    //
+    // These are wide slabs that deliberately cross the route overhead. They are
+    // therefore placed ABOVE the protected jump envelope (JUMP_CORRIDOR_ABOVE)
+    // and each instance is validated against the corridor in final space, so a
+    // slab can never occupy the player's airspace or the flight path.
     // ==========================================
     const finCount = Math.min(route.length, 80);
     const finStep = Math.max(1, Math.floor(route.length / finCount));
     const finGeom = new THREE.BoxGeometry(28.0, 1.2, 3.5);
 
     this.canopyFins = new THREE.InstancedMesh(finGeom, this.canopyMaterial, finCount);
+    this.canopyFins.name = 'SpectralCanopyFins';
     let fIdx = 0;
+
+    // Half-extent of the fin's largest horizontal dimension (28 wide / 2), used
+    // to derive a genuinely safe overhead height for a route-crossing slab.
+    const finHalfSpan = 14.0;
+
+    const finBox = new THREE.Box3();
+    const finMatrix = new THREE.Matrix4();
 
     for (let i = 0; i < route.length && fIdx < finCount; i += finStep) {
       const node = route[i];
@@ -154,15 +166,27 @@ export class SpectralArchitecture {
       const frameIdx = Math.floor(timeRatio * (analysis.frames.length - 1));
       const frame = analysis.frames[frameIdx] || { mid: 0.3, high: 0.3 };
 
-      const finHeight = 32.0 + frame.high * 16.0;
+      // Clear the protected envelope, then add a size-scaled margin so the fin
+      // still reads as safely overhead rather than grazing the jump apex.
+      const finHeight = RouteExclusionCorridor.JUMP_CORRIDOR_ABOVE + 14.0 + frame.high * 16.0;
       dummy.position.set(node.position.x, node.position.y + finHeight, node.position.z);
       dummy.scale.set(1.0, 1.0, 1.0);
-      dummy.rotation.set(0, node.yaw + Math.PI * 0.5, 0);
+      // Span PERPENDICULAR to travel direction: the fin crosses over the route.
+      dummy.rotation.set(0, node.yaw, 0);
       dummy.updateMatrix();
 
-      this.canopyFins.setMatrixAt(fIdx++, dummy.matrix);
+      // Validate the real final volume before committing the instance.
+      finBox.setFromCenterAndSize(
+        new THREE.Vector3(node.position.x, node.position.y + finHeight, node.position.z),
+        new THREE.Vector3(finHalfSpan * 2, 1.2, finHalfSpan * 2)
+      );
+      if (!corridor.evaluateVolume(finBox, 28.0)) {
+        finMatrix.copy(dummy.matrix);
+        this.canopyFins.setMatrixAt(fIdx++, finMatrix);
+      }
     }
 
+    this.canopyFins.count = fIdx;
     this.canopyFins.instanceMatrix.needsUpdate = true;
     this.group.add(this.canopyFins);
 
@@ -247,6 +271,15 @@ export class SpectralArchitecture {
       const topBeam = new THREE.Mesh(beamGeom, lintelMat);
       topBeam.position.set(0, topReach, 0);
       frameGroup.add(topBeam);
+
+      // Validate the FULL assembled gate (columns + lintel) in final world space
+      // rather than only the two column centres. A lintel spanning
+      // `halfSpan * 2 + 4` can intrude even when both columns are clear.
+      frameGroup.updateWorldMatrix(true, true);
+      const gateBox = new THREE.Box3().setFromObject(frameGroup);
+      if (corridor.evaluateVolume(gateBox, 28.0)) {
+        continue;
+      }
 
       this.onsetFrames.add(frameGroup);
     }

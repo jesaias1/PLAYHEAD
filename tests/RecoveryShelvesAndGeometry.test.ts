@@ -62,9 +62,14 @@ describe('Recovery Catch-Shelves and Void Geometry', () => {
           expect(shelf.dimensions).toEqual({ x: 3.2, y: 0.8, z: 4.5 });
           expect(shelf.position.y).toBeCloseTo(b.position.y - 4.5, 4);
 
-          // Centerline of gap is x = 0
-          const expectedLateralOffset = a.dimensions.x * 0.5 + 2.4; // 2.0 + 2.4 = 4.4
+          // Centerline of gap is x = 0. The shelf must sit clearly BESIDE the
+          // route, not beneath the fall line, so it cannot act as a safety net
+          // under an ordinary missed gap.
+          const maxHalfWidth = Math.max(a.dimensions.x, b.dimensions.x) * 0.5;
+          const expectedLateralOffset = maxHalfWidth + 7.5;
           expect(Math.abs(shelf.position.x)).toBeCloseTo(expectedLateralOffset, 4);
+          // Must be beyond the platform edge, not merely past it.
+          expect(Math.abs(shelf.position.x)).toBeGreaterThan(a.dimensions.x * 0.5 + 5.0);
           expect(shelf.position.z).toBeCloseTo((a.position.z + b.position.z) * 0.5, 4);
           expect(shelf.isRecoveryShelf).toBe(true);
         }
@@ -94,14 +99,16 @@ describe('Recovery Catch-Shelves and Void Geometry', () => {
           const shelf = shelves[0];
           expect(shelf.dimensions).toEqual({ x: 3.2, y: 0.8, z: 4.5 });
           expect(shelf.position.y).toBeCloseTo(b.position.y - 4.5, 4);
-          const expectedLateral = a.dimensions.x * 0.5 + 2.4; // 4.0 + 2.4 = 6.4
+          const maxHalfWidth = Math.max(a.dimensions.x, b.dimensions.x) * 0.5;
+          const expectedLateral = maxHalfWidth + 7.5;
           expect(Math.abs(shelf.position.x)).toBeCloseTo(expectedLateral, 4);
         }
       }
-      // Probability is capped at < 0.35
+      // Recovery geometry is deliberately rare so it stays "occasional" and
+      // never becomes continuous flooring beneath the course.
       const rate = count / iterations;
-      expect(rate).toBeGreaterThan(0.20);
-      expect(rate).toBeLessThan(0.40);
+      expect(rate).toBeGreaterThan(0.08);
+      expect(rate).toBeLessThan(0.25);
     });
 
     it('generates compact shelves on tricky uphill steps', () => {
