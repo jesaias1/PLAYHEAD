@@ -4,6 +4,7 @@
  */
 
 import { GameState, StateMachine } from './StateMachine';
+import * as THREE from 'three';
 import { GameClock } from './Clock';
 import { SettingsManager } from './Settings';
 import { GraphicsTier } from './Settings';
@@ -34,6 +35,8 @@ import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { RestoreReason } from '../player/RestorePolicy';
+import { movementDiagnostics } from './MovementDiagnostics';
+import { BUILD_LABEL } from './BuildInfo';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -77,6 +80,20 @@ export class Game {
     wasSurf: boolean;
     reason: RestoreReason | string;
     attempts: number;
+    /** Context captured when the restore was issued, for diagnostics. */
+    diag: {
+      before: { x: number; y: number; z: number };
+      velocity: { x: number; y: number; z: number };
+      displaySpeed: number;
+      cpId: number | null;
+      cpWasNull: boolean;
+      voidDeathY: number | null;
+      cameraYaw: number;
+      cameraPitch: number;
+      fov: number;
+      frameDeltaMs: number;
+      gameState: string;
+    };
   } | null = null;
 
   constructor(canvasContainer: HTMLElement, uiRoot: HTMLElement) {
@@ -537,6 +554,9 @@ export class Game {
     this.playerController.setPosition(spawnPos);
     this.syncAuthoritativeVoidBoundary();
     this.playerController.lastTouchedSurfaceType = 'PLATFORM';
+    // Re-arm the camera-translation monitor for the new track.
+    this.diagSettleFrames = 0;
+    this.diagHasPrev = false;
 
     const targetNode = this.currentTrack.route[1] || startNode;
     const lookTarget = targetNode === startNode ? {
@@ -572,6 +592,17 @@ export class Game {
   /** Smoothed FPS for the dev diagnostics overlay. */
   private smoothedFps = 0;
 
+  /** Last observed frame delta in ms (movement diagnostics context). */
+  private lastFrameDeltaMs = 0;
+
+  // Camera-translation monitor scratch state (diagnostics only).
+  private diagCamWorld = new THREE.Vector3();
+  private diagPrevCamWorld = new THREE.Vector3();
+  private diagPrevPlayerPos = new THREE.Vector3();
+  private diagHasPrev = false;
+  /** Frames to skip after a load before the camera checks are trusted. */
+  private diagSettleFrames = 0;
+
   /**
    * Pushes the authoritative world void boundary into the player.
    *
@@ -586,23 +617,183 @@ export class Game {
   }
 
   /**
+   * CAMERA TRANSLATION MONITOR (diagnostics only).
+   *
+   * The camera is owned by PlayerController.syncCamera(), which places it at
+   * `player.position + eyeHeight`. This asserts that invariant every frame and
+   * reports any frame where the camera's world position diverges from it, or
+   * jumps discontinuously relative to the player.
+   *
+   * Reads state only — it never writes player, camera or physics.
+   */
+  private checkCameraTranslationDiagnostics(): void {
+    const cam = this.environment.camera;
+    if (!cam) return;
+
+    // The camera is only owned by PlayerController.syncCamera() while the
+    // simulation is actually running (PLAYING / MOVEMENT_LAB). Outside those
+    // states a mismatch is expected and is not a desync.
+    const simulationActive =
+      this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB);
+
+    if (!simulationActive) {
+      this.diagSettleFrames = 0;
+      this.diagHasPrev = false;
+      return;
+    }
+
+    // Ignore the first frames after a load: the camera is placed by the first
+    // syncCamera() within a fixed step, so an immediate comparison would report
+    // the pre-sync camera (a startup artifact, not a real desync).
+    this.diagSettleFrames++;
+    if (this.diagSettleFrames < 30) {
+      cam.getWorldPosition(this.diagPrevCamWorld);
+      this.diagPrevPlayerPos.set(
+        this.playerController.position.x,
+        this.playerController.position.y,
+        this.playerController.position.z
+      );
+      this.diagHasPrev = true;
+      return;
+    }
+
+    cam.getWorldPosition(this.diagCamWorld);
+    const expectedX = this.playerController.position.x;
+    const expectedY = this.playerController.position.y + this.playerController.config.eyeHeight;
+    const expectedZ = this.playerController.position.z;
+
+    const desync = Math.hypot(
+      this.diagCamWorld.x - expectedX,
+      this.diagCamWorld.y - expectedY,
+      this.diagCamWorld.z - expectedZ
+    );
+
+    if (this.diagHasPrev) {
+      const camStep = Math.hypot(
+        this.diagCamWorld.x - this.diagPrevCamWorld.x,
+        this.diagCamWorld.y - this.diagPrevCamWorld.y,
+        this.diagCamWorld.z - this.diagPrevCamWorld.z
+      );
+      // Player step is invariant-safe: the physics body moved by at most this.
+      const playerStep = Math.hypot(
+        this.playerController.position.x - this.diagPrevPlayerPos.x,
+        this.playerController.position.y - this.diagPrevPlayerPos.y,
+        this.playerController.position.z - this.diagPrevPlayerPos.z
+      );
+      // A camera that moves much further than the player (beyond a small
+      // tolerance) indicates a transform/space fault rather than gameplay.
+      if (camStep > playerStep + 0.5) {
+        movementDiagnostics.recordThrottled(
+          'CAMERA_DESYNC',
+          'CAMERA_MOVED_INDEPENDENT_OF_PLAYER',
+          'Game.checkCameraTranslationDiagnostics',
+          {
+            cameraStep: camStep,
+            playerStep,
+            playerPos: `(${this.playerController.position.x.toFixed(3)}, ${this.playerController.position.y.toFixed(3)}, ${this.playerController.position.z.toFixed(3)})`,
+            cameraWorld: `(${this.diagCamWorld.x.toFixed(3)}, ${this.diagCamWorld.y.toFixed(3)}, ${this.diagCamWorld.z.toFixed(3)})`,
+            expectedEyeWorld: `(${expectedX.toFixed(3)}, ${expectedY.toFixed(3)}, ${expectedZ.toFixed(3)})`,
+            desync,
+            cameraLocal: `(${cam.position.x.toFixed(3)}, ${cam.position.y.toFixed(3)}, ${cam.position.z.toFixed(3)})`,
+            cameraParent: cam.parent ? cam.parent.type : 'null',
+            cameraYaw: this.cameraController.yaw,
+            cameraPitch: this.cameraController.pitch,
+            fov: cam.fov,
+            frameDeltaMs: this.lastFrameDeltaMs
+          },
+          'cam-independent'
+        );
+      }
+    }
+
+    if (desync > 1e-3) {
+      movementDiagnostics.recordThrottled(
+        'CAMERA_DESYNC',
+        'EYE_POINT_MISMATCH',
+        'Game.checkCameraTranslationDiagnostics',
+        {
+          desync,
+          cameraWorld: `(${this.diagCamWorld.x.toFixed(3)}, ${this.diagCamWorld.y.toFixed(3)}, ${this.diagCamWorld.z.toFixed(3)})`,
+          expectedEyeWorld: `(${expectedX.toFixed(3)}, ${expectedY.toFixed(3)}, ${expectedZ.toFixed(3)})`,
+          cameraLocal: `(${cam.position.x.toFixed(3)}, ${cam.position.y.toFixed(3)}, ${cam.position.z.toFixed(3)})`,
+          cameraParent: cam.parent ? cam.parent.type : 'null',
+          cameraYaw: this.cameraController.yaw,
+          cameraPitch: this.cameraController.pitch,
+          fov: cam.fov,
+          frameDeltaMs: this.lastFrameDeltaMs
+        },
+        'eye-desync'
+      );
+    }
+
+    this.diagPrevCamWorld.copy(this.diagCamWorld);
+    this.diagPrevPlayerPos.set(
+      this.playerController.position.x,
+      this.playerController.position.y,
+      this.playerController.position.z
+    );
+    this.diagHasPrev = true;
+  }
+
+  /**
    * Displays the restore notification (only after the restore is physically
    * confirmed) while keeping the player-facing message clean.
    *
    * Reason detail stays in diagnostics: emergency numeric recovery is surfaced
    * through the dev overlay rather than the production HUD.
    */
-  private announceRestore(reason: RestoreReason | string, wasSurf: boolean, fallback = false): void {
-    const isEmergency =
-      reason === RestoreReason.INVALID_NUMERIC_STATE ||
-      reason === RestoreReason.EMERGENCY_OUT_OF_BOUNDS;
-
-    if (isEmergency) {
-      console.warn(`[PLAYHEAD RESTORE] Emergency recovery triggered: ${reason}${fallback ? ' (fallback)' : ''}`);
+  private announceRestore(
+    reason: RestoreReason | string,
+    wasSurf: boolean,
+    fallback = false,
+    diag?: {
+      before: { x: number; y: number; z: number };
+      velocity: { x: number; y: number; z: number };
+      displaySpeed: number;
+      cpId: number | null;
+      cpWasNull: boolean;
+      voidDeathY: number | null;
+      cameraYaw: number;
+      cameraPitch: number;
+      fov: number;
+      frameDeltaMs: number;
+      gameState: string;
     }
-
+  ): void {
     // Always record the reason for diagnostics, independent of hint settings.
     this.lastRestoreReason = reason;
+
+    // Log EVERY restore that completes — including the normal void restore,
+    // which previously completed silently and was therefore invisible in a
+    // reproduction.
+    if (diag) {
+      movementDiagnostics.record(
+        'RESTORE',
+        `${String(reason)}${fallback ? ' (fallback)' : ''}`,
+        'Game.announceRestore (restore confirmed)',
+        {
+          restoredTo: `(${this.playerController.position.x.toFixed(3)}, ${this.playerController.position.y.toFixed(3)}, ${this.playerController.position.z.toFixed(3)})`,
+          positionBefore: `(${diag.before.x.toFixed(3)}, ${diag.before.y.toFixed(3)}, ${diag.before.z.toFixed(3)})`,
+          displacement: Math.hypot(
+            this.playerController.position.x - diag.before.x,
+            this.playerController.position.y - diag.before.y,
+            this.playerController.position.z - diag.before.z
+          ),
+          velocity: `(${diag.velocity.x.toFixed(3)}, ${diag.velocity.y.toFixed(3)}, ${diag.velocity.z.toFixed(3)})`,
+          displaySpeed: diag.displaySpeed,
+          playerYBefore: diag.before.y,
+          voidDeathY: diag.voidDeathY,
+          checkpointId: diag.cpId,
+          checkpointResolvedTo: diag.cpWasNull ? 'LEVEL_START' : 'CURRENT_CHECKPOINT',
+          cameraYaw: diag.cameraYaw,
+          cameraPitch: diag.cameraPitch,
+          fov: diag.fov,
+          frameDeltaMs: diag.frameDeltaMs,
+          gameState: diag.gameState,
+          wasSurf
+        }
+      );
+    }
 
     const settings = SettingsManager.getInstance().settings;
     if (!settings.showHints) return;
@@ -655,6 +846,53 @@ export class Game {
     if (this.isRestoringCheckpoint) return; // Prevent respawn races
     this.isRestoringCheckpoint = true;
     this.playerController.isRestoring = true;
+
+    // Capture the full pre-restore context now: by the time the restore is
+    // confirmed, the live player state has already been overwritten.
+    const cam = this.environment.camera as THREE.PerspectiveCamera;
+    const velAtRestore = this.playerController.velocity;
+    const restoreDiag = {
+      before: {
+        x: this.playerController.position.x,
+        y: this.playerController.position.y,
+        z: this.playerController.position.z
+      },
+      velocity: { x: velAtRestore.x, y: velAtRestore.y, z: velAtRestore.z },
+      displaySpeed: this.playerController.getSpeedUnits(),
+      cpId: this.currentCheckpoint ? this.currentCheckpoint.id : null,
+      cpWasNull: this.currentCheckpoint === null,
+      voidDeathY: this.playerController.authoritativeKillY,
+      cameraYaw: this.cameraController.yaw,
+      cameraPitch: this.cameraController.pitch,
+      fov: cam ? cam.fov : 0,
+      frameDeltaMs: this.lastFrameDeltaMs,
+      gameState: String(this.stateMachine.getState())
+    };
+
+    // Emit the restore request immediately (this is the decisive event: it
+    // identifies WHO asked for the restore and WHY).
+    movementDiagnostics.record(
+      'RESTORE',
+      String(reason),
+      'Game.restoreToCheckpoint',
+      {
+        positionBefore: `(${restoreDiag.before.x.toFixed(3)}, ${restoreDiag.before.y.toFixed(3)}, ${restoreDiag.before.z.toFixed(3)})`,
+        velocity: `(${restoreDiag.velocity.x.toFixed(3)}, ${restoreDiag.velocity.y.toFixed(3)}, ${restoreDiag.velocity.z.toFixed(3)})`,
+        displaySpeed: restoreDiag.displaySpeed,
+        playerY: restoreDiag.before.y,
+        voidDeathY: restoreDiag.voidDeathY,
+        checkpointId: restoreDiag.cpId,
+        checkpointResolvedTo: restoreDiag.cpWasNull ? 'LEVEL_START' : 'CURRENT_CHECKPOINT',
+        cameraYaw: restoreDiag.cameraYaw,
+        cameraPitch: restoreDiag.cameraPitch,
+        fov: restoreDiag.fov,
+        frameDeltaMs: restoreDiag.frameDeltaMs,
+        grounded: this.playerController.isGrounded,
+        surfing: this.playerController.isSurfing,
+        gameState: restoreDiag.gameState,
+        wasSurf
+      }
+    );
 
     try {
       if (this.previousStateBeforePause === GameState.MOVEMENT_LAB || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
@@ -807,7 +1045,8 @@ export class Game {
         yaw: spawnYaw,
         wasSurf,
         reason,
-        attempts: 0
+        attempts: 0,
+        diag: restoreDiag
       };
     } catch (e) {
       console.error('[PLAYHEAD ATOMIC RESTORE] Failed during restore transaction:', e);
@@ -1079,6 +1318,10 @@ export class Game {
       // Freeze simulation during viewmodel calibration
       if (this.viewmodelCalibrator.isActive) return;
 
+      // NOTE: `frameDelta` is initialised by this very `tick` call, so it is in
+      // its temporal dead zone inside this callback. The render-frame delta is
+      // recorded after tick() returns, below.
+
       // Smoothed FPS for developer diagnostics (never used for gameplay).
       if (dt > 0) {
         const instFps = 1 / dt;
@@ -1103,8 +1346,9 @@ export class Game {
           this.isRestoringCheckpoint = false;
           const wasSurf = this.pendingRestoreVerification.wasSurf;
           const reason = this.pendingRestoreVerification.reason;
+          const diag = this.pendingRestoreVerification.diag;
           this.pendingRestoreVerification = null;
-          this.announceRestore(reason, wasSurf);
+          this.announceRestore(reason, wasSurf, false, diag);
         } else {
           // Failed or displaced on frame: re-force authoritative transform
           this.pendingRestoreVerification.attempts++;
@@ -1116,9 +1360,9 @@ export class Game {
             this.isRestoringCheckpoint = false;
             const wasSurf = this.pendingRestoreVerification.wasSurf;
             const reason = this.pendingRestoreVerification.reason;
+            const diag = this.pendingRestoreVerification.diag;
             this.pendingRestoreVerification = null;
-            console.warn('[PLAYHEAD RESTORE] Emergency fallback restore completed');
-            this.announceRestore(reason, wasSurf, true);
+            this.announceRestore(reason, wasSurf, true, diag);
           }
         }
       }
@@ -1295,7 +1539,31 @@ export class Game {
       );
     }
 
+    // Render-frame delta for diagnostics context (safe here: tick() has returned).
+    this.lastFrameDeltaMs = frameDelta * 1000;
+
     this.environment.update(frameDelta);
+
+    // ---- Movement diagnostics (opt-in via ?debugMovement=1) --------------
+    if (movementDiagnostics.isEnabled) {
+      this.checkCameraTranslationDiagnostics();
+      const vmCam = this.environment.camera;
+      movementDiagnostics.update({
+        buildLabel: BUILD_LABEL,
+        speedUnits: this.playerController.getSpeedUnits(),
+        player: {
+          x: this.playerController.position.x,
+          y: this.playerController.position.y,
+          z: this.playerController.position.z
+        },
+        yawDeg: (this.cameraController.yaw * 180) / Math.PI,
+        pitchDeg: (this.cameraController.pitch * 180) / Math.PI,
+        fov: vmCam.fov,
+        frameDeltaMs: this.lastFrameDeltaMs,
+        voidDeathY: this.playerController.authoritativeKillY,
+        lastEvent: movementDiagnostics.getLastEvent()
+      });
+    }
 
     // Update First-Person Viewmodel (Hands + Karambit) in PLAYING, COUNTDOWN, or MOVEMENT_LAB
     let activeVm: ViewmodelController | null = null;

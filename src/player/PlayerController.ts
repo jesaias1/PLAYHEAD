@@ -12,6 +12,7 @@ import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { SettingsManager } from '../core/Settings';
 import { SurfState } from './SurfState';
 import { decideRestore, RestoreReason } from './RestorePolicy';
+import { movementDiagnostics } from '../core/MovementDiagnostics';
 
 export class PlayerController {
   public position = new THREE.Vector3();
@@ -321,18 +322,29 @@ export class PlayerController {
             timestamp: Date.now()
           });
           if (typeof console !== 'undefined') {
-            console.warn('[PLAYER CORRECTION]', {
-              reason: 'COLLISION_DEPENETRATION',
-              source: 'PlayerController.updateFixed -> PhysicsWorld.resolveCapsule',
-              backward,
-              correctionLen: corrLen,
-              horizontalSpeed: vhn * this.config.speedUnitScale,
-              preCollision: { x: preCollisionX, y: preCollisionY, z: preCollisionZ },
-              postCollision: { x: this.position.x, y: this.position.y, z: this.position.z },
-              grounded: colRes.isGrounded,
-              surfing: colRes.isSurfing,
-              hitWall: colRes.hitWall
-            });
+            const cam = this.cameraController.camera as THREE.PerspectiveCamera;
+            movementDiagnostics.recordThrottled(
+              'PLAYER_CORRECTION',
+              'COLLISION_DEPENETRATION',
+              'PlayerController.updateFixed -> PhysicsWorld.resolveCapsule',
+              {
+                positionBefore: `(${preCollisionX.toFixed(3)}, ${preCollisionY.toFixed(3)}, ${preCollisionZ.toFixed(3)})`,
+                positionAfter: `(${this.position.x.toFixed(3)}, ${this.position.y.toFixed(3)}, ${this.position.z.toFixed(3)})`,
+                correctionVector: `(${dx.toFixed(4)}, ${dy.toFixed(4)}, ${dz.toFixed(4)})`,
+                correctionDistance: corrLen,
+                backwardComponent: backward,
+                velocity: `(${this.velocity.x.toFixed(3)}, ${this.velocity.y.toFixed(3)}, ${this.velocity.z.toFixed(3)})`,
+                displaySpeed: vhn * this.config.speedUnitScale,
+                grounded: colRes.isGrounded,
+                surfing: colRes.isSurfing,
+                hitWall: colRes.hitWall,
+                lastTouchedSurface: this.lastTouchedSurfaceType,
+                cameraYaw: this.cameraController.yaw,
+                cameraPitch: this.cameraController.pitch,
+                fov: cam.fov
+              },
+              `depenetration:${backward.toFixed(2)}`
+            );
           }
         }
       }
