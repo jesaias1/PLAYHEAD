@@ -3,6 +3,105 @@
 Technical handoff for a stronger reasoning model. Branch `wip/remote-playhead`.
 Written after commit `bafc624` plus the raw-input work in this pass.
 
+> **LATEST UPDATE (this pass) — read section 14 first.** The `[VIEW SNAP]`
+> `YAW_MISMATCH` detector was **time-misaligned and produced false positives**.
+> That is now fixed. The laptop runtime spike, and the coalescing question, are
+> addressed by a new observational probe.
+
+---
+
+## 14. LATEST FINDINGS (this pass) — READ FIRST
+
+### 14.1 The previous `[VIEW SNAP] YAW_MISMATCH` was a FALSE POSITIVE
+
+**Confirmed.** `CameraController.applyMouseDelta()` mutates `yaw`/`pitch`
+**synchronously inside the DOM mouse event**. The old detector accumulated raw
+input during those events but compared "expected vs actual" later, inside
+`CameraController.update()` — a different, frame-separated time interval. Because
+yaw had already been mutated before the window opened, `actual` measured 0 while
+`expected` was non-zero, producing `YAW_MISMATCH` on completely correct input.
+This matches the human observations exactly (`rawX=-10, rawY=-3, expected != 0,
+actual = 0`).
+
+**Fix:** attribution moved to the event itself.
+
+- `CameraController.onMouseApplied` fires **inside** `applyMouseDelta` with
+  before/after yaw+pitch from that same call.
+- `ViewSnapDetector.checkEvent()` compares them with a `1e-9` tolerance (exact
+  arithmetic; only float noise allowed). Verified: `dx=-10, dy=-3` → silent, and
+  the laptop-style `131/-188` → silent.
+- `ViewSnapDetector.checkQuaternion()` is now the **only** frame-scoped check
+  (quaternion vs authoritative yaw/pitch, catches a second orientation writer).
+- A deliberate `justLocked` discard is reported as `[INPUT DISCARDED]`, never as
+  a view snap.
+
+Also fixed a real wrap bug in `checkQuaternion`: `Euler.setFromQuaternion`
+normalises yaw to `[-PI, PI]` while `yaw` accumulates unbounded, so both are now
+normalised into the same range before comparison. (179° vs −179° differ by a real
+2° and are still reported; 181° vs −179° are correctly equal.)
+
+### 14.2 The laptop spike: `movementX=131, movementY=-188`
+
+Interpretation from the human runtime capture:
+
+| Field | Value | Reading |
+|---|---|---|
+| magnitude | ~229 px | vs recent median 14.37 px → **15.95×** |
+| `eventsThisFrame` | 1 | it arrived as a single dispatch |
+| `timeSincePrevEvent` | ~12 ms | normal inter-event spacing (~83 Hz) |
+| `frameDelta` | ~11.4 ms | ~88 FPS — **the machine was NOT struggling** |
+| `RAW INPUT` | true | session confirmed `unadjustedMovement` |
+
+So this is a genuine **single-dispatch** event carrying ~229 px. At 0.0022 rad/px
+that is ~29° of yaw in one dispatch — and a single `movementX` of 700 px would be
+a 90°+ instantaneous turn.
+
+Note this **exonerates frame rate**: 11.4 ms frames are healthy, so "low FPS
+caused it" is not supported by the evidence.
+
+### 14.3 Coalescing probe — implemented and ready to answer the question
+
+`?pointerInputExperiment=1` enables observation-only listeners on
+`pointerrawupdate` (where supported) and `pointermove`. They **never apply
+input**; the production `mousemove` path remains the single authoritative
+mouse-look source, so no delta can be applied twice.
+
+Feature detection in the test Chromium:
+
+| Capability | Result |
+|---|---|
+| `PointerEvent` | present |
+| `getCoalescedEvents()` | **present** |
+| `pointerrawupdate` | **supported** |
+| handlers registered | `pointerrawupdate` 1, `pointermove` 1 |
+
+The probe reports, for the largest parent event seen: parent delta, constituent
+count, every constituent delta, the sum, whether the sum matches the parent,
+largest constituent, and timestamp spread. Verified with all 20 constituents
+summing exactly to the parent and **zero** sum mismatches.
+
+**Unresolved at time of writing:** whether a real laptop-generated 131/−188
+event decomposes into several smaller physical samples or is genuinely one raw
+sample. The probe answers this directly on the affected machine, and the overlay
+shows `POINTER PROBE` plus a `breakdown:` line.
+
+### 14.4 Raw-input session accounting
+
+`RAW INPUT: true` previously could not be distinguished from a silent fallback.
+`rawInputSession` now records `requestId`, `requestedMode`, `resolvedMode`,
+`fallbackCount` and `lastError`, so the flag can only be true for the **current**
+lock session. Observed: `requestedMode=unadjustedMovement`,
+`resolvedMode=unadjustedMovement`, `fallbackCount=0` — raw input genuinely
+resolved, no fallback used.
+
+### 14.5 What is still NOT proven
+
+`requestPointerLock({ unadjustedMovement: true })` **did resolve** on the laptop
+and the spike still occurred. So OS pointer acceleration is **not** the whole
+explanation; either it is not the cause, or something upstream (device driver /
+browser event coalescing) still batches motion. The coalescing probe is the
+instrument that decides this. **ROOT CAUSE REMAINS NOT YET PROVEN.**
+
 ---
 
 ## 1. HUMAN REPRODUCTION (verbatim observations)

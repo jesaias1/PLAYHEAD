@@ -19,6 +19,7 @@ export type MovementDiagEventKind =
   | 'CAMERA_DESYNC'
   | 'VIEW_SNAP'
   | 'RAW_MOUSE_SPIKE'
+  | 'INPUT_DISCARDED'
   | 'OTHER';
 
 /**
@@ -64,12 +65,18 @@ export interface FrameOrientationSample {
 
 /**
  * Detects a view-orientation discontinuity that cannot be explained by the
- * mouse input actually applied during that update.
+ * mouse input actually applied.
  *
- * Two independent assertions per frame:
- *  1. the applied mouse delta must match the observed yaw/pitch change
- *  2. the yaw/pitch change must match the change reconstructed from the final
- *     camera quaternion (catches a second orientation writer)
+ * TWO separate checks, deliberately at DIFFERENT scopes:
+ *
+ *  1. EVENT-LOCAL (`checkEvent`, called inside applyMouseDelta): compares the
+ *     expected yaw/pitch delta against the change observed in the SAME call.
+ *     Yaw/pitch are mutated synchronously inside the DOM event, so any
+ *     frame-separated comparison would report spurious mismatches.
+ *
+ *  2. FRAME-LEVEL (`checkQuaternion`): verifies the camera quaternion agrees
+ *     with the authoritative yaw/pitch, which catches a second orientation
+ *     writer. This one is genuinely frame-scoped.
  */
 export class ViewSnapDetector {
   private ring: FrameOrientationSample[] = [];
@@ -86,94 +93,93 @@ export class ViewSnapDetector {
     this.pendingCount++;
   }
 
+  /** Raw delta accumulated since the last frame boundary (diagnostics). */
+  public get frameAccumulated(): { x: number; y: number; count: number } {
+    return { x: this.pendingX, y: this.pendingY, count: this.pendingCount };
+  }
+
+  public resetFrameAccumulator(): void {
+    this.pendingX = 0;
+    this.pendingY = 0;
+    this.pendingCount = 0;
+  }
+
   /**
-   * Called once per frame after camera orientation has been updated.
-   * Returns a diagnosis when the change is unexplained, else null.
+   * EVENT-LOCAL check. Must be called from inside applyMouseDelta, with the
+   * before/after values from that same call.
+   *
+   * Returns a diagnosis string when the applied change does not match the
+   * input, or null when it does (which is the correct, expected case).
    */
-  public endFrame(args: {
+  public checkEvent(e: {
+    movementX: number;
+    movementY: number;
     yawBefore: number;
     yawAfter: number;
     pitchBefore: number;
     pitchAfter: number;
-    quatYawBefore: number;
-    quatYawAfter: number;
-    quatPitchBefore: number;
-    quatPitchAfter: number;
-    sensitivity: number;
-    baseSensitivity: number;
+    expectedYawDelta: number;
+    expectedPitchDelta: number;
+    pitchClamped: boolean;
     isLocked: boolean;
     justLocked: boolean;
-    frameDeltaMs: number;
-    playerPos: { x: number; y: number; z: number };
-    displaySpeed: number;
-  }): FrameOrientationSample & { diagnosis: string | null } {
-    const factor = args.baseSensitivity * args.sensitivity;
+  }): string | null {
+    const actualYawDelta = wrapAngleDelta(e.yawAfter - e.yawBefore);
+    const actualPitchDelta = e.pitchAfter - e.pitchBefore;
 
-    // Expected change from the mouse input actually applied this frame.
-    const expectedYawDelta = -this.pendingX * factor;
-    const expectedPitchDelta = -this.pendingY * factor;
+    const ANGLE_TOL = 1e-9; // rad — exact arithmetic; only float noise allowed
 
-    // Observed change (wrapped: angles, not linear values).
-    const actualYawDelta = wrapAngleDelta(args.yawAfter - args.yawBefore);
-    const actualPitchDelta = args.pitchAfter - args.pitchBefore;
-
-    const sample: FrameOrientationSample = {
-      yawBefore: args.yawBefore,
-      yawAfter: args.yawAfter,
-      pitchBefore: args.pitchBefore,
-      pitchAfter: args.pitchAfter,
-      rawX: this.pendingX,
-      rawY: this.pendingY,
-      eventCount: this.pendingCount,
-      expectedYawDelta,
-      expectedPitchDelta,
-      actualYawDelta,
-      actualPitchDelta,
-      sensitivity: args.sensitivity,
-      isLocked: args.isLocked,
-      justLocked: args.justLocked,
-      frameDeltaMs: args.frameDeltaMs,
-      playerPos: args.playerPos,
-      displaySpeed: args.displaySpeed,
-      timestamp: Date.now()
-    };
-
-    let diagnosis: string | null = null;
-
-    // 1. Applied mouse delta vs observed yaw/pitch change.
-    // Tolerance accounts for the pitch clamp legitimately absorbing input when
-    // the player is pinned at a pitch limit.
-    const yawResidual = wrapAngleDelta(actualYawDelta - expectedYawDelta);
-    const pitchResidual = actualPitchDelta - expectedPitchDelta;
-    const atPitchLimit = Math.abs(args.pitchAfter) >= 1.5499 || Math.abs(args.pitchBefore) >= 1.5499;
-
-    const ANGLE_TOL = 0.01; // rad
+    const yawResidual = wrapAngleDelta(actualYawDelta - e.expectedYawDelta);
     if (Math.abs(yawResidual) > ANGLE_TOL) {
-      diagnosis = `YAW_MISMATCH residual=${yawResidual.toFixed(5)} (expected ${expectedYawDelta.toFixed(5)}, actual ${actualYawDelta.toFixed(5)})`;
-    } else if (Math.abs(pitchResidual) > ANGLE_TOL && !atPitchLimit) {
-      diagnosis = `PITCH_MISMATCH residual=${pitchResidual.toFixed(5)} (expected ${expectedPitchDelta.toFixed(5)}, actual ${actualPitchDelta.toFixed(5)})`;
+      return `YAW_MISMATCH residual=${yawResidual.toExponential(3)} (expected ${e.expectedYawDelta.toExponential(3)}, actual ${actualYawDelta.toExponential(3)}, dx=${e.movementX})`;
     }
 
-    // 2. Camera quaternion must agree with yaw/pitch (no second writer).
-    if (!diagnosis) {
-      const qYaw = wrapAngleDelta(args.quatYawAfter - args.yawAfter);
-      const qPitch = args.quatPitchAfter - args.pitchAfter;
-      const Q_TOL = 0.02; // rad
-      if (Math.abs(qYaw) > Q_TOL) {
-        diagnosis = `QUATERNION_YAW_DIVERGENCE quatYaw=${args.quatYawAfter.toFixed(5)} yaw=${args.yawAfter.toFixed(5)} diff=${qYaw.toFixed(5)}`;
-      } else if (Math.abs(qPitch) > Q_TOL) {
-        diagnosis = `QUATERNION_PITCH_DIVERGENCE quatPitch=${args.quatPitchAfter.toFixed(5)} pitch=${args.pitchAfter.toFixed(5)} diff=${qPitch.toFixed(5)}`;
+    // Pitch may legitimately differ when the clamp absorbs input.
+    if (!e.pitchClamped) {
+      const pitchResidual = actualPitchDelta - e.expectedPitchDelta;
+      if (Math.abs(pitchResidual) > ANGLE_TOL) {
+        return `PITCH_MISMATCH residual=${pitchResidual.toExponential(3)} (expected ${e.expectedPitchDelta.toExponential(3)}, actual ${actualPitchDelta.toExponential(3)}, dy=${e.movementY})`;
       }
     }
 
+    return null;
+  }
+
+  /**
+   * FRAME-LEVEL check: the camera quaternion must agree with yaw/pitch.
+   * Returns a diagnosis when a second writer diverged the quaternion.
+   */
+  public checkQuaternion(args: {
+    yaw: number;
+    pitch: number;
+    quatYaw: number;
+    quatPitch: number;
+  }): string | null {
+    // `Euler.setFromQuaternion` normalises yaw into [-PI, PI] while
+    // CameraController.yaw accumulates unbounded. Normalise BOTH into the same
+    // range before comparing, so a wrap boundary is not mistaken for divergence.
+    const normalize = (a: number): number => {
+      const t = (a + Math.PI) % (Math.PI * 2);
+      return (t < 0 ? t + Math.PI * 2 : t) - Math.PI;
+    };
+
+    const qYaw = normalize(args.quatYaw) - normalize(args.yaw);
+    const qPitch = args.quatPitch - args.pitch;
+    const Q_TOL = 0.02; // rad
+
+    if (Math.abs(qYaw) > Q_TOL) {
+      return `QUATERNION_YAW_DIVERGENCE quatYaw=${args.quatYaw.toFixed(5)} yaw=${args.yaw.toFixed(5)} diff=${qYaw.toFixed(5)}`;
+    }
+    if (Math.abs(qPitch) > Q_TOL) {
+      return `QUATERNION_PITCH_DIVERGENCE quatPitch=${args.quatPitch.toFixed(5)} pitch=${args.pitch.toFixed(5)} diff=${qPitch.toFixed(5)}`;
+    }
+    return null;
+  }
+
+  /** Records a frame sample for the rolling history (no diagnosis). */
+  public recordFrame(sample: FrameOrientationSample): void {
     this.ring.push(sample);
     if (this.ring.length > this.capacity) this.ring.shift();
-
-    this.pendingX = 0;
-    this.pendingY = 0;
-    this.pendingCount = 0;
-
-    return { ...sample, diagnosis };
   }
 
   /** Most recent orientation samples, oldest first. */
@@ -224,6 +230,26 @@ export interface MovementDiagSnapshot {
   };
   lastViewSnap: MovementDiagEvent | null;
   lastRawSpike: MovementDiagEvent | null;
+  /** Pointer-granularity experiment data (?pointerInputExperiment=1). */
+  pointerProbe?: {
+    enabled: boolean;
+    rawUpdateCount: number;
+    pointerMoveCount: number;
+    multiConstituentCount: number;
+    maxConstituentCount: number;
+    largestParentMagnitude: number;
+    largestConstituentMagnitude: number;
+    sumMismatches: number;
+    largestParentBreakdown: string;
+  };
+  /** Raw pointer-lock session accounting. */
+  rawInput?: {
+    requestedMode: string;
+    resolvedMode: string;
+    fallbackCount: number;
+    lastError: string;
+    active: boolean;
+  };
 }
 
 const num = (v: number, digits = 3): string =>
@@ -289,7 +315,23 @@ export class MovementDiagnostics {
     return count === 1 ? '1 (ok)' : `${count} (EXPECTED 1)`;
   }
 
-  /** Records an event and mirrors it to the console. */
+  /**
+   * True when the URL asks for the isolated pointer-input experiment
+   * (?pointerInputExperiment=1). Collects PointerEvent / coalesced data for
+   * comparison against the production mousemove path WITHOUT changing input.
+   */
+  public static isPointerInputExperimentRequested(search: string): boolean {
+    try {
+      const params = new URLSearchParams(search || '');
+      const v = params.get('pointerInputExperiment');
+      return v === '1' || v === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Records an event and mirrors it to the console. */
   public record(
     kind: MovementDiagEventKind,
     reason: string,
@@ -312,7 +354,9 @@ export class MovementDiagnostics {
             ? '[VIEW SNAP]'
             : kind === 'RAW_MOUSE_SPIKE'
               ? '[RAW MOUSE SPIKE]'
-              : '[MOVEMENT DIAG]';
+              : kind === 'INPUT_DISCARDED'
+                ? '[INPUT DISCARDED]'
+                : '[MOVEMENT DIAG]';
 
     // `reason` is inlined into the string so it is readable immediately in the
     // DevTools console without expanding the object. The full structured detail
@@ -419,6 +463,23 @@ export class MovementDiagnostics {
           .slice(0, 12)
           .map(([k, v]) => (typeof v === 'number' ? `${k}=${num(v)}` : `${k}=${JSON.stringify(v)}`))
           .join('  ')
+      );
+    }
+
+    if (snapshot.rawInput) {
+      const ri = snapshot.rawInput;
+      lines.push(
+        `RAW LOCK req=${ri.requestedMode} resolved=${ri.resolvedMode} active=${ri.active} fallbacks=${ri.fallbackCount}${ri.lastError ? ' err=' + ri.lastError : ''}`
+      );
+    }
+
+    if (snapshot.pointerProbe) {
+      const pp = snapshot.pointerProbe;
+      lines.push(
+        `POINTER PROBE ${pp.enabled ? 'ON' : 'off'}  rawUpdate=${pp.rawUpdateCount} pointerMove=${pp.pointerMoveCount}`,
+        `  multiConstituent=${pp.multiConstituentCount} maxConstituents=${pp.maxConstituentCount} sumMismatches=${pp.sumMismatches}`,
+        `  largestParent=${num(pp.largestParentMagnitude, 1)}px largestConstituent=${num(pp.largestConstituentMagnitude, 1)}px`,
+        `  breakdown: ${pp.largestParentBreakdown}`
       );
     }
 

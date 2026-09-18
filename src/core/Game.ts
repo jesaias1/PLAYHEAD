@@ -36,6 +36,7 @@ import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { RestoreReason } from '../player/RestorePolicy';
 import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics, RawMouseSpikeDetector } from './MovementDiagnostics';
+import { PointerInputProbe } from './PointerInputProbe';
 import { BUILD_LABEL } from './BuildInfo';
 
 export class Game {
@@ -619,6 +620,10 @@ export class Game {
   private lastViewSnapEvent: MovementDiagEvent | null = null;
   private mouseHandlerCount = 0;
 
+  /** Pointer-granularity experiment (observation only). */
+  private pointerProbe = new PointerInputProbe();
+  private pointerProbeEnabled = false;
+
   /**
    * Pushes the authoritative world void boundary into the player.
    *
@@ -630,6 +635,22 @@ export class Game {
    */
   private syncAuthoritativeVoidBoundary(): void {
     this.playerController.authoritativeKillY = this.world.physics.getVoidDeathY();
+  }
+
+  /**
+   * Renders the largest observed parent pointer event as a readable breakdown,
+   * so it is immediately visible whether a big delta decomposes into smaller
+   * coalesced samples or is a genuine single raw sample.
+   */
+  private describeLargestParentEvent(): string {
+    const r = this.pointerProbe.largestParentEvent;
+    if (!r) return '(none yet)';
+    const parts = r.constituents
+      .slice(0, 8)
+      .map((c) => `${c.movementX}/${c.movementY}`)
+      .join(' ');
+    const more = r.constituents.length > 8 ? ` +${r.constituents.length - 8} more` : '';
+    return `parent ${r.parentX}/${r.parentY} (${r.parentMagnitude.toFixed(1)}px) = ${r.constituentCount} sample(s) [${parts}${more}] sum=${r.sumX.toFixed(1)}/${r.sumY.toFixed(1)} spread=${r.timestampSpreadMs.toFixed(1)}ms via ${r.source}`;
   }
 
   /**
@@ -1210,17 +1231,28 @@ export class Game {
       };
 
       this.cameraController.onOrientationFrame = (f) => {
-        const result = this.viewSnapDetector.endFrame({
+        // FRAME-SCOPED check only: quaternion vs authoritative yaw/pitch.
+        // (Expected-vs-actual input attribution is event-local, below.)
+        const diagnosis = this.viewSnapDetector.checkQuaternion({
+          yaw: f.yawAfter,
+          pitch: f.pitchAfter,
+          quatYaw: f.quatYawAfter,
+          quatPitch: f.quatPitchAfter
+        });
+
+        this.viewSnapDetector.recordFrame({
           yawBefore: f.yawBefore,
           yawAfter: f.yawAfter,
           pitchBefore: f.pitchBefore,
           pitchAfter: f.pitchAfter,
-          quatYawBefore: f.quatYawBefore,
-          quatYawAfter: f.quatYawAfter,
-          quatPitchBefore: f.quatPitchBefore,
-          quatPitchAfter: f.quatPitchAfter,
+          rawX: this.viewSnapDetector.frameAccumulated.x,
+          rawY: this.viewSnapDetector.frameAccumulated.y,
+          eventCount: this.viewSnapDetector.frameAccumulated.count,
+          expectedYawDelta: 0,
+          expectedPitchDelta: 0,
+          actualYawDelta: f.yawAfter - f.yawBefore,
+          actualPitchDelta: f.pitchAfter - f.pitchBefore,
           sensitivity: this.cameraController.getSensitivity(),
-          baseSensitivity: 0.0022,
           isLocked: f.isLocked,
           justLocked: f.justLocked,
           frameDeltaMs: this.lastFrameDeltaMs,
@@ -1229,39 +1261,81 @@ export class Game {
             y: this.playerController.position.y,
             z: this.playerController.position.z
           },
-          displaySpeed: this.playerController.getSpeedUnits()
+          displaySpeed: this.playerController.getSpeedUnits(),
+          timestamp: Date.now()
         });
+        this.viewSnapDetector.resetFrameAccumulator();
 
-      // Extend the view-snap report with the live handler registration count.
-      if (result.diagnosis) {
-        const wrap = (v: number) => (v * 180) / Math.PI;
+        if (diagnosis) {
+          movementDiagnostics.record(
+            'VIEW_SNAP',
+            diagnosis,
+            'CameraController.update (quaternion divergence)',
+            {
+              yaw: f.yawAfter,
+              pitch: f.pitchAfter,
+              quatYaw: f.quatYawAfter,
+              quatPitch: f.quatPitchAfter,
+              pointerLocked: f.isLocked,
+              frameDeltaMs: this.lastFrameDeltaMs
+            }
+          );
+          this.lastViewSnapEvent = movementDiagnostics.getLastEvent();
+        }
+      };
+
+      // EVENT-LOCAL attribution: compares expected vs actual inside the same
+      // applyMouseDelta call. This is the correct scope, because yaw/pitch are
+      // mutated synchronously inside the DOM mouse event.
+      this.cameraController.onMouseApplied = (e) => {
+        const diagnosis = this.viewSnapDetector.checkEvent(e);
+        if (diagnosis) {
+          const wrap = (v: number) => (v * 180) / Math.PI;
+          movementDiagnostics.record(
+            'VIEW_SNAP',
+            diagnosis,
+            'CameraController.applyMouseDelta (event-local)',
+            {
+              movementX: e.movementX,
+              movementY: e.movementY,
+              yawBeforeDeg: wrap(e.yawBefore),
+              yawAfterDeg: wrap(e.yawAfter),
+              pitchBeforeDeg: wrap(e.pitchBefore),
+              pitchAfterDeg: wrap(e.pitchAfter),
+              expectedYawDeltaDeg: wrap(e.expectedYawDelta),
+              actualYawDeltaDeg: wrap(e.yawAfter - e.yawBefore),
+              pitchClamped: e.pitchClamped,
+              pointerLocked: e.isLocked,
+              justLocked: e.justLocked
+            }
+          );
+          this.lastViewSnapEvent = movementDiagnostics.getLastEvent();
+        }
+      };
+
+      // Intentional discards are reported as such, never as a view snap.
+      this.cameraController.onMouseDiscarded = (e) => {
         movementDiagnostics.record(
-          'VIEW_SNAP',
-          result.diagnosis,
-          'CameraController.update (orientation discontinuity)',
-          {
-            rawX: result.rawX,
-            rawY: result.rawY,
-            mouseEvents: result.eventCount,
-            mouseHandlers: this.cameraController.registeredHandlerCounts.mousemove,
-            sensitivity: result.sensitivity,
-            yawBeforeDeg: wrap(result.yawBefore),
-            yawAfterDeg: wrap(result.yawAfter),
-            pitchBeforeDeg: wrap(result.pitchBefore),
-            pitchAfterDeg: wrap(result.pitchAfter),
-            expectedYawDeltaDeg: wrap(result.expectedYawDelta),
-            actualYawDeltaDeg: wrap(result.actualYawDelta),
-            expectedPitchDeltaDeg: wrap(result.expectedPitchDelta),
-            actualPitchDeltaDeg: wrap(result.actualPitchDelta),
-            pointerLocked: result.isLocked,
-            justLocked: result.justLocked,
-            frameDeltaMs: result.frameDeltaMs,
-            playerPos: `(${result.playerPos.x.toFixed(2)}, ${result.playerPos.y.toFixed(2)}, ${result.playerPos.z.toFixed(2)})`,
-            displaySpeed: result.displaySpeed
-          }
+          'INPUT_DISCARDED',
+          e.reason,
+          'CameraController mousemove (deliberate discard)',
+          { movementX: e.movementX, movementY: e.movementY }
         );
-        this.lastViewSnapEvent = movementDiagnostics.getLastEvent();
-      }
+      };
+    }
+
+    // ---- Pointer-granularity experiment (?pointerInputExperiment=1) ------
+    // Observation only: never applies input. Reports whether large mousemove
+    // deltas decompose into smaller coalesced pointer samples.
+    if (MovementDiagnostics.isPointerInputExperimentRequested(
+      typeof window !== 'undefined' ? window.location.search : ''
+    )) {
+      this.pointerProbeEnabled = true;
+      this.cameraController.onPointerProbeEvent = (source, e) => {
+        this.pointerProbe.observe(source, e, {
+          isLocked: this.cameraController.getIsLocked(),
+          gameState: String(this.stateMachine.getState())
+        });
       };
     }
 
@@ -1710,7 +1784,25 @@ export class Game {
             }
           : undefined,
         lastViewSnap: this.lastViewSnapEvent,
-        lastRawSpike: this.lastRawSpikeEvent
+        lastRawSpike: this.lastRawSpikeEvent,
+        rawInput: {
+          requestedMode: this.cameraController.rawInputSession.requestedMode,
+          resolvedMode: this.cameraController.rawInputSession.resolvedMode,
+          fallbackCount: this.cameraController.rawInputSession.fallbackCount,
+          lastError: this.cameraController.rawInputSession.lastError,
+          active: this.cameraController.rawInputActive
+        },
+        pointerProbe: {
+          enabled: this.pointerProbeEnabled,
+          rawUpdateCount: this.pointerProbe.counts.rawUpdate,
+          pointerMoveCount: this.pointerProbe.counts.pointerMove,
+          multiConstituentCount: this.pointerProbe.counts.multiConstituent,
+          maxConstituentCount: this.pointerProbe.counts.maxConstituentCount,
+          largestParentMagnitude: this.pointerProbe.counts.largestParentMagnitude,
+          largestConstituentMagnitude: this.pointerProbe.counts.largestConstituentMagnitude,
+          sumMismatches: this.pointerProbe.counts.sumMismatches,
+          largestParentBreakdown: this.describeLargestParentEvent()
+        }
       });
     }
 

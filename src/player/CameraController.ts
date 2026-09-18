@@ -125,10 +125,27 @@ export class CameraController {
   public onRawMouseDelta?: (movementX: number, movementY: number, justLocked: boolean) => void;
 
   /** Counts of handler registrations performed by initEvents(). */
-  public registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0 };
+  public registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0, pointerrawupdate: 0, pointermove: 0 };
 
   /** True when the OS has confirmed raw (unaccelerated) pointer input is active. */
   public rawInputActive = false;
+
+  /**
+   * Raw-input session accounting, so `RAW INPUT: true` is only ever shown for
+   * the CURRENT lock session and a silent fallback cannot masquerade as raw.
+   */
+  public rawInputSession = {
+    /** Incremented on every lock request, so results can be attributed. */
+    requestId: 0,
+    requestedMode: 'none' as 'none' | 'unadjustedMovement' | 'plain',
+    resolvedMode: 'none' as 'none' | 'unadjustedMovement' | 'plain',
+    resolvedRequestId: -1,
+    fallbackCount: 0,
+    lastError: ''
+  };
+
+  /** Diagnostics hook: pointer-granularity observations (never applies input). */
+  public onPointerProbeEvent?: (source: 'pointerrawupdate' | 'pointermove', e: PointerEvent) => void;
 
   /** Diagnostics hook, invoked once per CameraController.update(). */
   public onOrientationFrame?: (frame: {
@@ -207,33 +224,59 @@ export class CameraController {
       return;
     }
 
+    const requestId = ++this.rawInputSession.requestId;
+    this.rawInputSession.requestedMode = 'unadjustedMovement';
+    this.rawInputSession.resolvedMode = 'none';
+    this.rawInputSession.lastError = '';
+
     let result: Promise<void> | void;
     try {
       result = el.requestPointerLock({ unadjustedMovement: true });
-    } catch {
-      this.plainRequestPointerLock(el);
+    } catch (err) {
+      this.rawInputSession.lastError = String(err);
+      this.plainRequestPointerLock(el, requestId);
       return;
     }
 
     // Browsers that do not support the options argument return undefined and
     // have already granted (or refused) the plain lock — nothing more to do.
     if (!result || typeof (result as Promise<void>).then !== 'function') {
+      this.rawInputSession.resolvedMode = 'plain';
+      this.rawInputSession.resolvedRequestId = requestId;
+      this.rawInputActive = false;
       return;
     }
 
     (result as Promise<void>).then(
       () => {
-        this.rawInputActive = true;
+        // Only trust this if it belongs to the current lock request.
+        if (requestId === this.rawInputSession.requestId) {
+          this.rawInputActive = true;
+          this.rawInputSession.resolvedMode = 'unadjustedMovement';
+          this.rawInputSession.resolvedRequestId = requestId;
+        }
       },
-      () => {
+      (err) => {
         // NotSupportedError / SecurityError — retry with the plain call.
-        this.rawInputActive = false;
-        this.plainRequestPointerLock(el);
+        this.rawInputSession.lastError = err && err.name ? String(err.name) : String(err);
+        if (requestId === this.rawInputSession.requestId) {
+          this.rawInputActive = false;
+        }
+        this.plainRequestPointerLock(el, requestId);
       }
     );
   }
 
-  private plainRequestPointerLock(el: HTMLElement & { requestPointerLock?: () => unknown }): void {
+  private plainRequestPointerLock(
+    el: HTMLElement & { requestPointerLock?: () => unknown },
+    requestId: number
+  ): void {
+    this.rawInputSession.fallbackCount++;
+    if (requestId === this.rawInputSession.requestId) {
+      this.rawInputSession.resolvedMode = 'plain';
+      this.rawInputSession.resolvedRequestId = requestId;
+      this.rawInputActive = false;
+    }
     try {
       const p = el.requestPointerLock?.();
       if (p && typeof (p as Promise<void>).then === 'function') {
@@ -295,6 +338,13 @@ export class CameraController {
   public applyMouseDelta(deltaX: number, deltaY: number): void {
     const factor = CameraController.BASE_SENSITIVITY * this.sensitivity;
 
+    // EVENT-LOCAL ATTRIBUTION (diagnostics only).
+    // Yaw/pitch are mutated here, inside the DOM event, so expected-vs-actual
+    // must be compared within this same call. Comparing against a later
+    // CameraController.update() window produces spurious mismatches.
+    const diagYawBefore = this.yaw;
+    const diagPitchBefore = this.pitch;
+
     this.lastMouseDeltaX += deltaX;
     this.lastMouseDeltaY += deltaY;
 
@@ -305,10 +355,47 @@ export class CameraController {
     this.pitch -= deltaY * factor;
 
     // Clamp pitch between approx -88.8° and +88.8° (prevents pole gimbal lock and flipping)
+    const pitchBeforeClamp = this.pitch;
     this.pitch = clamp(this.pitch, -1.55, 1.55);
 
     this.updateCameraRotation();
+
+    if (this.onMouseApplied) {
+      this.onMouseApplied({
+        movementX: deltaX,
+        movementY: deltaY,
+        yawBefore: diagYawBefore,
+        yawAfter: this.yaw,
+        pitchBefore: diagPitchBefore,
+        pitchAfter: this.pitch,
+        expectedYawDelta: -deltaX * factor,
+        expectedPitchDelta: -deltaY * factor,
+        pitchClamped: pitchBeforeClamp !== this.pitch,
+        isLocked: this.isLocked,
+        justLocked: this.justLocked,
+        mouseLookEnabled: this.mouseLookEnabled
+      });
+    }
   }
+
+  /** Diagnostics hook: an input event was deliberately discarded. */
+  public onMouseDiscarded?: (e: { movementX: number; movementY: number; reason: string }) => void;
+
+  /** Diagnostics hook: fired inside applyMouseDelta, atomically per event. */
+  public onMouseApplied?: (e: {
+    movementX: number;
+    movementY: number;
+    yawBefore: number;
+    yawAfter: number;
+    pitchBefore: number;
+    pitchAfter: number;
+    expectedYawDelta: number;
+    expectedPitchDelta: number;
+    pitchClamped: boolean;
+    isLocked: boolean;
+    justLocked: boolean;
+    mouseLookEnabled: boolean;
+  }) => void;
 
   public consumeMouseDelta(): { x: number; y: number } {
     const d = { x: this.lastMouseDeltaX, y: this.lastMouseDeltaY };
@@ -329,7 +416,7 @@ export class CameraController {
     // Count registrations so diagnostics can prove the listener lifecycle stays
     // stable across Movement Lab enter/exit and pause/resume cycles (a duplicate
     // mousemove handler would apply every delta twice → an apparent snap).
-    this.registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0 };
+    this.registeredHandlerCounts = { mousemove: 0, pointerlockchange: 0, pointerlockerror: 0, pointerdown: 0, pointerrawupdate: 0, pointermove: 0 };
 
     this.registeredHandlerCounts.pointerlockerror++;
     document.addEventListener('pointerlockerror', () => {
@@ -401,6 +488,16 @@ export class CameraController {
 
       if (this.justLocked) {
         this.justLocked = false;
+        // Intentional discard of the first delta after acquiring lock (it can
+        // carry the whole cursor displacement). Report it as such so it is never
+        // confused with an orientation fault.
+        if (this.onMouseDiscarded) {
+          this.onMouseDiscarded({
+            movementX: e.movementX,
+            movementY: e.movementY,
+            reason: 'JUST_LOCKED'
+          });
+        }
         return;
       }
 
@@ -416,6 +513,26 @@ export class CameraController {
       if (this.mouseLookEnabled && !this.isLocked) {
         this.lock();
       }
+    });
+
+    // --- Experimental pointer-granularity observation ---------------------
+    // (?pointerInputExperiment=1) These listeners NEVER apply input; they only
+    // report what the browser delivers. The production mousemove path therefore
+    // stays the single authoritative mouse-look source, and no delta can be
+    // applied twice.
+    this.registeredHandlerCounts.pointerrawupdate = 0;
+    this.registeredHandlerCounts.pointermove = 0;
+
+    if (typeof window !== 'undefined' && 'onpointerrawupdate' in window) {
+      this.registeredHandlerCounts.pointerrawupdate++;
+      window.addEventListener('pointerrawupdate', (e) => {
+        if (this.onPointerProbeEvent) this.onPointerProbeEvent('pointerrawupdate', e as PointerEvent);
+      });
+    }
+
+    this.registeredHandlerCounts.pointermove++;
+    window.addEventListener('pointermove', (e) => {
+      if (this.onPointerProbeEvent) this.onPointerProbeEvent('pointermove', e as PointerEvent);
     });
   }
 }
