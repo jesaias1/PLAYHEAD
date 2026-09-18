@@ -1331,7 +1331,7 @@ export class Game {
       typeof window !== 'undefined' ? window.location.search : ''
     )) {
       this.pointerProbeEnabled = true;
-      this.cameraController.onPointerProbeEvent = (source, e) => {
+      this.cameraController.pointerProbeSink = (source, e) => {
         this.pointerProbe.observe(source, e, {
           isLocked: this.cameraController.getIsLocked(),
           gameState: String(this.stateMachine.getState())
@@ -1802,6 +1802,17 @@ export class Game {
           largestConstituentMagnitude: this.pointerProbe.counts.largestConstituentMagnitude,
           sumMismatches: this.pointerProbe.counts.sumMismatches,
           largestParentBreakdown: this.describeLargestParentEvent()
+        },
+        inputSource: {
+          active: this.cameraController.inputSource,
+          rawSupported: this.cameraController.pointerRawUpdateSupported,
+          coalescedSupported: this.cameraController.coalescedSupported,
+          rawEvents: this.cameraController.inputCounters.rawEvents,
+          parentEvents: this.cameraController.inputCounters.parentEvents,
+          appliedSamples: this.cameraController.inputCounters.appliedSamples,
+          duplicateDrops: this.cameraController.inputCounters.duplicateDrops,
+          largestAppliedSample: this.cameraController.inputCounters.largestAppliedSample,
+          maxConstituents: this.cameraController.inputCounters.maxConstituents
         }
       });
     }

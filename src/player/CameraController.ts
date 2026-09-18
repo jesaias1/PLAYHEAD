@@ -19,6 +19,15 @@
 import * as THREE from 'three';
 import { clamp } from '../utils/math';
 
+/**
+ * Authoritative mouse-look input source.
+ *
+ * Exactly ONE of these feeds `applyMouseDelta` at any time; the others remain
+ * observation-only so a single physical displacement can never be applied
+ * twice. Selected by `resolveInputSource()` in priority order.
+ */
+export type InputSource = 'RAW_POINTER' | 'COALESCED_POINTER' | 'LEGACY_MOUSE';
+
 export class CameraController {
   public camera: THREE.PerspectiveCamera;
   public yaw = 0;   // Radians
@@ -53,6 +62,13 @@ export class CameraController {
     }
 
     this.initEvents();
+
+    // Feature-detect the granular pointer APIs, then pick the best source.
+    if (typeof window !== 'undefined' && typeof PointerEvent !== 'undefined') {
+      const proto = PointerEvent.prototype as unknown as { getCoalescedEvents?: unknown };
+      this.coalescedSupported = typeof proto.getCoalescedEvents === 'function';
+    }
+    this.inputSource = this.resolveInputSource();
   }
 
   public setSensitivity(val: number): void {
@@ -146,6 +162,36 @@ export class CameraController {
 
   /** Diagnostics hook: pointer-granularity observations (never applies input). */
   public onPointerProbeEvent?: (source: 'pointerrawupdate' | 'pointermove', e: PointerEvent) => void;
+
+  // ---------------------------------------------------------------------
+  // GRANULAR INPUT SOURCE STATE
+  // ---------------------------------------------------------------------
+
+  /** Upper bound on constituent samples accepted from one pointer event. */
+  private static readonly MAX_COALESCED_SAMPLES = 64;
+
+  /** The single source currently allowed to modify yaw/pitch. */
+  public inputSource: InputSource = 'LEGACY_MOUSE';
+
+  public pointerRawUpdateSupported = false;
+  public coalescedSupported = false;
+
+  /** Reusable scratch arrays: the raw/coalesced paths allocate nothing. */
+  private coalescedX = new Float64Array(CameraController.MAX_COALESCED_SAMPLES);
+  private coalescedY = new Float64Array(CameraController.MAX_COALESCED_SAMPLES);
+
+  /** Internal observation sink used by the diagnostics probe. */
+  public pointerProbeSink?: (source: 'pointerrawupdate' | 'pointermove', e: PointerEvent) => void;
+
+  /** Cheap numeric counters for the overlay (no allocations, no logging). */
+  public inputCounters = {
+    rawEvents: 0,
+    parentEvents: 0,
+    appliedSamples: 0,
+    duplicateDrops: 0,
+    largestAppliedSample: 0,
+    maxConstituents: 0
+  };
 
   /** Diagnostics hook, invoked once per CameraController.update(). */
   public onOrientationFrame?: (frame: {
@@ -451,6 +497,13 @@ export class CameraController {
       this.isLocked = locked;
       this.isLockPending = false;
       this.onLockChange?.(locked);
+
+      // A new lock session must not inherit any residual input state from the
+      // previous one (stale accumulated delta, pending samples, discard flag).
+      this.resetInputSessionState();
+      this.inputCounters.rawEvents = 0;
+      this.inputCounters.parentEvents = 0;
+
       if (locked) {
         this.mouseLookEnabled = true;
         if (typeof document !== 'undefined' && document.body?.style) {
@@ -459,7 +512,9 @@ export class CameraController {
         if (this.domElement?.style) {
           this.domElement.style.cursor = 'none';
         }
-        // Prevent first-frame giant delta snap when pointer lock engages
+        // The first delta after acquiring lock can carry the whole cursor
+        // displacement; discard exactly one event. Set AFTER the reset above so
+        // it is well-defined for the new session.
         this.justLocked = true;
       } else {
         if (!this.mouseLookEnabled) {
@@ -478,34 +533,13 @@ export class CameraController {
 
     this.registeredHandlerCounts.mousemove++;
     document.addEventListener('mousemove', (e) => {
-      if (!this.isLocked && !this.mouseLookEnabled) return;
+      if (!this.isMouseLookActive()) return;
 
-      // Record the raw delta BEFORE any filtering so diagnostics can prove
-      // whether the applied change matches what the browser delivered.
-      if (this.onRawMouseDelta) {
-        this.onRawMouseDelta(e.movementX, e.movementY, this.justLocked);
-      }
-
-      if (this.justLocked) {
-        this.justLocked = false;
-        // Intentional discard of the first delta after acquiring lock (it can
-        // carry the whole cursor displacement). Report it as such so it is never
-        // confused with an orientation fault.
-        if (this.onMouseDiscarded) {
-          this.onMouseDiscarded({
-            movementX: e.movementX,
-            movementY: e.movementY,
-            reason: 'JUST_LOCKED'
-          });
-        }
-        return;
-      }
-
-      this.applyMouseDelta(e.movementX, e.movementY);
-
-      if (this.mouseLookEnabled && !this.isLocked && !this.isLockPending && Date.now() - this.lastLockAttempt > 1200) {
-        this.lock();
-      }
+      // mousemove is the LEGACY source. When a finer source owns application it
+      // is observation-only, so the same physical displacement cannot be
+      // applied twice.
+      this.observeRaw(e.movementX, e.movementY);
+      this.routeInput('LEGACY_MOUSE', e.movementX, e.movementY);
     });
 
     this.registeredHandlerCounts.pointerdown++;
@@ -515,24 +549,250 @@ export class CameraController {
       }
     });
 
-    // --- Experimental pointer-granularity observation ---------------------
-    // (?pointerInputExperiment=1) These listeners NEVER apply input; they only
-    // report what the browser delivers. The production mousemove path therefore
-    // stays the single authoritative mouse-look source, and no delta can be
-    // applied twice.
+    // --- Granular pointer input sources -----------------------------------
+    // Registers the finer event streams. Exactly ONE source applies input at a
+    // time (see `inputSource`), so pointerrawupdate / pointermove / mousemove
+    // can never stack.
     this.registeredHandlerCounts.pointerrawupdate = 0;
     this.registeredHandlerCounts.pointermove = 0;
 
     if (typeof window !== 'undefined' && 'onpointerrawupdate' in window) {
+      this.pointerRawUpdateSupported = true;
       this.registeredHandlerCounts.pointerrawupdate++;
-      window.addEventListener('pointerrawupdate', (e) => {
-        if (this.onPointerProbeEvent) this.onPointerProbeEvent('pointerrawupdate', e as PointerEvent);
+
+      // While pointer lock is active, pointerrawupdate targets the locked
+      // element, so the listener must be on document. Registering on window
+      // alone would miss every locked event.
+      document.addEventListener('pointerrawupdate', (e) => {
+        this.onPointerRawUpdate(e as PointerEvent);
       });
     }
 
     this.registeredHandlerCounts.pointermove++;
-    window.addEventListener('pointermove', (e) => {
-      if (this.onPointerProbeEvent) this.onPointerProbeEvent('pointermove', e as PointerEvent);
+    document.addEventListener('pointermove', (e) => {
+      this.onPointerMove(e as PointerEvent);
     });
+  }
+
+  /** True when mouse look should process events at all. */
+  private isMouseLookActive(): boolean {
+    return this.isLocked || this.mouseLookEnabled;
+  }
+
+  /**
+   * PRIMARY SOURCE: pointerrawupdate.
+   *
+   * This stream delivers the granular physical samples as the browser receives
+   * them, BEFORE they are batched into a coalesced pointermove parent. Applying
+   * these applies each physical sample once and spreads the motion across the
+   * time it actually occurred, instead of one late angular jump.
+   *
+   * Deliberately minimal: no allocations, no logging, no DOM work.
+   */
+  private onPointerRawUpdate(e: PointerEvent): void {
+    if (!this.isMouseLookActive()) return;
+    this.inputCounters.rawEvents++;
+
+    if (this.pointerProbeSink) this.pointerProbeSink('pointerrawupdate', e);
+
+    // Only the authoritative source may modify yaw/pitch.
+    this.routeInput('RAW_POINTER', e.movementX, e.movementY);
+  }
+
+  /**
+   * FALLBACK 1: pointermove with getCoalescedEvents().
+   *
+   * Applies EACH constituent sample exactly once and never additionally applies
+   * the parent aggregate (which is the sum of those constituents).
+   */
+  private onPointerMove(e: PointerEvent): void {
+    if (!this.isMouseLookActive()) return;
+    this.inputCounters.parentEvents++;
+
+    if (this.pointerProbeSink) this.pointerProbeSink('pointermove', e);
+
+    this.routeCoalescedEvent(e);
+  }
+
+  /**
+   * Single routing decision for one input sample.
+   *
+   * Returns true when the sample was handed to applyMouseDelta, false when it
+   * was observation-only. This is the ONLY place that decides application, so a
+   * physical displacement can never be applied twice.
+   */
+  public routeInput(source: InputSource, movementX: number, movementY: number): boolean {
+    if (this.inputSource !== source) {
+      this.inputCounters.duplicateDrops++;
+      return false;
+    }
+    this.applyFromEvent(movementX, movementY);
+    return true;
+  }
+
+  /**
+   * Applies a pointermove event via its coalesced constituents when that source
+   * is authoritative. The parent aggregate is NEVER additionally applied.
+   */
+  public routeCoalescedEvent(e: PointerEvent): number {
+    if (this.inputSource !== 'COALESCED_POINTER') {
+      this.inputCounters.duplicateDrops++;
+      return 0;
+    }
+    const samples = this.readCoalescedSamples(e);
+    for (let i = 0; i < samples.count; i++) {
+      this.applyFromEvent(this.coalescedX[i], this.coalescedY[i]);
+    }
+    return samples.count;
+  }
+
+  /**
+   * Returns the constituent samples that WOULD be applied for a pointer event,
+   * without applying them. Exposed for verification of displacement
+   * preservation and parent/constituent non-duplication.
+   */
+  public extractCoalescedSamples(e: PointerEvent): { count: number; x: number[]; y: number[] } {
+    const samples = this.readCoalescedSamples(e);
+    const x: number[] = [];
+    const y: number[] = [];
+    for (let i = 0; i < samples.count; i++) {
+      x.push(this.coalescedX[i]);
+      y.push(this.coalescedY[i]);
+    }
+    return { count: samples.count, x, y };
+  }
+
+  /**
+   * Extracts reliable constituent samples from a pointer event.
+   *
+   * Robust against every browser behaviour we can observe:
+   *  - getCoalescedEvents missing            -> parent only
+   *  - returns empty list                    -> parent only
+   *  - returns one sample equal to the parent-> parent only
+   *  - returns several samples               -> those samples
+   *  - throws / malformed values             -> parent only
+   *
+   * Writes into reusable scratch arrays so this allocates nothing per call.
+   */
+  private readCoalescedSamples(e: PointerEvent): { count: number } {
+    const maybe = e as PointerEvent & { getCoalescedEvents?: () => PointerEvent[] };
+
+    if (typeof maybe.getCoalescedEvents === 'function') {
+      let list: PointerEvent[] | null = null;
+      try {
+        list = maybe.getCoalescedEvents();
+      } catch {
+        list = null;
+      }
+
+      if (list && list.length > 0) {
+        // Guard against an implausible list rather than trusting it blindly.
+        if (list.length > CameraController.MAX_COALESCED_SAMPLES) {
+          this.coalescedX[0] = e.movementX;
+          this.coalescedY[0] = e.movementY;
+          return { count: 1 };
+        }
+
+        let n = 0;
+        let finite = true;
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i];
+          const cx = c && typeof c.movementX === 'number' ? c.movementX : 0;
+          const cy = c && typeof c.movementY === 'number' ? c.movementY : 0;
+          if (!Number.isFinite(cx) || !Number.isFinite(cy)) { finite = false; break; }
+          this.coalescedX[n] = cx;
+          this.coalescedY[n] = cy;
+          n++;
+        }
+
+        if (finite && n > 0) {
+          this.inputCounters.maxConstituents = Math.max(this.inputCounters.maxConstituents, n);
+          return { count: n };
+        }
+      }
+    }
+
+    // Fallback: the parent delta IS the single sample.
+    this.coalescedX[0] = e.movementX;
+    this.coalescedY[0] = e.movementY;
+    return { count: 1 };
+  }
+
+  /**
+   * SINGLE APPLICATION POINT.
+   *
+   * Handles the intentional first-event discard after acquiring lock, records
+   * the largest applied sample, then applies the delta exactly once.
+   */
+  private applyFromEvent(movementX: number, movementY: number): void {
+    if (this.justLocked) {
+      this.justLocked = false;
+      if (this.onMouseDiscarded) {
+        this.onMouseDiscarded({ movementX, movementY, reason: 'JUST_LOCKED' });
+      }
+      return;
+    }
+
+    const magnitude = Math.abs(movementX) + Math.abs(movementY);
+    if (magnitude > this.inputCounters.largestAppliedSample) {
+      this.inputCounters.largestAppliedSample = magnitude;
+    }
+    this.inputCounters.appliedSamples++;
+
+    this.applyMouseDelta(movementX, movementY);
+  }
+
+  /** Cheap raw-delta observation for the spike detector (numbers only). */
+  private observeRaw(movementX: number, movementY: number): void {
+    if (this.onRawMouseDelta) {
+      this.onRawMouseDelta(movementX, movementY, this.justLocked);
+    }
+  }
+
+  /**
+   * Resolves the authoritative input source for this environment.
+   *
+   * Priority: pointerrawupdate > coalesced pointermove > legacy mousemove.
+   * A `?inputSource=` override exists for A/B testing on affected hardware; it
+   * is a debug affordance only and is never surfaced in player settings.
+   */
+  public resolveInputSource(): InputSource {
+    let override = '';
+    try {
+      override = new URLSearchParams(
+        typeof window !== 'undefined' ? window.location.search : ''
+      ).get('inputSource') || '';
+    } catch {
+      override = '';
+    }
+
+    if (override === 'raw' || override === 'coalesced' || override === 'legacy') {
+      // Honour the override, but never select a source the browser cannot do.
+      if (override === 'raw' && !this.pointerRawUpdateSupported) return 'COALESCED_POINTER';
+      if (override === 'coalesced' && !this.coalescedSupported) return 'LEGACY_MOUSE';
+      return override === 'raw' ? 'RAW_POINTER'
+        : override === 'coalesced' ? 'COALESCED_POINTER'
+          : 'LEGACY_MOUSE';
+    }
+
+    if (this.pointerRawUpdateSupported) return 'RAW_POINTER';
+    if (this.coalescedSupported) return 'COALESCED_POINTER';
+    return 'LEGACY_MOUSE';
+  }
+
+  public setInputSource(source: InputSource): void {
+    this.inputSource = source;
+    this.resetInputSessionState();
+  }
+
+  /**
+   * Clears all input-session state. Called on lock transitions so a stale
+   * delta, discard flag or residual sample cannot leak across sessions.
+   */
+  public resetInputSessionState(): void {
+    this.justLocked = false;
+    this.isLockPending = false;
+    this.lastMouseDeltaX = 0;
+    this.lastMouseDeltaY = 0;
   }
 }

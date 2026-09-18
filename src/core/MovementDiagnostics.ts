@@ -250,6 +250,18 @@ export interface MovementDiagSnapshot {
     lastError: string;
     active: boolean;
   };
+  /** Authoritative granular input source + its counters. */
+  inputSource?: {
+    active: string;
+    rawSupported: boolean;
+    coalescedSupported: boolean;
+    rawEvents: number;
+    parentEvents: number;
+    appliedSamples: number;
+    duplicateDrops: number;
+    largestAppliedSample: number;
+    maxConstituents: number;
+  };
 }
 
 const num = (v: number, digits = 3): string =>
@@ -480,6 +492,15 @@ export class MovementDiagnostics {
         `  multiConstituent=${pp.multiConstituentCount} maxConstituents=${pp.maxConstituentCount} sumMismatches=${pp.sumMismatches}`,
         `  largestParent=${num(pp.largestParentMagnitude, 1)}px largestConstituent=${num(pp.largestConstituentMagnitude, 1)}px`,
         `  breakdown: ${pp.largestParentBreakdown}`
+      );
+    }
+
+    if (snapshot.inputSource) {
+      const is = snapshot.inputSource;
+      lines.push(
+        `INPUT SOURCE ${is.active}  (rawSupported=${is.rawSupported} coalescedSupported=${is.coalescedSupported})`,
+        `  rawEvents=${is.rawEvents} parentEvents=${is.parentEvents} appliedSamples=${is.appliedSamples} duplicateDrops=${is.duplicateDrops}`,
+        `  largestAppliedSample=${num(is.largestAppliedSample, 1)} maxConstituents=${is.maxConstituents}`
       );
     }
 

@@ -1,12 +1,97 @@
 # PLAYHEAD — Rubberband / View-Snap Investigation Handoff
 
-Technical handoff for a stronger reasoning model. Branch `wip/remote-playhead`.
-Written after commit `bafc624` plus the raw-input work in this pass.
+Technical handoff. Branch `wip/remote-playhead`.
 
-> **LATEST UPDATE (this pass) — read section 14 first.** The `[VIEW SNAP]`
-> `YAW_MISMATCH` detector was **time-misaligned and produced false positives**.
-> That is now fixed. The laptop runtime spike, and the coalescing question, are
-> addressed by a new observational probe.
+> **LATEST (granular input pass) — see section 15.** Chromium coalescing was
+> proven on the affected laptop, so the input path was rebuilt around a single
+> authoritative granular source. The earlier `[VIEW SNAP]` false positives are
+> fixed (section 14).
+
+---
+
+## 15. GRANULAR RAW POINTER INPUT (current architecture)
+
+### 15.1 Proven evidence that drove this change
+
+On the affected laptop, with `RAW INPUT = true` and `POINTER LOCK = true`:
+
+- a real spike of `movementX=-413, movementY=159` (442.5 px) arrived as
+  `eventsThisFrame = 1` with `frameDelta ≈ 35.4 ms`;
+- the pointer probe decomposed a parent `226/41` (229.7 px) into **14
+  constituents** over a **12.3 ms** spread, with constituent deltas like
+  `[19/2, 11/1, 18/3, 13/1, 18/3, 13/2, 18/4, 19/3, …]` summing **exactly** to
+  the parent (`sum = 226/41`).
+
+**Conclusion: Chromium batches multiple smaller physical pointer updates into
+larger parent events on that machine.** This is measured, not hypothetical.
+
+It does **not** by itself prove every visible glitch is caused by coalescing.
+
+### 15.2 New input architecture
+
+`CameraController` now has an explicit **input source** with a single
+application point.
+
+| Priority | Source | Mechanism |
+|---|---|---|
+| Primary | `RAW_POINTER` | `pointerrawupdate` — the granular samples as received, before batching |
+| Fallback 1 | `COALESCED_POINTER` | `pointermove` + `getCoalescedEvents()`, each constituent applied once |
+| Fallback 2 | `LEGACY_MOUSE` | plain `mousemove` `movementX/Y` |
+
+Selected by `resolveInputSource()`; overridable for A/B testing with
+`?inputSource=raw|coalesced|legacy` (never exposed in player settings).
+
+**Ownership rule:** only the active source may call `applyMouseDelta`. Every
+other stream is observation-only and increments `duplicateDrops`. This is
+enforced in one place (`routeInput` / `routeCoalescedEvent`), so a physical
+displacement cannot be applied twice.
+
+**Listener targets:** `pointerrawupdate` and `pointermove` are registered on
+**document** (while pointer lock is active the browser targets the locked
+element; a window listener would miss every locked event).
+
+**Deduplication:** the coalesced path applies the constituents and **never** the
+parent aggregate. Verified: 8 constituents summing to `129/19` produce exactly
+`-129 * 0.0022` rad of yaw.
+
+**Session lifecycle:** `resetInputSessionState()` runs on every
+`pointerlockchange`, clearing the accumulated viewmodel delta, the discard flag
+and pending samples. The first post-lock event is discarded exactly once
+(reported as `[INPUT DISCARDED]`).
+
+**Cost:** the hot handlers allocate nothing — scratch `Float64Array(64)` buffers
+are reused, and counters are plain numbers. Diagnostics only run when the debug
+flags are set.
+
+### 15.3 Measured results (production bundle)
+
+| Check | Result |
+|---|---|
+| one displacement → one application | raw applies exactly; mousemove and pointermove apply **0** |
+| coalesced yaw == constituent sum | exact to 1e-12 |
+| parent aggregate additionally applied | **no** |
+| 90° / 180° / 360° flicks | **exact**, no clipping |
+| rapid alternating (±200 px × 100) | cancels to **0** |
+| sustained fast spin (150 px × 200) | −3781.52° preserved |
+| polling 125–8000 Hz | identical final yaw |
+| render 144/120/90/60/45/30 fps | identical final yaw |
+| main-thread stalls 16–200 ms | no double application, exactly 40 samples per case |
+| handler counts after 5× pause/resume | mousemove 1, pointerrawupdate 1, pointermove 1 |
+
+### 15.4 Important limitation
+
+Applying 14 constituents **synchronously inside one late `pointermove`** still
+renders as a single jump, because no frame is drawn between them. That is why
+`pointerrawupdate` is the primary source: it delivers those samples earlier, over
+the time the motion actually occurred. The coalesced path is a correctness
+fallback (exact total, no duplication), **not** a claimed smoothness fix.
+
+### 15.5 Status
+
+**NOT PROVEN that the human-visible snap is fixed.** What is proven: batching
+occurs, large parent events occur, and the architecture now consumes granular
+input once. Whether that removes the perceived glitch requires human testing on
+the affected laptop.
 
 ---
 

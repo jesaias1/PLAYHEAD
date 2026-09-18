@@ -92,47 +92,56 @@ try {
   console.log(JSON.stringify(counts, null, 2));
 
   // ---- view snap detection -----------------------------------------------
+  // Uses the CURRENT event-local API: expected-vs-actual is compared inside the
+  // same event, and the quaternion check is the only frame-scoped assertion.
   const snapTest = await page.evaluate(async () => {
     const g = window.game;
     const cc = g.cameraController;
     const det = g['viewSnapDetector'];
-
-    // 1. Legitimate wrap: drive a real mouse delta equal to a 2deg change at the
-    //    +/-PI boundary, then move yaw across the wrap.
     const factor = 0.0022 * cc.getSensitivity();
+
+    // 1. Legitimate +-PI wrap of the SAME physical yaw must not be a snap.
+    //    181deg and -179deg are 2*PI apart.
     const D = Math.PI / 180;
-    const before = det ? det.recent(1).length : -1;
-    cc.yaw = 179 * D;
-    cc.pitch = 0;
-    cc.updateCameraRotation();
-    // Simulate the app's own frame accounting.
-    if (cc.onRawMouseDelta) cc.onRawMouseDelta(-2 * D / factor, 0, false);
-    const wrapped = g['viewSnapDetector'].endFrame({
-      yawBefore: 179 * D, yawAfter: -179 * D,
-      pitchBefore: 0, pitchAfter: 0,
-      quatYawBefore: 179 * D, quatYawAfter: -179 * D,
-      quatPitchBefore: 0, quatPitchAfter: 0,
-      sensitivity: cc.getSensitivity(), baseSensitivity: 0.0022,
-      isLocked: true, justLocked: false, frameDeltaMs: 16,
-      playerPos: { x: 0, y: 0, z: 0 }, displaySpeed: 0
+    const wrapDiagnosis = det.checkQuaternion({
+      yaw: 181 * D, pitch: 0, quatYaw: -179 * D, quatPitch: 0
     });
 
-    // 2. Real discontinuity: yaw jumps with NO mouse input.
-    const jumped = g['viewSnapDetector'].endFrame({
-      yawBefore: 0, yawAfter: 1.5,
-      pitchBefore: 0, pitchAfter: 0,
-      quatYawBefore: 0, quatYawAfter: 1.5,
-      quatPitchBefore: 0, quatPitchAfter: 0,
-      sensitivity: cc.getSensitivity(), baseSensitivity: 0.0022,
-      isLocked: true, justLocked: false, frameDeltaMs: 16,
-      playerPos: { x: 0, y: 0, z: 0 }, displaySpeed: 0
+    // 2. A correctly applied event must report nothing (event-local).
+    const okEvent = det.checkEvent({
+      movementX: -10, movementY: -3,
+      yawBefore: 0.4, pitchBefore: -0.1,
+      yawAfter: 0.4 + 10 * factor, pitchAfter: -0.1 + 3 * factor,
+      expectedYawDelta: 10 * factor, expectedPitchDelta: 3 * factor,
+      pitchClamped: false, isLocked: true, justLocked: false
     });
-    void before;
-    return { wrapDiagnosis: wrapped.diagnosis, jumpDiagnosis: jumped.diagnosis };
+
+    // 3. A genuine dropped application IS reported.
+    const droppedEvent = det.checkEvent({
+      movementX: 100, movementY: 0,
+      yawBefore: 0, yawAfter: 0,
+      pitchBefore: 0, pitchAfter: 0,
+      expectedYawDelta: -100 * factor, expectedPitchDelta: 0,
+      pitchClamped: false, isLocked: true, justLocked: false
+    });
+
+    // 4. A second orientation writer IS reported (frame-scoped).
+    const divergence = det.checkQuaternion({
+      yaw: 0, pitch: 0, quatYaw: 2.0, quatPitch: 0
+    });
+
+    return {
+      wrapDiagnosis,
+      okDiagnosis: okEvent,
+      droppedDiagnosis: droppedEvent,
+      divergenceDiagnosis: divergence
+    };
   });
   console.log('\n=== VIEW SNAP DETECTOR (production bundle) ===');
-  console.log('legit +-PI wrap diagnosis :', snapTest.wrapDiagnosis, '(expect null)');
-  console.log('injected jump diagnosis   :', snapTest.jumpDiagnosis);
+  console.log('legit +-PI wrap (same yaw)     :', snapTest.wrapDiagnosis, '(expect null)');
+  console.log('correctly applied event        :', snapTest.okDiagnosis, '(expect null)');
+  console.log('dropped application            :', snapTest.droppedDiagnosis);
+  console.log('second orientation writer      :', snapTest.divergenceDiagnosis);
 
   // ---- overlay contents ---------------------------------------------------
   const overlay = await page.evaluate(() => {
@@ -178,7 +187,9 @@ try {
   check('handler count stable after resume', counts.afterResume1.mousemove === m);
   check('handler count stable after repeated pause/resume', counts.afterRepeated.mousemove === m);
   check('legit +-PI wrap NOT flagged as view snap', snapTest.wrapDiagnosis === null);
-  check('injected orientation jump IS flagged', String(snapTest.jumpDiagnosis).includes('YAW_MISMATCH'));
+  check('correctly applied event NOT flagged (event-local)', snapTest.okDiagnosis === null);
+  check('dropped application IS flagged', String(snapTest.droppedDiagnosis).includes('YAW_MISMATCH'));
+  check('second orientation writer IS flagged', String(snapTest.divergenceDiagnosis).includes('QUATERNION_YAW_DIVERGENCE'));
   check('overlay shows orientation fields', ['RAW DX/DY', 'EXPECTED', 'ACTUAL', 'POINTER LOCK']
     .every((k) => (overlay || '').includes(k)));
   check('viewmodel hidden flag applied', vm.hidden === true);

@@ -115,7 +115,10 @@ async function boot(url) {
 }
 
 try {
-  const { page, errs } = await boot(`http://127.0.0.1:${PORT}/?debugMovement=1`);
+  // This harness drives input through synthetic `mousemove` events, so it pins
+  // the LEGACY source. Under the default RAW_POINTER source, mousemove is
+  // intentionally observation-only — that is the deduplication guarantee.
+  const { page, errs } = await boot(`http://127.0.0.1:${PORT}/?debugMovement=1&inputSource=legacy`);
 
   const factor = await page.evaluate(() => 0.0022 * window.game.cameraController.getSensitivity());
   console.log(`\n[dpi] radians per mouse pixel = ${factor}`);

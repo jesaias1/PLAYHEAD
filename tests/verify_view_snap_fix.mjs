@@ -56,7 +56,7 @@ try {
   const errs = [];
   page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
 
-  await page.goto(`http://127.0.0.1:${PORT}/?debugMovement=1&pointerInputExperiment=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`http://127.0.0.1:${PORT}/?debugMovement=1&pointerInputExperiment=1&inputSource=legacy`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#btn-showcase-enter', { timeout: 40000 });
   await page.click('#btn-showcase-enter');
   await page.waitForFunction(() => {
@@ -197,7 +197,9 @@ try {
           writable: false, configurable: true
         });
       }
-      window.dispatchEvent(ev);
+      // Dispatch on document: while pointer lock is active the browser targets
+      // the locked element, which is why the controller listens on document.
+      document.dispatchEvent(ev);
     };
 
     // A big parent composed of 20 small samples summing to it.
@@ -208,6 +210,10 @@ try {
       const py = i < 19 ? -9 : -188 - sy;
       parts.push([px, py]); sx += px; sy += py;
     }
+    // Clear immediately before dispatching so the LARGEST observed parent event
+    // is deterministically the synthetic pointermove below (the probe also
+    // observes pointerrawupdate, whose samples are single-constituent).
+    probeObj.clear();
     dispatch(131, -188, parts);
 
     const yawAfter = cc.yaw;
