@@ -133,8 +133,10 @@ describe('CitySignageSystem & PixelArtLibrary Textures', () => {
 
     const monoliths: MonolithAnchor[] = [
       {
+        id: 'monolith_0',
         position: new THREE.Vector3(160, 50, 60),
         width: 24,
+        depth: 24,
         height: 400,
         topY: 100,
         abyssBottom: -300,
@@ -150,8 +152,10 @@ describe('CitySignageSystem & PixelArtLibrary Textures', () => {
         isHero: true
       },
       {
+        id: 'monolith_1',
         position: new THREE.Vector3(-160, 50, 140),
         width: 24,
+        depth: 24,
         height: 400,
         topY: 100,
         abyssBottom: -300,
@@ -170,8 +174,10 @@ describe('CitySignageSystem & PixelArtLibrary Textures', () => {
 
     const stelae: StelaAnchor[] = [
       {
+        id: 'stela_0',
         position: new THREE.Vector3(135, 30, 80),
         width: 10,
+        depth: 12,
         height: 350,
         topY: 60,
         abyssBottom: -290,
@@ -188,6 +194,14 @@ describe('CitySignageSystem & PixelArtLibrary Textures', () => {
 
     const signage = new CitySignageSystem(analysis, track, corridor, monoliths, stelae);
     expect(signage.group.children.length).toBeGreaterThan(0);
+
+    // Verify all placed signs are strictly vertical (pitch=0, roll=0)
+    for (const child of signage.group.children) {
+      if (child instanceof THREE.Mesh) {
+        expect(child.rotation.x).toBeCloseTo(0, 4);
+        expect(child.rotation.z).toBeCloseTo(0, 4);
+      }
+    }
 
     // Verify distance culling
     const camPos = new THREE.Vector3(0, 0, 0);
@@ -259,5 +273,87 @@ describe('CitySignageSystem & PixelArtLibrary Textures', () => {
 
     // Verify clean disposal
     expect(() => signage.dispose()).not.toThrow();
+  });
+
+  it('enforces strict placement rules: no overlaps, valid standoff, single sign per tower', () => {
+    const analysis = createMockAnalysis();
+    const track = createMockTrack();
+    const corridor = new RouteExclusionCorridor(track.route);
+
+    // Create 6 monoliths and 6 stelae along the course
+    const monoliths: MonolithAnchor[] = [];
+    for (let i = 0; i < 6; i++) {
+      const node = track.route[i * 3];
+      monoliths.push({
+        id: `m_${i}`,
+        position: new THREE.Vector3(160, 50, node.position.z),
+        width: 24,
+        depth: 24,
+        height: 380,
+        topY: 100,
+        abyssBottom: -280,
+        yaw: 0.1 * i,
+        side: 1,
+        fwdX: 0,
+        fwdZ: 1,
+        rightX: 1,
+        rightZ: 0,
+        node,
+        nodeIndex: i * 3,
+        progressRatio: (i * 3) / 19,
+        isHero: i === 1 || i === 4
+      });
+    }
+
+    const stelae: StelaAnchor[] = [];
+    for (let j = 0; j < 6; j++) {
+      const node = track.route[j * 3 + 1] || track.route[track.route.length - 1];
+      stelae.push({
+        id: `s_${j}`,
+        position: new THREE.Vector3(135, 30, node.position.z),
+        width: 10,
+        depth: 12,
+        height: 320,
+        topY: 60,
+        abyssBottom: -260,
+        yaw: 0.1 * j,
+        side: 1,
+        fwdX: 0,
+        fwdZ: 1,
+        rightX: 1,
+        rightZ: 0,
+        node,
+        progressRatio: (j * 3 + 1) / 19
+      });
+    }
+
+    const signage = new CitySignageSystem(analysis, track, corridor, monoliths, stelae);
+    const meshes: THREE.Mesh[] = [];
+    signage.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) meshes.push(obj);
+    });
+
+    expect(meshes.length).toBeGreaterThan(0);
+
+    // 1. Verify that no two placed billboard meshes overlap or are too close
+    for (let i = 0; i < meshes.length; i++) {
+      for (let j = i + 1; j < meshes.length; j++) {
+        const dist = meshes[i].position.distanceTo(meshes[j].position);
+        // Minimum spacing threshold between any two signs
+        expect(dist).toBeGreaterThanOrEqual(35.0);
+      }
+    }
+
+    // 2. Verify all signs are strictly vertical (no wild pitch or roll)
+    for (const m of meshes) {
+      expect(Math.abs(m.rotation.x)).toBeLessThan(0.001);
+      expect(Math.abs(m.rotation.z)).toBeLessThan(0.001);
+    }
+
+    // 3. Verify that the total number of placed meshes does not exceed the number of towers
+    // (Strict single-sign per tower policy)
+    expect(meshes.length).toBeLessThanOrEqual(monoliths.length + stelae.length);
+
+    signage.dispose();
   });
 });

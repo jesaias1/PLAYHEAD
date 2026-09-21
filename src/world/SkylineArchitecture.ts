@@ -147,8 +147,10 @@ export class SkylineArchitecture {
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
 
           monolithAnchors.push({
+            id: `monolith_${i}_${side}`,
             position: dummy.position.clone(),
             width: 24.0,
+            depth: 24.0,
             height: pHeight,
             topY: pTopY,
             abyssBottom: pAbyssBottom,
@@ -192,8 +194,10 @@ export class SkylineArchitecture {
             this.supportStelae.setMatrixAt(sIdx++, dummy.matrix);
 
             stelaeAnchors.push({
+              id: `stela_${i}_${side}_${st}`,
               position: dummy.position.clone(),
               width: 10.0,
+              depth: 12.0,
               height: sHeight,
               topY: sTopY,
               abyssBottom: sAbyssBottom,
