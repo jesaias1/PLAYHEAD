@@ -82,6 +82,12 @@ export class RouteExclusionCorridor {
       } else {
         safetyMargin = 26.0 + 0.65 * objectRadius;
       }
+
+      // Background architecture clearance for large monumental structures / skyscrapers
+      if (objectRadius >= 12.0 || (maxY - minY) >= 60.0) {
+        const bgMargin = isSurf ? (55.0 + extraSurfMargin) : 46.0;
+        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * objectRadius);
+      }
       const requiredDist = trackHalfBreadth + objectRadius + safetyMargin;
 
       // Vertical clearance envelope: usable player airspace around the route
@@ -90,15 +96,36 @@ export class RouteExclusionCorridor {
 
       const verticalOverlap = !(maxY < routeMinY || minY > routeMaxY);
       if (verticalOverlap) {
-        const dx = pos.x - node.position.x;
-        const dz = pos.z - node.position.z;
+        // Continuous oriented platform segment clearance from entry anchor to exit anchor
+        const halfLen = (node.dimensions.z || 0) * 0.5;
+        const fwdX = Math.sin(node.yaw);
+        const fwdZ = Math.cos(node.yaw);
+        const entryX = node.position.x - fwdX * halfLen;
+        const entryZ = node.position.z - fwdZ * halfLen;
+        const exitX = node.position.x + fwdX * halfLen;
+        const exitZ = node.position.z + fwdZ * halfLen;
+
+        const segDx = exitX - entryX;
+        const segDz = exitZ - entryZ;
+        const segLenSq = segDx * segDx + segDz * segDz;
+
+        let tNode = 0.5;
+        if (segLenSq > 0.0001) {
+          tNode = ((pos.x - entryX) * segDx + (pos.z - entryZ) * segDz) / segLenSq;
+          tNode = Math.max(0, Math.min(1, tNode));
+        }
+        const closestNodeX = entryX + tNode * segDx;
+        const closestNodeZ = entryZ + tNode * segDz;
+
+        const dx = pos.x - closestNodeX;
+        const dz = pos.z - closestNodeZ;
         const distSq = dx * dx + dz * dz;
         if (distSq < requiredDist * requiredDist) {
           return true; // Collision with node corridor
         }
       }
 
-      // Check surf exit launch cone (protects airborne trajectory flying off the ramp)
+      // Check surf exit launch cone (protects entire airborne trajectory flying off the ramp up to 130m)
       if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
         const fwdX = Math.sin(node.yaw);
         const fwdZ = Math.cos(node.yaw);
@@ -110,13 +137,13 @@ export class RouteExclusionCorridor {
         const toObjZ = pos.z - exitZ;
         const projFwd = toObjX * fwdX + toObjZ * fwdZ;
 
-        if (projFwd > 0 && projFwd < 45.0) {
-          const coneRatio = projFwd / 45.0;
-          const coneRadius = 14.0 + coneRatio * 18.0 + objectRadius;
+        if (projFwd > 0 && projFwd < 130.0) {
+          const coneRatio = projFwd / 130.0;
+          const coneRadius = 24.0 + coneRatio * 32.0 + objectRadius + (extraSurfMargin ? extraSurfMargin * 0.5 : 0);
           const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
 
-          const coneMinY = node.position.y - 18.0;
-          const coneMaxY = node.position.y + 40.0;
+          const coneMinY = node.position.y - 30.0;
+          const coneMaxY = node.position.y + 65.0;
           if (!(maxY < coneMinY || minY > coneMaxY)) {
             if (latDistSq < coneRadius * coneRadius) {
               return true; // Collision with surf exit launch cone
@@ -348,14 +375,40 @@ export class RouteExclusionCorridor {
       } else {
         safetyMargin = 26.0 + 0.65 * radius;
       }
+      // Background architecture clearance for large monumental structures / skyscrapers
+      if (radius >= 12.0 || (box.max.y - box.min.y) >= 60.0) {
+        const bgMargin = isSurf ? (55.0 + extraSurfMargin) : 46.0;
+        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * radius);
+      }
       const requiredDist = trackHalfBreadth + radius + safetyMargin;
 
       const routeMinY = node.position.y - JUMP_CORRIDOR_BELOW;
       const routeMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
 
       if (!(box.max.y < routeMinY || box.min.y > routeMaxY)) {
-        const dx = center.x - node.position.x;
-        const dz = center.z - node.position.z;
+        // Continuous oriented platform segment clearance from entry anchor to exit anchor
+        const halfLen = (node.dimensions.z || 0) * 0.5;
+        const fwdX = Math.sin(node.yaw);
+        const fwdZ = Math.cos(node.yaw);
+        const entryX = node.position.x - fwdX * halfLen;
+        const entryZ = node.position.z - fwdZ * halfLen;
+        const exitX = node.position.x + fwdX * halfLen;
+        const exitZ = node.position.z + fwdZ * halfLen;
+
+        const segDx = exitX - entryX;
+        const segDz = exitZ - entryZ;
+        const segLenSq = segDx * segDx + segDz * segDz;
+
+        let tNode = 0.5;
+        if (segLenSq > 0.0001) {
+          tNode = ((center.x - entryX) * segDx + (center.z - entryZ) * segDz) / segLenSq;
+          tNode = Math.max(0, Math.min(1, tNode));
+        }
+        const closestNodeX = entryX + tNode * segDx;
+        const closestNodeZ = entryZ + tNode * segDz;
+
+        const dx = center.x - closestNodeX;
+        const dz = center.z - closestNodeZ;
         const dist = Math.sqrt(dx * dx + dz * dz);
         const penetration = requiredDist - dist;
         if (penetration > 0 && (!worst || penetration > worst.penetration)) {
@@ -363,7 +416,7 @@ export class RouteExclusionCorridor {
         }
       }
 
-      // Check surf exit launch cone (protects airborne trajectory flying off the ramp)
+      // Check surf exit launch cone (protects entire airborne trajectory flying off the ramp up to 130m)
       if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
         const fwdX = Math.sin(node.yaw);
         const fwdZ = Math.cos(node.yaw);
@@ -375,13 +428,13 @@ export class RouteExclusionCorridor {
         const toObjZ = center.z - exitZ;
         const projFwd = toObjX * fwdX + toObjZ * fwdZ;
 
-        if (projFwd > 0 && projFwd < 45.0) {
-          const coneRatio = projFwd / 45.0;
-          const coneRadius = 14.0 + coneRatio * 18.0 + radius;
+        if (projFwd > 0 && projFwd < 130.0) {
+          const coneRatio = projFwd / 130.0;
+          const coneRadius = 24.0 + coneRatio * 32.0 + radius + extraSurfMargin * 0.5;
           const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
 
-          const coneMinY = node.position.y - 18.0;
-          const coneMaxY = node.position.y + 40.0;
+          const coneMinY = node.position.y - 30.0;
+          const coneMaxY = node.position.y + 65.0;
           if (!(box.max.y < coneMinY || box.min.y > coneMaxY)) {
             const latDist = Math.sqrt(latDistSq);
             const penetration = coneRadius - latDist;

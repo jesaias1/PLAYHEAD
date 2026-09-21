@@ -7,9 +7,12 @@ import { RouteNode } from '../generation/GenerationTypes';
 import { BoxCollider } from './Collider';
 import { SurfState, SurfaceClassification } from '../player/SurfState';
 
+import { RouteVoidEnvelope } from './RouteVoidEnvelope';
+
 export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
   public killPlaneY = -40.0; // Beneath lowest route structure
+  public voidEnvelope = new RouteVoidEnvelope();
 
   /**
    * Vertical clearance below the LOWEST legitimate gameplay geometry.
@@ -29,16 +32,27 @@ export class PhysicsWorld {
    * Derived from FINAL legitimate gameplay geometry (main route + mandatory
    * surf + optional surf + recovery shelves), then pushed down by VOID_MARGIN.
    *
-   * Normal falling death is fundamentally "player crosses below this Y".
-   * It is intentionally NOT tied to the current platform or the current
-   * checkpoint, so it stays correct on vertically complex maps and never
-   * punishes a player who is merely below their local platform while still
-   * flying high above the true void.
+   * If x and z are provided, evaluates the route-aware void death boundary at that
+   * horizontal position (with stacking protection ensuring lower descending routes
+   * remain safe).
    */
-  public getVoidDeathY(): number {
-    return Number.isFinite(this.lowestGameplayY)
+  public getVoidDeathY(x?: number, z?: number): number {
+    const globalY = Number.isFinite(this.lowestGameplayY)
       ? this.lowestGameplayY - PhysicsWorld.VOID_MARGIN
       : this.killPlaneY;
+
+    if (x !== undefined && z !== undefined) {
+      return this.voidEnvelope.getVoidDeathYAt(x, z, globalY);
+    }
+    return globalY;
+  }
+
+  /**
+   * Evaluates if a player position has crossed the authoritative route-aware void death boundary.
+   */
+  public isPositionInVoid(pos: { x: number; y: number; z: number }): boolean {
+    const globalY = this.getVoidDeathY();
+    return this.voidEnvelope.isBelowVoidEnvelope(pos, globalY);
   }
 
   public buildFromRoute(
@@ -99,6 +113,9 @@ export class PhysicsWorld {
     this.killPlaneY = Number.isFinite(lowestY)
       ? (lowestY - PhysicsWorld.VOID_MARGIN)
       : -40.0;
+
+    // Build authoritative route-aware void death envelope beneath legitimate gameplay phrases
+    this.voidEnvelope.build(route, optionalRamps, recoveryShelves, signalSpines);
   }
 
   public addCollider(col: BoxCollider): void {

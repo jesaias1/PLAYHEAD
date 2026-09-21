@@ -62,6 +62,11 @@ export class Hud {
           <div class="hud-progress-bar-fill" id="hud-progress"></div>
         </div>
       </div>
+
+      <div class="hud-restart-hold hidden" id="hud-restart-hold" style="position: absolute; bottom: 84px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 0.72rem; color: #ff3366; letter-spacing: 0.12em; text-align: center; pointer-events: none; background: rgba(8, 12, 18, 0.92); border: 1px solid rgba(255, 51, 102, 0.4); padding: 6px 14px; box-shadow: 0 0 16px rgba(255, 51, 102, 0.25);">
+        <div style="font-weight: 700; color: #ff3366;">HOLD [R] // RESTARTING RUN</div>
+        <div id="hud-restart-bar" style="margin-top: 4px; font-family: monospace; color: #00f0ff; letter-spacing: 0.15em;">[░░░░░░░░░░]</div>
+      </div>
     `;
 
     this.titleElem = this.element.querySelector('#hud-title') as HTMLElement;
@@ -80,6 +85,9 @@ export class Hud {
     this.splitBadgeElem = this.element.querySelector('#hud-split-badge') as HTMLElement;
     this.splitBadgeLabelElem = this.element.querySelector('#hud-split-badge-label') as HTMLElement;
     this.splitBadgeValElem = this.element.querySelector('#hud-split-badge-val') as HTMLElement;
+
+    this.restartHoldElem = this.element.querySelector('#hud-restart-hold') as HTMLElement;
+    this.restartBarElem = this.element.querySelector('#hud-restart-bar') as HTMLElement;
   }
 
   private surfIndicatorElem: HTMLElement;
@@ -92,8 +100,22 @@ export class Hud {
   private splitBadgeElem: HTMLElement;
   private splitBadgeLabelElem: HTMLElement;
   private splitBadgeValElem: HTMLElement;
+  private restartHoldElem: HTMLElement;
+  private restartBarElem: HTMLElement;
   private splitTimeout: number | null = null;
   private surfHintTimeout: number | null = null;
+
+  public setRestartHoldProgress(progress: number | null): void {
+    if (progress === null || progress <= 0) {
+      this.restartHoldElem.classList.add('hidden');
+      return;
+    }
+    this.restartHoldElem.classList.remove('hidden');
+    const totalBars = 12;
+    const filledBars = Math.min(totalBars, Math.max(0, Math.round(progress * totalBars)));
+    const barStr = '[' + '█'.repeat(filledBars) + '░'.repeat(totalBars - filledBars) + ']';
+    this.restartBarElem.textContent = barStr;
+  }
 
   public show(): void {
     const hideHud = SettingsManager.getInstance().settings.hideHud;
@@ -106,6 +128,7 @@ export class Hud {
 
   public hide(): void {
     this.element.classList.add('hidden');
+    this.restartHoldElem.classList.add('hidden');
     if (this.toastTimeout) {
       clearTimeout(this.toastTimeout);
       this.toastTimeout = null;

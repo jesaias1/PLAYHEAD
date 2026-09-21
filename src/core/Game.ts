@@ -259,9 +259,16 @@ export class Game {
       onNewTrack: () => this.returnToImport()
     });
 
-    // Player fall / restore
+    // Player fall / restore / full restart
     this.playerController.onFallCallback = (reason) => this.handlePlayerFall(reason);
     this.playerController.onRestoreCallback = () => this.handlePlayerManualRestore();
+    this.playerController.onFullRestartCallback = () => {
+      this.ui.hud.setRestartHoldProgress(null);
+      this.restartTrack();
+    };
+    this.playerController.onHoldProgressCallback = (progress) => {
+      this.ui.hud.setRestartHoldProgress(progress);
+    };
 
     // Replay finished
     this.replayPlayer.onCompleteCallback = () => {
@@ -701,6 +708,7 @@ export class Game {
    */
   private syncAuthoritativeVoidBoundary(): void {
     this.playerController.authoritativeKillY = this.world.physics.getVoidDeathY();
+    this.playerController.voidChecker = (pos) => this.world.physics.isPositionInVoid(pos);
   }
 
   /**
@@ -1767,7 +1775,8 @@ export class Game {
               width: finishNode.dimensions.x,
               height: FINISH_GATE_HEIGHT
             },
-            this.playerController.config.playerHeight
+            this.playerController.config.playerHeight,
+            this.playerController.config.playerRadius
           )
         ) {
           this.handleFinishSequence();

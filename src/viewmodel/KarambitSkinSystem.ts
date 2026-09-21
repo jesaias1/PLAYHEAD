@@ -1250,6 +1250,26 @@ export class KarambitSkinSystem {
       .map(key => key.slice(0, -':DIAMOND'.length));
   }
 
+  /**
+   * DEV testing helper: grants pending signals for repeatable decoder testing.
+   * Preserves legitimate rank history.
+   */
+  public grantDevPendingSignals(count = 999, rank: RunRank = 'GOLD'): void {
+    const ranks: RunRank[] = new Array(count).fill(rank);
+    this.progression.pendingDropRanks.push(...ranks);
+    this.saveState();
+    this.notifyListeners();
+  }
+
+  /**
+   * DEV testing helper: clears all pending signals.
+   */
+  public clearDevPendingSignals(): void {
+    this.progression.pendingDropRanks = [];
+    this.saveState();
+    this.notifyListeners();
+  }
+
   public getRewardOwnedSkinIds(): string[] {
     return [...this.progression.rewardOwnedSkinIds];
   }

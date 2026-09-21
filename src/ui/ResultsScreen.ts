@@ -282,7 +282,20 @@ export class ResultsScreen {
     this.signalDropOpenBtn.disabled = false;
   }
 
+  private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
+
+  public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
+    this.decodeModal = modal;
+  }
+
   private openSignalDrop(): void {
+    if (this.decodeModal) {
+      this.decodeModal.open(() => {
+        this.prepareSignalDropPanel(0);
+      });
+      return;
+    }
+
     const skinSystem = KarambitSkinSystem.getInstance();
     const reward = skinSystem.openSignalDrop();
     if (!reward) {

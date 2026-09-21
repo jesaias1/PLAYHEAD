@@ -128,16 +128,16 @@ export class GeometryBuilder {
     });
     reactiveMaterials.push(accentMaterial);
 
-    // 3b. Dedicated Signal Spine Top Material (Audio-Reactive aggregate with prominent signal pulse)
+    // 3b. Dedicated Signal Spine Top Material (Clean dark aggregate with subtle palette signal identity)
     const spineTopMaterial = new THREE.MeshStandardMaterial({
-      color: 0x162234,
+      color: 0x0e141f,
       emissive: primaryCol,
-      emissiveIntensity: 0.42,
-      roughness: 0.42,
-      metalness: 0.65,
+      emissiveIntensity: 0.18,
+      roughness: 0.52,
+      metalness: 0.48,
       map: concreteTex,
       bumpMap: concreteTex,
-      bumpScale: 0.04
+      bumpScale: 0.03
     });
     reactiveMaterials.push(spineTopMaterial);
 
@@ -434,20 +434,6 @@ export class GeometryBuilder {
         mesh.position.set(spine.position.x, spine.position.y, spine.position.z);
         mesh.rotation.set(spine.pitch, spine.yaw, spine.roll, 'YXZ');
         rootGroup.add(mesh);
-
-        // High-contrast signal emissive edge trim (Cosmic Pixel Brutalism recovery marker)
-        const edgesGeom = new THREE.EdgesGeometry(geom);
-        const lineMat = new THREE.LineBasicMaterial({
-          color: primaryCol,
-          transparent: true,
-          opacity: 1.0,
-          depthTest: true
-        });
-        const edges = new THREE.LineSegments(edgesGeom, lineMat);
-        edges.position.copy(mesh.position);
-        edges.rotation.copy(mesh.rotation);
-        rootGroup.add(edges);
-        edgeLines.push(edges);
       }
     }
 
@@ -753,8 +739,8 @@ function createSurfFlank(
   corridor: RouteExclusionCorridor
 ): THREE.Group | null {
   const side = (node.yaw > 0 ? 1 : -1);
-  const baseDist = 58.0; // Pushed outward for safe lateral surf clearance
-  const radius = 28.0;
+  const baseDist = 72.0; // Pushed outward for safe lateral surf clearance
+  const radius = 32.0;
   const minY = -200.0;
   const maxY = 50.0;
 
@@ -770,8 +756,8 @@ function createSurfFlank(
     radius,
     minY,
     maxY,
-    6,
-    16.0
+    8,
+    18.0
   );
 
   if (!safePos) return null;
@@ -788,6 +774,13 @@ function createSurfFlank(
   const flankLeg = new THREE.Mesh(new THREE.BoxGeometry(48.0, flankDepth, 6.0), material);
   flankLeg.position.set(0, -flankDepth * 0.5, 0);
   group.add(flankLeg);
+
+  // Authoritative validation on final transformed geometry
+  group.updateWorldMatrix(true, true);
+  const finalBox = new THREE.Box3().setFromObject(group);
+  if (corridor.evaluateVolume(finalBox, 32.0)) {
+    return null; // Reject if canyon wall encroaches on surf airspace
+  }
 
   return group;
 }

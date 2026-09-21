@@ -24,14 +24,19 @@ export class FinishGateDetector {
     this.previous = { ...position };
   }
 
-  public sample(position: Vector3Like, gate: FinishGateVolume, playerHeight: number): boolean {
+  public sample(
+    position: Vector3Like,
+    gate: FinishGateVolume,
+    playerHeight: number,
+    playerRadius = 0.0
+  ): boolean {
     if (this.completed) return false;
     if (!this.previous) {
       this.previous = { ...position };
       return false;
     }
 
-    const hit = segmentCrossesFinishGate(this.previous, position, gate, playerHeight);
+    const hit = segmentCrossesFinishGate(this.previous, position, gate, playerHeight, playerRadius);
     this.previous = { ...position };
     if (hit) this.completed = true;
     return hit;
@@ -42,12 +47,13 @@ export function segmentCrossesFinishGate(
   previous: Vector3Like,
   current: Vector3Like,
   gate: FinishGateVolume,
-  playerHeight: number
+  playerHeight: number,
+  playerRadius = 0.0
 ): boolean {
   const a = toGateLocal(previous, gate);
   const b = toGateLocal(current, gate);
   const dz = b.z - a.z;
-  const planeTolerance = 0.08;
+  const planeTolerance = Math.max(0.08, playerRadius * 0.35);
 
   let t: number;
   if (Math.abs(dz) < 1e-8) {
@@ -59,11 +65,12 @@ export function segmentCrossesFinishGate(
   }
 
   const x = a.x + (b.x - a.x) * t;
-  if (Math.abs(x) > gate.width * 0.5) return false;
+  const halfWidth = gate.width * 0.5 + playerRadius;
+  if (Math.abs(x) > halfWidth) return false;
 
   const feetY = previous.y + (current.y - previous.y) * t;
-  const gateMinY = gate.position.y;
-  const gateMaxY = gate.position.y + (gate.height ?? FINISH_GATE_HEIGHT);
+  const gateMinY = gate.position.y - (playerRadius > 0 ? 0.4 : 0);
+  const gateMaxY = gate.position.y + (gate.height ?? FINISH_GATE_HEIGHT) + (playerRadius > 0 ? 0.4 : 0);
   return feetY <= gateMaxY && feetY + playerHeight >= gateMinY;
 }
 

@@ -302,3 +302,146 @@ describe('G: restore clears stale state', () => {
     expect(cameraController.camera.position.z).toBe(56);
   });
 });
+
+describe('Route-Aware Void Death Envelope & Stacking Protection', () => {
+  it('restores promptly beneath an elevated platform without waiting for global void plane', () => {
+    const physics = new PhysicsWorld();
+    const highPlatform: RouteNode = {
+      id: 1,
+      time: 0,
+      position: { x: 0, y: 100, z: 0 },
+      dimensions: { x: 14, y: 2, z: 30 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false
+    };
+
+    physics.buildFromRoute([highPlatform]);
+    // Global kill plane is lowest - 20m = 99 - 20 = 79m (if single platform)
+    // Now let's add a distant deep platform at y = -80m
+    const deepPlatform: RouteNode = {
+      id: 2,
+      time: 10,
+      position: { x: 500, y: -80, z: 500 },
+      dimensions: { x: 14, y: 2, z: 30 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 100,
+      isSurf: false
+    };
+
+    physics.buildFromRoute([highPlatform, deepPlatform]);
+    // Global void death Y is deepPlatform bottom - 20m = -81 - 20 = -101m
+    expect(physics.getVoidDeathY()).toBeCloseTo(-101, 1);
+
+    // Beneath high platform at (0, z=0), local threshold is around 77.5m - 79m (prompt fall)
+    const localVoidY = physics.getVoidDeathY(0, 0);
+    expect(localVoidY).toBeGreaterThanOrEqual(77);
+    expect(localVoidY).toBeLessThanOrEqual(80);
+
+    // Player falling at y = 75m directly under high platform is in void!
+    expect(physics.isPositionInVoid({ x: 0, y: 75, z: 0 })).toBe(true);
+    // Player at y = 90m (only 10m below) is still safe
+    expect(physics.isPositionInVoid({ x: 0, y: 90, z: 0 })).toBe(false);
+  });
+
+  it('guarantees lower descending routes remain 100% safe (Stacking Protection)', () => {
+    const physics = new PhysicsWorld();
+    const upperPlatform: RouteNode = {
+      id: 1,
+      time: 0,
+      position: { x: 0, y: 100, z: 0 },
+      dimensions: { x: 14, y: 2, z: 30 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false
+    };
+
+    // Lower deck platform directly beneath at y = 30m
+    const lowerDeck: RouteNode = {
+      id: 2,
+      time: 5,
+      position: { x: 0, y: 30, z: 10 },
+      dimensions: { x: 20, y: 2, z: 40 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 50,
+      isSurf: false
+    };
+
+    physics.buildFromRoute([upperPlatform, lowerDeck]);
+
+    // Beneath upper platform where lower deck exists, local threshold must be below LOWER deck (30 - 1 - 20 = 9m)!
+    const thresholdAboveLowerDeck = physics.getVoidDeathY(0, 10);
+    expect(thresholdAboveLowerDeck).toBeCloseTo(9, 1);
+
+    // Player descending between upper and lower platform at y = 60m must NOT be restored!
+    expect(physics.isPositionInVoid({ x: 0, y: 60, z: 10 })).toBe(false);
+    // Player descending at y = 32m just landing on lower platform must NOT be restored!
+    expect(physics.isPositionInVoid({ x: 0, y: 32, z: 10 })).toBe(false);
+    // Player falling beneath lower deck at y = 5m IS in void!
+    expect(physics.isPositionInVoid({ x: 0, y: 5, z: 10 })).toBe(true);
+  });
+
+  it('keeps legitimate fast airborne transfers between platforms safe', () => {
+    const physics = new PhysicsWorld();
+    const platA: RouteNode = {
+      id: 1,
+      time: 0,
+      position: { x: 0, y: 80, z: 0 },
+      dimensions: { x: 12, y: 2, z: 20 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false
+    };
+    const platB: RouteNode = {
+      id: 2,
+      time: 2,
+      position: { x: 0, y: 70, z: 50 },
+      dimensions: { x: 12, y: 2, z: 20 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 50,
+      isSurf: false
+    };
+
+    physics.buildFromRoute([platA, platB]);
+
+    // Midpoint of airborne jump gap at z = 25
+    const jumpMidThreshold = physics.getVoidDeathY(0, 25);
+    // Flight path bottom around y = 68.5 -> threshold is around 68.5 - 20 = 48.5m
+    expect(jumpMidThreshold).toBeLessThanOrEqual(50);
+
+    // Airborne player at y = 75 is safe
+    expect(physics.isPositionInVoid({ x: 0, y: 75, z: 25 })).toBe(false);
+    // Player missing jump and plunging to y = 40 is in void
+    expect(physics.isPositionInVoid({ x: 0, y: 40, z: 25 })).toBe(true);
+  });
+});

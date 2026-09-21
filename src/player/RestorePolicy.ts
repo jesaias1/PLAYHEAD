@@ -97,7 +97,8 @@ export function hasInvalidNumericState(state: PlayerNumericState): boolean {
  */
 export function decideRestore(
   state: PlayerNumericState,
-  voidDeathY: number | null
+  voidDeathY: number | null,
+  isRouteVoid?: (pos: { x: number; y: number; z: number }) => boolean
 ): RestoreReason | null {
   if (hasInvalidNumericState(state)) {
     if (
@@ -113,6 +114,12 @@ export function decideRestore(
     return RestoreReason.INVALID_NUMERIC_STATE;
   }
 
+  // 1. Authoritative route-aware void death envelope check (short, prompt fall under local phrase)
+  if (isRouteVoid && isRouteVoid(state.position)) {
+    return RestoreReason.NORMAL_VOID;
+  }
+
+  // 2. Global world void boundary check (fallback)
   if (voidDeathY !== null && Number.isFinite(voidDeathY) && state.position.y < voidDeathY) {
     return RestoreReason.NORMAL_VOID;
   }

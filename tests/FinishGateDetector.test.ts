@@ -40,4 +40,25 @@ describe('continuous finish gate detection', () => {
     expect(detector.sample({ x: 0, y: 1.5, z: -5 }, gate, 1.8)).toBe(false);
     expect(detector.sample({ x: 0, y: 1.5, z: 5 }, gate, 1.8)).toBe(false);
   });
+
+  it('incorporates player cylinder radius in swept crossing detection', () => {
+    // Gate width is 20 (half-width 10.0).
+    // A point at x = 10.3 with playerRadius = 0.5 reaches x - radius = 9.8, which intersects the gate.
+    expect(segmentCrossesFinishGate(
+      { x: 10.3, y: 1.5, z: -10 },
+      { x: 10.3, y: 1.5, z: 10 },
+      gate,
+      1.8,
+      0.5
+    )).toBe(true);
+
+    // A point at x = 10.8 with playerRadius = 0.5 is beyond 10.5, so it misses.
+    expect(segmentCrossesFinishGate(
+      { x: 10.8, y: 1.5, z: -10 },
+      { x: 10.8, y: 1.5, z: 10 },
+      gate,
+      1.8,
+      0.5
+    )).toBe(false);
+  });
 });

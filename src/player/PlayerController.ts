@@ -53,6 +53,10 @@ export class PlayerController {
 
   public onFallCallback?: (reason: RestoreReason) => void;
   public onRestoreCallback?: () => void;
+  public onFullRestartCallback?: () => void;
+  public onHoldProgressCallback?: (progress: number | null) => void;
+  private rKeyDownTime: number | null = null;
+  private rFullRestartTriggered = false;
 
   public lastTouchedSurfaceType: 'PLATFORM' | 'SURF' = 'PLATFORM';
 
@@ -67,6 +71,7 @@ export class PlayerController {
    * are above this plane.
    */
   public authoritativeKillY: number | null = null;
+  public voidChecker?: (pos: { x: number; y: number; z: number }) => boolean;
 
   public isRestoring = false;
   private freefallTimer = 0;
@@ -128,6 +133,9 @@ export class PlayerController {
     this.keys.restore = false;
     this.jumpBufferTimer = 0;
     this.cameraController.setTargetRoll(0);
+    this.rKeyDownTime = null;
+    this.rFullRestartTriggered = false;
+    this.onHoldProgressCallback?.(null);
   }
 
   public get keysState(): { forward: boolean; backward: boolean; left: boolean; right: boolean; jump: boolean } {
@@ -140,6 +148,18 @@ export class PlayerController {
   }
 
   public updateFixed(dt: number): void {
+    if (this.rKeyDownTime !== null && !this.rFullRestartTriggered) {
+      const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
+      const progress = Math.min(1.0, elapsedSec / 2.0);
+      this.onHoldProgressCallback?.(progress);
+      if (elapsedSec >= 2.0) {
+        this.rFullRestartTriggered = true;
+        this.rKeyDownTime = null;
+        this.onHoldProgressCallback?.(null);
+        this.onFullRestartCallback?.();
+      }
+    }
+
     if (this.isRestoring) return;
 
     // 1. Calculate input Wish Direction relative to Camera Yaw
@@ -426,7 +446,8 @@ export class PlayerController {
     // a SEPARATE emergency path and is never treated as a gameplay kill zone.
     const restoreReason = decideRestore(
       { position: this.position, velocity: this.velocity },
-      this.authoritativeKillY
+      this.authoritativeKillY,
+      this.voidChecker
     );
 
     if (restoreReason !== null) {
@@ -454,6 +475,9 @@ export class PlayerController {
 
   /** True only when the player has genuinely crossed the world void boundary. */
   public isBelowVoidDeathPlane(): boolean {
+    if (this.voidChecker) {
+      return this.voidChecker(this.position);
+    }
     return this.authoritativeKillY !== null && this.position.y < this.authoritativeKillY;
   }
 
@@ -497,8 +521,9 @@ export class PlayerController {
       if (e.code === 'Digit3') this.setPreset('PLAYHEAD');
 
       if (e.code === 'KeyR' && !e.repeat) {
-        this.stats.recordRestart();
-        this.onRestoreCallback?.();
+        this.rKeyDownTime = performance.now();
+        this.rFullRestartTriggered = false;
+        this.onHoldProgressCallback?.(0.01);
       }
     });
 
@@ -508,6 +533,20 @@ export class PlayerController {
       if (e.code === 'KeyA') this.keys.left = false;
       if (e.code === 'KeyD') this.keys.right = false;
       if (e.code === 'Space') this.keys.jump = false;
+      if (e.code === 'KeyR') {
+        if (this.rKeyDownTime !== null && !this.rFullRestartTriggered) {
+          const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
+          this.rKeyDownTime = null;
+          this.onHoldProgressCallback?.(null);
+          if (elapsedSec < 2.0) {
+            this.stats.recordRestart();
+            this.onRestoreCallback?.();
+          }
+        } else {
+          this.rKeyDownTime = null;
+          this.onHoldProgressCallback?.(null);
+        }
+      }
     });
 
     // Reset keys on window blur to avoid stuck input

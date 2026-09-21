@@ -44,6 +44,7 @@ export class UIManager {
 
     this.armoryModal.setDecodeModal(this.decodeModal);
     this.importScreen.setDecodeModal(this.decodeModal);
+    this.resultsScreen.setDecodeModal(this.decodeModal);
 
     this.root.appendChild(this.importScreen.element);
     this.root.appendChild(this.analysisScreen.element);

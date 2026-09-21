@@ -197,4 +197,29 @@ describe('RouteExclusionCorridor', () => {
     expect(group.children.length).toBe(1);
     expect(group.children[0]).toBe(safeMesh);
   });
+
+  it('rejects a building placed in the extended surf airborne flight trajectory (80m forward)', () => {
+    // Node 2 is a surf ramp at z = 50, yaw = 0 (facing +Z), dimensions.z = 20 (exit at z = 60).
+    // An object 80m forward along the flight trajectory at z = 140 must be rejected.
+    const airborneSurfFlightPos = new THREE.Vector3(5, 5, 140);
+    const radius = 10;
+    const isInside = corridor.isPointInsideCorridor(airborneSurfFlightPos, radius, -10, 50);
+    expect(isInside).toBe(true);
+  });
+
+  it('rejects a colossal skyscraper placed too close to the route (enforces background clearance)', () => {
+    // Colossal skyscraper (radius 18m, height 150m) at 60m lateral distance
+    const skyscraperBox = new THREE.Box3(
+      new THREE.Vector3(45, -50, -10),
+      new THREE.Vector3(75, 150, 10)
+    );
+    expect(corridor.isBoxInsideCorridor(skyscraperBox)).toBe(true);
+
+    // Far background skyscraper (radius 18m, height 150m) at 160m lateral distance is allowed
+    const distantSkyscraperBox = new THREE.Box3(
+      new THREE.Vector3(145, -50, -10),
+      new THREE.Vector3(175, 150, 10)
+    );
+    expect(corridor.isBoxInsideCorridor(distantSkyscraperBox)).toBe(false);
+  });
 });

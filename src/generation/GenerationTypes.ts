@@ -86,7 +86,7 @@ export interface RouteNode {
   ascentPostLandingRunway?: number;
   isRecoveryShelf?: boolean;
   isSignalSpine?: boolean;
-  signalSpineVariant?: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF';
+  signalSpineVariant?: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'BROKEN' | 'TAPER_TO_REJOIN';
   obstacleType?: RouteObstacleType;
   obstacleGroupId?: number;
   obstacleSafeLane?: 'LEFT' | 'RIGHT' | 'BOTH' | 'JUMP';

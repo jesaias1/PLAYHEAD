@@ -317,6 +317,47 @@ export class SkylineArchitecture {
    * Culling individual instances (rather than a whole layer) keeps the
    * silhouette continuous, and because the cutoff is generous and gradual there
    * is no popping near the player.
+  /**
+   * Refreshes the authored transform baseline after the authoritative world-space
+   * RouteExclusionCorridor validation pass has run. This guarantees distance culling
+   * and instance restoration never resurrect rejected or zeroed-out instances.
+   */
+  public refreshAuthoredTransformsAfterValidation(): void {
+    const refresh = (mesh: THREE.InstancedMesh | null): THREE.Matrix4[] => {
+      if (!mesh) return [];
+      const out: THREE.Matrix4[] = [];
+      const tmp = new THREE.Matrix4();
+      const pos = new THREE.Vector3();
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, tmp);
+        pos.setFromMatrixPosition(tmp);
+        // If an instance was rejected/zeroed by RouteExclusionCorridor, keep it permanently as zeroMatrix
+        if (pos.y < -50000 || tmp.elements[0] === 0) {
+          const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+          zero.setPosition(0, -99999, 0);
+          out.push(zero);
+        } else {
+          out.push(tmp.clone());
+        }
+      }
+      return out;
+    };
+    this.primaryBase = refresh(this.primaryMonoliths);
+    this.supportBase = refresh(this.supportStelae);
+    this.ridgeBase = refresh(this.backgroundRidges);
+    if (this.primaryMonoliths) this.hiddenFlags.set(this.primaryMonoliths, new Array(this.primaryMonoliths.count).fill(false));
+    if (this.supportStelae) this.hiddenFlags.set(this.supportStelae, new Array(this.supportStelae.count).fill(false));
+    if (this.backgroundRidges) this.hiddenFlags.set(this.backgroundRidges, new Array(this.backgroundRidges.count).fill(false));
+  }
+
+  /**
+   * Distance-based visibility for purely decorative skyline clusters.
+   *
+   * These sit 155-260m+ out and plunge hundreds of metres, so at long range
+   * they are a large amount of fill for very little on-screen contribution.
+   * Culling individual instances (rather than a whole layer) keeps the
+   * silhouette continuous, and because the cutoff is generous and gradual there
+   * is no popping near the player.
    *
    * `maxDistance <= 0` disables culling entirely (HIGH / ULTRA).
    */
@@ -342,6 +383,7 @@ export class SkylineArchitecture {
     ];
 
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    hidden.setPosition(0, -99999, 0);
     const pos = new THREE.Vector3();
 
     for (const { mesh, base } of targets) {
@@ -353,6 +395,12 @@ export class SkylineArchitecture {
         const m = base[i];
         if (!m) continue;
         pos.setFromMatrixPosition(m);
+        // Permanently rejected instances stay zeroed
+        if (pos.y < -50000 || m.elements[0] === 0) {
+          mesh.setMatrixAt(i, hidden);
+          continue;
+        }
+
         const far = pos.distanceToSquared(cameraPos) > cutoffSq;
         const current = this.hiddenFlags.get(mesh)![i];
         if (current === far) continue;
@@ -371,10 +419,22 @@ export class SkylineArchitecture {
       { mesh: this.supportStelae, base: this.supportBase },
       { mesh: this.backgroundRidges, base: this.ridgeBase }
     ];
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    hidden.setPosition(0, -99999, 0);
+    const pos = new THREE.Vector3();
+
     for (const { mesh, base } of pairs) {
       if (!mesh) continue;
       for (let i = 0; i < mesh.count; i++) {
-        if (base[i]) mesh.setMatrixAt(i, base[i]);
+        if (base[i]) {
+          const m = base[i];
+          pos.setFromMatrixPosition(m);
+          if (pos.y < -50000 || m.elements[0] === 0) {
+            mesh.setMatrixAt(i, hidden);
+          } else {
+            mesh.setMatrixAt(i, m);
+          }
+        }
       }
       const flags = this.hiddenFlags.get(mesh);
       if (flags) flags.fill(false);

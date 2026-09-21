@@ -13,17 +13,22 @@ export class SignalDecodeModal {
   private titleElem: HTMLElement;
   private kickerElem: HTMLElement;
   private statusElem: HTMLElement;
+  private skipBtn: HTMLButtonElement;
+  private closeBtn: HTMLButtonElement;
   private onCompleteCallback?: (skin: KarambitSkin) => void;
 
   private skinSystem = KarambitSkinSystem.getInstance();
   private isRolling = false;
+  private rollTimeout: number | null = null;
+  private activeReward: OpenedSignalDrop | null = null;
+  private currentTargetOffset = 0;
 
   constructor() {
     this.element = document.createElement('div');
     this.element.className = 'screen signal-decode-modal-screen hidden';
     this.element.innerHTML = `
       <div class="decode-modal-backdrop" style="position: absolute; inset: 0; background: rgba(2, 6, 12, 0.88); backdrop-filter: blur(14px);"></div>
-      <div class="decode-modal-dialog terminal-console" style="position: relative; z-index: 2; width: min(92vw, 760px); padding: 24px 28px; background: rgba(8, 14, 22, 0.98); border: 1px solid #1f2f45; border-top: 3px solid #00f0ff; box-shadow: 0 20px 60px rgba(0,0,0,0.85); text-align: center;">
+      <div class="decode-modal-dialog terminal-console" style="position: relative; z-index: 2; width: min(92vw, 780px); padding: 24px 28px; background: rgba(8, 14, 22, 0.98); border: 1px solid #1f2f45; border-top: 3px solid #00f0ff; box-shadow: 0 20px 60px rgba(0,0,0,0.85); text-align: center;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 16px;">
           <div style="text-align: left;">
             <div id="decode-modal-kicker" style="font-family: var(--font-mono); font-size: 0.65rem; color: #00f0ff; letter-spacing: 0.25em;">// SIGNAL RECOVERY BUS</div>
@@ -46,12 +51,13 @@ export class SignalDecodeModal {
         </div>
 
         <!-- CELEBRATION / REVEAL CARD -->
-        <div id="decode-celebration" class="hidden" style="margin-top: 16px; padding: 16px; border: 1px solid rgba(0, 240, 255, 0.4); border-left: 4px solid #00f0ff; background: rgba(10, 18, 28, 0.85); text-align: left;">
+        <div id="decode-celebration" class="hidden" style="margin-top: 16px; padding: 18px; border: 1px solid rgba(0, 240, 255, 0.4); border-left: 4px solid #00f0ff; background: rgba(10, 18, 28, 0.85); text-align: left;">
           <!-- Populated when animation lands -->
         </div>
 
         <!-- FOOTER ACTIONS -->
         <div id="decode-actions" style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 12px;">
+          <button id="btn-decode-modal-skip" class="terminal-btn-subtle" style="display: none; padding: 8px 18px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer; color: #00f0ff; border: 1px solid #00f0ff; background: rgba(0, 240, 255, 0.08);">[ SKIP REVEAL // SPACE ]</button>
           <button id="btn-decode-modal-close" class="terminal-btn-subtle" style="display: none; padding: 8px 18px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer; color: #8fa0b5; border: 1px solid #334458;">[ CLOSE ]</button>
         </div>
       </div>
@@ -67,9 +73,23 @@ export class SignalDecodeModal {
     this.titleElem = this.element.querySelector('#decode-modal-title') as HTMLElement;
     this.kickerElem = this.element.querySelector('#decode-modal-kicker') as HTMLElement;
     this.statusElem = this.element.querySelector('#decode-modal-status') as HTMLElement;
+    this.skipBtn = this.element.querySelector('#btn-decode-modal-skip') as HTMLButtonElement;
+    this.closeBtn = this.element.querySelector('#btn-decode-modal-close') as HTMLButtonElement;
 
-    const closeBtn = this.element.querySelector('#btn-decode-modal-close') as HTMLButtonElement;
-    closeBtn.addEventListener('click', () => this.hide());
+    this.skipBtn.addEventListener('click', () => this.skipReveal());
+    this.closeBtn.addEventListener('click', () => this.hide());
+
+    window.addEventListener('keydown', (e) => {
+      if (!this.isVisible()) return;
+      if (this.isRolling) {
+        if (e.code === 'Space' || e.key === ' ' || e.code === 'Escape') {
+          e.preventDefault();
+          this.skipReveal();
+        }
+      } else if (e.code === 'Escape') {
+        this.hide();
+      }
+    });
   }
 
   public open(onComplete?: (skin: KarambitSkin) => void): void {
@@ -110,14 +130,15 @@ export class SignalDecodeModal {
       </div>
     `;
 
-    const closeBtn = this.element.querySelector('#btn-decode-modal-close') as HTMLButtonElement;
-    closeBtn.style.display = 'inline-block';
-    closeBtn.textContent = '[ CONFIRM ]';
-    closeBtn.focus();
+    this.skipBtn.style.display = 'none';
+    this.closeBtn.style.display = 'inline-block';
+    this.closeBtn.textContent = '[ CONFIRM ]';
+    this.closeBtn.focus();
   }
 
   private startRollingReveal(reward: OpenedSignalDrop): void {
     this.isRolling = true;
+    this.activeReward = reward;
     this.element.classList.remove('hidden');
     this.stripContainer.style.display = 'block';
     this.celebrationCard.classList.add('hidden');
@@ -126,23 +147,30 @@ export class SignalDecodeModal {
     this.kickerElem.textContent = `// ${reward.qualityLabel}`;
     this.statusElem.textContent = 'RECEIVING STREAM';
 
-    const closeBtn = this.element.querySelector('#btn-decode-modal-close') as HTMLButtonElement;
-    closeBtn.style.display = 'none';
+    this.closeBtn.style.display = 'none';
+    this.skipBtn.style.display = 'inline-block';
 
-    // Build rolling card strip
+    // Build rolling card strip: 46 cards, target index 38
     const allSkins = this.skinSystem.getSkins().filter(s => s.dropEligible);
+    const highTierSkins = allSkins.filter(s => s.rarity === 'ARTIFACT' || s.rarity === 'RELIC');
     const CARD_WIDTH = 130;
     const CARD_GAP = 10;
-    const TOTAL_CARDS = 32;
-    const TARGET_INDEX = 24;
+    const TOTAL_CARDS = 46;
+    const TARGET_INDEX = 38;
 
     this.stripInner.innerHTML = '';
     const cards: HTMLElement[] = [];
 
     for (let i = 0; i < TOTAL_CARDS; i++) {
-      const skin = (i === TARGET_INDEX)
-        ? reward.skin
-        : allSkins[Math.floor(Math.random() * allSkins.length)] || reward.skin;
+      let skin: KarambitSkin;
+      if (i === TARGET_INDEX) {
+        skin = reward.skin;
+      } else if ((i === TARGET_INDEX - 1 || i === TARGET_INDEX + 1) && highTierSkins.length > 0) {
+        // Dramatic near-miss on either side of target
+        skin = highTierSkins[Math.floor(Math.random() * highTierSkins.length)];
+      } else {
+        skin = allSkins[Math.floor(Math.random() * allSkins.length)] || reward.skin;
+      }
 
       const rarityColor = this.getRarityColor(skin.rarity);
       const isTarget = i === TARGET_INDEX;
@@ -185,9 +213,7 @@ export class SignalDecodeModal {
     }
 
     // Target displacement: center of card at TARGET_INDEX
-    // Card center offset from start of strip: TARGET_INDEX * (CARD_WIDTH + CARD_GAP) + CARD_WIDTH / 2
-    const targetOffset = TARGET_INDEX * (CARD_WIDTH + CARD_GAP) + (CARD_WIDTH / 2);
-    // Initial start offset: offset by first card center so reticle is on card 0
+    this.currentTargetOffset = TARGET_INDEX * (CARD_WIDTH + CARD_GAP) + (CARD_WIDTH / 2);
     const startOffset = CARD_WIDTH / 2;
 
     this.stripInner.style.transition = 'none';
@@ -196,20 +222,42 @@ export class SignalDecodeModal {
     // Force reflow
     void this.stripInner.offsetHeight;
 
-    // Trigger smooth deceleration ease-out animation
-    const durationMs = 2100;
-    this.stripInner.style.transition = `transform ${durationMs}ms cubic-bezier(0.1, 0.82, 0.16, 1.0)`;
-    this.stripInner.style.transform = `translateX(${-targetOffset}px)`;
+    // Trigger smooth deceleration ease-out animation (3800ms)
+    const durationMs = 3800;
+    this.stripInner.style.transition = `transform ${durationMs}ms cubic-bezier(0.06, 0.78, 0.12, 1.0)`;
+    this.stripInner.style.transform = `translateX(${-this.currentTargetOffset}px)`;
 
-    setTimeout(() => {
+    this.rollTimeout = window.setTimeout(() => {
       this.isRolling = false;
       this.revealAward(reward);
     }, durationMs + 100);
   }
 
+  private skipReveal(): void {
+    if (!this.isRolling || !this.activeReward) return;
+    if (this.rollTimeout !== null) {
+      window.clearTimeout(this.rollTimeout);
+      this.rollTimeout = null;
+    }
+
+    // Fast deceleration jump
+    this.stripInner.style.transition = 'transform 180ms cubic-bezier(0.1, 0.85, 0.2, 1.0)';
+    this.stripInner.style.transform = `translateX(${-this.currentTargetOffset}px)`;
+
+    this.rollTimeout = window.setTimeout(() => {
+      this.isRolling = false;
+      if (this.activeReward) {
+        this.revealAward(this.activeReward);
+      }
+    }, 200);
+  }
+
   private revealAward(reward: OpenedSignalDrop): void {
+    this.skipBtn.style.display = 'none';
     const rarityColor = this.getRarityColor(reward.skin.rarity);
-    this.titleElem.textContent = 'SIGNAL DECODED // ACQUIRED';
+    const isHighTier = reward.skin.rarity === 'ARTIFACT' || reward.skin.rarity === 'RELIC';
+
+    this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
     this.statusElem.textContent = reward.skin.rarity;
     this.statusElem.style.borderColor = rarityColor;
     this.statusElem.style.color = rarityColor;
@@ -217,15 +265,18 @@ export class SignalDecodeModal {
     this.celebrationCard.classList.remove('hidden');
     this.celebrationCard.style.borderColor = rarityColor;
     this.celebrationCard.style.borderLeftColor = rarityColor;
-    this.celebrationCard.style.boxShadow = `0 0 24px ${rarityColor}33`;
+    this.celebrationCard.style.background = isHighTier
+      ? `radial-gradient(circle at top right, ${rarityColor}28, rgba(10, 18, 28, 0.95))`
+      : 'rgba(10, 18, 28, 0.90)';
+    this.celebrationCard.style.boxShadow = `0 0 32px ${rarityColor}44, inset 0 0 16px ${rarityColor}18`;
 
     this.celebrationCard.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
         <div>
           <div style="font-family: var(--font-mono); font-size: 0.62rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
-            [${reward.qualityLabel} // ${reward.skin.rarity}]
+            [${reward.qualityLabel} // ${reward.skin.rarity}] ${isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : ''}
           </div>
-          <div style="font-family: var(--font-mono); font-size: 1.1rem; font-weight: 800; color: #ffffff; margin-top: 3px;">
+          <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 3px; letter-spacing: 0.04em;">
             ${reward.skin.name}
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">
@@ -233,19 +284,19 @@ export class SignalDecodeModal {
           </div>
         </div>
         <div style="text-align: right;">
-          <span style="font-family: var(--font-mono); font-size: 0.60rem; padding: 2px 6px; border: 1px solid ${rarityColor}; color: ${rarityColor};">
-            ${reward.skin.profile.isVideoArtifact ? 'LIVE ARTIFACT' : 'PROFILE'}
+          <span style="font-family: var(--font-mono); font-size: 0.60rem; padding: 3px 8px; border: 1px solid ${rarityColor}; color: ${rarityColor}; background: ${rarityColor}18;">
+            ${reward.skin.profile.isVideoArtifact ? 'LIVE VIDEO ARTIFACT' : 'PROFILE TIER'}
           </span>
         </div>
       </div>
-      <div style="font-family: var(--font-mono); font-size: 0.68rem; color: #cbd5e1; margin-top: 8px; line-height: 1.35;">
+      <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #cbd5e1; margin-top: 10px; line-height: 1.45;">
         ${reward.skin.description}
       </div>
-      <div style="margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end;">
-        <button id="btn-decode-equip" class="primary" style="padding: 7px 18px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
+      <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="btn-decode-equip" class="primary" style="padding: 8px 22px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
           > EQUIP NOW
         </button>
-        <button id="btn-decode-claim" class="secondary" style="padding: 7px 16px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
+        <button id="btn-decode-claim" class="secondary" style="padding: 8px 18px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
           CLAIM & RETURN
         </button>
       </div>
@@ -270,8 +321,13 @@ export class SignalDecodeModal {
 
   public hide(): void {
     if (this.isRolling) return;
+    if (this.rollTimeout !== null) {
+      window.clearTimeout(this.rollTimeout);
+      this.rollTimeout = null;
+    }
     this.element.classList.add('hidden');
     this.stripInner.innerHTML = '';
+    this.activeReward = null;
   }
 
   public isVisible(): boolean {

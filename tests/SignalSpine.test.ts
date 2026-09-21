@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as THREE from 'three';
 import { TrackGenerator } from '../src/generation/TrackGenerator';
 import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { SignalSpineGenerator } from '../src/generation/SignalSpineGenerator';
@@ -9,6 +10,7 @@ import { SeededRandom } from '../src/generation/SeededRandom';
 import { PhysicsWorld } from '../src/physics/PhysicsWorld';
 import { TrackAnalysis } from '../src/audio/AudioFeatures';
 import { PaletteSelector } from '../src/audio/TrackPalettes';
+import { GeometryBuilder } from '../src/world/GeometryBuilder';
 
 function createMockAnalysis(seed: number, themes: string[]): TrackAnalysis {
   const duration = 60.0;
@@ -85,6 +87,26 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(variants.size).toBeGreaterThanOrEqual(2);
   });
 
+  it('generates authored shapes (TAPERED, OFFSET, BROKEN, TAPER_TO_REJOIN) with phrase-adaptive widths', () => {
+    const analysis = createMockAnalysis(9999, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
+    const track = RouteGenerator.generate(analysis);
+    const spines = track.signalSpines || [];
+
+    expect(spines.length).toBeGreaterThan(10);
+
+    const variants = new Set(spines.map(s => s.signalSpineVariant));
+    // Must contain multi-segment tapered, offset, or broken shapes
+    const hasAdvancedShape = ['TAPERED', 'OFFSET', 'BROKEN', 'TAPER_TO_REJOIN'].some(v => variants.has(v as any));
+    expect(hasAdvancedShape).toBe(true);
+
+    // Verify phrase-adaptive widths:
+    // No spine should be an oversized runway (> 2.8m) or razor thin (< 0.65m)
+    for (const spine of spines) {
+      expect(spine.dimensions.x).toBeLessThanOrEqual(2.8);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(0.65);
+    }
+  });
+
   it('guarantees ZERO under-slung geometry (spines sit flush at top playable surface)', () => {
     const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
     const track = RouteGenerator.generate(analysis);
@@ -152,9 +174,9 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(spines.length).toBeGreaterThan(0);
 
     for (const spine of spines) {
-      // 1. Spines must be physically narrow (1.5m to 4.2m width, never full width)
-      expect(spine.dimensions.x).toBeLessThanOrEqual(4.2);
-      expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.5);
+      // 1. Spines must be physically narrow (0.65m to 2.8m width, never full width or easy highway)
+      expect(spine.dimensions.x).toBeLessThanOrEqual(2.8);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(0.65);
 
       // 2. Thickness must be low profile (<= 0.5m)
       expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
@@ -162,7 +184,7 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       // 3. Must be flagged as isSignalSpine with an authored variant
       expect(spine.isSignalSpine).toBe(true);
       expect(spine.signalSpineVariant).toBeDefined();
-      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'CATWALK']).toContain(
+      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'CATWALK', 'TAPERED', 'BROKEN', 'TAPER_TO_REJOIN']).toContain(
         spine.signalSpineVariant
       );
     }
@@ -188,7 +210,8 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
 
     // Verify all spines on Signal Drift are top-surface and narrow
     for (const spine of spines) {
-      expect(spine.dimensions.x).toBeLessThanOrEqual(4.2);
+      expect(spine.dimensions.x).toBeLessThanOrEqual(2.8);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(0.65);
       expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
       expect(spine.isSignalSpine).toBe(true);
     }
@@ -230,5 +253,51 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     for (const runway of runways) {
       expect(runway.dimensions.x).toBeLessThanOrEqual(28.0); // Reasonable upper bound for flow landings
     }
+  });
+
+  it('guarantees clean production appearance without debug wireframe outline on spine top surface', () => {
+    const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
+    const palette = PaletteSelector.selectPalette(12345, 0.6, 0.7);
+    const track = TrackGenerator.generate(analysis, palette);
+    expect(track.signalSpines).toBeDefined();
+    expect(track.signalSpines!.length).toBeGreaterThan(0);
+
+    const built = GeometryBuilder.buildWorld(track, palette);
+    const rootGroup = built.rootGroup;
+
+    // Find meshes for signal spines
+    const spinePositions = (track.signalSpines || []).map(s => s.position);
+    let foundSpineMeshes = 0;
+
+    rootGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && Array.isArray(obj.material)) {
+        const isSpineMesh = spinePositions.some(sp =>
+          Math.abs(obj.position.x - sp.x) < 0.01 &&
+          Math.abs(obj.position.y - sp.y) < 0.01 &&
+          Math.abs(obj.position.z - sp.z) < 0.01
+        );
+        if (isSpineMesh) {
+          foundSpineMeshes++;
+          // Top surface material (index 2) must be clean dark aggregate (spineTopMaterial)
+          const topMat = obj.material[2] as THREE.MeshStandardMaterial;
+          expect(topMat).toBeDefined();
+          expect(topMat.wireframe).toBeFalsy();
+          expect(topMat.color.getHex()).toBe(0x0e141f);
+        }
+      }
+
+      // Verify that NO EdgesGeometry wireframe (LineSegments) is co-located with any signal spine
+      if (obj instanceof THREE.LineSegments) {
+        const isCoLocatedWithSpine = spinePositions.some(sp =>
+          Math.abs(obj.position.x - sp.x) < 0.01 &&
+          Math.abs(obj.position.y - sp.y) < 0.01 &&
+          Math.abs(obj.position.z - sp.z) < 0.01
+        );
+        expect(isCoLocatedWithSpine).toBe(false);
+      }
+    });
+
+    expect(foundSpineMeshes).toBeGreaterThan(0);
+    built.dispose();
   });
 });

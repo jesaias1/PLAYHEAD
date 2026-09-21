@@ -196,8 +196,8 @@ export class SignalSpineGenerator {
       // -----------------------------------------------------------------------
       // CONTROLLED INSTANCE VARIATION
       // -----------------------------------------------------------------------
-      const spine = SignalSpineGenerator.createVariedTopSurfaceSpine(
-        spineId++,
+      const spineNodes = SignalSpineGenerator.createVariedTopSurfaceSpine(
+        () => spineId++,
         a,
         b,
         exitTopA,
@@ -207,16 +207,19 @@ export class SignalSpineGenerator {
         pitch,
         minPlatWidth,
         isSmallChain,
+        isPostSurfReentry,
         rng
       );
 
-      if (spine) {
+      if (spineNodes && spineNodes.length > 0) {
         coveredGaps.add(gapKey);
-        spines.push(spine);
+        for (const spine of spineNodes) {
+          spines.push(spine);
+        }
         if (isSmallChain) {
-          smallChainConnectors++;
+          smallChainConnectors += spineNodes.length;
         } else {
-          mediumLargeConnectors++;
+          mediumLargeConnectors += spineNodes.length;
         }
       }
     }
@@ -268,116 +271,216 @@ export class SignalSpineGenerator {
   }
 
   /**
-   * Creates a narrow, top-surface bridging spine with controlled instance variation.
+   * Creates narrow, top-surface bridging spine segments with controlled width & shape variation.
    * Ensures zero under-slung geometry: top surface sits cleanly at the playable elevation.
+   *
+   * Shapes:
+   * 1. TAPERED: wider at platform attachments, narrower through middle, wider again near next platform.
+   * 2. OFFSET: slightly left or right rather than always centered.
+   * 3. BROKEN: occasional short missing section requiring one small controlled hop.
+   * 4. TAPER-TO-REJOIN: spine gradually narrows or ends so player must return to main route.
    */
   private static createVariedTopSurfaceSpine(
-    id: number,
+    nextId: () => number,
     a: RouteNode,
     b: RouteNode,
     exitTopA: THREE.Vector3,
     entryTopB: THREE.Vector3,
-    _gapHoriz: number,
+    gapHoriz: number,
     gap3D: number,
     pitch: number,
     minPlatWidth: number,
     isSmallChain: boolean,
+    isPostSurfReentry: boolean,
     rng: SeededRandom
-  ): RouteNode | null {
+  ): RouteNode[] {
     const dx = entryTopB.x - exitTopA.x;
     const dz = entryTopB.z - exitTopA.z;
     const yaw = Math.atan2(dx, dz);
 
-    // 1. Width Variation: 18% to 28% of local platform width (narrow lifeline, never a full-width bridge)
-    const widthRatio = rng.nextFloat(0.18, 0.28);
-    const maxWidthCap = isSmallChain ? 2.8 : 4.2;
-    const spineWidth = Math.max(1.5, Math.min(maxWidthCap, minPlatWidth * widthRatio));
+    // 1. Adaptive Width according to Movement Phrase:
+    // - post-surf catch / very punishing transfer: ~20–25% of local platform width
+    // - normal small-platform chain: ~12–18%
+    // - precision / high-skill recovery line: ~8–12%
+    let widthRatio: number;
+    let minWidthCap: number;
+    let maxWidthCap: number;
 
-    // 2. Thickness: low profile (0.35m - 0.45m), sitting within upper platform elevation
-    const spineThickness = Math.min(0.45, Math.min(a.dimensions.y, b.dimensions.y) * 0.45);
+    if (isPostSurfReentry) {
+      widthRatio = rng.nextFloat(0.20, 0.25);
+      minWidthCap = 1.20;
+      maxWidthCap = 2.40;
+    } else if (isSmallChain) {
+      widthRatio = rng.nextFloat(0.12, 0.18);
+      minWidthCap = 0.95;
+      maxWidthCap = 1.70;
+    } else {
+      widthRatio = rng.nextFloat(0.08, 0.12);
+      minWidthCap = 0.80;
+      maxWidthCap = 1.40;
+    }
 
-    // 3. Length / Overlap Variation: 0.40m to 0.85m overlap into platform lips
-    const overlap = rng.nextFloat(0.40, 0.85);
-    const spineLength = gap3D + overlap * 2.0;
+    const baseWidth = Math.max(minWidthCap, Math.min(maxWidthCap, minPlatWidth * widthRatio));
+    const spineThickness = Math.min(0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.40);
+    const overlap = rng.nextFloat(0.40, 0.80);
+    const totalSpan = gap3D + overlap * 2.0;
 
-    // Midpoint on top playable surface
-    const topMid = new THREE.Vector3().addVectors(exitTopA, entryTopB).multiplyScalar(0.5);
+    // Unit direction from exitTopA to entryTopB
+    const dir = new THREE.Vector3(dx, entryTopB.y - exitTopA.y, dz).normalize();
+    const spanStart = exitTopA.clone().addScaledVector(dir, -overlap);
+    const spanEnd = entryTopB.clone().addScaledVector(dir, overlap);
+    const lateralDir = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
-    // Elevation tuning: +0.025m (2.5cm) lip above platform top to cleanly rest like a runway catwalk plate
-    topMid.y += 0.025;
+    const makeSegment = (
+      uStart: number,
+      uEnd: number,
+      segWidth: number,
+      latShift: number,
+      variant: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'BROKEN' | 'TAPER_TO_REJOIN'
+    ): RouteNode => {
+      const segLen = Math.max(0.2, (uEnd - uStart) * totalSpan);
+      const uMid = (uStart + uEnd) * 0.5;
+      const topMid = spanStart.clone().lerp(spanEnd, uMid);
+      if (latShift !== 0) {
+        topMid.addScaledVector(lateralDir, latShift);
+      }
+      // Rest 2.5cm atop platform surface
+      topMid.y += 0.025;
 
-    // 4. Lateral Placement & Alignment Variation (Fast Line vs Recovery Line vs Center)
+      const topOffset = new THREE.Vector3(0, spineThickness * 0.5, 0).applyEuler(
+        new THREE.Euler(pitch, yaw, 0, 'YXZ')
+      );
+      const spinePos = new THREE.Vector3().subVectors(topMid, topOffset);
+
+      return {
+        id: nextId(),
+        time: a.time,
+        position: { x: spinePos.x, y: spinePos.y, z: spinePos.z },
+        dimensions: { x: segWidth, y: spineThickness, z: segLen },
+        yaw,
+        pitch,
+        roll: 0,
+        type: RouteNodeType.RUNWAY,
+        intensity: a.intensity * 0.8,
+        sectionIndex: a.sectionIndex,
+        arcLength: a.arcLength,
+        isSurf: false,
+        isBoost: false,
+        isOptional: true,
+        isSignalSpine: true,
+        signalSpineVariant: variant
+      };
+    };
+
+    // Shape Selection
     const turnAngle = b.yaw - a.yaw;
-    const isCurved = Math.abs(turnAngle) > 0.04;
-    const alignmentRoll = rng.next();
+    const isCurved = Math.abs(turnAngle) > 0.05;
+    const shapeRoll = rng.next();
 
-    let variant: 'STRAIGHT' | 'OFFSET' | 'CATWALK' | 'CURVED' = 'STRAIGHT';
+    let chosenShape: 'TAPERED' | 'OFFSET' | 'BROKEN' | 'TAPER_TO_REJOIN' | 'DEFAULT';
 
-    if (isCurved) {
-      const turnSign = turnAngle > 0 ? 1 : -1;
-      const maxShift = Math.min(3.0, (minPlatWidth - spineWidth) * 0.35);
-
-      if (alignmentRoll < 0.45) {
-        // Fast Line: biased toward inside turn corner cutting the apex
-        const shift = -turnSign * rng.nextFloat(0.4, 0.85) * maxShift;
-        topMid.x += Math.cos(yaw) * shift;
-        topMid.z -= Math.sin(yaw) * shift;
-        variant = 'CURVED';
-      } else if (alignmentRoll < 0.80) {
-        // Recovery Line: biased toward outside drift margin catching wide players
-        const shift = turnSign * rng.nextFloat(0.5, 0.95) * maxShift;
-        topMid.x += Math.cos(yaw) * shift;
-        topMid.z -= Math.sin(yaw) * shift;
-        variant = 'OFFSET';
+    if (isPostSurfReentry) {
+      if (shapeRoll < 0.45 && gap3D >= 3.0) {
+        chosenShape = 'TAPERED';
+      } else if (shapeRoll < 0.75) {
+        chosenShape = 'OFFSET';
+      } else if (shapeRoll < 0.90 && gap3D >= 3.5) {
+        chosenShape = 'TAPER_TO_REJOIN';
       } else {
-        // Center alignment along curved trajectory
-        variant = 'CURVED';
+        chosenShape = 'DEFAULT';
+      }
+    } else if (isSmallChain) {
+      if (shapeRoll < 0.35 && gap3D >= 3.0) {
+        chosenShape = 'TAPERED';
+      } else if (shapeRoll < 0.60) {
+        chosenShape = 'OFFSET';
+      } else if (shapeRoll < 0.80 && gapHoriz >= 4.2) {
+        chosenShape = 'BROKEN';
+      } else if (shapeRoll < 0.92 && gap3D >= 3.5) {
+        chosenShape = 'TAPER_TO_REJOIN';
+      } else {
+        chosenShape = 'DEFAULT';
       }
     } else {
-      // Straight trajectory
-      const maxShift = Math.min(2.6, (minPlatWidth - spineWidth) * 0.32);
-
-      if (alignmentRoll < 0.35) {
-        // Slight left strafe bias
-        const shift = -rng.nextFloat(0.4, 0.85) * maxShift;
-        topMid.x += Math.cos(yaw) * shift;
-        topMid.z -= Math.sin(yaw) * shift;
-        variant = 'OFFSET';
-      } else if (alignmentRoll < 0.70) {
-        // Slight right strafe bias
-        const shift = rng.nextFloat(0.4, 0.85) * maxShift;
-        topMid.x += Math.cos(yaw) * shift;
-        topMid.z -= Math.sin(yaw) * shift;
-        variant = 'OFFSET';
+      // Medium & Larger transfers
+      if (shapeRoll < 0.32 && gap3D >= 3.5) {
+        chosenShape = 'TAPERED';
+      } else if (shapeRoll < 0.58) {
+        chosenShape = 'OFFSET';
+      } else if (shapeRoll < 0.80 && gapHoriz >= 4.5) {
+        chosenShape = 'BROKEN';
+      } else if (shapeRoll < 0.92 && gap3D >= 3.5) {
+        chosenShape = 'TAPER_TO_REJOIN';
       } else {
-        // Center alignment
-        variant = spineWidth <= 2.2 ? 'CATWALK' : 'STRAIGHT';
+        chosenShape = 'DEFAULT';
       }
     }
 
-    // Offset from top surface to box center
-    const topOffset = new THREE.Vector3(0, spineThickness * 0.5, 0).applyEuler(
-      new THREE.Euler(pitch, yaw, 0, 'YXZ')
-    );
-    const spinePos = new THREE.Vector3().subVectors(topMid, topOffset);
+    // 1. TAPERED SPINE:
+    // Wider at platform attachments, narrower in middle, wider near next platform
+    if (chosenShape === 'TAPERED') {
+      const entryWidth = Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
+      const midWidth = Math.max(0.65, baseWidth * 0.75);
+      const exitWidth = Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
 
-    return {
-      id,
-      time: a.time,
-      position: { x: spinePos.x, y: spinePos.y, z: spinePos.z },
-      dimensions: { x: spineWidth, y: spineThickness, z: spineLength },
-      yaw,
-      pitch,
-      roll: 0,
-      type: RouteNodeType.RUNWAY,
-      intensity: a.intensity * 0.8,
-      sectionIndex: a.sectionIndex,
-      arcLength: a.arcLength,
-      isSurf: false,
-      isBoost: false,
-      isOptional: true,
-      isSignalSpine: true,
-      signalSpineVariant: variant
-    };
+      return [
+        makeSegment(0.0, 0.28, entryWidth, 0, 'TAPERED'),
+        makeSegment(0.27, 0.73, midWidth, 0, 'TAPERED'),
+        makeSegment(0.72, 1.0, exitWidth, 0, 'TAPERED')
+      ];
+    }
+
+    // 2. OFFSET SPINE:
+    // Slightly left or right of center rather than always centered
+    if (chosenShape === 'OFFSET') {
+      const turnSign = Math.abs(turnAngle) > 0.02
+        ? (turnAngle > 0 ? 1 : -1)
+        : (rng.next() < 0.5 ? 1 : -1);
+      const maxShift = Math.min(2.4, (minPlatWidth - baseWidth) * 0.35);
+      const shift = turnSign * rng.nextFloat(0.45, 0.85) * maxShift;
+
+      return [makeSegment(0.0, 1.0, baseWidth, shift, 'OFFSET')];
+    }
+
+    // 3. BROKEN SPINE:
+    // Short missing section requiring one small controlled hop
+    if (chosenShape === 'BROKEN') {
+      const hopLength = Math.min(1.8, Math.max(1.2, gapHoriz * 0.25));
+      const hopFraction = Math.min(0.35, hopLength / totalSpan);
+      const seg1End = (1.0 - hopFraction) * 0.5;
+      const seg2Start = seg1End + hopFraction;
+
+      return [
+        makeSegment(0.0, seg1End, baseWidth, 0, 'BROKEN'),
+        makeSegment(seg2Start, 1.0, baseWidth, 0, 'BROKEN')
+      ];
+    }
+
+    // 4. TAPER-TO-REJOIN:
+    // Spine gradually narrows or ends so player must return to main route
+    if (chosenShape === 'TAPER_TO_REJOIN') {
+      const isExitCatch = rng.next() < 0.5;
+      if (isExitCatch) {
+        // Starts at Platform A, extends ~68% into gap and narrows at tip
+        const rootWidth = Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
+        const tipWidth = Math.max(0.65, baseWidth * 0.70);
+        return [
+          makeSegment(0.0, 0.36, rootWidth, 0, 'TAPER_TO_REJOIN'),
+          makeSegment(0.35, 0.70, tipWidth, 0, 'TAPER_TO_REJOIN')
+        ];
+      } else {
+        // Entry catch tongue extending backwards from Platform B by ~68%
+        const tipWidth = Math.max(0.65, baseWidth * 0.70);
+        const rootWidth = Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
+        return [
+          makeSegment(0.30, 0.65, tipWidth, 0, 'TAPER_TO_REJOIN'),
+          makeSegment(0.64, 1.0, rootWidth, 0, 'TAPER_TO_REJOIN')
+        ];
+      }
+    }
+
+    // 5. DEFAULT (STRAIGHT / CATWALK / CURVED)
+    const variant = isCurved ? 'CURVED' : (baseWidth <= 1.3 ? 'CATWALK' : 'STRAIGHT');
+    return [makeSegment(0.0, 1.0, baseWidth, 0, variant)];
   }
 }

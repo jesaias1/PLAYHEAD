@@ -150,6 +150,8 @@ export class World {
         `intruding into protected route volumes.`
       );
     }
+    // Refresh authored transforms so distance culling never resurrects rejected buildings
+    this.skyline.refreshAuthoredTransformsAfterValidation();
 
     // ==========================================================
     // STATIC TRANSFORM FREEZE

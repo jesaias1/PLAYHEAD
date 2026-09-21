@@ -9,10 +9,13 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { TrackGenerator } from '../generation/TrackGenerator';
 import { Environment } from '../world/Environment';
 import { BUILD_LABEL } from '../core/BuildInfo';
+import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 
 export class DevOverlay {
   public element: HTMLElement;
   private isVisible = false;
+  private textElement: HTMLElement;
+  private buttonBar: HTMLElement;
 
   constructor() {
     this.element = document.createElement('div');
@@ -32,6 +35,50 @@ export class DevOverlay {
       display: none;
       line-height: 1.5;
     `;
+
+    this.textElement = document.createElement('div');
+    this.element.appendChild(this.textElement);
+
+    this.buttonBar = document.createElement('div');
+    this.buttonBar.style.cssText = `
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0, 240, 255, 0.2);
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    `;
+    this.buttonBar.innerHTML = `
+      <button id="btn-dev-grant-signals" style="background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid #00f0ff; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ GRANT 999 SIGNALS ]</button>
+      <button id="btn-dev-clear-signals" style="background: rgba(255, 50, 50, 0.12); color: #ff5555; border: 1px solid #ff5555; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ CLEAR SIGNALS ]</button>
+    `;
+    this.element.appendChild(this.buttonBar);
+
+    const grantBtn = this.buttonBar.querySelector('#btn-dev-grant-signals') as HTMLButtonElement;
+    const clearBtn = this.buttonBar.querySelector('#btn-dev-clear-signals') as HTMLButtonElement;
+
+    grantBtn?.addEventListener('click', () => {
+      KarambitSkinSystem.getInstance().grantDevPendingSignals(999);
+      grantBtn.textContent = '[ +999 SIGNALS GRANTED ]';
+      setTimeout(() => { grantBtn.textContent = '[ GRANT 999 SIGNALS ]'; }, 1500);
+    });
+
+    clearBtn?.addEventListener('click', () => {
+      KarambitSkinSystem.getInstance().clearDevPendingSignals();
+      clearBtn.textContent = '[ SIGNALS CLEARED ]';
+      setTimeout(() => { clearBtn.textContent = '[ CLEAR SIGNALS ]'; }, 1500);
+    });
+
+    // Expose console helpers
+    (window as any).grantDevSignals = (count = 999) => {
+      KarambitSkinSystem.getInstance().grantDevPendingSignals(count);
+      console.log(`[DEV] Granted ${count} pending signals`);
+    };
+    (window as any).clearDevSignals = () => {
+      KarambitSkinSystem.getInstance().clearDevPendingSignals();
+      console.log('[DEV] Cleared all pending signals');
+    };
+
     document.body.appendChild(this.element);
 
     // Check query param
@@ -120,6 +167,6 @@ export class DevOverlay {
       world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE'
     ];
 
-    this.element.innerText = lines.join('\n');
+    this.textElement.innerText = lines.join('\n');
   }
 }
