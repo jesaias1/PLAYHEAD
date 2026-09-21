@@ -515,7 +515,449 @@ export class PixelArtLibrary {
     });
   }
 
-  private static getOrCreateRect(
+  /**
+   * TRACK HERO BANNER (256x128)
+   * Colossal high-definition display with real song title, BPM badge,
+   * deterministic track code, telemetry status, and stepped waveform envelope.
+   */
+  public static getTrackHeroBannerTexture(
+    title: string,
+    bpm: number,
+    trackCode: string,
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa',
+    waveform?: Float32Array
+  ): THREE.CanvasTexture {
+    const key = `billboard_hero_${title}_${bpm}_${trackCode}_${accentHex}_${secondaryHex}`;
+    return this.getOrCreateRect(key, 256, 128, (ctx, w, h) => {
+      // Obsidian monitor glass
+      ctx.fillStyle = '#030509';
+      ctx.fillRect(0, 0, w, h);
+
+      // Outer bezel and technical grid
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(2, 2, w - 4, h - 4);
+
+      // Corner bracket accents
+      ctx.strokeStyle = accentHex;
+      ctx.lineWidth = 3;
+      // Top-left
+      ctx.beginPath(); ctx.moveTo(2, 16); ctx.lineTo(2, 2); ctx.lineTo(16, 2); ctx.stroke();
+      // Top-right
+      ctx.beginPath(); ctx.moveTo(w - 16, 2); ctx.lineTo(w - 2, 2); ctx.lineTo(w - 2, 16); ctx.stroke();
+      // Bottom-left
+      ctx.beginPath(); ctx.moveTo(2, h - 16); ctx.lineTo(2, h - 2); ctx.lineTo(16, h - 2); ctx.stroke();
+      // Bottom-right
+      ctx.beginPath(); ctx.moveTo(w - 16, h - 2); ctx.lineTo(w - 2, h - 2); ctx.lineTo(w - 2, h - 16); ctx.stroke();
+
+      // Header kicker
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('[PLAYHEAD SIGNAL RENDER // NAV SYSTEM]', 14, 16);
+
+      // Track Title (large, clean, bold)
+      ctx.font = 'bold 20px monospace, "Segoe UI", sans-serif';
+      // Subtle accent glow
+      ctx.fillStyle = secondaryHex;
+      ctx.fillText(title.toUpperCase().slice(0, 22), 15, 39);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(title.toUpperCase().slice(0, 22), 14, 38);
+
+      // BPM Badge (high-contrast pill)
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(14, 46, 70, 16);
+      ctx.strokeStyle = accentHex;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(14, 46, 70, 16);
+      ctx.font = 'bold 11px monospace';
+      ctx.fillStyle = accentHex;
+      ctx.fillText(`${bpm} BPM`, 20, 58);
+
+      // Track ID badge
+      ctx.fillStyle = secondaryHex;
+      ctx.font = 'bold 11px monospace';
+      ctx.fillText(`PH://${trackCode.toUpperCase()}`, 92, 58);
+
+      // Status Line
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('LOCK: TRANSIENT SYNC  //  DSP ACTIVE', 14, 76);
+
+      // Real Waveform / Spectrum Analyzer bars
+      const numBars = 36;
+      const barSpacing = (w - 28) / numBars;
+      for (let b = 0; b < numBars; b++) {
+        const bx = 14 + b * barSpacing;
+        let val = 0.3;
+        if (waveform && waveform.length > 0) {
+          const wIdx = Math.floor((b / numBars) * waveform.length);
+          val = Math.max(0.1, Math.min(1.0, waveform[wIdx] || 0.3));
+        } else {
+          val = 0.2 + 0.6 * Math.abs(Math.sin((b * 0.4) + 1.2));
+        }
+        const barH = Math.max(4, Math.round(val * 32));
+        const by = 114 - barH;
+
+        ctx.fillStyle = val > 0.75 ? secondaryHex : (val > 0.45 ? accentHex : '#334155');
+        ctx.fillRect(bx, by, barSpacing - 2, barH);
+
+        // Peak dot
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(bx, by - 2, barSpacing - 2, 1);
+      }
+
+      // Bottom calibration hazard footer
+      ctx.fillStyle = '#ffb700';
+      for (let x = 14; x < w - 14; x += 12) {
+        ctx.fillRect(x, 120, 6, 2);
+      }
+    });
+  }
+
+  /**
+   * VERTICAL JAPANESE STELAE RUNNER (64x256)
+   * High-contrast edge-mounted neon stela with authentic system Kanji,
+   * English reading subtitle, hex coordinate ticker, and vertical VU meters.
+   */
+  public static getVerticalJapaneseSignTexture(
+    termIndex = 0,
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa'
+  ): THREE.CanvasTexture {
+    const approvedTerms = [
+      { kanji: '信号', reading: 'SIGNAL', code: 'SIG-01' },
+      { kanji: '再生', reading: 'PLAYBACK', code: 'PLY-02' },
+      { kanji: '入力', reading: 'INPUT', code: 'INP-03' },
+      { kanji: '速度', reading: 'VELOCITY', code: 'VEL-04' },
+      { kanji: '深度', reading: 'DEPTH', code: 'DPT-05' },
+      { kanji: '同期', reading: 'SYNC', code: 'SNC-06' },
+      { kanji: '解析', reading: 'ANALYSIS', code: 'ANL-07' },
+      { kanji: '軌道', reading: 'TRAJECTORY', code: 'TRJ-08' },
+      { kanji: '周波', reading: 'FREQUENCY', code: 'FRQ-09' }
+    ];
+    const term = approvedTerms[Math.abs(termIndex) % approvedTerms.length];
+    const key = `billboard_vert_jp_${term.code}_${accentHex}_${secondaryHex}`;
+
+    return this.getOrCreateRect(key, 64, 256, (ctx, w, h) => {
+      // Dark monolith runner
+      ctx.fillStyle = '#020409';
+      ctx.fillRect(0, 0, w, h);
+
+      // Neon outer frame
+      ctx.strokeStyle = accentHex;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(2, 2, w - 4, h - 4);
+
+      // Header block with code
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(4, 4, w - 8, 20);
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = secondaryHex;
+      ctx.fillText(term.code, w / 2, 18);
+
+      // English subtitle
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(term.reading, w / 2, 34);
+
+      // Divider line
+      ctx.fillStyle = accentHex;
+      ctx.fillRect(10, 40, w - 20, 2);
+
+      // Main Vertical Kanji Glyphs (High contrast, bold)
+      ctx.font = 'bold 36px "Segoe UI", "Hiragino Sans", "Meiryo", monospace, sans-serif';
+      ctx.textBaseline = 'middle';
+
+      // Character 1
+      ctx.fillStyle = secondaryHex;
+      ctx.fillText(term.kanji[0], w / 2 + 1, 71);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(term.kanji[0], w / 2, 70);
+
+      // Character 2
+      ctx.fillStyle = secondaryHex;
+      ctx.fillText(term.kanji[1], w / 2 + 1, 119);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(term.kanji[1], w / 2, 118);
+
+      // Center separator
+      ctx.fillStyle = accentHex;
+      ctx.fillRect(8, 142, w - 16, 2);
+
+      // Vertical hex coordinates & status
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(`0x${(termIndex * 31 + 79).toString(16).toUpperCase()}`, w / 2, 156);
+      ctx.fillText('DSP-SYNC', w / 2, 168);
+      ctx.fillText('LOCK:OK', w / 2, 180);
+
+      // Binary dot matrix
+      ctx.fillStyle = accentHex;
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 3; col++) {
+          if ((row + col + termIndex) % 2 === 0) {
+            ctx.fillRect(18 + col * 12, 192 + row * 6, 4, 3);
+          }
+        }
+      }
+
+      // Vertical VU audio meter
+      for (let b = 0; b < 8; b++) {
+        const by = 244 - b * 4;
+        ctx.fillStyle = b > 5 ? secondaryHex : (b > 2 ? accentHex : '#1e293b');
+        ctx.fillRect(12, by, w - 24, 2.5);
+      }
+    });
+  }
+
+  /**
+   * HORIZONTAL TELEMETRY DISPLAY (192x64)
+   * Sleek brutalist operator screen showing section information,
+   * live transient tracking, and oscilloscope wave.
+   */
+  public static getHorizontalTelemetryTexture(
+    trackTitle: string,
+    sectionTheme: string,
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa'
+  ): THREE.CanvasTexture {
+    const key = `billboard_telem_${trackTitle}_${sectionTheme}_${accentHex}_${secondaryHex}`;
+    return this.getOrCreateRect(key, 192, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#040710';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = '#1a2436';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(2, 2, w - 4, h - 4);
+
+      // Top title bar
+      ctx.fillStyle = '#0b1120';
+      ctx.fillRect(4, 4, w - 8, 14);
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = accentHex;
+      ctx.fillText(`AUDIO NAV // ${trackTitle.toUpperCase().slice(0, 16)}`, 8, 14);
+
+      // Main Section Readout
+      ctx.font = 'bold 14px monospace';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`SEC // ${sectionTheme.toUpperCase()}`, 8, 34);
+
+      // Radar / Scope on right side
+      ctx.strokeStyle = accentHex;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(138, 20, 46, 38);
+      ctx.beginPath();
+      ctx.arc(161, 39, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = secondaryHex;
+      ctx.fillRect(160, 38, 3, 3);
+
+      // Status ticks
+      ctx.font = '8px monospace';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('DSP LOCK: ACTIVE', 8, 46);
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('TRANSIENT: SYNC', 8, 56);
+    });
+  }
+
+  /**
+   * SPECTROGRAM FREQUENCY MATRIX (128x128)
+   * Stepped LED audio matrix with 16 multi-band columns,
+   * peak hold markers, and DSP status.
+   */
+  public static getSpectrogramMatrixTexture(
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa'
+  ): THREE.CanvasTexture {
+    const key = `billboard_spectro_matrix_${accentHex}_${secondaryHex}`;
+    return this.getOrCreateRect(key, 128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#020306';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = '#111928';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(2, 2, w - 4, h - 4);
+
+      // Header
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('[FREQ SPECTRUM // 16-BAND]', 8, 12);
+
+      // 16 Frequency columns
+      const cols = 16;
+      const colW = 6;
+      for (let c = 0; c < cols; c++) {
+        const cx = 10 + c * 7;
+        const norm = c / cols;
+        // Peak profile typical of electronic music (strong bass/mid curve)
+        const profile = Math.max(0.15, Math.sin(norm * Math.PI * 0.9 + 0.2));
+        const colHeight = Math.round(profile * 90);
+
+        for (let y = 0; y < colHeight; y += 4) {
+          const py = 116 - y;
+          const ratio = y / 90;
+          ctx.fillStyle = ratio > 0.75 ? secondaryHex : (ratio > 0.4 ? accentHex : '#0284c7');
+          ctx.fillRect(cx, py, colW, 3);
+        }
+
+        // Peak marker
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(cx, 116 - colHeight - 3, colW, 2);
+      }
+
+      // Frequency axis
+      ctx.font = '7px monospace';
+      ctx.fillStyle = '#475569';
+      ctx.fillText('20Hz', 10, 124);
+      ctx.fillText('1kHz', 56, 124);
+      ctx.fillText('20k', 104, 124);
+    });
+  }
+
+  /**
+   * ROOFTOP CROWN GLYPH SIGN (128x64)
+   * High-contrast iconic glyph perched atop skyscraper parapets.
+   */
+  public static getRooftopCrownTexture(
+    glyphIndex = 0,
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa'
+  ): THREE.CanvasTexture {
+    const key = `billboard_crown_${glyphIndex}_${accentHex}_${secondaryHex}`;
+    return this.getOrCreateRect(key, 128, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#020306';
+      ctx.fillRect(0, 0, w, h);
+
+      // Steel truss frame
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(3, 3, w - 6, h - 6);
+
+      const center = w / 2;
+      const gType = Math.abs(glyphIndex) % 4;
+
+      if (gType === 0) {
+        // Cosmic Eye in the Void
+        ctx.strokeStyle = accentHex;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(center, 32, 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = secondaryHex;
+        ctx.beginPath();
+        ctx.arc(center, 32, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(center - 2, 30, 4, 4);
+      } else if (gType === 1) {
+        // Delta Horizon / Inverted Pyramid
+        ctx.strokeStyle = accentHex;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(center - 24, 16);
+        ctx.lineTo(center + 24, 16);
+        ctx.lineTo(center, 50);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fillStyle = secondaryHex;
+        ctx.beginPath();
+        ctx.moveTo(center - 10, 20);
+        ctx.lineTo(center + 10, 20);
+        ctx.lineTo(center, 36);
+        ctx.closePath();
+        ctx.fill();
+      } else if (gType === 2) {
+        // Audio Pulse Signal / Chevron
+        ctx.fillStyle = accentHex;
+        for (let i = -3; i <= 3; i++) {
+          const barH = 36 - Math.abs(i) * 8;
+          ctx.fillRect(center + i * 8 - 3, 32 - barH / 2, 6, barH);
+        }
+      } else {
+        // Stepped Diamond Matrix
+        ctx.strokeStyle = secondaryHex;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(center - 16, 16, 32, 32);
+        ctx.fillStyle = accentHex;
+        ctx.fillRect(center - 8, 24, 16, 16);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(center - 3, 29, 6, 6);
+      }
+
+      // Corner strobe beacon markers
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(6, 6, 4, 4);
+      ctx.fillRect(w - 10, 6, 4, 4);
+      ctx.fillRect(6, h - 10, 4, 4);
+      ctx.fillRect(w - 10, h - 10, 4, 4);
+    });
+  }
+
+  /**
+   * BRUTALIST SLIT WINDOW CLUSTER (64x128)
+   * Dense, irregular clusters of narrow brutalist horizontal slit windows
+   * giving towering monoliths architectural human scale.
+   */
+  public static getWindowClusterTexture(
+    theme: 'cool' | 'warm' | 'accent' = 'cool',
+    accentHex = '#00f0ff'
+  ): THREE.CanvasTexture {
+    const key = `facade_windows_${theme}_${accentHex}`;
+    return this.getOrCreateRect(key, 64, 128, (ctx, w, h) => {
+      // Dark monolith basalt/concrete
+      ctx.fillStyle = '#04060a';
+      ctx.fillRect(0, 0, w, h);
+
+      // Lit window color
+      const litColor = theme === 'warm' ? '#fbbf24' : (theme === 'accent' ? accentHex : '#7dd3fc');
+      const unlitColor = '#0b1018';
+
+      // Rows of horizontal slit windows
+      for (let y = 6; y < h - 6; y += 7) {
+        for (let x = 6; x < w - 6; x += 11) {
+          // Pseudorandom hash to cluster lights realistically
+          const hash = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+          const isLit = (hash - Math.floor(hash)) < 0.28;
+
+          ctx.fillStyle = isLit ? litColor : unlitColor;
+          ctx.fillRect(x, y, 7, 2);
+        }
+      }
+    });
+  }
+
+  /**
+   * FACADE STRUCTURAL RIBS & CONDUITS (32x128)
+   * Vertical architectural seams, structural mullions, and illuminated conduits.
+   */
+  public static getFacadeRibsTexture(accentHex = '#00f0ff'): THREE.CanvasTexture {
+    const key = `facade_ribs_${accentHex}`;
+    return this.getOrCreateRect(key, 32, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#030508';
+      ctx.fillRect(0, 0, w, h);
+
+      // Subtle vertical panel seams
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(6, 0, 2, h);
+      ctx.fillRect(15, 0, 2, h);
+      ctx.fillRect(24, 0, 2, h);
+
+      // Illuminated central conduit
+      ctx.fillStyle = accentHex;
+      ctx.fillRect(16, 0, 1, h);
+
+      // Horizontal expansion joint ticks
+      ctx.fillStyle = '#1e293b';
+      for (let y = 16; y < h; y += 32) {
+        ctx.fillRect(0, y, w, 2);
+      }
+    });
+  }
+
+  public static getOrCreateRect(
     key: string,
     width: number,
     height: number,
@@ -526,7 +968,9 @@ export class PixelArtLibrary {
     }
 
     if (typeof document === 'undefined') {
-      return new THREE.CanvasTexture(null as unknown as HTMLCanvasElement);
+      const mockTex = new THREE.CanvasTexture(null as unknown as HTMLCanvasElement);
+      this.cache.set(key, mockTex);
+      return mockTex;
     }
 
     const canvas = document.createElement('canvas');
@@ -556,3 +1000,4 @@ export class PixelArtLibrary {
     return this.getOrCreateRect(key, size, size, (ctx, w) => paintFn(ctx, w));
   }
 }
+

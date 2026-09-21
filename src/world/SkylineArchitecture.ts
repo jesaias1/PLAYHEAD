@@ -11,8 +11,8 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState } from './MusicVisualController';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
-import { PixelArtLibrary } from './PixelArtLibrary';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
 
 export class SkylineArchitecture {
   public group: THREE.Group;
@@ -21,6 +21,7 @@ export class SkylineArchitecture {
   private backgroundRidges: THREE.InstancedMesh | null = null;
 
   private towerMaterials: THREE.MeshStandardMaterial[] = [];
+  public signageSystem: CitySignageSystem | null = null;
 
   // Authored per-instance transforms, retained so distance culling can restore
   // them exactly (never regenerating geometry or changing silhouettes).
@@ -108,21 +109,8 @@ export class SkylineArchitecture {
       if (n.position.y < minWorldY) minWorldY = n.position.y;
     }
 
-    // Billboard materials for skyscraper facades
-    const billboardMats = [
-      new THREE.MeshBasicMaterial({
-        map: PixelArtLibrary.getSignalBillboardTexture(palette.hex, '#ff00aa'),
-        side: THREE.DoubleSide
-      }),
-      new THREE.MeshBasicMaterial({
-        map: PixelArtLibrary.getHazardBillboardTexture('#ffb700'),
-        side: THREE.DoubleSide
-      }),
-      new THREE.MeshBasicMaterial({
-        map: PixelArtLibrary.getSpectrogramBillboardTexture(palette.hex),
-        side: THREE.DoubleSide
-      })
-    ];
+    const monolithAnchors: MonolithAnchor[] = [];
+    const stelaeAnchors: StelaAnchor[] = [];
 
     for (let i = 2; i < route.length - 2 && pIdx < maxInstances; i += step) {
       const node = route[i];
@@ -158,15 +146,29 @@ export class SkylineArchitecture {
         if (!corridor.isPointInsideCorridor(dummy.position, 22.0, pAbyssBottom, pTopY)) {
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
 
-          // Mount authored pixel billboard on every 2nd skyscraper facade facing toward route
-          if (pIdx % 2 === 0) {
-            const bMat = billboardMats[(pIdx / 2) % billboardMats.length];
-            const bMesh = new THREE.Mesh(new THREE.PlaneGeometry(22.0, 11.0), bMat);
-            const facadeOffset = -side * 12.2;
-            bMesh.position.set(px + rightX * facadeOffset, node.position.y + 42.0, pz + rightZ * facadeOffset);
-            bMesh.rotation.y = node.yaw + (side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5);
-            this.group.add(bMesh);
-          }
+          monolithAnchors.push({
+            position: dummy.position.clone(),
+            width: 24.0,
+            height: pHeight,
+            topY: pTopY,
+            abyssBottom: pAbyssBottom,
+            yaw: node.yaw + (side > 0 ? 0.15 : -0.15),
+            side,
+            fwdX,
+            fwdZ,
+            rightX,
+            rightZ,
+            node,
+            nodeIndex: i,
+            progressRatio: i / (route.length - 1),
+            isHero:
+              (analysis.sections &&
+                analysis.sections.some(
+                  s => s.theme === 'DROP' && node.time >= s.start && node.time <= s.end
+                )) ||
+              frame.bass > 0.65 ||
+              (i / step) % 4 === 1
+          });
         }
 
         // 2. Secondary Support Stelae (Framing primary monolith, plunging 320m-560m into deep abyss)
@@ -188,6 +190,22 @@ export class SkylineArchitecture {
 
           if (!corridor.isPointInsideCorridor(dummy.position, 16.0, sAbyssBottom, sTopY)) {
             this.supportStelae.setMatrixAt(sIdx++, dummy.matrix);
+
+            stelaeAnchors.push({
+              position: dummy.position.clone(),
+              width: 10.0,
+              height: sHeight,
+              topY: sTopY,
+              abyssBottom: sAbyssBottom,
+              yaw: node.yaw + 0.1 * st,
+              side,
+              fwdX,
+              fwdZ,
+              rightX,
+              rightZ,
+              node,
+              progressRatio: i / (route.length - 1)
+            });
           }
         }
 
@@ -241,12 +259,25 @@ export class SkylineArchitecture {
     this.group.add(this.primaryMonoliths);
     this.group.add(this.supportStelae);
     this.group.add(this.backgroundRidges);
+
+    // 4. Mount Audio-Reactive City Signage & Facade Displays
+    this.signageSystem = new CitySignageSystem(
+      analysis,
+      track,
+      corridor,
+      monolithAnchors,
+      stelaeAnchors
+    );
+    this.group.add(this.signageSystem.group);
   }
 
-  public update(visualState: MusicVisualState, _dt = 0): void {
+  public update(visualState: MusicVisualState, dt = 0): void {
     const baseEmissive = 0.03 + visualState.bass * 0.12 + visualState.dropImpact * 0.35;
     for (const mat of this.towerMaterials) {
       mat.emissiveIntensity = Math.min(1.0, baseEmissive * visualState.reactivityMultiplier);
+    }
+    if (this.signageSystem) {
+      this.signageSystem.update(visualState, dt);
     }
   }
 
@@ -262,6 +293,10 @@ export class SkylineArchitecture {
    * `maxDistance <= 0` disables culling entirely (HIGH / ULTRA).
    */
   public applyDistanceCulling(cameraPos: THREE.Vector3, maxDistance: number): void {
+    if (this.signageSystem) {
+      this.signageSystem.applyDistanceCulling(cameraPos, maxDistance);
+    }
+
     if (maxDistance <= 0) {
       if (this.cullingActive) {
         this.restoreAllInstances();
@@ -320,6 +355,11 @@ export class SkylineArchitecture {
   }
 
   public dispose(): void {
+    if (this.signageSystem) {
+      this.signageSystem.dispose();
+      this.signageSystem = null;
+    }
+
     this.group.traverse(obj => {
       if (obj instanceof THREE.InstancedMesh || obj instanceof THREE.Mesh) {
         obj.geometry.dispose();
