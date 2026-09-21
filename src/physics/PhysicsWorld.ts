@@ -45,7 +45,8 @@ export class PhysicsWorld {
     route: RouteNode[],
     optionalRamps?: RouteNode[],
     recoveryShelves?: RouteNode[],
-    obstacles?: RouteNode[]
+    obstacles?: RouteNode[],
+    signalSpines?: RouteNode[]
   ): void {
     this.colliders = [];
     let lowestY = Infinity;
@@ -72,6 +73,15 @@ export class PhysicsWorld {
         const col = new BoxCollider(shelf);
         this.colliders.push(col);
         const bottomY = shelf.position.y - shelf.dimensions.y * 0.5;
+        if (bottomY < lowestY) lowestY = bottomY;
+      }
+    }
+
+    if (signalSpines) {
+      for (const spine of signalSpines) {
+        const col = new BoxCollider(spine);
+        this.colliders.push(col);
+        const bottomY = spine.position.y - spine.dimensions.y * 0.5;
         if (bottomY < lowestY) lowestY = bottomY;
       }
     }

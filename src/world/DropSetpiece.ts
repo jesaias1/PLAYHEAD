@@ -100,7 +100,8 @@ export class DropSetpiece {
     const allCorridorNodes = [
       ...track.route,
       ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || [])
+      ...(track.recoveryShelves || []),
+      ...(track.signalSpines || [])
     ];
     const corridor = new RouteExclusionCorridor(allCorridorNodes);
 

@@ -100,7 +100,12 @@ export class SkylineArchitecture {
     let sIdx = 0;
     let rIdx = 0;
 
-    const allCorridorNodes = track.optionalRamps ? [...track.route, ...track.optionalRamps] : track.route;
+    const allCorridorNodes = [
+      ...track.route,
+      ...(track.optionalRamps || []),
+      ...(track.recoveryShelves || []),
+      ...(track.signalSpines || [])
+    ];
     const corridor = new RouteExclusionCorridor(allCorridorNodes);
 
     // Calculate global route minimum Y so every skyscraper extends far below the lowest route elevation
@@ -128,8 +133,8 @@ export class SkylineArchitecture {
         // Skip some sides to maintain asymmetric negative space
         if (((i / step) % 3 === 0) && side === 1) continue;
 
-        // 1. Primary Landmark Monolith (155m - 185m away, plunging 340m-600m into deep abyss)
-        const pDist = 155.0 + ((i * 19) % 30);
+        // 1. Primary Landmark Monolith (175m - 210m away, plunging 340m-600m into deep abyss)
+        const pDist = 175.0 + ((i * 19) % 35);
         const px = node.position.x + rightX * side * pDist;
         const pz = node.position.z + rightZ * side * pDist;
         const pTopY = node.position.y + Math.max(90.0, 100.0 + frame.bass * 160.0);
@@ -143,7 +148,14 @@ export class SkylineArchitecture {
         dummy.rotation.set(0, node.yaw + (side > 0 ? 0.15 : -0.15), 0);
         dummy.updateMatrix();
 
-        if (!corridor.isPointInsideCorridor(dummy.position, 22.0, pAbyssBottom, pTopY)) {
+        // Authoritative full 3D rotated bounding-box validation
+        const mLocalBox = new THREE.Box3(
+          new THREE.Vector3(-12.0, -pHeight * 0.5, -12.0),
+          new THREE.Vector3(12.0, pHeight * 0.5, 12.0)
+        );
+        const mCandidateBox = mLocalBox.applyMatrix4(dummy.matrix);
+
+        if (!corridor.isBoxInsideCorridor(mCandidateBox)) {
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
 
           monolithAnchors.push({
@@ -173,12 +185,12 @@ export class SkylineArchitecture {
           });
         }
 
-        // 2. Secondary Support Stelae (Framing primary monolith, plunging 320m-560m into deep abyss)
+        // 2. Secondary Support Stelae (Framing primary monolith, staying 160m-225m away)
         for (let st = -1; st <= 1; st += 2) {
           if (sIdx >= maxInstances * 2) break;
-          const sDist = pDist - 28.0 + st * 14.0;
-          const sx = node.position.x + rightX * side * sDist + fwdX * (st * 32.0);
-          const sz = node.position.z + rightZ * side * sDist + fwdZ * (st * 32.0);
+          const sDist = pDist + (st > 0 ? 16.0 : -12.0);
+          const sx = node.position.x + rightX * side * sDist + fwdX * (st * 24.0);
+          const sz = node.position.z + rightZ * side * sDist + fwdZ * (st * 24.0);
           const sTopY = node.position.y + Math.max(50.0, 55.0 + frame.mid * 80.0);
           const sPlunge = 320.0 + ((i * 29 + st * 71) % 240.0); // 320m - 560m varying plunge
           const sAbyssBottom = minWorldY - sPlunge;
@@ -190,7 +202,13 @@ export class SkylineArchitecture {
           dummy.rotation.set(0.04 * st, node.yaw + 0.1 * st, 0.05 * side);
           dummy.updateMatrix();
 
-          if (!corridor.isPointInsideCorridor(dummy.position, 16.0, sAbyssBottom, sTopY)) {
+          const sLocalBox = new THREE.Box3(
+            new THREE.Vector3(-5.0, -sHeight * 0.5, -6.0),
+            new THREE.Vector3(5.0, sHeight * 0.5, 6.0)
+          );
+          const sCandidateBox = sLocalBox.applyMatrix4(dummy.matrix);
+
+          if (!corridor.isBoxInsideCorridor(sCandidateBox)) {
             this.supportStelae.setMatrixAt(sIdx++, dummy.matrix);
 
             stelaeAnchors.push({
@@ -213,9 +231,9 @@ export class SkylineArchitecture {
           }
         }
 
-        // 3. Distant Background Ridge (260m away in far atmosphere, plunging 360m-600m into abyss)
+        // 3. Distant Background Ridge (280m - 330m away in far atmosphere)
         if (rIdx < maxInstances) {
-          const rDist = 260.0 + ((i * 23) % 45);
+          const rDist = 280.0 + ((i * 23) % 50);
           const rx = node.position.x + rightX * side * rDist;
           const rz = node.position.z + rightZ * side * rDist;
           const rTopY = node.position.y + Math.max(55.0, 60.0 + frame.bass * 70.0);
@@ -229,7 +247,13 @@ export class SkylineArchitecture {
           dummy.rotation.set(0, node.yaw + 0.3, 0);
           dummy.updateMatrix();
 
-          if (!corridor.isPointInsideCorridor(dummy.position, 42.0, rAbyssBottom, rTopY)) {
+          const rLocalBox = new THREE.Box3(
+            new THREE.Vector3(-35.0, -rHeight * 0.5, -9.0),
+            new THREE.Vector3(35.0, rHeight * 0.5, 9.0)
+          );
+          const rCandidateBox = rLocalBox.applyMatrix4(dummy.matrix);
+
+          if (!corridor.isBoxInsideCorridor(rCandidateBox)) {
             this.backgroundRidges.setMatrixAt(rIdx++, dummy.matrix);
           }
         }

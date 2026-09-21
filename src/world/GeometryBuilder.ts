@@ -70,11 +70,12 @@ export class GeometryBuilder {
       reactiveBeacons.push({ mesh, channel });
     };
 
-    // Authoritative Route Exclusion Corridor (including any optional skill lines and recovery shelves)
+    // Authoritative Route Exclusion Corridor (including any optional skill lines, recovery shelves, and signal spines)
     const allRouteNodes = [
       ...track.route,
       ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || [])
+      ...(track.recoveryShelves || []),
+      ...(track.signalSpines || [])
     ];
     const corridor = new RouteExclusionCorridor(allRouteNodes);
 
@@ -391,6 +392,41 @@ export class GeometryBuilder {
           color: 0x1f293d,
           transparent: true,
           opacity: 0.6
+        });
+        const edges = new THREE.LineSegments(edgesGeom, lineMat);
+        edges.position.copy(mesh.position);
+        edges.rotation.copy(mesh.rotation);
+        rootGroup.add(edges);
+        edgeLines.push(edges);
+      }
+    }
+
+    // Build Authoritative Signal Spines (Procedural secondary recovery layer)
+    if (track.signalSpines) {
+      for (const spine of track.signalSpines) {
+        const geom = new THREE.BoxGeometry(spine.dimensions.x, spine.dimensions.y, spine.dimensions.z);
+        const meshMat = spine.isSurf
+          ? [
+              accentMaterial,
+              accentMaterial,
+              surfMaterial,
+              backgroundMonolithMaterial,
+              accentMaterial,
+              accentMaterial
+            ]
+          : backgroundMonolithMaterial;
+
+        const mesh = new THREE.Mesh(geom, meshMat);
+        mesh.position.set(spine.position.x, spine.position.y, spine.position.z);
+        mesh.rotation.set(spine.pitch, spine.yaw, spine.roll, 'YXZ');
+        rootGroup.add(mesh);
+
+        // High-contrast signal emissive edge trim (Cosmic Pixel Brutalism recovery marker)
+        const edgesGeom = new THREE.EdgesGeometry(geom);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: primaryCol,
+          transparent: true,
+          opacity: 0.95
         });
         const edges = new THREE.LineSegments(edgesGeom, lineMat);
         edges.position.copy(mesh.position);

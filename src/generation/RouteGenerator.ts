@@ -14,6 +14,7 @@ import { SurfValidator } from './SurfValidator';
 import { getPlatformLateralEnvelope, getPlatformMaxHalfWidth } from './PlatformShape';
 import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowGeometry';
 import { RouteChallengeGenerator } from './RouteChallengeGenerator';
+import { SignalSpineGenerator } from './SignalSpineGenerator';
 
 export const ROUTE_GENERATION_VERSION = 2;
 
@@ -586,7 +587,10 @@ export class RouteGenerator {
     // 6. Generate Subtle Recovery Catch-Shelves under tricky platform sequences
     const recoveryShelves = RouteGenerator.generateRecoveryShelves(repairedNodes, rng);
 
-    // 7. FINAL AUTHORITATIVE RAMP CLIPPING VALIDATION
+    // 7. Generate Authoritative Signal Spines (procedural recovery layer for post-surf, staircases, and high-speed gaps)
+    const signalSpines = SignalSpineGenerator.generate(repairedNodes, analysis, rng);
+
+    // 8. FINAL AUTHORITATIVE RAMP CLIPPING VALIDATION
     //
     // Candidate selection earlier in generation reasons about ramps using
     // conservative proxies and the main route only. This pass instead measures
@@ -596,7 +600,8 @@ export class RouteGenerator {
     const optionalRamps = RouteGenerator.rejectClippingRamps(
       optionalRampsRaw,
       repairedNodes,
-      recoveryShelves
+      recoveryShelves,
+      signalSpines
     );
     const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis);
 
@@ -606,6 +611,7 @@ export class RouteGenerator {
       route: repairedNodes,
       optionalRamps,
       recoveryShelves,
+      signalSpines,
       obstacles,
       checkpoints,
       finish,
@@ -647,12 +653,14 @@ export class RouteGenerator {
   public static rejectClippingRamps(
     ramps: RouteNode[],
     route: RouteNode[],
-    recoveryShelves: RouteNode[] = []
+    recoveryShelves: RouteNode[] = [],
+    signalSpines: RouteNode[] = []
   ): RouteNode[] {
     if (ramps.length === 0) return ramps;
 
     const routeBoxes = route.map((n) => RouteGenerator.nodeOBB(n));
     const shelfBoxes = recoveryShelves.map((n) => RouteGenerator.nodeOBB(n));
+    const spineBoxes = signalSpines.map((n) => RouteGenerator.nodeOBB(n));
     const accepted: RouteNode[] = [];
     const acceptedBoxes: OBB[] = [];
 
@@ -672,7 +680,14 @@ export class RouteGenerator {
         }
       }
 
-      // 3. Previously accepted optional ramps (ramp vs ramp).
+      // 3. Signal Spines.
+      if (!clips) {
+        for (const box of spineBoxes) {
+          if (box.intersectsOBB(rampBox)) { clips = true; break; }
+        }
+      }
+
+      // 4. Previously accepted optional ramps (ramp vs ramp).
       if (!clips) {
         for (const box of acceptedBoxes) {
           if (box.intersectsOBB(rampBox)) { clips = true; break; }
@@ -1158,6 +1173,7 @@ export class RouteGenerator {
       seed: analysis.seed,
       route: nodes,
       recoveryShelves: [],
+      signalSpines: [],
       obstacles,
       checkpoints,
       finish,

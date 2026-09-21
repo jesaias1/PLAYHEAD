@@ -98,6 +98,33 @@ export class RouteExclusionCorridor {
         }
       }
 
+      // Check surf exit launch cone (protects airborne trajectory flying off the ramp)
+      if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
+        const fwdX = Math.sin(node.yaw);
+        const fwdZ = Math.cos(node.yaw);
+        const halfLen = (node.dimensions.z || 0) * 0.5;
+        const exitX = node.position.x + fwdX * halfLen;
+        const exitZ = node.position.z + fwdZ * halfLen;
+
+        const toObjX = pos.x - exitX;
+        const toObjZ = pos.z - exitZ;
+        const projFwd = toObjX * fwdX + toObjZ * fwdZ;
+
+        if (projFwd > 0 && projFwd < 45.0) {
+          const coneRatio = projFwd / 45.0;
+          const coneRadius = 14.0 + coneRatio * 18.0 + objectRadius;
+          const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
+
+          const coneMinY = node.position.y - 18.0;
+          const coneMaxY = node.position.y + 40.0;
+          if (!(maxY < coneMinY || minY > coneMaxY)) {
+            if (latDistSq < coneRadius * coneRadius) {
+              return true; // Collision with surf exit launch cone
+            }
+          }
+        }
+      }
+
       // Check flight trajectory segment to next node
       if (i < this.route.length - 1) {
         const nextNode = this.route[i + 1];
@@ -113,7 +140,6 @@ export class RouteExclusionCorridor {
           segMargin = 30.0 + 0.7 * objectRadius;
         }
         const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
-        const segRequiredDist = segHalfBreadth + objectRadius + segMargin;
 
         const ax = node.position.x;
         const az = node.position.z;
@@ -134,9 +160,21 @@ export class RouteExclusionCorridor {
         const closestZ = az + t * abz;
         const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
 
-        // Jump trajectory vertical clearance: player arcs upward or downward
-        const jumpMinY = interpY - JUMP_CORRIDOR_BELOW;
-        const jumpMaxY = interpY + JUMP_CORRIDOR_ABOVE;
+        // 3D Parabolic jump arc apex calculation over airborne gaps
+        const segDist = Math.sqrt(segLenSq);
+        const gapDist = Math.max(0, segDist - ((node.dimensions.z || 0) * 0.5 + (nextNode.dimensions.z || 0) * 0.5));
+        const apexHeight = gapDist > 4.0 ? Math.max(2.5, Math.min(8.5, gapDist * 0.32)) : 0;
+        const arcOffset = 4.0 * t * (1.0 - t) * apexHeight;
+        const flightY = interpY + arcOffset;
+
+        // Jump trajectory vertical clearance
+        const jumpMinY = flightY - JUMP_CORRIDOR_BELOW;
+        const jumpMaxY = flightY + JUMP_CORRIDOR_ABOVE;
+
+        // Lateral air-strafe drift expansion over airborne gaps
+        const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
+        const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
+        const segRequiredDist = segHalfBreadth + objectRadius + segMargin + lateralDrift;
 
         const segVerticalOverlap = !(maxY < jumpMinY || minY > jumpMaxY);
         if (segVerticalOverlap) {
@@ -325,6 +363,35 @@ export class RouteExclusionCorridor {
         }
       }
 
+      // Check surf exit launch cone (protects airborne trajectory flying off the ramp)
+      if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
+        const fwdX = Math.sin(node.yaw);
+        const fwdZ = Math.cos(node.yaw);
+        const halfLen = (node.dimensions.z || 0) * 0.5;
+        const exitX = node.position.x + fwdX * halfLen;
+        const exitZ = node.position.z + fwdZ * halfLen;
+
+        const toObjX = center.x - exitX;
+        const toObjZ = center.z - exitZ;
+        const projFwd = toObjX * fwdX + toObjZ * fwdZ;
+
+        if (projFwd > 0 && projFwd < 45.0) {
+          const coneRatio = projFwd / 45.0;
+          const coneRadius = 14.0 + coneRatio * 18.0 + radius;
+          const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
+
+          const coneMinY = node.position.y - 18.0;
+          const coneMaxY = node.position.y + 40.0;
+          if (!(box.max.y < coneMinY || box.min.y > coneMaxY)) {
+            const latDist = Math.sqrt(latDistSq);
+            const penetration = coneRadius - latDist;
+            if (penetration > 0 && (!worst || penetration > worst.penetration)) {
+              worst = { penetration, nodeIndex: i };
+            }
+          }
+        }
+      }
+
       // Flight trajectory segment to next node
       if (i < this.route.length - 1) {
         const nextNode = this.route[i + 1];
@@ -340,7 +407,6 @@ export class RouteExclusionCorridor {
           segMargin = 30.0 + 0.7 * radius;
         }
         const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
-        const segRequiredDist = segHalfBreadth + radius + segMargin;
 
         const ax = node.position.x;
         const az = node.position.z;
@@ -358,8 +424,20 @@ export class RouteExclusionCorridor {
         const closestZ = az + t * abz;
         const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
 
-        const jumpMinY = interpY - JUMP_CORRIDOR_BELOW;
-        const jumpMaxY = interpY + JUMP_CORRIDOR_ABOVE;
+        // 3D Parabolic jump arc apex calculation over airborne gaps
+        const segDist = Math.sqrt(segLenSq);
+        const gapDist = Math.max(0, segDist - ((node.dimensions.z || 0) * 0.5 + (nextNode.dimensions.z || 0) * 0.5));
+        const apexHeight = gapDist > 4.0 ? Math.max(2.5, Math.min(8.5, gapDist * 0.32)) : 0;
+        const arcOffset = 4.0 * t * (1.0 - t) * apexHeight;
+        const flightY = interpY + arcOffset;
+
+        const jumpMinY = flightY - JUMP_CORRIDOR_BELOW;
+        const jumpMaxY = flightY + JUMP_CORRIDOR_ABOVE;
+
+        // Lateral air-strafe drift expansion over airborne gaps
+        const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
+        const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
+        const segRequiredDist = segHalfBreadth + radius + segMargin + lateralDrift;
 
         if (!(box.max.y < jumpMinY || box.min.y > jumpMaxY)) {
           const cdx = center.x - closestX;
@@ -374,6 +452,13 @@ export class RouteExclusionCorridor {
     }
 
     return worst;
+  }
+
+  /**
+   * Fast boolean query checking if a 3D bounding box violates the corridor.
+   */
+  public isBoxInsideCorridor(box: THREE.Box3, extraSurfMargin = 28.0): boolean {
+    return this.evaluateVolume(box, extraSurfMargin) !== null;
   }
 }
 

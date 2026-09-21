@@ -85,6 +85,8 @@ export interface RouteNode {
   ascentMinimumApproach?: number;
   ascentPostLandingRunway?: number;
   isRecoveryShelf?: boolean;
+  isSignalSpine?: boolean;
+  signalSpineVariant?: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF';
   obstacleType?: RouteObstacleType;
   obstacleGroupId?: number;
   obstacleSafeLane?: 'LEFT' | 'RIGHT' | 'BOTH' | 'JUMP';
@@ -114,6 +116,7 @@ export interface GeneratedTrack {
   route: RouteNode[];
   optionalRamps?: RouteNode[];
   recoveryShelves?: RouteNode[];
+  signalSpines?: RouteNode[];
   obstacles?: RouteNode[];
   checkpoints: CheckpointDefinition[];
   finish: FinishDefinition;

@@ -72,7 +72,7 @@ export class World {
     }
 
     // 2. Build Physics Colliders (frozen authoritative physics)
-    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves, track.obstacles);
+    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves, track.obstacles, track.signalSpines);
 
     // 3. Build Procedural Route & Monolith Meshes
     this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette);
@@ -130,7 +130,8 @@ export class World {
     const allCorridorNodes = [
       ...track.route,
       ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || [])
+      ...(track.recoveryShelves || []),
+      ...(track.signalSpines || [])
     ];
     this.corridor = new RouteExclusionCorridor(allCorridorNodes);
 
