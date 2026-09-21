@@ -128,6 +128,19 @@ export class GeometryBuilder {
     });
     reactiveMaterials.push(accentMaterial);
 
+    // 3b. Dedicated Signal Spine Top Material (Audio-Reactive aggregate with prominent signal pulse)
+    const spineTopMaterial = new THREE.MeshStandardMaterial({
+      color: 0x162234,
+      emissive: primaryCol,
+      emissiveIntensity: 0.42,
+      roughness: 0.42,
+      metalness: 0.65,
+      map: concreteTex,
+      bumpMap: concreteTex,
+      bumpScale: 0.04
+    });
+    reactiveMaterials.push(spineTopMaterial);
+
     // 4. Checkpoint Material
     const checkpointMaterial = new THREE.MeshStandardMaterial({
       color: 0x080c14,
@@ -405,13 +418,13 @@ export class GeometryBuilder {
     if (track.signalSpines) {
       for (const spine of track.signalSpines) {
         const geom = new THREE.BoxGeometry(spine.dimensions.x, spine.dimensions.y, spine.dimensions.z);
-        // Multi-material: Top face (+Y, index 2) matches platformMaterial (playable concrete aggregate).
+        // Multi-material: Top face (+Y, index 2) uses spineTopMaterial (audio-reactive signal aggregate).
         // Underside (-Y, index 3) gets backgroundMonolithMaterial (dark brutalist basalt).
         // Side faces (indices 0, 1, 4, 5) get accentMaterial (dark with audio-reactive accent trim).
         const meshMat = [
           accentMaterial,
           accentMaterial,
-          spine.isSurf ? surfMaterial : platformMaterial,
+          spine.isSurf ? surfMaterial : spineTopMaterial,
           backgroundMonolithMaterial,
           accentMaterial,
           accentMaterial
@@ -427,7 +440,8 @@ export class GeometryBuilder {
         const lineMat = new THREE.LineBasicMaterial({
           color: primaryCol,
           transparent: true,
-          opacity: 0.95
+          opacity: 1.0,
+          depthTest: true
         });
         const edges = new THREE.LineSegments(edgesGeom, lineMat);
         edges.position.copy(mesh.position);

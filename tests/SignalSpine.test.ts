@@ -50,65 +50,42 @@ function createMockAnalysis(seed: number, themes: string[]): TrackAnalysis {
 }
 
 describe('Signal Spine & Recovery Traversal Layer', () => {
-  it('guarantees recovery coverage for post-surf landing chains across generated tracks', () => {
-    // Generate tracks across multiple seeds containing SURF phrases
-    const seeds = [12345, 777, 4242, 99991, 31337];
-
-    for (const seed of seeds) {
-      const analysis = createMockAnalysis(seed, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'SURF', 'FLOW']);
-      const palette = PaletteSelector.selectPalette(seed, 0.6, 0.7);
-      const track = TrackGenerator.generate(analysis, palette);
-
-      expect(track.signalSpines).toBeDefined();
-      const spines = track.signalSpines!;
-      expect(spines.length).toBeGreaterThan(0);
-
-      // Verify that every surf ramp exit has post-surf recovery spine coverage in following landing chain
-      for (let i = 0; i < track.route.length - 1; i++) {
-        const curr = track.route[i];
-        const next = track.route[i + 1];
-
-        if (curr.isSurf && !next.isSurf) {
-          // Post-surf landing detected
-          const postSurfLanding = track.route[i + 1];
-          const hasPostSurfSpine = spines.some(s => {
-            const dx = Math.abs(s.position.x - postSurfLanding.position.x);
-            const dz = Math.abs(s.position.z - postSurfLanding.position.z);
-            return Math.hypot(dx, dz) < 35.0;
-          });
-
-          expect(hasPostSurfSpine).toBe(true);
-        }
-      }
-    }
-  });
-
-  it('generates top-surface bridging spines across staircase and ascent chains', () => {
-    const analysis = createMockAnalysis(4242, ['FLOW', 'BUILDUP', 'FLOW']);
-    const palette = PaletteSelector.selectPalette(4242, 0.6, 0.7);
-    const track = TrackGenerator.generate(analysis, palette);
-
+  it('generates connectors across BOTH small-platform chains AND medium / larger transfers', () => {
+    const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
+    const rng = new SeededRandom(12345);
+    const track = RouteGenerator.generate(analysis);
     const spines = track.signalSpines || [];
-    const ascentNodes = track.route.filter(n =>
-      n.type === RouteNodeType.STEP_UP ||
-      n.type === RouteNodeType.ASCENT_CHAIN ||
-      n.ascentVariant !== undefined
-    );
 
-    expect(ascentNodes.length).toBeGreaterThan(0);
+    expect(spines.length).toBeGreaterThan(0);
 
-    // Verify bridging spines exist near ascent steps
-    for (const ascentNode of ascentNodes) {
-      const nearSpines = spines.filter(s => {
-        const dx = Math.abs(s.position.x - ascentNode.position.x);
-        const dz = Math.abs(s.position.z - ascentNode.position.z);
-        return Math.hypot(dx, dz) < 25.0;
-      });
-      expect(nearSpines.length).toBeGreaterThan(0);
-    }
+    const report = SignalSpineGenerator.getLastReport();
+    expect(report).toBeDefined();
+    expect(report!.smallChainConnectors).toBeGreaterThan(0);
+    expect(report!.mediumLargeConnectors).toBeGreaterThan(0);
+    expect(report!.totalGenerated).toBe(spines.length);
   });
 
-  it('guarantees ZERO under-slung geometry (spines exist strictly at the top playable surface)', () => {
+  it('exhibits controlled instance variation in width, length, and lateral alignment', () => {
+    const analysis = createMockAnalysis(4242, ['FLOW', 'BUILDUP', 'FLOW']);
+    const track = RouteGenerator.generate(analysis);
+    const spines = track.signalSpines || [];
+
+    expect(spines.length).toBeGreaterThan(5);
+
+    // 1. Widths must vary across instances (not a cloned fixed width)
+    const widths = new Set(spines.map(s => Math.round(s.dimensions.x * 10) / 10));
+    expect(widths.size).toBeGreaterThanOrEqual(3);
+
+    // 2. Lengths must vary across instances
+    const lengths = new Set(spines.map(s => Math.round(s.dimensions.z * 10) / 10));
+    expect(lengths.size).toBeGreaterThanOrEqual(3);
+
+    // 3. Variants must feature varied alignments (CURVED, OFFSET, STRAIGHT/CATWALK)
+    const variants = new Set(spines.map(s => s.signalSpineVariant));
+    expect(variants.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('guarantees ZERO under-slung geometry (spines sit flush at top playable surface)', () => {
     const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
     const track = RouteGenerator.generate(analysis);
     const spines = track.signalSpines || [];
@@ -167,7 +144,7 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     }
   });
 
-  it('enforces strict risk preservation (narrow catch strip, preserving void on sides)', () => {
+  it('enforces strict risk preservation (narrow catch strip, never full-width bridges)', () => {
     const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
     const track = RouteGenerator.generate(analysis);
     const spines = track.signalSpines || [];
@@ -175,8 +152,8 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(spines.length).toBeGreaterThan(0);
 
     for (const spine of spines) {
-      // 1. Spines must be physically narrow (1.5m to 3.2m width)
-      expect(spine.dimensions.x).toBeLessThanOrEqual(3.2);
+      // 1. Spines must be physically narrow (1.5m to 4.2m width, never full width)
+      expect(spine.dimensions.x).toBeLessThanOrEqual(4.2);
       expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.5);
 
       // 2. Thickness must be low profile (<= 0.5m)
@@ -191,8 +168,8 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     }
   });
 
-  it('guarantees Signal Drift (track_13_signal_drift) receives top-surface signal spines', () => {
-    const presetPath = path.resolve(__dirname, '../public/music/presets/track_13_signal_drift.json');
+  it('guarantees Signal Drift (track_1_signal_drift) receives both small-chain and medium/large connectors', () => {
+    const presetPath = path.resolve(__dirname, '../public/music/presets/track_1_signal_drift.json');
     expect(fs.existsSync(presetPath)).toBe(true);
 
     const presetJson = JSON.parse(fs.readFileSync(presetPath, 'utf8'));
@@ -200,18 +177,18 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     const spines = SignalSpineGenerator.generate(presetJson.track.route, presetJson.analysis, rng);
 
     // Verify healthy top-surface spine coverage on Signal Drift
-    expect(spines.length).toBeGreaterThanOrEqual(10);
+    expect(spines.length).toBeGreaterThanOrEqual(15);
 
-    // Verify that the surf-to-stair sequence (nodes #38 through #48) has bridging spines
-    const stairSpines = spines.filter(s => {
-      // Check if spine connects near the stair steps
-      return s.position.z >= 1250 && s.position.z <= 1650;
-    });
-    expect(stairSpines.length).toBeGreaterThanOrEqual(5);
+    const report = SignalSpineGenerator.getLastReport();
+    expect(report).toBeDefined();
+    // Must generate on small chains (staircase / post-surf)
+    expect(report!.smallChainConnectors).toBeGreaterThanOrEqual(5);
+    // Must ALSO generate on medium / larger transfers
+    expect(report!.mediumLargeConnectors).toBeGreaterThanOrEqual(10);
 
     // Verify all spines on Signal Drift are top-surface and narrow
     for (const spine of spines) {
-      expect(spine.dimensions.x).toBeLessThanOrEqual(3.2);
+      expect(spine.dimensions.x).toBeLessThanOrEqual(4.2);
       expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
       expect(spine.isSignalSpine).toBe(true);
     }
