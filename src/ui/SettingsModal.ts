@@ -25,8 +25,6 @@ export class SettingsModal {
   private closeBtn: HTMLButtonElement;
 
   private onCloseCallback?: () => void;
-  /** Called when the GRAPHICS tier changes, so it can be applied live. */
-  public onGraphicsChanged?: (tier: string) => void;
   private settingsManager = SettingsManager.getInstance();
 
   constructor() {
@@ -239,8 +237,6 @@ export class SettingsModal {
     this.graphicsSelect.addEventListener('change', () => {
       const tier = this.graphicsSelect.value as any;
       this.settingsManager.update({ graphics: tier });
-      // Apply immediately so the change is visible without restarting.
-      this.onGraphicsChanged?.(tier);
     });
 
     this.calloutsSelect.addEventListener('change', () => {

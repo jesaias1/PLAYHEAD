@@ -29,6 +29,12 @@ export interface GameSettings {
   showHints: boolean;
 }
 
+export type SettingsKey = keyof GameSettings;
+export type SettingsListener = (
+  settings: Readonly<GameSettings>,
+  changedKeys: ReadonlySet<SettingsKey>
+) => void;
+
 const DEFAULT_SETTINGS: GameSettings = {
   mouseSensitivity: 1.0,
   fov: 75,
@@ -53,6 +59,7 @@ const STORAGE_KEY = 'trackrun_settings';
 export class SettingsManager {
   private static instance: SettingsManager;
   public settings: GameSettings;
+  private listeners = new Set<SettingsListener>();
 
   private constructor() {
     this.settings = this.load();
@@ -91,7 +98,26 @@ export class SettingsManager {
   }
 
   public update(partial: Partial<GameSettings>): void {
+    const changedKeys = (Object.keys(partial) as SettingsKey[])
+      .filter(key => partial[key] !== undefined && partial[key] !== this.settings[key]);
+    if (changedKeys.length === 0) return;
+
     this.settings = { ...this.settings, ...partial };
     this.save();
+
+    const changed = new Set(changedKeys);
+    for (const listener of this.listeners) {
+      try {
+        listener(this.settings, changed);
+      } catch (error) {
+        console.warn('[SettingsManager] Settings listener failed:', error);
+      }
+    }
+  }
+
+  /** Subscribe active runtime consumers to the single persisted settings state. */
+  public subscribe(listener: SettingsListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 }

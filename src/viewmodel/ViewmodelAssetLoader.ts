@@ -142,6 +142,7 @@ export class ViewmodelAssetLoader {
     const knifeMaterials: THREE.Material[] = [];
     const canonicalCyan = new THREE.Color(0x00f0ff);
     const activeAccent = canonicalCyan.clone();
+    const artifactRim = canonicalCyan.clone();
 
     knifeScene.traverse((obj: THREE.Object3D) => {
       if ((obj as THREE.Mesh).isMesh) {
@@ -215,14 +216,17 @@ export class ViewmodelAssetLoader {
       // retained as a minor 20% anchor rather than the dominant term, so the
       // accent actually tracks the map (violet map -> violet, red -> crimson)
       // while never snapping to a raw fully-saturated hue.
-      const canonicalAnchor = new THREE.Color(0x00f0ff);
-      const blended = col.clone().lerp(canonicalAnchor, 0.2);
-      activeAccent.copy(blended);
+      activeAccent.copy(col).lerp(canonicalCyan, 0.2);
 
       if (cosmicMaterial) {
         const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
         if (equipped.profile.isCanonical) {
-          cosmicMaterial.uniforms.uRimColor.value.copy(blended);
+          cosmicMaterial.uniforms.uRimColor.value.copy(activeAccent);
+        } else if (equipped.profile.isVideoArtifact) {
+          // The level palette belongs on the physical edge/reflection only.
+          // It never multiplies the source video sampled inside the blade.
+          artifactRim.copy(equipped.profile.rimColor).lerp(activeAccent, 0.58);
+          cosmicMaterial.uniforms.uRimColor.value.copy(artifactRim);
         }
       }
     };
@@ -289,6 +293,7 @@ export class ViewmodelAssetLoader {
 
     const cosmicMat = new KarambitCosmicMaterial();
     KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat);
+    const fallbackRim = new THREE.Color();
 
     return {
       rootGroup,
@@ -306,7 +311,13 @@ export class ViewmodelAssetLoader {
       },
       accentColor: accentColor.clone(),
       setAccentColor: (col: THREE.Color) => {
-        cosmicMat.uniforms.uRimColor.value.copy(col);
+        const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
+        if (equipped.profile.isCanonical) {
+          cosmicMat.uniforms.uRimColor.value.copy(col);
+        } else if (equipped.profile.isVideoArtifact) {
+          fallbackRim.copy(equipped.profile.rimColor).lerp(col, 0.58);
+          cosmicMat.uniforms.uRimColor.value.copy(fallbackRim);
+        }
       },
       setAudioPulse: () => {
         // Headless fallback rig has no hand material to modulate.

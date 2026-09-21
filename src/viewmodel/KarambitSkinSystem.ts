@@ -371,9 +371,9 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       isCanonical: false,
       isVideoArtifact: true,
       videoPath: '/assets/viewmodel/karambit/videos/signalism.mp4',
-      exposure: 1.02,
-      contrast: 1.08,
-      emission: 1.02,
+      exposure: 1.12,
+      contrast: 1.0,
+      emission: 1.04,
       uvScale: 1.0
     }
   },
@@ -404,9 +404,9 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       isCanonical: false,
       isVideoArtifact: true,
       videoPath: '/assets/viewmodel/karambit/videos/god-run.mp4',
-      exposure: 1.0,
-      contrast: 1.1,
-      emission: 1.04,
+      exposure: 1.1,
+      contrast: 1.0,
+      emission: 1.05,
       uvScale: 1.0
     }
   },
@@ -437,9 +437,9 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       isCanonical: false,
       isVideoArtifact: true,
       videoPath: '/assets/viewmodel/karambit/videos/prism.mp4',
-      exposure: 1.0,
-      contrast: 1.04,
-      emission: 1.0,
+      exposure: 1.08,
+      contrast: 1.0,
+      emission: 1.03,
       uvScale: 1.0
     }
   }

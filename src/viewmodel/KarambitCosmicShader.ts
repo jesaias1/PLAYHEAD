@@ -280,13 +280,17 @@ export const KarambitCosmicShaderDef = {
           );
           vec3 videoDeep = texture2D(tCosmicTexture, artifactUvDeep).rgb;
           vec3 videoNear = texture2D(tCosmicTexture, artifactUvNear).rgb;
-          float signalLuma = dot(videoNear, vec3(0.2126, 0.7152, 0.0722));
-          artColor1 = mix(videoDeep * 0.78, videoNear, 0.46);
-          artColor2 = mix(
-            uNebulaSecondary * 0.08,
-            videoDeep * mix(vec3(1.0), uNebulaPrimary, 0.12),
-            0.14 + signalLuma * 0.12
-          );
+
+          // Preserve the supplied artwork as the dominant blade colour. A
+          // gentle perceptual lift recovers information in dark source frames
+          // without replacing their hue with the current map palette.
+          vec3 sourceVideo = mix(videoNear, videoDeep, 0.10);
+          float sourceLuma = dot(sourceVideo, vec3(0.2126, 0.7152, 0.0722));
+          float shadowWeight = 1.0 - smoothstep(0.06, 0.38, sourceLuma);
+          vec3 liftedVideo = mix(sourceVideo, sqrt(max(sourceVideo, vec3(0.0))), 0.24);
+          liftedVideo += vec3(0.018 * shadowWeight);
+          artColor1 = liftedVideo;
+          artColor2 = videoDeep;
         } else if (uIsPrism > 0.5) {
           // PRISM STATIC: Pearlescent / Icy / Iridescent cosmic material
           // Multi-angle iridescent chromatic wave shifting between icy electric cyan and soft pale rose-pink
@@ -334,9 +338,15 @@ export const KarambitCosmicShaderDef = {
           artColor2 = texture2D(tCosmicTexture, uvLayer2).rgb;
         }
 
-        // Apply contrast & exposure
-        artColor1 = pow(artColor1, vec3(uContrast)) * uExposure;
-        artColor2 = pow(artColor2, vec3(uContrast)) * (uExposure * 0.7);
+        // Video Artifacts keep source contrast/hue intact. Static skins retain
+        // the stronger authored contrast curve used by their texture profiles.
+        if (uIsVideoArtifact > 0.5) {
+          artColor1 = clamp(artColor1 * uExposure, 0.0, 1.35);
+          artColor2 = clamp(artColor2 * (uExposure * 0.92), 0.0, 1.25);
+        } else {
+          artColor1 = pow(artColor1, vec3(uContrast)) * uExposure;
+          artColor2 = pow(artColor2, vec3(uContrast)) * (uExposure * 0.7);
+        }
       } else {
         if (uIsPrism > 0.5) {
           float r1 = fbm(uvLayer1 + parallaxShift * 0.06);
@@ -360,7 +370,7 @@ export const KarambitCosmicShaderDef = {
         if (uIsBlackstar > 0.5) {
           cosmicCore = (artColor1 + artColor2) * uEmission;
         } else if (uIsVideoArtifact > 0.5) {
-          cosmicCore = mix(artColor1, artColor2, 0.16) * uEmission;
+          cosmicCore = mix(artColor1, artColor2, 0.08) * uEmission;
         } else if (uIsPrism > 0.5) {
           cosmicCore = mix(artColor1, artColor2, 0.26) * uEmission;
         } else {
@@ -370,7 +380,9 @@ export const KarambitCosmicShaderDef = {
       } else {
         cosmicCore = artColor1 + artColor2 * 0.45;
       }
-      cosmicCore *= audioPulse;
+      cosmicCore *= uIsVideoArtifact > 0.5
+        ? (1.0 + (audioPulse - 1.0) * 0.28)
+        : audioPulse;
 
       // LAYER 3: Stellar Sparkles / Flares
       vec2 starGrid = uvLayer2 * (uIsBlackstar > 0.5 ? 4.0 : (uIsPrism > 0.5 ? 6.5 : 5.5));
@@ -413,7 +425,7 @@ export const KarambitCosmicShaderDef = {
       } else if (uIsVideoArtifact > 0.5) {
         // Thin signal-glass edge preserves the knife silhouette without washing
         // out the live imagery inside it.
-        rimGlow = uRimColor * (pow(fresnel, uFresnelPower) * 1.25) * (0.9 + uAudioImpact * 0.16);
+        rimGlow = uRimColor * (pow(fresnel, uFresnelPower) * 1.0) * (0.82 + uAudioImpact * 0.12);
       } else if (uIsPrism > 0.5) {
         // Prism: Crisp luminous icy-pearl rim with subtle spectral sheen
         rimGlow = mix(vec3(0.75, 0.92, 1.0), vec3(1.0, 0.82, 0.92), fresnel) * (pow(fresnel, 2.2) * 1.4);
@@ -423,14 +435,14 @@ export const KarambitCosmicShaderDef = {
 
       // Specular blade gloss for glass/blade enclosure feel
       // Blackstar absorbs ambient light -> specular is dampened to 0.09
-      float specStrength = uIsVideoArtifact > 0.5 ? 0.28 : (uIsBlackstar > 0.5 ? 0.09 : (uIsPrism > 0.5 ? 0.40 : 0.45));
+      float specStrength = uIsVideoArtifact > 0.5 ? 0.22 : (uIsBlackstar > 0.5 ? 0.09 : (uIsPrism > 0.5 ? 0.40 : 0.45));
       float bladeSpec = pow(max(0.0, dot(reflect(-uLightDirection, N), V)), 24.0) * specStrength;
 
       // Composite the trapped cosmic blade
       vec3 cosmicBlade = cosmicCore + starGlow + rimGlow + vec3(bladeSpec * 0.35);
       if (uIsVideoArtifact > 0.5) {
         vec3 artifactSteel = baseTex.rgb * uBaseColor * (0.28 + diffuseLight * 0.28);
-        cosmicBlade = mix(artifactSteel, cosmicBlade, 0.88);
+        cosmicBlade = mix(artifactSteel, cosmicBlade, 0.94);
       }
 
       // Composite handle vs blade

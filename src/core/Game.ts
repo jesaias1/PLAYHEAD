@@ -6,8 +6,7 @@
 import { GameState, StateMachine } from './StateMachine';
 import * as THREE from 'three';
 import { GameClock } from './Clock';
-import { SettingsManager } from './Settings';
-import { GraphicsTier } from './Settings';
+import { GameSettings, GraphicsTier, SettingsKey, SettingsManager } from './Settings';
 import { AudioEngine } from '../audio/AudioEngine';
 import { AudioLoader } from '../audio/AudioLoader';
 import { AudioAnalyzer } from '../audio/AudioAnalyzer';
@@ -114,6 +113,10 @@ export class Game {
     this.cameraController = new CameraController(this.environment.camera, this.environment.renderer.domElement);
     this.playerController = new PlayerController(this.cameraController, this.world.physics);
     this.viewmodelController = new ViewmodelController();
+    // Environment resolves AUTO/quality presets before the viewmodel exists.
+    // Synchronize the initial pass once, then live graphics changes propagate
+    // through the authoritative settings subscription below.
+    this.viewmodelController.applyQuality(this.environment.activePreset);
 
     // Diagnostics: ?debugNoViewmodel=1 hides hands/knife ONLY, to isolate a
     // viewmodel sway illusion from a real world-view snap. It does not alter
@@ -159,6 +162,14 @@ export class Game {
       }
     );
 
+    const settingsManager = SettingsManager.getInstance();
+    this.applyLiveSettings(settingsManager.settings, new Set<SettingsKey>([
+      'mouseSensitivity', 'fov', 'masterVolume', 'ghostMode'
+    ]));
+    settingsManager.subscribe((settings, changedKeys) => {
+      this.applyLiveSettings(settings, changedKeys);
+    });
+
     this.setupCallbacks();
     this.setupStateMachine();
     this.setupInputHandlers();
@@ -187,16 +198,6 @@ export class Game {
     this.ui.analysisScreen.setOnEnterTrack(() => {
       this.stateMachine.transitionTo(GameState.COUNTDOWN);
     });
-
-    // Settings Modal
-    this.ui.settingsModal.setOnClose(() => {
-      this.ghostManager.applySettingsVisibility();
-    });
-
-    // Apply a GRAPHICS tier change immediately, without needing a restart.
-    this.ui.settingsModal.onGraphicsChanged = (tier) => {
-      this.environment.applyQualityTier(tier as GraphicsTier, false);
-    };
 
     // Pause Screen
     this.ui.pauseScreen.setCallbacks({
@@ -255,6 +256,27 @@ export class Game {
     this.replayPlayer.onCompleteCallback = () => {
       this.stateMachine.transitionTo(GameState.FINISHED);
     };
+  }
+
+  private applyLiveSettings(
+    settings: Readonly<GameSettings>,
+    changedKeys: ReadonlySet<SettingsKey>
+  ): void {
+    if (changedKeys.has('mouseSensitivity')) {
+      this.cameraController.setSensitivity(settings.mouseSensitivity);
+    }
+    if (changedKeys.has('fov')) {
+      this.environment.setBaseFov(settings.fov);
+    }
+    if (changedKeys.has('masterVolume')) {
+      this.audioEngine.setVolume(settings.masterVolume);
+    }
+    if (changedKeys.has('graphics')) {
+      this.environment.applyQualityTier(settings.graphics as GraphicsTier, false);
+    }
+    if (changedKeys.has('ghostMode')) {
+      this.ghostManager.applySettingsVisibility();
+    }
   }
 
   private async enterMovementLab(trackId?: string): Promise<void> {
@@ -595,10 +617,6 @@ export class Game {
     const spawnYaw = calculateLookYaw(spawnPos, lookTarget);
     this.playerController.setOrientation(spawnYaw);
 
-    const settings = SettingsManager.getInstance().settings;
-    this.cameraController.setSensitivity(settings.mouseSensitivity);
-    this.environment.setBaseFov(settings.fov);
-    this.audioEngine.setVolume(settings.masterVolume);
     // setPalette applies the map's primary hue to the adaptive viewmodel accent.
     this.viewmodelController.setPalette(this.world.visualController.state.palette);
   }
