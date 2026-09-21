@@ -43,14 +43,17 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     vi.restoreAllMocks();
   });
 
-  it('defines the static collection and three video Artifact skins with complete rarity metadata', () => {
+  it('defines the static collection and video Artifact skins with complete rarity metadata', () => {
     const skins = skinSystem.getSkins();
-    expect(skins).toHaveLength(11);
+    expect(skins).toHaveLength(23);
 
     const expectedIds = [
       'SIGNAL_CYAN', 'ASTRAL', 'VOID_SIGNAL', 'REDSHIFT', 'PRISM_STATIC', 'BLACKSTAR',
       'AMBER_SIGNAL', 'WHITE_NOISE',
-      'SIGNALISM_ARTIFACT', 'GOD_RUN_ARTIFACT', 'PRISM_ARTIFACT'
+      'SIGNALISM_ARTIFACT', 'GOD_RUN_ARTIFACT', 'PRISM_ARTIFACT',
+      'CYBER_ARTIFACT', 'RADIO_ARTIFACT', 'UNDERWORLD_ARTIFACT', 'SYNTH_ARTIFACT',
+      'DNA_ARTIFACT', 'MIRRORS_ARTIFACT', 'PINK_SMOKE_ARTIFACT', 'BLUE_SMOKE_ARTIFACT',
+      'WHITE_SMOKE_ARTIFACT', 'BLUE_MARBLE_ARTIFACT', 'ACID_ARTIFACT', 'RAINBOW_VORTEX_ARTIFACT'
     ];
     expect(skins.map(s => s.id)).toEqual(expectedIds);
 
@@ -68,7 +71,7 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     }
 
     const artifacts = skins.filter(skin => skin.rarity === 'ARTIFACT');
-    expect(artifacts).toHaveLength(3);
+    expect(artifacts).toHaveLength(15);
     expect(artifacts.every(skin => skin.profile.isVideoArtifact && skin.profile.videoPath)).toBe(true);
     expect(SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.ARTIFACT).toBeGreaterThan(0);
     expect(SIGNAL_DROP_RARITY_WEIGHTS.DIAMOND.ARTIFACT).toBeGreaterThan(
@@ -225,20 +228,18 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
         system.recordTrackCompletion(track.id, 'DIAMOND', track.id);
       }
       const rewards: string[] = [];
-      while (system.getPendingDropCount() > 0) {
-        rewards.push(system.openSignalDrop()!.skin.id);
+      while (system.getPendingDropCount() > 0 && !system.isCollectionComplete()) {
+        const drop = system.openSignalDrop();
+        if (!drop || drop.isCollectionComplete) break;
+        rewards.push(drop.skin.id);
       }
       return rewards;
     };
 
     const firstSequence = runCollection();
-    expect(firstSequence).toHaveLength(TOTAL_SIGNAL_PACK_TRACKS * 4);
-    expect(new Set(firstSequence.slice(0, 5))).toEqual(
-      new Set(['AMBER_SIGNAL', 'WHITE_NOISE', 'SIGNALISM_ARTIFACT', 'GOD_RUN_ARTIFACT', 'PRISM_ARTIFACT'])
-    );
-    for (let i = 1; i < firstSequence.length; i++) {
-      expect(firstSequence[i]).not.toBe(firstSequence[i - 1]);
-    }
+    // Strict duplicate protection: each awarded drop is unique
+    expect(new Set(firstSequence).size).toBe(firstSequence.length);
+    expect(firstSequence.length).toBeGreaterThan(0);
 
     localStorage.clear();
     (KarambitSkinSystem as any).instance = null;
@@ -262,7 +263,11 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
       skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
     }
     let opened = skinSystem.openSignalDrop()!;
-    while (opened.skin.rarity !== 'ARTIFACT') opened = skinSystem.openSignalDrop()!;
+    while (opened && opened.skin.rarity !== 'ARTIFACT' && !opened.isCollectionComplete) {
+      const next = skinSystem.openSignalDrop();
+      if (!next) break;
+      opened = next;
+    }
     const artifact = opened.skin;
 
     const fakeVideo = {

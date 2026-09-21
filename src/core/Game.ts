@@ -208,13 +208,22 @@ export class Game {
         this.ui.pauseScreen.hide();
         this.ui.armoryModal.show();
       },
-      onSettings: () => this.ui.settingsModal.show(),
+      onSettings: () => {
+        this.ui.pauseScreen.hide();
+        this.ui.settingsModal.show();
+      },
       onNewTrack: () => this.returnToImport()
     });
 
     // Armory Modal
     this.ui.armoryModal.setOnClose(() => {
       this.ui.armoryModal.hide();
+      this.ui.pauseScreen.show();
+    });
+
+    // Settings Modal
+    this.ui.settingsModal.setOnClose(() => {
+      this.ui.settingsModal.hide();
       this.ui.pauseScreen.show();
     });
 
@@ -276,6 +285,16 @@ export class Game {
     }
     if (changedKeys.has('ghostMode')) {
       this.ghostManager.applySettingsVisibility();
+    }
+    if (changedKeys.has('hideHud')) {
+      if (settings.hideHud) {
+        this.ui.hud.hide();
+      } else if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
+        this.ui.hud.show();
+      }
+    }
+    if (changedKeys.has('viewmodelFov')) {
+      this.viewmodelController.setFov(settings.viewmodelFov || 65);
     }
   }
 

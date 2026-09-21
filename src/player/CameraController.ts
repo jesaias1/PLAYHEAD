@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import { clamp } from '../utils/math';
+import { SettingsManager } from '../core/Settings';
 
 /**
  * Authoritative mouse-look input source.
@@ -69,6 +70,16 @@ export class CameraController {
       this.coalescedSupported = typeof proto.getCoalescedEvents === 'function';
     }
     this.inputSource = this.resolveInputSource();
+
+    const initialSens = SettingsManager.getInstance().settings.mouseSensitivity;
+    if (typeof initialSens === 'number' && !isNaN(initialSens)) {
+      this.sensitivity = clamp(initialSens, 0.1, 3.0);
+    }
+    SettingsManager.getInstance().subscribe((settings, changed) => {
+      if (changed.has('mouseSensitivity')) {
+        this.setSensitivity(settings.mouseSensitivity);
+      }
+    });
   }
 
   public setSensitivity(val: number): void {

@@ -1,0 +1,52 @@
+# Secrets and local credentials
+.env
+.env.*
+*.pem
+*.key
+*.secret
+*token*
+*credential*
+*credentials*
+*secret*
+
+# Dependencies and generated build output
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.turbo/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+*.map
+
+# Binary/native artifacts
+*.exe
+*.dll
+*.node
+*.wasm
+
+# Large media and visual captures
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp3
+*.ogg
+*.wav
+*.mp4
+*.mov
+*.webm
+*.glb
+*.gltf
+*.ttf
+*.woff
+*.woff2
+
+# Local prompt dumps and one-off generated reports
+user_prompt*.txt
+screenshot*
+playwright-report/
+test-results/

@@ -172,13 +172,13 @@
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.11em;
-  padding: 7px 10px;
-  background: transparent;
-  border: none;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-bottom: 2px solid transparent;
-  color: var(--text-muted);
+  color: #64748b;
   cursor: pointer;
-  transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+  transition: all var(--motion-fast);
   text-transform: uppercase;
   margin-bottom: -7px;
   white-space: nowrap;
@@ -186,14 +186,17 @@
 
 .import-tab-btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .import-tab-btn.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent-color);
-  text-shadow: 0 0 12px var(--accent-glow);
-  background: linear-gradient(180deg, transparent, rgba(0, 240, 255, 0.06));
+  color: #ffffff;
+  border-color: var(--accent-color);
+  border-bottom: 2px solid var(--accent-color);
+  text-shadow: 0 0 14px var(--accent-glow);
+  background: linear-gradient(180deg, rgba(0, 240, 255, 0.04), rgba(0, 240, 255, 0.12));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 16px rgba(0, 240, 255, 0.15);
 }
 
 .import-tab-btn:focus-visible,
@@ -399,20 +402,22 @@
 
 .lab-console-card {
   width: min(100%, 680px);
+  max-height: min(72vh, 480px);
+  overflow-y: auto;
   min-width: 0;
-  margin: 16px auto;
-  padding: 20px 24px;
+  margin: 14px auto;
+  padding: 18px 22px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   border-left: 4px solid var(--accent-color);
   text-align: left;
 }
 
 .lab-console-copy {
   color: #a0aec0;
-  font-size: 0.85rem;
-  line-height: 1.5;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .lab-control-grid {
@@ -437,14 +442,6 @@
   font-size: 0.78rem;
 }
 
-.lab-state-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 14px;
-  color: #718096;
-  font: 0.66rem/1.35 var(--font-mono);
-}
-
 .lab-actions {
   display: flex;
   gap: 12px;
@@ -452,11 +449,12 @@
 
 .armory-decoder {
   width: 100%;
-  border: 1px solid rgba(0, 240, 255, 0.38);
+  border: 1px solid rgba(0, 240, 255, 0.45);
   border-left: 4px solid var(--accent-color);
-  background: linear-gradient(105deg, rgba(0, 240, 255, 0.085), rgba(4, 8, 14, 0.96) 58%);
-  box-shadow: inset 0 0 30px rgba(0, 240, 255, 0.025), 0 12px 30px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(105deg, rgba(0, 240, 255, 0.09), rgba(4, 8, 14, 0.96) 58%);
+  box-shadow: inset 0 0 30px rgba(0, 240, 255, 0.03), 0 12px 30px rgba(0, 0, 0, 0.35);
   text-align: left;
+  margin-bottom: 12px;
 }
 
 .decoder-header {
@@ -706,8 +704,9 @@
 
 .strip-item.active {
   border-color: var(--accent-color);
-  background: rgba(0, 240, 255, 0.15);
-  box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.2);
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.22), rgba(0, 240, 255, 0.08));
+  box-shadow: inset 0 0 16px rgba(0, 240, 255, 0.25), 0 0 12px rgba(0, 240, 255, 0.3);
+  transform: translateY(-1px);
 }
 
 .strip-item.active::after {

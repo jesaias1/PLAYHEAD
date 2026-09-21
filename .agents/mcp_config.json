@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jevgrep": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\lin4s\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\JevGrep\\source\\dist\\cli.js",
+        "mcp",
+        "--config",
+        "C:\\Users\\lin4s\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Roaming\\jevgrep\\profiles\\TRACKRUN-c107103080\\config.json"
+      ]
+    }
+  }
+}

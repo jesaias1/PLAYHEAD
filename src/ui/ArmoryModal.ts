@@ -173,6 +173,12 @@ export class ArmoryModal {
     });
   }
 
+  private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
+
+  public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
+    this.decodeModal = modal;
+  }
+
   private initEvents(): void {
     this.closeBtn.addEventListener('click', () => {
       this.hide();
@@ -185,6 +191,10 @@ export class ArmoryModal {
     });
 
     this.dropOpenBtn.addEventListener('click', () => {
+      if (this.decodeModal) {
+        this.decodeModal.open(() => this.renderSkins());
+        return;
+      }
       const reward = this.skinSystem.openSignalDrop();
       if (!reward) {
         this.renderSkins();

@@ -71,6 +71,7 @@ export class ImportScreen {
   private onDevTrackCallback?: (genre?: SyntheticGenre) => void;
   private onErrorCallback?: (err: string) => void;
   private onMovementLabCallback?: (trackId?: string) => void;
+  private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
 
   constructor() {
     this.catalog = MusicPack.getCatalog();
@@ -87,17 +88,6 @@ export class ImportScreen {
           </div>
           <p class="brand-tagline">DROP A SONG. ENTER IT.<span class="terminal-cursor" aria-hidden="true"></span></p>
           <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
-        </div>
-
-        <div class="system-status-shell" aria-label="PLAYHEAD system status">
-          <div class="system-status-heading">[SYS] AUDIO → SIGNAL ANALYSIS → MOVEMENT DATA → WORLD SYNTHESIS</div>
-          <div class="terminal-top-telemetry">
-            <span class="telemetry-item"><i></i>[SYS] CORE ONLINE</span>
-            <span class="telemetry-item"><i></i>[DSP] ANALYZER READY</span>
-            <span class="telemetry-item"><i></i>[MAP] ROUTE STANDBY</span>
-            <span class="telemetry-item"><i></i>[WORLD] SYNTH IDLE</span>
-            <span class="telemetry-item signal"><i></i>[SIGNAL] AWAITING INPUT</span>
-          </div>
         </div>
 
         <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
@@ -179,9 +169,6 @@ export class ImportScreen {
               <select class="settings-select lab-signal-select" id="lab-music-select">
                 <option value="NONE">NONE // SILENT SANDBOX</option>
               </select>
-            </div>
-            <div class="lab-state-row">
-              <span>[MAP] UNRESTRICTED</span><span>[COLLISION] AUTHORITATIVE</span><span>[PB] GHOST ACTIVE</span>
             </div>
             <div class="lab-actions">
               <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">> ENTER MOVEMENT LAB</button>
@@ -496,6 +483,10 @@ export class ImportScreen {
     this.onCatalogTrackCallback = onCatalogTrack;
   }
 
+  public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
+    this.decodeModal = modal;
+  }
+
   public show(): void {
     this.renderArmory();
     this.element.classList.remove('hidden');
@@ -598,6 +589,10 @@ export class ImportScreen {
 
     this.decoderButton.addEventListener('click', () => {
       if (this.decoderBusy || this.skinSystem.getPendingDropCount() === 0) return;
+      if (this.decodeModal) {
+        this.decodeModal.open(() => this.renderArmory());
+        return;
+      }
       const reward = this.skinSystem.openSignalDrop();
       if (!reward) return;
       this.lastDecoderReward = reward;

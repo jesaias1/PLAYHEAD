@@ -36,12 +36,12 @@ export function deriveAscentLandingEnvelope(
   const minimumApproach = clamp(
     expectedSpeed * timeToClear + movement.playerRadius * 2 + 1.5,
     5.0,
-    8.5
+    14.0
   );
 
   const speedSurplus = expectedSpeed - 20;
-  const width = 14.0 + speedSurplus * 0.24 + (isCatch ? 5.0 : 0);
-  const depth = 18.0 + expectedSpeed * 0.55 + (isCatch ? 8.0 + expectedSpeed * 0.1 : 0);
+  const width = 15.0 + speedSurplus * 0.35 + (isCatch ? 6.0 : 0);
+  const depth = 20.0 + expectedSpeed * 0.65 + (isCatch ? 10.0 + expectedSpeed * 0.15 : 0);
   const flareRatio = variant === 'FLARED_ASCENT'
     ? 1.58
     : variant === 'OFFSET_ASCENT'

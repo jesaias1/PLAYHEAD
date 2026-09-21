@@ -45,7 +45,13 @@ export class PresetLevelCache {
         json.analysis.waveform = new Float32Array(json.analysis.waveform);
       }
 
-      const track: GeneratedTrack = json.track;
+      let track: GeneratedTrack = json.track;
+      // Ensure stale presets lacking modern ascent metadata are recomputed with dynamic ascent coverage
+      const hasStaleAscent = !track?.route || track.route.some((n: any) => n.type === 'STEP_UP' && !n.ascentVariant);
+      if (hasStaleAscent && json.analysis) {
+        track = RouteGenerator.generate(json.analysis);
+      }
+
       // Ensure optional side-surf skill ramps are present even in cached presets
       if (!track.optionalRamps || track.optionalRamps.length === 0) {
         const rng = new SeededRandom(json.analysis?.seed || 12345);

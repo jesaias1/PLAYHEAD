@@ -247,7 +247,7 @@ export class RouteGenerator {
           const curveDirection: -1 | 1 = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
             const isCatch = st === steps - 1;
-            const rise = rng.nextFloat(0.28, 0.46);
+            const rise = rng.nextFloat(0.35, 0.48);
             const envelope = deriveAscentLandingEnvelope(
               estimatedSpeed,
               22 + section.intensity * 4,
@@ -382,7 +382,7 @@ export class RouteGenerator {
           const curveDirection: -1 | 1 = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
             const isCatch = st === steps - 1;
-            const rise = rng.nextFloat(0.24, 0.42);
+            const rise = rng.nextFloat(0.35, 0.48);
             const highSpeedFloor = 26 + section.intensity * 4 + (variant === 'OFFSET_ASCENT' ? 1.5 : 0);
             const envelope = deriveAscentLandingEnvelope(
               estimatedSpeed,

@@ -40,6 +40,7 @@ export interface OpenedSignalDrop {
   skin: KarambitSkin;
   sourceRank: RunRank;
   qualityLabel: 'STANDARD SIGNAL' | 'REFINED SIGNAL' | 'HIGH-FIDELITY SIGNAL' | 'PRISTINE SIGNAL';
+  isCollectionComplete?: boolean;
 }
 
 const SIGNAL_DROP_PROGRESSION_VERSION = 2 as const;
@@ -440,6 +441,402 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       exposure: 1.08,
       contrast: 1.0,
       emission: 1.03,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'CYBER_ARTIFACT',
+    name: '11 // CYBER',
+    codename: 'GRID PULSE ARTIFACT',
+    description: 'High-density cybernetic vector stream flowing along the blade fuller with reactive terminal green accents.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 9,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'CYBER // #00FF88',
+    profile: {
+      baseColor: new THREE.Color(0x0a1410),
+      nebulaPrimary: new THREE.Color(0x00ff88),
+      nebulaSecondary: new THREE.Color(0x006633),
+      starColor: new THREE.Color(0x88ffcc),
+      rimColor: new THREE.Color(0x00ffaa),
+      parallaxDepth: 0.15,
+      layer2Scale: 1.4,
+      flowSpeed: 0.0,
+      sparkleRate: 1.2,
+      fresnelPower: 3.0,
+      audioReactivity: 0.22,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/cyber.mp4',
+      exposure: 1.15,
+      contrast: 1.05,
+      emission: 1.08,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'RADIO_ARTIFACT',
+    name: '12 // RADIO',
+    codename: 'FREQUENCY DRIFT ARTIFACT',
+    description: 'Analog RF carrier modulation pattern encased in brushed beryllium bronze with amber glow response.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 9,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'RADIO // #FFAA00',
+    profile: {
+      baseColor: new THREE.Color(0x1a1205),
+      nebulaPrimary: new THREE.Color(0xffaa00),
+      nebulaSecondary: new THREE.Color(0x774400),
+      starColor: new THREE.Color(0xffe599),
+      rimColor: new THREE.Color(0xffcc33),
+      parallaxDepth: 0.14,
+      layer2Scale: 1.4,
+      flowSpeed: 0.0,
+      sparkleRate: 1.25,
+      fresnelPower: 2.9,
+      audioReactivity: 0.20,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/radio.mp4',
+      exposure: 1.12,
+      contrast: 1.0,
+      emission: 1.06,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'UNDERWORLD_ARTIFACT',
+    name: '13 // UNDERWORLD',
+    codename: 'SUBTERRANEAN ANOMALY',
+    description: 'Abyssal sub-surface seismic magma pulse trapped under obsidian titanium with searing crimson edge illumination.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 10,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'ABYSS // #FF0044',
+    profile: {
+      baseColor: new THREE.Color(0x16050a),
+      nebulaPrimary: new THREE.Color(0xff0044),
+      nebulaSecondary: new THREE.Color(0x66001a),
+      starColor: new THREE.Color(0xff99aa),
+      rimColor: new THREE.Color(0xff1a53),
+      parallaxDepth: 0.16,
+      layer2Scale: 1.5,
+      flowSpeed: 0.0,
+      sparkleRate: 1.3,
+      fresnelPower: 3.2,
+      audioReactivity: 0.25,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/underworld.mp4',
+      exposure: 1.18,
+      contrast: 1.1,
+      emission: 1.1,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'SYNTH_ARTIFACT',
+    name: '14 // SYNTH',
+    codename: 'NEO-ANALOG WAVEFORM',
+    description: 'Vibrant ultraviolet synthwave oscillation pulsing through internal crystal waveguides.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 10,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'SYNTH // #C026D3',
+    profile: {
+      baseColor: new THREE.Color(0x180820),
+      nebulaPrimary: new THREE.Color(0xc026d3),
+      nebulaSecondary: new THREE.Color(0x4a044e),
+      starColor: new THREE.Color(0xf0abfc),
+      rimColor: new THREE.Color(0xe879f9),
+      parallaxDepth: 0.15,
+      layer2Scale: 1.45,
+      flowSpeed: 0.0,
+      sparkleRate: 1.2,
+      fresnelPower: 3.0,
+      audioReactivity: 0.22,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/synth.mp4',
+      exposure: 1.14,
+      contrast: 1.05,
+      emission: 1.07,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'DNA_ARTIFACT',
+    name: '15 // DNA',
+    codename: 'BIOMETRIC HELIX CIPHER',
+    description: 'Living genetic transmission matrix looping continuously inside tempered crystal steel.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 10,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'HELIX // #06B6D4',
+    profile: {
+      baseColor: new THREE.Color(0x06141a),
+      nebulaPrimary: new THREE.Color(0x06b6d4),
+      nebulaSecondary: new THREE.Color(0x083344),
+      starColor: new THREE.Color(0xa5f3fc),
+      rimColor: new THREE.Color(0x22d3ee),
+      parallaxDepth: 0.15,
+      layer2Scale: 1.4,
+      flowSpeed: 0.0,
+      sparkleRate: 1.25,
+      fresnelPower: 2.9,
+      audioReactivity: 0.20,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/dna.mp4',
+      exposure: 1.12,
+      contrast: 1.0,
+      emission: 1.05,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'MIRRORS_ARTIFACT',
+    name: '16 // MIRRORS',
+    codename: 'SPECULAR INFINITY VAULT',
+    description: 'Multi-layered specular infinity mirror reflecting void coordinates into dimensional depth.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 11,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'MIRROR // #CBD5E1',
+    profile: {
+      baseColor: new THREE.Color(0x181c24),
+      nebulaPrimary: new THREE.Color(0xcbd5e1),
+      nebulaSecondary: new THREE.Color(0x334155),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0xe2e8f0),
+      parallaxDepth: 0.18,
+      layer2Scale: 1.55,
+      flowSpeed: 0.0,
+      sparkleRate: 1.35,
+      fresnelPower: 3.2,
+      audioReactivity: 0.18,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/mirrors.mp4',
+      exposure: 1.1,
+      contrast: 1.08,
+      emission: 1.04,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'PINK_SMOKE_ARTIFACT',
+    name: '17 // PINK SMOKE',
+    codename: 'THERMAL VAPOR DISPERSION',
+    description: 'Superheated rose vapor shifting across micro-grooves with an iridescent magenta edge.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 11,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'VAPOR // #EC4899',
+    profile: {
+      baseColor: new THREE.Color(0x1a0814),
+      nebulaPrimary: new THREE.Color(0xec4899),
+      nebulaSecondary: new THREE.Color(0x831843),
+      starColor: new THREE.Color(0xfbcfe8),
+      rimColor: new THREE.Color(0xf472b6),
+      parallaxDepth: 0.14,
+      layer2Scale: 1.4,
+      flowSpeed: 0.0,
+      sparkleRate: 1.15,
+      fresnelPower: 2.8,
+      audioReactivity: 0.20,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/pink-smoke.mp4',
+      exposure: 1.12,
+      contrast: 1.0,
+      emission: 1.05,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'BLUE_SMOKE_ARTIFACT',
+    name: '18 // BLUE SMOKE',
+    codename: 'CRYOGENIC CLOUD CHAMBER',
+    description: 'Sub-zero vapor stream trapped in zero gravity, illuminating a cryogenic blue aura.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 11,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'MIST // #38BDF8',
+    profile: {
+      baseColor: new THREE.Color(0x081420),
+      nebulaPrimary: new THREE.Color(0x38bdf8),
+      nebulaSecondary: new THREE.Color(0x075985),
+      starColor: new THREE.Color(0xbae6fd),
+      rimColor: new THREE.Color(0x7dd3fc),
+      parallaxDepth: 0.14,
+      layer2Scale: 1.4,
+      flowSpeed: 0.0,
+      sparkleRate: 1.15,
+      fresnelPower: 2.8,
+      audioReactivity: 0.20,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/blue-smoke.mp4',
+      exposure: 1.12,
+      contrast: 1.0,
+      emission: 1.05,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'WHITE_SMOKE_ARTIFACT',
+    name: '19 // WHITE SMOKE',
+    codename: 'PURE DIFFUSION ENVELOPE',
+    description: 'High-vacuum white aerosol veil creating soft volumetric plumes inside the crystal spine.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 12,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'AETHER // #F8FAFC',
+    profile: {
+      baseColor: new THREE.Color(0x181c22),
+      nebulaPrimary: new THREE.Color(0xf8fafc),
+      nebulaSecondary: new THREE.Color(0x475569),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0xf1f5f9),
+      parallaxDepth: 0.13,
+      layer2Scale: 1.38,
+      flowSpeed: 0.0,
+      sparkleRate: 1.1,
+      fresnelPower: 2.7,
+      audioReactivity: 0.18,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/white-smoke.mp4',
+      exposure: 1.1,
+      contrast: 1.02,
+      emission: 1.04,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'BLUE_MARBLE_ARTIFACT',
+    name: '20 // BLUE MARBLE',
+    codename: 'ORBITAL CONTINENTAL CORE',
+    description: 'Orbital celestial sphere suspended within the blade blade body, rotating in dark stellar blue.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 12,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'ORBIT // #2563EB',
+    profile: {
+      baseColor: new THREE.Color(0x0a1428),
+      nebulaPrimary: new THREE.Color(0x2563eb),
+      nebulaSecondary: new THREE.Color(0x1e3a8a),
+      starColor: new THREE.Color(0xbfdbfe),
+      rimColor: new THREE.Color(0x3b82f6),
+      parallaxDepth: 0.16,
+      layer2Scale: 1.5,
+      flowSpeed: 0.0,
+      sparkleRate: 1.25,
+      fresnelPower: 3.1,
+      audioReactivity: 0.22,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/blue-marble.mp4',
+      exposure: 1.15,
+      contrast: 1.06,
+      emission: 1.08,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'ACID_ARTIFACT',
+    name: '21 // ACID',
+    codename: 'HYPER-REACTIVE TOXIN',
+    description: 'Corrosive neon lime reagent bubbling in ultra-thin titanium capillaries with an intense toxic glow.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 12,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'ACID // #84CC16',
+    profile: {
+      baseColor: new THREE.Color(0x0e1806),
+      nebulaPrimary: new THREE.Color(0x84cc16),
+      nebulaSecondary: new THREE.Color(0x3f6212),
+      starColor: new THREE.Color(0xd9f99d),
+      rimColor: new THREE.Color(0xa3e635),
+      parallaxDepth: 0.15,
+      layer2Scale: 1.45,
+      flowSpeed: 0.0,
+      sparkleRate: 1.35,
+      fresnelPower: 3.2,
+      audioReactivity: 0.26,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/acid.mp4',
+      exposure: 1.18,
+      contrast: 1.1,
+      emission: 1.12,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'RAINBOW_VORTEX_ARTIFACT',
+    name: '22 // RAINBOW VORTEX',
+    codename: 'CHROMATIC SINGULARITY',
+    description: 'A multi-spectral gravitational whirlpool bending chromatic light around a rotating event horizon.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 12,
+    rarity: 'ARTIFACT',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'VORTEX // #A855F7',
+    profile: {
+      baseColor: new THREE.Color(0x140a20),
+      nebulaPrimary: new THREE.Color(0xa855f7),
+      nebulaSecondary: new THREE.Color(0x581c87),
+      starColor: new THREE.Color(0xf3e8ff),
+      rimColor: new THREE.Color(0xc084fc),
+      parallaxDepth: 0.17,
+      layer2Scale: 1.5,
+      flowSpeed: 0.0,
+      sparkleRate: 1.3,
+      fresnelPower: 3.1,
+      audioReactivity: 0.24,
+      isCanonical: false,
+      isVideoArtifact: true,
+      videoPath: '/assets/viewmodel/karambit/videos/rainbow-vortex.mp4',
+      exposure: 1.16,
+      contrast: 1.08,
+      emission: 1.1,
       uvScale: 1.0
     }
   }
@@ -892,8 +1289,10 @@ export class KarambitSkinSystem {
 
     const trulyUnlocked = (skin: KarambitSkin): boolean => this.isSkinUnlockedWithoutDev(skin.id);
     const unowned = eligible.filter(skin => !trulyUnlocked(skin));
-    const candidates = unowned.length > 0 ? unowned : eligible;
-    const candidateIds = new Set(candidates.map(skin => skin.id));
+    if (unowned.length === 0) {
+      return null;
+    }
+    const candidateIds = new Set(unowned.map(skin => skin.id));
 
     for (let refill = 0; refill < 2; refill++) {
       let bag = this.progression.rewardBags[rank];
@@ -909,7 +1308,7 @@ export class KarambitSkinSystem {
         const id = bag[i];
         if (!candidateIds.has(id)) continue;
         if (fallbackIndex < 0) fallbackIndex = i;
-        if (candidates.length > 1 && id === this.progression.lastRewardSkinId) continue;
+        if (unowned.length > 1 && id === this.progression.lastRewardSkinId) continue;
         this.progression.rewardBagCursors[rank] = i + 1;
         return this.getSkin(id);
       }
@@ -919,7 +1318,7 @@ export class KarambitSkinSystem {
       }
       this.refillRewardBag(rank);
     }
-    return candidates[0] ?? null;
+    return unowned[0] ?? null;
   }
 
   private getQualityLabel(rank: RunRank): OpenedSignalDrop['qualityLabel'] {
@@ -931,11 +1330,33 @@ export class KarambitSkinSystem {
     }
   }
 
+  public isCollectionComplete(): boolean {
+    const eligible = KARAMBIT_SKINS.filter(skin => skin.dropEligible);
+    return eligible.length > 0 && eligible.every(skin => this.isSkinUnlockedWithoutDev(skin.id));
+  }
+
   public openSignalDrop(): OpenedSignalDrop | null {
     const sourceRank = this.progression.pendingDropRanks[0];
     if (!sourceRank) return null;
+
+    if (this.isCollectionComplete()) {
+      return {
+        skin: this.getEquippedSkin(),
+        sourceRank,
+        qualityLabel: this.getQualityLabel(sourceRank),
+        isCollectionComplete: true
+      };
+    }
+
     const skin = this.getNextRewardSkin(sourceRank);
-    if (!skin) return null;
+    if (!skin) {
+      return {
+        skin: this.getEquippedSkin(),
+        sourceRank,
+        qualityLabel: this.getQualityLabel(sourceRank),
+        isCollectionComplete: true
+      };
+    }
 
     this.progression.pendingDropRanks.shift();
     if (!this.progression.rewardOwnedSkinIds.includes(skin.id)) {
@@ -944,7 +1365,7 @@ export class KarambitSkinSystem {
     this.progression.lastRewardSkinId = skin.id;
     this.saveState();
     this.notifyListeners();
-    return { skin, sourceRank, qualityLabel: this.getQualityLabel(sourceRank) };
+    return { skin, sourceRank, qualityLabel: this.getQualityLabel(sourceRank), isCollectionComplete: false };
   }
 
   public getSkinProgress(id: string, includeDevPreview = true): { current: number; total: number; label: string; isUnlocked: boolean } {
@@ -1008,20 +1429,18 @@ export class KarambitSkinSystem {
           isUnlocked: diamondCount >= TOTAL_SIGNAL_PACK_TRACKS
         };
 
-      case 'SIGNALISM_ARTIFACT':
-      case 'GOD_RUN_ARTIFACT':
-      case 'PRISM_ARTIFACT':
-      case 'AMBER_SIGNAL':
-      case 'WHITE_NOISE':
-        return {
-          current: 0,
-          total: 1,
-          label: 'OPEN SIGNAL DROPS',
-          isUnlocked: false
-        };
-
-      default:
+      default: {
+        const targetSkin = this.getSkin(norm);
+        if (targetSkin.dropEligible) {
+          return {
+            current: 0,
+            total: 1,
+            label: 'OPEN SIGNAL DROPS',
+            isUnlocked: false
+          };
+        }
         return { current: 0, total: 1, label: 'LOCKED', isUnlocked: false };
+      }
     }
   }
 

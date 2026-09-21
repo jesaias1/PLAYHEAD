@@ -203,6 +203,11 @@ export class ViewmodelController {
     return false;
   }
 
+  public setFov(fov: number): void {
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
+  }
+
   public getKnifeGroup(): THREE.Group | null {
     return this.rigInstance?.knifeGroup || null;
   }
