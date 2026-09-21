@@ -13,6 +13,7 @@ export class ResultsScreen {
   private trackTitleElem: HTMLElement;
   private rankElem: HTMLElement;
   private rankSubElem: HTMLElement;
+  private pbStatusElem: HTMLElement;
 
   private timeElem: HTMLElement;
   private targetElem: HTMLElement;
@@ -49,8 +50,10 @@ export class ResultsScreen {
       <div class="results-container">
         <div class="results-header" id="res-header">
           <div class="results-title-group">
-            <h1 class="results-title">RUN COMPLETE</h1>
-            <div class="results-track-title" id="res-track-title">PLAYHEAD TRACK</div>
+            <div class="results-kicker">[SYS] RUN REPORT // SIGNAL ARCHIVE</div>
+            <h1 class="results-title">RUN REPORT</h1>
+            <div class="results-track-title"><span>[SIGNAL]</span> <span id="res-track-title">PLAYHEAD TRACK</span></div>
+            <div class="results-pb-status hidden" id="res-pb-status">[PB] NEW PERSONAL BEST</div>
           </div>
           <div class="rank-group" id="res-rank-group">
             <div class="rank-badge" id="res-rank">GOLD</div>
@@ -60,39 +63,39 @@ export class ResultsScreen {
 
         <div class="results-grid" id="res-grid">
           <div class="stat-card">
-            <div class="stat-label">COMPLETION TIME</div>
+            <div class="stat-label">[TIME] COMPLETION</div>
             <div class="stat-value" id="res-time">00:00.000</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">TARGET TIME</div>
+            <div class="stat-label">[TIME] TARGET</div>
             <div class="stat-value" id="res-target">00:00.000</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">SYNC DELTA</div>
+            <div class="stat-label">[SIGNAL] SYNC DELTA</div>
             <div class="stat-value" id="res-sync">+0.00s</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">MAX SPEED</div>
+            <div class="stat-label">[RUN] MAX SPEED</div>
             <div class="stat-value" id="res-max-speed">0 u/s</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">AVERAGE SPEED</div>
+            <div class="stat-label">[RUN] AVERAGE SPEED</div>
             <div class="stat-value" id="res-avg-speed">0 u/s</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">STRAFE EFFICIENCY</div>
+            <div class="stat-label">[RUN] STRAFE EFFICIENCY</div>
             <div class="stat-value" id="res-strafe">0%</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">FALL COUNT</div>
+            <div class="stat-label">[ROUTE] FALL COUNT</div>
             <div class="stat-value" id="res-falls">0</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">TOTAL SCORE</div>
+            <div class="stat-label">[SYS] TOTAL SCORE</div>
             <div class="stat-value" id="res-score">0</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">VS THE ECHO</div>
+            <div class="stat-label">[GHOST] VS THE ECHO</div>
             <div class="stat-value" id="res-rival">—</div>
           </div>
         </div>
@@ -117,6 +120,7 @@ export class ResultsScreen {
     this.trackTitleElem = this.element.querySelector('#res-track-title') as HTMLElement;
     this.rankElem = this.element.querySelector('#res-rank') as HTMLElement;
     this.rankSubElem = this.element.querySelector('#res-rank-sub') as HTMLElement;
+    this.pbStatusElem = this.element.querySelector('#res-pb-status') as HTMLElement;
 
     this.timeElem = this.element.querySelector('#res-time') as HTMLElement;
     this.targetElem = this.element.querySelector('#res-target') as HTMLElement;
@@ -164,6 +168,8 @@ export class ResultsScreen {
     this.clearTimeouts();
 
     this.trackTitleElem.textContent = trackTitle.toUpperCase();
+    const isNewPersonalBest = !overtimeInfo?.isOvertime && ghostInfo?.isNewPB === true;
+    this.pbStatusElem.classList.toggle('hidden', !isNewPersonalBest);
 
     // Format Typographic Rank & Overtime State
     if (overtimeInfo?.isOvertime) {

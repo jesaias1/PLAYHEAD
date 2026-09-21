@@ -7,11 +7,14 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { formatTime } from '../utils/math';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { VisualDreamDirector } from '../world/VisualDreamProfile';
+import { formatAnalysisStage } from './SignalIdentity';
 
 export class AnalysisScreen {
   public element: HTMLElement;
   private trackTitleElem: HTMLElement;
   private stageElem: HTMLElement;
+  private progressElem: HTMLElement;
+  private progressReadoutElem: HTMLElement;
   private logElem: HTMLElement;
   private waveformCanvas: HTMLCanvasElement;
   private enterBtn: HTMLButtonElement;
@@ -26,6 +29,7 @@ export class AnalysisScreen {
   private onEnterTrackCallback?: () => void;
   private animScanFrame = 0;
   private scanProgress = 0;
+  private lastStageLabel = '';
 
   constructor() {
     this.element = document.createElement('div');
@@ -33,9 +37,16 @@ export class AnalysisScreen {
     this.element.innerHTML = `
       <div class="analysis-container">
         <div class="analysis-header">
+          <div class="analysis-kicker">[SIGNAL] AUDIO-TO-SPACE COMPILER</div>
           <h2 class="analysis-track-title" id="analysis-title">SIGNAL LOADING...</h2>
-          <div class="analysis-stage" id="analysis-stage">SYNTHESIZING SIGNAL</div>
-          <div class="terminal-stage-log" id="analysis-log" style="font-family: var(--font-mono); font-size: 0.78rem; color: #8899aa; margin-top: 8px; max-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; border-left: 2px solid rgba(0,240,255,0.4); padding-left: 8px;"></div>
+          <div class="analysis-stage-row">
+            <div class="analysis-stage" id="analysis-stage" aria-live="polite">[SIGNAL] STANDING BY</div>
+            <div class="analysis-progress-readout" id="analysis-progress-readout">00%</div>
+          </div>
+          <div class="analysis-progress-track" role="progressbar" aria-label="Signal processing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="analysis-progress"></span>
+          </div>
+          <div class="terminal-stage-log" id="analysis-log" aria-label="Completed processing stages"></div>
         </div>
 
         <canvas class="waveform-canvas" id="analysis-waveform" width="840" height="120"></canvas>
@@ -68,13 +79,15 @@ export class AnalysisScreen {
         </div>
 
         <div class="analysis-footer">
-          <button class="btn-hero" id="btn-enter-track" disabled>ENTER TRACK</button>
+          <button class="btn-hero" id="btn-enter-track" disabled>[SYS] ENTER WORLD</button>
         </div>
       </div>
     `;
 
     this.trackTitleElem = this.element.querySelector('#analysis-title') as HTMLElement;
     this.stageElem = this.element.querySelector('#analysis-stage') as HTMLElement;
+    this.progressElem = this.element.querySelector('#analysis-progress') as HTMLElement;
+    this.progressReadoutElem = this.element.querySelector('#analysis-progress-readout') as HTMLElement;
     this.logElem = this.element.querySelector('#analysis-log') as HTMLElement;
     this.waveformCanvas = this.element.querySelector('#analysis-waveform') as HTMLCanvasElement;
     this.enterBtn = this.element.querySelector('#btn-enter-track') as HTMLButtonElement;
@@ -109,6 +122,7 @@ export class AnalysisScreen {
 
   private triggerTransition(): void {
     this.enterBtn.disabled = true;
+    this.setStage('[SYS] ENTERING...', 1);
     // 1. Contracting animation: collapse waveform to 2px signal line
     this.element.classList.add('contracting');
 
@@ -138,9 +152,21 @@ export class AnalysisScreen {
     this.logElem.scrollTop = this.logElem.scrollHeight;
   }
 
-  public setStage(stageText: string): void {
-    this.stageElem.textContent = stageText.toUpperCase();
-    this.addStageLog(stageText);
+  public setStage(stageText: string, progress?: number): void {
+    const label = formatAnalysisStage(stageText);
+    this.stageElem.textContent = label;
+    if (label !== this.lastStageLabel) {
+      this.addStageLog(label);
+      this.lastStageLabel = label;
+    }
+
+    if (progress !== undefined) {
+      const bounded = Math.max(0, Math.min(1, progress));
+      const percentage = Math.round(bounded * 100);
+      this.progressElem.style.transform = `scaleX(${bounded})`;
+      this.progressReadoutElem.textContent = `${percentage.toString().padStart(2, '0')}%`;
+      this.progressElem.parentElement?.setAttribute('aria-valuenow', percentage.toString());
+    }
   }
 
   public setTrackTitle(title: string): void {
@@ -151,9 +177,12 @@ export class AnalysisScreen {
     this.element.classList.remove('hidden');
     this.element.classList.remove('contracting');
     this.enterBtn.disabled = true;
+    this.enterBtn.textContent = '[SYS] ENTER WORLD';
     if (this.logElem) {
       this.logElem.innerHTML = '';
     }
+    this.lastStageLabel = '';
+    this.setStage('[SIGNAL] STANDING BY', 0);
     this.clearWaveform();
   }
 
@@ -168,7 +197,7 @@ export class AnalysisScreen {
 
   public displayAnalysis(analysis: TrackAnalysis): void {
     this.trackTitleElem.textContent = analysis.filename.toUpperCase();
-    this.stageElem.textContent = 'WORLD MAPPED // READY TO RUN';
+    this.setStage('[SYS] SIGNAL LOCKED // WORLD READY', 1);
 
     this.durElem.textContent = formatTime(analysis.duration).slice(0, 5);
     this.bpmElem.textContent = `${analysis.bpm} BPM`;

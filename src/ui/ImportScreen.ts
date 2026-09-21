@@ -10,6 +10,7 @@ import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { createProgramFingerprint } from './SignalIdentity';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -35,6 +36,7 @@ export class ImportScreen {
   private showcaseDurationElem: HTMLElement;
   private showcaseDiffElem: HTMLElement;
   private showcaseDescElem: HTMLElement;
+  private showcaseFingerprintElem: HTMLElement;
   private showcaseEnterBtn: HTMLButtonElement;
   private showcasePreviewBtn: HTMLButtonElement;
   private previewIconElem: HTMLElement;
@@ -73,30 +75,31 @@ export class ImportScreen {
     this.element.innerHTML = `
       <div class="import-container terminal-console">
         <div class="terminal-top-telemetry">
-          <span class="telemetry-item">[SYS: ONLINE]</span>
-          <span class="telemetry-item">[DSP KERNEL: V2.4_STABLE]</span>
-          <span class="telemetry-item">[AUDIO PIPELINE: READY]</span>
-          <span class="telemetry-item signal">[STATUS: READY]</span>
+          <span class="telemetry-item">[SYS] CORE ONLINE</span>
+          <span class="telemetry-item">[DSP] ANALYZER READY</span>
+          <span class="telemetry-item">[WORLD] SYNTH IDLE</span>
+          <span class="telemetry-item signal">[SIGNAL] AWAITING INPUT</span>
         </div>
 
         <div class="brand-header">
-          <div class="brand-eyebrow">// ARCHITECTURAL AUDIO SYSTEM · TERMINAL CONSOLE</div>
+          <div class="brand-eyebrow">[SYS] AUDIO-NAVIGATION HARDWARE // PLAYHEAD</div>
           <div class="brand-title-wrap">
             <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
             <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
           </div>
-          <p class="brand-tagline">> SELECT FREQUENCY. ENTER THE SIGNAL.</p>
+          <p class="brand-tagline">DROP A SONG. ENTER IT.<span class="terminal-cursor" aria-hidden="true"></span></p>
+          <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
         </div>
 
-        <div class="import-tabs terminal-tabs">
-          <button class="import-tab-btn active" id="tab-btn-showcase">[ 01 // SIGNAL PACK ]</button>
-          <button class="import-tab-btn" id="tab-btn-custom">[ 02 // CUSTOM AUDIO ]</button>
-          <button class="import-tab-btn" id="tab-btn-lab">[ 03 // MOVEMENT LAB ]</button>
-          <button class="import-tab-btn" id="tab-btn-armory">[ 04 // KARAMBIT ARMORY ]</button>
+        <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
+          <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">[ 01 // SIGNAL PACK ]</button>
+          <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
+          <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
+          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // KARAMBIT ARMORY ]</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL -->
-        <div class="showcase-container showcase-panel" id="panel-showcase">
+        <div class="showcase-container showcase-panel" id="panel-showcase" role="tabpanel" aria-labelledby="tab-btn-showcase">
           <div class="terminal-panel-header">// SELECTED SIGNAL TELEMETRY</div>
           <div class="showcase-card terminal-card" id="showcase-card">
             <div class="showcase-header">
@@ -111,6 +114,11 @@ export class ImportScreen {
               <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
               <span class="showcase-badge" id="showcase-duration">01:12</span>
               <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
+            </div>
+
+            <div class="signal-program-readout" aria-label="Deterministic signal program identity">
+              <span class="signal-program-label">[SIGNAL ID]</span>
+              <div class="signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
             </div>
 
             <div class="showcase-desc" id="showcase-desc">
@@ -133,9 +141,9 @@ export class ImportScreen {
         </div>
 
         <!-- 02: CUSTOM AUDIO PANEL -->
-        <div class="custom-panel terminal-panel hidden" id="panel-custom">
+        <div class="custom-panel terminal-panel hidden" id="panel-custom" role="tabpanel" aria-labelledby="tab-btn-custom" aria-hidden="true">
           <div class="terminal-panel-header">// EXTERNAL SIGNAL INJECTION</div>
-          <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone">
+          <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone" role="button" tabindex="0" aria-label="Choose or drop an audio file">
             <div class="drop-icon terminal-glow-icon">⤓</div>
             <div class="drop-title">INITIALIZE AUDIO STREAM</div>
             <div class="drop-subtitle">> DRAG & DROP TRACK OR CLICK TO BROWSE</div>
@@ -148,7 +156,7 @@ export class ImportScreen {
         </div>
 
         <!-- 03: MOVEMENT LAB SETUP PANEL -->
-        <div class="showcase-container showcase-panel hidden" id="panel-lab">
+        <div class="showcase-container showcase-panel hidden" id="panel-lab" role="tabpanel" aria-labelledby="tab-btn-lab" aria-hidden="true">
           <div class="terminal-panel-header">// MOVEMENT LAB · KINETIC CALIBRATION & SANDBOX</div>
           <div class="terminal-card" style="padding: 20px 24px; max-width: 680px; margin: 16px auto; display: flex; flex-direction: column; gap: 16px; border-left: 4px solid #00f0ff;">
             <div style="font-size: 0.85rem; color: #a0aec0; line-height: 1.5;">
@@ -170,7 +178,7 @@ export class ImportScreen {
         </div>
 
         <!-- 04: KARAMBIT ARMORY PANEL -->
-        <div class="showcase-container showcase-panel hidden" id="panel-armory">
+        <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
           <div class="terminal-panel-header" style="display: flex; justify-content: space-between; align-items: center;">
             <span>// KARAMBIT ARMORY · PERFORMANCE UNLOCKS & COSMIC SHADERS</span>
             <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
@@ -211,6 +219,7 @@ export class ImportScreen {
     this.showcaseDurationElem = this.element.querySelector('#showcase-duration') as HTMLElement;
     this.showcaseDiffElem = this.element.querySelector('#showcase-diff') as HTMLElement;
     this.showcaseDescElem = this.element.querySelector('#showcase-desc') as HTMLElement;
+    this.showcaseFingerprintElem = this.element.querySelector('#showcase-fingerprint') as HTMLElement;
     this.showcaseEnterBtn = this.element.querySelector('#btn-showcase-enter') as HTMLButtonElement;
     this.showcasePreviewBtn = this.element.querySelector('#btn-showcase-preview') as HTMLButtonElement;
     this.previewIconElem = this.element.querySelector('#preview-icon') as HTMLElement;
@@ -245,15 +254,25 @@ export class ImportScreen {
   private buildStrip(): void {
     this.selectorStripElem.innerHTML = '';
     this.catalog.forEach((t, idx) => {
-      const item = document.createElement('div');
+      const item = document.createElement('button');
+      item.type = 'button';
       item.className = `strip-item terminal-strip-item ${t.id === this.selectedTrack.id ? 'active' : ''}`;
       item.dataset.trackId = t.id;
+      item.setAttribute('aria-pressed', t.id === this.selectedTrack.id ? 'true' : 'false');
+
+      const mins = Math.floor(t.duration / 60);
+      const secs = Math.floor(t.duration % 60);
+      const duration = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
       item.innerHTML = `
         <div class="strip-item-num">[${(idx + 1).toString().padStart(2, '0')}] // ${t.difficultyLabel}</div>
         <div class="strip-item-title">${t.title}</div>
-        <div class="strip-item-bpm">${t.bpm} BPM</div>
+        <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
+        <div class="strip-signal-bars" aria-hidden="true"></div>
       `;
+
+      const bars = item.querySelector('.strip-signal-bars') as HTMLElement;
+      this.renderFingerprint(bars, t, 12);
 
       item.addEventListener('click', () => {
         this.selectTrack(t);
@@ -273,8 +292,10 @@ export class ImportScreen {
     items.forEach((elem) => {
       if ((elem as HTMLElement).dataset.trackId === track.id) {
         elem.classList.add('active');
+        elem.setAttribute('aria-pressed', 'true');
       } else {
         elem.classList.remove('active');
+        elem.setAttribute('aria-pressed', 'false');
       }
     });
   }
@@ -298,6 +319,17 @@ export class ImportScreen {
     }
     this.showcaseGenreElem.style.borderColor = t.accentColor;
     this.showcaseGenreElem.style.color = t.accentColor;
+    this.renderFingerprint(this.showcaseFingerprintElem, t);
+  }
+
+  private renderFingerprint(container: HTMLElement, track: TrackCatalogEntry, count = 18): void {
+    const fragment = document.createDocumentFragment();
+    for (const value of createProgramFingerprint(track.id, track.bpm, track.duration, track.difficulty, count)) {
+      const bar = document.createElement('span');
+      bar.style.setProperty('--signal-level', value.toString());
+      fragment.appendChild(bar);
+    }
+    container.replaceChildren(fragment);
   }
 
   public renderArmory(): void {
@@ -467,53 +499,21 @@ export class ImportScreen {
   }
 
   private initEvents(): void {
-    // Tab switching
-    this.tabShowcaseBtn.addEventListener('click', () => {
-      this.tabShowcaseBtn.classList.add('active');
-      this.tabCustomBtn.classList.remove('active');
-      this.tabLabBtn.classList.remove('active');
-      this.tabArmoryBtn.classList.remove('active');
-      this.showcasePanel.classList.remove('hidden');
-      this.customPanel.classList.add('hidden');
-      this.labPanel.classList.add('hidden');
-      this.armoryPanel.classList.add('hidden');
-    });
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => this.switchModule(index));
+      tab.addEventListener('keydown', (event) => {
+        let nextIndex = index;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = tabs.length - 1;
+        else return;
 
-    this.tabCustomBtn.addEventListener('click', () => {
-      this.stopPreview();
-      this.tabCustomBtn.classList.add('active');
-      this.tabShowcaseBtn.classList.remove('active');
-      this.tabLabBtn.classList.remove('active');
-      this.tabArmoryBtn.classList.remove('active');
-      this.customPanel.classList.remove('hidden');
-      this.showcasePanel.classList.add('hidden');
-      this.labPanel.classList.add('hidden');
-      this.armoryPanel.classList.add('hidden');
-    });
-
-    this.tabLabBtn.addEventListener('click', () => {
-      this.stopPreview();
-      this.tabLabBtn.classList.add('active');
-      this.tabShowcaseBtn.classList.remove('active');
-      this.tabCustomBtn.classList.remove('active');
-      this.tabArmoryBtn.classList.remove('active');
-      this.labPanel.classList.remove('hidden');
-      this.showcasePanel.classList.add('hidden');
-      this.customPanel.classList.add('hidden');
-      this.armoryPanel.classList.add('hidden');
-    });
-
-    this.tabArmoryBtn.addEventListener('click', () => {
-      this.stopPreview();
-      this.tabArmoryBtn.classList.add('active');
-      this.tabShowcaseBtn.classList.remove('active');
-      this.tabCustomBtn.classList.remove('active');
-      this.tabLabBtn.classList.remove('active');
-      this.armoryPanel.classList.remove('hidden');
-      this.showcasePanel.classList.add('hidden');
-      this.customPanel.classList.add('hidden');
-      this.labPanel.classList.add('hidden');
-      this.renderArmory();
+        event.preventDefault();
+        this.switchModule(nextIndex);
+        tabs[nextIndex].focus();
+      });
     });
 
     this.labEnterBtn.addEventListener('click', () => {
@@ -555,6 +555,13 @@ export class ImportScreen {
       this.fileInput.click();
     });
 
+    this.dropZone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.fileInput.click();
+      }
+    });
+
     this.browseBtn.addEventListener('click', () => {
       this.fileInput.click();
     });
@@ -566,5 +573,22 @@ export class ImportScreen {
         this.onFileSelectedCallback?.(file);
       }
     });
+  }
+
+  private switchModule(activeIndex: number): void {
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
+    const panels = [this.showcasePanel, this.customPanel, this.labPanel, this.armoryPanel];
+    if (activeIndex !== 0) this.stopPreview();
+
+    tabs.forEach((tab, index) => {
+      const active = index === activeIndex;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.tabIndex = active ? 0 : -1;
+      panels[index].classList.toggle('hidden', !active);
+      panels[index].setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+
+    if (activeIndex === 3) this.renderArmory();
   }
 }

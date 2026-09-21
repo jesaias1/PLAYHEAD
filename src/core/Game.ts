@@ -470,7 +470,7 @@ export class Game {
       this.isFirstContactCourse = !!trackEntry.isFirstContact;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(trackEntry.title);
-      this.ui.analysisScreen.setStage(`LOADING SIGNAL // ${trackEntry.genre}`);
+      this.ui.analysisScreen.setStage(`[SIGNAL] OFFICIAL PROGRAM REQUESTED // ${trackEntry.genre}`, 0.04);
 
       // Concurrently load audio and check precomputed level cache
       const [buffer, precomputed] = await Promise.all([
@@ -480,6 +480,7 @@ export class Game {
 
       if (precomputed) {
         // INSTANT LOAD PATH: Bypass heavy FFT analysis and procedural route regeneration
+        this.ui.analysisScreen.setStage('[AUDIO] PROGRAM BUFFER READY', 0.35);
         await this.audioEngine.init();
         this.audioEngine.setBuffer(buffer);
 
@@ -487,7 +488,9 @@ export class Game {
         this.ui.applyAccent(precomputed.analysis.visualAccent);
         this.environment.setAccent(precomputed.analysis.visualAccent);
 
+        this.ui.analysisScreen.setStage('[MAP] PRECOMPUTED MOVEMENT PHRASES RESTORED', 0.72);
         this.currentTrack = precomputed.track;
+        this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.88);
         this.world.loadTrack(precomputed.analysis, this.currentTrack, this.environment);
         if (precomputed.spectacleEvents) {
           this.world.songDirector.spectaclePlanner.events = precomputed.spectacleEvents;
@@ -496,6 +499,7 @@ export class Game {
           this.ui.hud.showSectionTitle(title);
         };
 
+        this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.97);
         this.ui.analysisScreen.displayAnalysis(precomputed.analysis);
         this.stateMachine.transitionTo(GameState.READY);
         return;
@@ -517,8 +521,10 @@ export class Game {
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(file.name);
+      this.ui.analysisScreen.setStage('[SIGNAL] INPUT RECEIVED', 0.02);
 
       const { buffer, filename } = await AudioLoader.loadFromFile(file);
+      this.ui.analysisScreen.setStage('[AUDIO] PCM DECODED', 0.08);
       await this.processBuffer(buffer, filename);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Audio load failed';
@@ -534,9 +540,10 @@ export class Game {
       this.stateMachine.transitionTo(GameState.ANALYSING);
       const title = `DEV ${genre.replace('_', ' ')}`;
       this.ui.analysisScreen.setTrackTitle(title);
-      this.ui.analysisScreen.setStage('GENERATING DEV AUDIO SIGNAL');
+      this.ui.analysisScreen.setStage('[AUDIO] GENERATING DEV SIGNAL', 0.04);
 
       const buffer = await SyntheticTrack.generate(genre);
+      this.ui.analysisScreen.setStage('[AUDIO] PCM BUFFER READY', 0.08);
       await this.processBuffer(buffer, title);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Dev track failed';
@@ -549,9 +556,9 @@ export class Game {
     await this.audioEngine.init();
     this.audioEngine.setBuffer(buffer);
 
-    this.ui.analysisScreen.setStage('[DSP ] extracting waveform & detecting transients');
-    const analysis = await AudioAnalyzer.analyze(buffer, filename, (stage, _prog) => {
-      this.ui.analysisScreen.setStage(stage);
+    this.ui.analysisScreen.setStage('[DSP] PREPARING ANALYSIS', 0.1);
+    const analysis = await AudioAnalyzer.analyze(buffer, filename, (stage, progress) => {
+      this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68);
     });
 
     this.currentAnalysis = analysis;
@@ -559,15 +566,16 @@ export class Game {
     this.environment.setAccent(analysis.visualAccent);
 
     // Deterministically generate the course
-    this.ui.analysisScreen.setStage('[MAP ] compiling route & resolving surf phrases');
+    this.ui.analysisScreen.setStage('[MAP] MOVEMENT PHRASES', 0.82);
     this.currentTrack = TrackGenerator.generate(analysis);
-    this.ui.analysisScreen.setStage('[VAL ] validating traversal & corridor safety');
+    this.ui.analysisScreen.setStage('[ROUTE] TRAVERSAL VALIDATED', 0.9);
+    this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
     this.world.loadTrack(analysis, this.currentTrack, this.environment);
     this.world.songDirector.onSectionAnnouncement = (title) => {
       this.ui.hud.showSectionTitle(title);
     };
 
-    this.ui.analysisScreen.setStage('[OK  ] execute.track');
+    this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.98);
     this.stateMachine.transitionTo(GameState.READY);
   }
 
