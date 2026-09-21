@@ -9,7 +9,7 @@
 import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
-import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
 import { createProgramFingerprint } from './SignalIdentity';
 
 export class ImportScreen {
@@ -51,6 +51,10 @@ export class ImportScreen {
   // Armory Elements
   private armoryGridElem: HTMLElement;
   private armoryDevToggleBtn: HTMLButtonElement;
+  private decoderPendingElem: HTMLElement;
+  private decoderStatusElem: HTMLElement;
+  private decoderDetailElem: HTMLElement;
+  private decoderButton: HTMLButtonElement;
 
   // State
   private catalog: TrackCatalogEntry[];
@@ -59,6 +63,8 @@ export class ImportScreen {
   private previewCtx: AudioContext | null = null;
   private currentPreviewSource: AudioBufferSourceNode | null = null;
   private skinSystem = KarambitSkinSystem.getInstance();
+  private lastDecoderReward: OpenedSignalDrop | null = null;
+  private decoderBusy = false;
 
   private onFileSelectedCallback?: (file: File) => void;
   private onCatalogTrackCallback?: (track: TrackCatalogEntry) => void;
@@ -74,21 +80,24 @@ export class ImportScreen {
     this.element.className = 'screen import-screen';
     this.element.innerHTML = `
       <div class="import-container terminal-console">
-        <div class="terminal-top-telemetry">
-          <span class="telemetry-item">[SYS] CORE ONLINE</span>
-          <span class="telemetry-item">[DSP] ANALYZER READY</span>
-          <span class="telemetry-item">[WORLD] SYNTH IDLE</span>
-          <span class="telemetry-item signal">[SIGNAL] AWAITING INPUT</span>
-        </div>
-
         <div class="brand-header">
-          <div class="brand-eyebrow">[SYS] AUDIO-NAVIGATION HARDWARE // PLAYHEAD</div>
           <div class="brand-title-wrap">
             <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
             <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
           </div>
           <p class="brand-tagline">DROP A SONG. ENTER IT.<span class="terminal-cursor" aria-hidden="true"></span></p>
           <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
+        </div>
+
+        <div class="system-status-shell" aria-label="PLAYHEAD system status">
+          <div class="system-status-heading">[SYS] AUDIO → SIGNAL ANALYSIS → MOVEMENT DATA → WORLD SYNTHESIS</div>
+          <div class="terminal-top-telemetry">
+            <span class="telemetry-item"><i></i>[SYS] CORE ONLINE</span>
+            <span class="telemetry-item"><i></i>[DSP] ANALYZER READY</span>
+            <span class="telemetry-item"><i></i>[MAP] ROUTE STANDBY</span>
+            <span class="telemetry-item"><i></i>[WORLD] SYNTH IDLE</span>
+            <span class="telemetry-item signal"><i></i>[SIGNAL] AWAITING INPUT</span>
+          </div>
         </div>
 
         <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
@@ -116,13 +125,16 @@ export class ImportScreen {
               <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
             </div>
 
-            <div class="signal-program-readout" aria-label="Deterministic signal program identity">
-              <span class="signal-program-label">[SIGNAL ID]</span>
-              <div class="signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
-            </div>
-
             <div class="showcase-desc" id="showcase-desc">
               Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
+            </div>
+
+            <div class="signal-program-readout" aria-label="Deterministic signal program identity">
+              <div class="signal-program-header">
+                <span class="signal-program-label">[SIGNAL] PROGRAM FINGERPRINT</span>
+                <span class="signal-program-state">LOCKED // DETERMINISTIC</span>
+              </div>
+              <div class="signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
             </div>
 
             <div class="showcase-actions">
@@ -158,20 +170,20 @@ export class ImportScreen {
         <!-- 03: MOVEMENT LAB SETUP PANEL -->
         <div class="showcase-container showcase-panel hidden" id="panel-lab" role="tabpanel" aria-labelledby="tab-btn-lab" aria-hidden="true">
           <div class="terminal-panel-header">// MOVEMENT LAB · KINETIC CALIBRATION & SANDBOX</div>
-          <div class="terminal-card" style="padding: 20px 24px; max-width: 680px; margin: 16px auto; display: flex; flex-direction: column; gap: 16px; border-left: 4px solid #00f0ff;">
-            <div style="font-size: 0.85rem; color: #a0aec0; line-height: 1.5;">
+          <div class="terminal-card lab-console-card">
+            <div class="lab-console-copy">
               Dedicated isolated physics sandbox for practicing bunny-hop timing, Source-inspired air strafing, and high-velocity surf ramp control.
             </div>
-            <div class="settings-row" style="margin-top: 4px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
-              <label class="settings-label" style="min-width: 160px; font-size: 0.8rem; font-family: var(--font-mono); color: #cbd5e1;">SIGNAL // SOUNDTRACK</label>
-              <select class="settings-select" id="lab-music-select" style="flex: 1; padding: 8px 12px; font-size: 0.8rem;">
+            <div class="lab-control-grid">
+              <label class="settings-label" for="lab-music-select">[SIGNAL] SOUNDTRACK</label>
+              <select class="settings-select lab-signal-select" id="lab-music-select">
                 <option value="NONE">NONE // SILENT SANDBOX</option>
               </select>
             </div>
-            <div style="font-size: 0.72rem; color: #718096; font-family: var(--font-mono); margin-top: 4px;">
-              [MODE: UNRESTRICTED TRAVERSAL] · [COLLISION: AUTHORITATIVE] · [PB GHOST: ACTIVE]
+            <div class="lab-state-row">
+              <span>[MAP] UNRESTRICTED</span><span>[COLLISION] AUTHORITATIVE</span><span>[PB] GHOST ACTIVE</span>
             </div>
-            <div style="margin-top: 8px; display: flex; gap: 12px;">
+            <div class="lab-actions">
               <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">> ENTER MOVEMENT LAB</button>
             </div>
           </div>
@@ -180,12 +192,35 @@ export class ImportScreen {
         <!-- 04: KARAMBIT ARMORY PANEL -->
         <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
           <div class="terminal-panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>// KARAMBIT ARMORY · PERFORMANCE UNLOCKS & COSMIC SHADERS</span>
+            <span>[ARMORY] KARAMBIT COSMETIC CONTROL</span>
             <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
               DEV PREVIEW: OFF
             </button>
           </div>
-          <div id="armory-skins-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 10px; max-height: 480px; overflow-y: auto; padding-right: 4px;">
+          <section class="armory-decoder" aria-labelledby="signal-decoder-title">
+            <div class="decoder-header">
+              <div>
+                <div class="decoder-kicker">[SIGNAL] COSMETIC ACQUISITION BUS</div>
+                <h2 id="signal-decoder-title">SIGNAL DECODER</h2>
+              </div>
+              <div class="decoder-counter"><span>PENDING SIGNALS</span><strong id="decoder-pending">0</strong></div>
+            </div>
+            <div class="decoder-body">
+              <div class="decoder-copy">
+                <div id="decoder-status" class="decoder-status">NO SIGNAL AVAILABLE</div>
+                <div id="decoder-detail" class="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</div>
+              </div>
+              <div class="decoder-quality-grid" aria-label="Rank signal quality">
+                <span><b>BRONZE</b> SIGNAL</span>
+                <span><b>SILVER</b> ENHANCED ODDS</span>
+                <span><b>GOLD</b> HIGH-GRADE</span>
+                <span><b>DIAMOND</b> PRISTINE</span>
+              </div>
+              <button id="btn-decode-signal" class="btn-hero btn-terminal-exec decoder-button" type="button">[ NO SIGNAL AVAILABLE ]</button>
+            </div>
+          </section>
+          <div class="armory-catalog-heading">[ARMORY] CHALLENGE UNLOCKS // COSMETIC CATALOG</div>
+          <div id="armory-skins-grid" class="armory-skins-grid">
             <!-- Populated dynamically via renderArmory() -->
           </div>
         </div>
@@ -234,6 +269,10 @@ export class ImportScreen {
     // Armory elements
     this.armoryGridElem = this.element.querySelector('#armory-skins-grid') as HTMLElement;
     this.armoryDevToggleBtn = this.element.querySelector('#btn-armory-dev-toggle') as HTMLButtonElement;
+    this.decoderPendingElem = this.element.querySelector('#decoder-pending') as HTMLElement;
+    this.decoderStatusElem = this.element.querySelector('#decoder-status') as HTMLElement;
+    this.decoderDetailElem = this.element.querySelector('#decoder-detail') as HTMLElement;
+    this.decoderButton = this.element.querySelector('#btn-decode-signal') as HTMLButtonElement;
 
     this.buildStrip();
     this.buildLabSelect();
@@ -333,6 +372,7 @@ export class ImportScreen {
   }
 
   public renderArmory(): void {
+    this.renderSignalDecoder();
     const isDev = this.skinSystem.isDevPreview();
     this.armoryDevToggleBtn.textContent = `DEV PREVIEW: ${isDev ? 'ACTIVE' : 'OFF'}`;
     this.armoryDevToggleBtn.style.color = isDev ? '#ffdd00' : '#00f0ff';
@@ -411,6 +451,35 @@ export class ImportScreen {
 
       this.armoryGridElem.appendChild(card);
     });
+  }
+
+  private renderSignalDecoder(): void {
+    const pending = this.skinSystem.getPendingDropCount();
+    this.decoderPendingElem.textContent = pending.toString();
+
+    if (this.decoderBusy) {
+      this.decoderStatusElem.textContent = 'DECODING...';
+      this.decoderDetailElem.textContent = 'Interpreting packet signature // resolving Armory payload.';
+      this.decoderButton.textContent = '[ DECODING SIGNAL ]';
+      this.decoderButton.disabled = true;
+      return;
+    }
+
+    if (this.lastDecoderReward) {
+      const reward = this.lastDecoderReward;
+      this.decoderStatusElem.textContent = 'ARMORY SIGNAL FOUND';
+      this.decoderStatusElem.dataset.rarity = reward.skin.rarity;
+      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.skin.rarity} // ${reward.skin.name}`;
+    } else {
+      this.decoderStatusElem.textContent = pending > 0 ? 'SIGNAL ACQUIRED' : 'NO SIGNAL AVAILABLE';
+      this.decoderStatusElem.removeAttribute('data-rarity');
+      this.decoderDetailElem.textContent = pending > 0
+        ? 'Packet ready. Decode to register one permanent Armory cosmetic.'
+        : 'Complete official Signal Pack runs to acquire Armory signals.';
+    }
+
+    this.decoderButton.disabled = pending === 0;
+    this.decoderButton.textContent = pending > 0 ? '[ DECODE SIGNAL ]' : '[ NO SIGNAL AVAILABLE ]';
   }
 
   public setCallbacks(
@@ -525,6 +594,19 @@ export class ImportScreen {
     this.armoryDevToggleBtn.addEventListener('click', () => {
       this.skinSystem.toggleDevPreview();
       this.renderArmory();
+    });
+
+    this.decoderButton.addEventListener('click', () => {
+      if (this.decoderBusy || this.skinSystem.getPendingDropCount() === 0) return;
+      const reward = this.skinSystem.openSignalDrop();
+      if (!reward) return;
+      this.lastDecoderReward = reward;
+      this.decoderBusy = true;
+      this.renderSignalDecoder();
+      window.setTimeout(() => {
+        this.decoderBusy = false;
+        this.renderArmory();
+      }, 320);
     });
 
     // Showcase actions

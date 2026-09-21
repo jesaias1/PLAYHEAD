@@ -9,7 +9,7 @@ import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
  * VOID FALL REGRESSION
  *
  * Governing rule: the ONLY gameplay death is crossing the authoritative world
- * void boundary (final legitimate geometry minus a generous margin). Airborne
+ * void boundary (final legitimate geometry minus a bounded vertical margin). Airborne
  * duration, speed, distance, platform proximity and route progression are never
  * kill rules. See tests/VoidRestorePolicy.test.ts for the full policy suite.
  */
@@ -148,9 +148,73 @@ describe('VoidFallRegression', () => {
 
     physics.buildFromRoute(highRoute);
     // lowest bottomY is 120 - 1 = 119
-    // killPlaneY must be 119 - VOID_MARGIN (40) = 79, NOT -25!
+    // killPlaneY is derived from playable geometry, never a checkpoint or decoration.
     expect(physics.killPlaneY).toBe(119 - PhysicsWorld.VOID_MARGIN);
     expect(physics.getVoidDeathY()).toBe(119 - PhysicsWorld.VOID_MARGIN);
+  });
+
+  it('keeps legitimate high-speed airborne travel safe above the gameplay boundary', () => {
+    const { player, physics } = setupPlayer();
+    let fallCalled = false;
+    player.onFallCallback = () => { fallCalled = true; };
+    physics.buildFromRoute([{
+      id: 1,
+      time: 0,
+      position: { x: 0, y: -10, z: 0 },
+      dimensions: { x: 14, y: 2, z: 30 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false,
+      isBoost: false
+    }]);
+
+    player.authoritativeKillY = physics.getVoidDeathY();
+    player.setPosition({ x: 4000, y: player.authoritativeKillY + 0.5, z: -3500 });
+    player.velocity.set(145, -3, 110);
+    player.updateFixed(1 / 120);
+
+    expect(fallCalled).toBe(false);
+  });
+
+  it('places unrecoverable fall restore within 20m of the lowest playable underside', () => {
+    const { player, physics } = setupPlayer();
+    const reasons: string[] = [];
+    player.onFallCallback = reason => reasons.push(reason);
+
+    const route: RouteNode[] = [{
+      id: 1,
+      time: 0,
+      position: { x: 0, y: 12, z: 0 },
+      dimensions: { x: 14, y: 2, z: 24 },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      type: RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: 0,
+      isSurf: false,
+      isBoost: false
+    }];
+    physics.buildFromRoute(route);
+
+    const playableBottom = 11;
+    expect(playableBottom - physics.getVoidDeathY()).toBe(20);
+
+    player.authoritativeKillY = physics.getVoidDeathY();
+    player.setPosition({ x: 0, y: player.authoritativeKillY + 0.05, z: 0 });
+    player.velocity.set(0, -1, 0);
+    player.updateFixed(1 / 120);
+    expect(reasons).toEqual([]);
+
+    player.position.y = player.authoritativeKillY - 0.05;
+    player.updateFixed(1 / 120);
+    expect(reasons).toEqual(['NORMAL_VOID']);
   });
 
   it('allows high surf jumps (> 5 seconds airtime) above track level without false void fall', () => {

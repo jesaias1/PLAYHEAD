@@ -5,12 +5,13 @@
 import * as THREE from 'three';
 import { OBB } from 'three/examples/jsm/math/OBB.js';
 import { TrackAnalysis } from '../audio/AudioFeatures';
-import { CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
+import { AscentVariant, CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
 import { RouteValidator } from './RouteValidator';
 import { SeededRandom } from './SeededRandom';
 import { SurfPlanner } from './SurfPlanner';
 import { SurfPhraseGenerator } from './SurfPhraseGenerator';
 import { SurfValidator } from './SurfValidator';
+import { getPlatformMaxHalfWidth } from './PlatformShape';
 
 export class RouteGenerator {
   public static generate(analysis: TrackAnalysis): GeneratedTrack {
@@ -238,17 +239,25 @@ export class RouteGenerator {
           consecutiveNarrow = 0;
 
         } else if (theme === 'BUILDUP') {
-          // Buildup: Route narrows and escalates steeply towards the crest
+          // Buildup: a readable climbing arc with real outside-corner landing room.
           const steps = 3;
+          const phraseId = nodeId;
+          const variant: AscentVariant = rng.nextBool(0.52) ? 'FLARED_ASCENT' : 'FLOW_STAIR';
+          const curveDirection = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
-            const gap = rng.nextFloat(3.5, 5.0);
-            const stepLen = 14.0;
-            // Velocity-aware: widen first step if arriving fast
+            const isCatch = st === steps - 1;
+            const gap = rng.nextFloat(3.2, 4.4);
+            const stepLen = isCatch ? rng.nextFloat(23.0, 26.0) : rng.nextFloat(18.0, 21.0);
             const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
-            const widthBoost = (st === 0) ? Math.min(1.5, speedFactor) : 1.0;
-            const stepWidth = 9.5 * widthBoost; // Widened for forgiving takeoff
-            const exitWidth = stepWidth * 1.65; // Substantially widened flared exit width
-            const rise = 0.85;
+            const widthBoost = st === 0 ? Math.min(1.3, speedFactor) : 1.0;
+            const stepWidth = (isCatch ? 18.0 : 14.5) * widthBoost;
+            const exitWidth = stepWidth * (variant === 'FLARED_ASCENT' ? 1.55 : 1.42);
+            const rise = rng.nextFloat(0.42, 0.62);
+
+            // One consistent turn direction describes a broad spatial curve instead
+            // of forcing a left/right slalom. The catch step straightens the exit.
+            const turnStrength = isCatch ? 0.035 : (variant === 'FLARED_ASCENT' ? 0.085 : 0.065);
+            currentYaw += curveDirection * turnStrength;
 
             currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
             currentPos.y += rise;
@@ -261,6 +270,10 @@ export class RouteGenerator {
               position: { ...currentPos },
               dimensions: { x: stepWidth, y: 2.0, z: stepLen },
               exitWidth,
+              ascentVariant: variant,
+              ascentPhraseId: phraseId,
+              ascentStepIndex: st,
+              ascentStepCount: steps,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -276,8 +289,7 @@ export class RouteGenerator {
             currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
             cumulativeDistance += stepLen * 0.5;
             sectionCurrentDistance += stepLen * 0.5;
-            // Climbing costs speed
-            estimatedSpeed = estimatedSpeed * 0.88;
+            estimatedSpeed = estimatedSpeed * 0.94;
             consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
           }
 
@@ -349,18 +361,33 @@ export class RouteGenerator {
           consecutiveNarrow = 0;
 
         } else if (theme === 'ASCENT') {
-          // Escalating stepping platforms - flared for high-speed approach and clean takeoff
-          const steps = rng.nextInt(2, 3);
+          // Flow ascents trace a gentle curve so natural air-strafes meet broad,
+          // flared landing zones instead of a centred staircase.
+          const variants: AscentVariant[] = ['FLOW_STAIR', 'FLARED_ASCENT', 'BREATHER_ASCENT', 'OFFSET_ASCENT'];
+          const variant = rng.choice(variants);
+          const steps = variant === 'BREATHER_ASCENT' ? 4 : rng.nextInt(3, 4);
+          const phraseId = nodeId;
+          const curveDirection = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
-            const gap = rng.nextFloat(3.5, 5.0);
-            const stepLen = rng.nextFloat(14.0, 18.0);
-            // Velocity-aware: widen first step if arriving fast
+            const isCatch = st === steps - 1;
+            const isBreather = variant === 'BREATHER_ASCENT' && isCatch;
+            const gap = rng.nextFloat(3.1, isCatch ? 4.1 : 4.6);
+            const stepLen = isCatch
+              ? rng.nextFloat(isBreather ? 26.0 : 22.0, isBreather ? 30.0 : 26.0)
+              : rng.nextFloat(18.0, 22.0);
             const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
-            const widthBoost = (st === 0) ? Math.min(1.5, speedFactor) : 1.0;
-            const baseWidth = rng.nextFloat(10.0, 13.0);
+            const widthBoost = st === 0 ? Math.min(1.3, speedFactor) : 1.0;
+            const baseWidth = isCatch
+              ? rng.nextFloat(isBreather ? 19.0 : 16.5, isBreather ? 22.0 : 19.5)
+              : rng.nextFloat(14.0, 17.0);
             const stepWidth = baseWidth * widthBoost;
-            const exitWidth = stepWidth * 1.65;
-            const rise = rng.nextFloat(0.5, 0.85);
+            const flareRatio = variant === 'FLARED_ASCENT' ? 1.58 : (variant === 'OFFSET_ASCENT' ? 1.45 : 1.38);
+            const exitWidth = stepWidth * flareRatio;
+            const rise = rng.nextFloat(0.34, 0.58);
+
+            const baseTurn = variant === 'OFFSET_ASCENT' ? 0.105 : (variant === 'FLOW_STAIR' ? 0.08 : 0.065);
+            const turnStrength = isCatch ? baseTurn * 0.42 : baseTurn * (st === 0 ? 0.8 : 1.0);
+            currentYaw += curveDirection * turnStrength;
 
             currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
             currentPos.y += rise;
@@ -373,6 +400,10 @@ export class RouteGenerator {
               position: { ...currentPos },
               dimensions: { x: stepWidth, y: 2.0, z: stepLen },
               exitWidth,
+              ascentVariant: variant,
+              ascentPhraseId: phraseId,
+              ascentStepIndex: st,
+              ascentStepCount: steps,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -388,8 +419,7 @@ export class RouteGenerator {
             currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
             cumulativeDistance += stepLen * 0.5;
             sectionCurrentDistance += stepLen * 0.5;
-            // Climbing costs speed
-            estimatedSpeed = estimatedSpeed * 0.88;
+            estimatedSpeed = estimatedSpeed * 0.94;
             consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
           }
 
@@ -743,7 +773,7 @@ export class RouteGenerator {
         const perpX = -dirZ * side;
         const perpZ = dirX * side;
 
-        const startHalfW = (startPlatform.dimensions.x || 10.0) * 0.5;
+        const startHalfW = getPlatformMaxHalfWidth(startPlatform);
         const lateralOffset = startHalfW + rampEffectiveHalfW + edgeGap;
 
         // Strictly guarantee no overlap
@@ -783,7 +813,7 @@ export class RouteGenerator {
 
           // Broad phase: skip nodes whose bounding sphere cannot reach ours.
           const nodeHalfDiag = Math.hypot(
-            node.dimensions.x * 0.5,
+            getPlatformMaxHalfWidth(node),
             node.dimensions.y * 0.5,
             node.dimensions.z * 0.5
           );

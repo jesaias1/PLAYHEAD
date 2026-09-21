@@ -42,6 +42,12 @@ export enum RouteNodeType {
   FINISH = 'FINISH'
 }
 
+export type AscentVariant =
+  | 'FLOW_STAIR'
+  | 'FLARED_ASCENT'
+  | 'BREATHER_ASCENT'
+  | 'OFFSET_ASCENT';
+
 export interface RouteNode {
   id: number;
   time: number;               // Corresponding song timestamp (seconds)
@@ -61,6 +67,10 @@ export interface RouteNode {
   isOptional?: boolean;
   isLaunchVariant?: boolean;
   exitWidth?: number;
+  ascentVariant?: AscentVariant;
+  ascentPhraseId?: number;
+  ascentStepIndex?: number;
+  ascentStepCount?: number;
   isRecoveryShelf?: boolean;
 }
 

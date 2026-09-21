@@ -101,6 +101,22 @@ describe('RouteExclusionCorridor', () => {
     expect(stepUpCorridor.isPointInsideCorridor(outsideStepUp, 2, -5, 10)).toBe(false);
   });
 
+  it('protects the full flared exit width of ascent platforms', () => {
+    const flared: RouteNode = {
+      ...mockRoute[0],
+      id: 20,
+      dimensions: { x: 12, y: 1.5, z: 20 },
+      exitWidth: 24,
+      type: RouteNodeType.STEP_UP
+    };
+    const flaredCorridor = new RouteExclusionCorridor([flared]);
+
+    // With the 12m exit half-width this point is inside the protected band;
+    // using only the 6m entry half-width would incorrectly allow it.
+    expect(flaredCorridor.isPointInsideCorridor(new THREE.Vector3(44, 0, 0), 2, -5, 10)).toBe(true);
+    expect(flaredCorridor.isPointInsideCorridor(new THREE.Vector3(50, 0, 0), 2, -5, 10)).toBe(false);
+  });
+
   it('enforces strengthened lateral clearance on surf sections (rejecting objects at 36m)', () => {
     // Node 2 is a surf ramp with dimensions.x = 14 (half-breadth 7m)
     // Surf margin: Math.max(38.0, 18.0 + extraSurfMargin) + 0.85 * objectRadius

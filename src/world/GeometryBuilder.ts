@@ -8,6 +8,7 @@
 
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { createPlatformGeometry } from '../generation/PlatformShape';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
@@ -208,28 +209,8 @@ export class GeometryBuilder {
     for (let i = 0; i < track.route.length; i++) {
       const node = track.route[i];
 
-      // Primary Platform Mesh (Strictly preserves node dimensions, handles flared trapezoids for STEP_UP)
-      let geom: THREE.BufferGeometry;
-      if (node.exitWidth && node.exitWidth > node.dimensions.x) {
-        geom = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
-        const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
-        const entryW = node.dimensions.x;
-        const exitW = node.exitWidth;
-        const h = node.dimensions.y;
-        const l = node.dimensions.z;
-        for (let v = 0; v < posAttr.count; v++) {
-          const zNorm = posAttr.getZ(v);
-          const xNorm = posAttr.getX(v);
-          const yNorm = posAttr.getY(v);
-          const width = zNorm > 0 ? exitW : entryW;
-          posAttr.setXYZ(v, xNorm * width, yNorm * h, zNorm * l);
-        }
-        geom.computeVertexNormals();
-        geom.computeBoundingBox();
-        geom.computeBoundingSphere();
-      } else {
-        geom = new THREE.BoxGeometry(node.dimensions.x, node.dimensions.y, node.dimensions.z);
-      }
+      // Rendering and collision consume the same authoritative footprint.
+      const geom = createPlatformGeometry(node);
 
       // Surf face readability: top (+Y) gets glowing chevrons, bottom/sides get dark basalt
       const surfMultiMat = [

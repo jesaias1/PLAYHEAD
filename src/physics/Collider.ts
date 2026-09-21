@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { getPlatformFootprint, interpolatePlatformHalfWidth } from '../generation/PlatformShape';
 
 export interface CollisionResult {
   hasContact: boolean;
@@ -33,10 +34,11 @@ export class BoxCollider {
 
   constructor(node: RouteNode) {
     this.center.set(node.position.x, node.position.y, node.position.z);
-    this.halfSize.set(node.dimensions.x * 0.5, node.dimensions.y * 0.5, node.dimensions.z * 0.5);
-    this.entryHalfWidth = node.dimensions.x * 0.5;
-    this.exitHalfWidth = (node.exitWidth ?? node.dimensions.x) * 0.5;
-    this.isTrapezoid = this.exitHalfWidth > this.entryHalfWidth;
+    const footprint = getPlatformFootprint(node);
+    this.halfSize.set(footprint.entryHalfWidth, footprint.halfHeight, footprint.halfDepth);
+    this.entryHalfWidth = footprint.entryHalfWidth;
+    this.exitHalfWidth = footprint.exitHalfWidth;
+    this.isTrapezoid = Math.abs(this.exitHalfWidth - this.entryHalfWidth) > 1e-6;
 
     const maxHalfWidth = Math.max(this.entryHalfWidth, this.exitHalfWidth);
     this.boundingRadius = Math.hypot(maxHalfWidth, this.halfSize.y, this.halfSize.z);
@@ -69,9 +71,12 @@ export class BoxCollider {
 
     if (this.isTrapezoid) {
       const clampedZ = Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z));
-      const spanZ = 2.0 * this.halfSize.z;
-      const t = spanZ > 0 ? (clampedZ + this.halfSize.z) / spanZ : 0.5;
-      currentHalfW = this.entryHalfWidth + (this.exitHalfWidth - this.entryHalfWidth) * t;
+      currentHalfW = interpolatePlatformHalfWidth(
+        this.entryHalfWidth,
+        this.exitHalfWidth,
+        this.halfSize.z,
+        clampedZ
+      );
       const clampedX = Math.max(-currentHalfW, Math.min(currentHalfW, localPoint.x));
       const clampedY = Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y));
       clamped = new THREE.Vector3(clampedX, clampedY, clampedZ);

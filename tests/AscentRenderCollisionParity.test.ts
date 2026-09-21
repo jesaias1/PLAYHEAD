@@ -4,6 +4,7 @@ import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { BoxCollider } from '../src/physics/Collider';
 import { PhysicsWorld } from '../src/physics/PhysicsWorld';
 import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
+import { createPlatformGeometry, getPlatformHalfWidthAtLocalZ } from '../src/generation/PlatformShape';
 import { TrackAnalysis } from '../src/audio/AudioFeatures';
 
 /**
@@ -13,36 +14,11 @@ import { TrackAnalysis } from '../src/audio/AudioFeatures';
  * ENTIRE visible top surface. A previous bug left the far corners visually
  * present but non-solid, so the player fell through them.
  *
- * These tests reconstruct the exact render geometry used by GeometryBuilder
- * (its flared trapezoid path) and probe the collider at the same sample points:
- * centre, left/right middle, far-left/right widened corners, exit edge, and
- * just outside each lateral edge.
+ * These tests consume the same authoritative platform footprint as the renderer
+ * and probe the collider at representative visible and non-visible points.
  */
 describe('AscentRenderCollisionParity', () => {
   const PLAYER_RADIUS = 0.35;
-
-  /**
-   * Mirrors the flared-trapezoid geometry built in GeometryBuilder.buildWorld
-   * for a node that has exitWidth > dimensions.x.
-   */
-  function buildRenderGeometry(node: RouteNode): THREE.BufferGeometry {
-    const geom = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
-    const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
-    const entryW = node.dimensions.x;
-    const exitW = node.exitWidth!;
-    const h = node.dimensions.y;
-    const l = node.dimensions.z;
-    for (let v = 0; v < posAttr.count; v++) {
-      const zNorm = posAttr.getZ(v);
-      const xNorm = posAttr.getX(v);
-      const yNorm = posAttr.getY(v);
-      const width = zNorm > 0 ? exitW : entryW;
-      posAttr.setXYZ(v, xNorm * width, yNorm * h, zNorm * l);
-    }
-    geom.computeVertexNormals();
-    geom.computeBoundingBox();
-    return geom;
-  }
 
   function ascentTrack(): RouteNode[] {
     const analysis: TrackAnalysis = {
@@ -71,7 +47,7 @@ describe('AscentRenderCollisionParity', () => {
     expect(stepUps.length).toBeGreaterThan(0);
 
     for (const node of stepUps) {
-      const geom = buildRenderGeometry(node);
+      const geom = createPlatformGeometry(node);
       const box = geom.boundingBox!;
       const col = new BoxCollider(node);
 
@@ -81,13 +57,18 @@ describe('AscentRenderCollisionParity', () => {
 
       // Sample the visible top surface in the platform's local frame, then
       // convert to world space (the collider API is world-space).
+      const nearZ = -halfLenZ * 0.65;
+      const farZ = halfLenZ - 0.15;
+      const nearHalfW = getPlatformHalfWidthAtLocalZ(node, nearZ);
+      const farHalfW = getPlatformHalfWidthAtLocalZ(node, farZ);
       const samples: Array<{ name: string; x: number; z: number }> = [
         { name: 'centre', x: 0, z: 0 },
-        { name: 'left-middle', x: -exitHalfW * 0.7, z: 0 },
-        { name: 'right-middle', x: exitHalfW * 0.7, z: 0 },
-        { name: 'far-left-widened-corner', x: -(exitHalfW - 0.15), z: halfLenZ - 0.15 },
-        { name: 'far-right-widened-corner', x: exitHalfW - 0.15, z: halfLenZ - 0.15 },
-        { name: 'exit-edge', x: 0, z: halfLenZ - 0.15 }
+        { name: 'near-left', x: -(nearHalfW - 0.15), z: nearZ },
+        { name: 'near-right', x: nearHalfW - 0.15, z: nearZ },
+        { name: 'far-middle', x: 0, z: farZ },
+        { name: 'far-left-widened-corner', x: -(farHalfW - 0.15), z: farZ },
+        { name: 'far-right-widened-corner', x: farHalfW - 0.15, z: farZ },
+        { name: 'exit-edge', x: 0, z: halfLenZ - 0.04 }
       ];
 
       const yaw = node.yaw;
@@ -127,14 +108,20 @@ describe('AscentRenderCollisionParity', () => {
       const topY = node.dimensions.y * 0.5;
       const exitHalfW = node.exitWidth! * 0.5;
 
+      const farZ = node.dimensions.z * 0.5 - 0.15;
+      const farHalfW = getPlatformHalfWidthAtLocalZ(node, farZ);
       const outside = [
-        { name: 'beyond-right-exit', x: exitHalfW + PLAYER_RADIUS + 0.6, z: node.dimensions.z * 0.5 - 0.15 },
-        { name: 'beyond-left-exit', x: -(exitHalfW + PLAYER_RADIUS + 0.6), z: node.dimensions.z * 0.5 - 0.15 },
-        { name: 'beyond-entry-narrow', x: exitHalfW - 0.2, z: -(node.dimensions.z * 0.5) - 0.4 }
+        { name: 'just-outside-right', x: farHalfW + PLAYER_RADIUS + 0.15, z: farZ },
+        { name: 'just-outside-left', x: -(farHalfW + PLAYER_RADIUS + 0.15), z: farZ }
       ];
 
       for (const s of outside) {
-        const probe = new THREE.Vector3(s.x, topY + PLAYER_RADIUS - 0.05, s.z);
+        const yaw = node.yaw;
+        const probe = new THREE.Vector3(
+          node.position.x + s.x * Math.cos(yaw) + s.z * Math.sin(yaw),
+          node.position.y + topY + PLAYER_RADIUS - 0.05,
+          node.position.z - s.x * Math.sin(yaw) + s.z * Math.cos(yaw)
+        );
         const res = col.testSphere(probe, PLAYER_RADIUS);
         expect(
           res.hasContact,

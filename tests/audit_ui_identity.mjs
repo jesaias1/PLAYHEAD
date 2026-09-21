@@ -40,6 +40,7 @@ try {
         tagline: document.querySelector('.brand-tagline')?.textContent?.trim(),
         secondary: document.querySelector('.brand-secondary')?.textContent?.trim(),
         logoRect: rect('.brand-logo-text'),
+        statusRect: rect('.system-status-shell'),
         enterRect: rect('#btn-showcase-enter'),
         tabsRect: rect('.import-tabs'),
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
@@ -50,6 +51,8 @@ try {
         dropZoneAccessible: document.querySelector('#import-drop-zone')?.getAttribute('role') === 'button'
           && document.querySelector('#import-drop-zone')?.getAttribute('tabindex') === '0',
         fingerprintBars: document.querySelectorAll('#showcase-fingerprint > span').length,
+        fingerprintRect: rect('.signal-program-readout'),
+        metadataRect: rect('.showcase-meta-row'),
         stripDetailVisible: (document.querySelector('#showcase-strip .strip-item-title')?.getBoundingClientRect().height ?? 0) > 0
           && (document.querySelector('#showcase-strip .strip-signal-bars')?.getBoundingClientRect().height ?? 0) > 0
       };
@@ -60,6 +63,7 @@ try {
     assert(state.tagline?.startsWith('DROP A SONG. ENTER IT.'), `${viewport.name}: primary tagline is missing`);
     assert(state.secondary === 'BECOME THE PLAYHEAD.', `${viewport.name}: secondary tagline is missing`);
     assert(state.logoRect && state.logoRect.height >= 45, `${viewport.name}: logo is not visually prominent`);
+    assert(state.statusRect && state.logoRect.bottom < state.statusRect.top, `${viewport.name}: system status competes above the PLAYHEAD brand`);
     assert(state.enterRect && state.enterRect.bottom <= viewport.height, `${viewport.name}: EXEC TRACK is below the fold`);
     assert(state.tabsRect && state.tabsRect.bottom <= viewport.height, `${viewport.name}: module navigation is below the fold`);
     assert(!state.horizontalOverflow, `${viewport.name}: horizontal overflow detected`);
@@ -68,6 +72,7 @@ try {
     assert(state.stripButtons, `${viewport.name}: catalog entries are not keyboard-native buttons`);
     assert(state.dropZoneAccessible, `${viewport.name}: custom audio drop zone is not keyboard accessible`);
     assert(state.fingerprintBars === 18, `${viewport.name}: selected signal fingerprint is incomplete`);
+    assert(state.fingerprintRect && state.metadataRect && state.fingerprintRect.top >= state.metadataRect.bottom, `${viewport.name}: fingerprint overlaps signal metadata`);
     assert(state.stripDetailVisible, `${viewport.name}: catalog signal title or fingerprint is clipped`);
 
     await page.focus('#tab-btn-showcase');
@@ -82,6 +87,33 @@ try {
 
     await page.keyboard.press('Home');
     assert(await page.$eval('#panel-showcase', (panel) => !panel.classList.contains('hidden')), `${viewport.name}: Home key did not restore Signal Pack`);
+
+    await page.click('#tab-btn-lab');
+    const labLayout = await page.evaluate(() => {
+      const panel = document.querySelector('.lab-console-card')?.getBoundingClientRect();
+      const select = document.querySelector('#lab-music-select')?.getBoundingClientRect();
+      return panel && select ? {
+        contained: select.left >= panel.left && select.right <= panel.right,
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+      } : null;
+    });
+    assert(labLayout?.contained, `${viewport.name}: Movement Lab soundtrack control escapes its panel`);
+    assert(!labLayout?.horizontalOverflow, `${viewport.name}: Movement Lab creates horizontal overflow`);
+
+    await page.click('#tab-btn-armory');
+    const decoderState = await page.evaluate(() => ({
+      visible: (document.querySelector('.armory-decoder')?.getBoundingClientRect().height ?? 0) > 0,
+      title: document.querySelector('#signal-decoder-title')?.textContent,
+      pending: document.querySelector('#decoder-pending')?.textContent,
+      button: document.querySelector('#btn-decode-signal')?.textContent,
+      horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+    }));
+    assert(decoderState.visible && decoderState.title === 'SIGNAL DECODER', `${viewport.name}: persistent Signal Decoder is missing`);
+    assert(decoderState.pending !== undefined && decoderState.button, `${viewport.name}: Signal Decoder state is incomplete`);
+    assert(!decoderState.horizontalOverflow, `${viewport.name}: Armory Signal Decoder overflows horizontally`);
+    await page.screenshot({ path: path.join(os.tmpdir(), `playhead-ui-armory-${viewport.name}.png`), fullPage: false });
+
+    await page.click('#tab-btn-showcase');
 
     const frontScreenshotPath = path.join(os.tmpdir(), `playhead-ui-identity-${viewport.name}.png`);
     await page.screenshot({ path: frontScreenshotPath, fullPage: false });

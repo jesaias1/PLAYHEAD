@@ -12,13 +12,13 @@ export class PhysicsWorld {
   public killPlaneY = -40.0; // Beneath lowest route structure
 
   /**
-   * Generous safety margin below the LOWEST legitimate gameplay geometry.
+   * Vertical clearance below the LOWEST legitimate gameplay geometry.
    *
-   * This is the only thing standing between a player and a normal void restore,
-   * so it is deliberately generous: it must swallow an entire long high-speed
-   * transfer without ever reading as "you should have landed by now".
+   * The boundary is global and geometry-derived, so long airborne transfers
+   * remain safe regardless of speed, distance, or airtime. Twenty metres still
+   * clears playable undersides while avoiding several extra seconds of empty fall.
    */
-  public static readonly VOID_MARGIN = 40.0;
+  public static readonly VOID_MARGIN = 20.0;
 
   /** Lowest legitimate gameplay Y found by the most recent buildFromRoute. */
   public lowestGameplayY = Infinity;

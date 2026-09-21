@@ -131,7 +131,7 @@ describe('Ascent Platform Trapezoidal Collider Tests', () => {
     });
   });
 
-  describe('RouteGenerator 1.65x ascent widening consistency', () => {
+  describe('RouteGenerator flow-ascent widening consistency', () => {
     const analysis: TrackAnalysis = {
       filename: 'ascent_test_track',
       duration: 60.0,
@@ -149,7 +149,7 @@ describe('Ascent Platform Trapezoidal Collider Tests', () => {
       visualAccent: { name: 'Icy Cyan', hex: '#00f0ff', rgb: [0, 240, 255] }
     };
 
-    it('consistently widens EVERY STEP_UP node by 1.65x in BUILDUP and ASCENT sections', () => {
+    it('gives every ascent step a supported flare and flow metadata', () => {
       const track = RouteGenerator.generate(analysis);
       const stepUpNodes = track.route.filter(n => n.type === RouteNodeType.STEP_UP);
 
@@ -157,13 +157,18 @@ describe('Ascent Platform Trapezoidal Collider Tests', () => {
 
       for (const step of stepUpNodes) {
         expect(step.exitWidth).toBeDefined();
-        expect(step.exitWidth).toBeCloseTo(step.dimensions.x * 1.65, 4);
+        expect(step.exitWidth!).toBeGreaterThanOrEqual(step.dimensions.x * 1.38);
+        expect(step.exitWidth!).toBeLessThanOrEqual(step.dimensions.x * 1.59);
         expect(step.exitWidth!).toBeGreaterThan(step.dimensions.x);
+        expect(step.ascentVariant).toBeDefined();
+        expect(step.ascentPhraseId).toBeDefined();
+        expect(step.ascentStepIndex).toBeGreaterThanOrEqual(0);
+        expect(step.ascentStepCount).toBeGreaterThanOrEqual(3);
 
         // Verify that BoxCollider correctly recognizes every step as a trapezoid
         const col = new BoxCollider(step);
         expect(col.isTrapezoid).toBe(true);
-        expect(col.exitHalfWidth).toBeCloseTo((step.dimensions.x * 1.65) * 0.5, 4);
+        expect(col.exitHalfWidth).toBeCloseTo(step.exitWidth! * 0.5, 4);
       }
     });
   });

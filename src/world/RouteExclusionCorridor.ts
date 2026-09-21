@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { getPlatformMaxHalfWidth } from '../generation/PlatformShape';
 
 export interface ObjectBoundingVolume {
   position: THREE.Vector3;
@@ -71,7 +72,7 @@ export class RouteExclusionCorridor {
       const isSurf = !!node.isSurf;
       const isStepUp = node.type === RouteNodeType.STEP_UP ||
         (i < this.route.length - 1 && this.route[i + 1].type === RouteNodeType.STEP_UP);
-      const trackHalfBreadth = (node.dimensions.x || 10.0) * 0.5;
+      const trackHalfBreadth = getPlatformMaxHalfWidth(node);
 
       let safetyMargin: number;
       if (isSurf) {
@@ -111,7 +112,7 @@ export class RouteExclusionCorridor {
         } else {
           segMargin = 30.0 + 0.7 * objectRadius;
         }
-        const segHalfBreadth = Math.max(trackHalfBreadth, ((nextNode.dimensions.x || 10.0) * 0.5));
+        const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
         const segRequiredDist = segHalfBreadth + objectRadius + segMargin;
 
         const ax = node.position.x;
@@ -299,7 +300,7 @@ export class RouteExclusionCorridor {
       const isSurf = !!node.isSurf;
       const isStepUp = node.type === RouteNodeType.STEP_UP ||
         (i < this.route.length - 1 && this.route[i + 1].type === RouteNodeType.STEP_UP);
-      const trackHalfBreadth = (node.dimensions.x || 10.0) * 0.5;
+      const trackHalfBreadth = getPlatformMaxHalfWidth(node);
 
       let safetyMargin: number;
       if (isSurf) {
@@ -338,7 +339,7 @@ export class RouteExclusionCorridor {
         } else {
           segMargin = 30.0 + 0.7 * radius;
         }
-        const segHalfBreadth = Math.max(trackHalfBreadth, ((nextNode.dimensions.x || 10.0) * 0.5));
+        const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
         const segRequiredDist = segHalfBreadth + radius + segMargin;
 
         const ax = node.position.x;
