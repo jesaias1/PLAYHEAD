@@ -65,35 +65,22 @@ export class ViewmodelAssetLoader {
     const armsScene = armsGltf.scene as THREE.Group;
     armsScene.name = 'ArmsScene';
 
-    // Hands: PRESERVE the underlying glove/skin appearance. The palette must read
-// as coloured light falling on the hands, never as a recolour of the hands.
-//
-// The failure mode this guards against: emissive is ADDED to the shaded result
-// and multiplied by emissiveIntensity, so a strong palette tint at high
-// intensity floods the whole limb (the "entire hand is pink" artifact). Both
-// the tint strength and the intensity therefore stay low here, and the visible
-// coloured light is carried mainly by the dedicated rim light and the
-// silhouette rim in ViewmodelStyleFilter.
-const armMaterials: THREE.MeshStandardMaterial[] = [];
-const baseHandEmissive = new THREE.Color(0x39445c);
-const baseHandEmissiveIntensity = 0.30;
-let handAudioPulse = 0;
-const activeArmAccent = new THREE.Color(0x00f0ff);
+    // Keep the authored skin/glove texture as the dominant colour source.
+    // Palette colour is supplied spatially by the dedicated fill/rim lights and
+    // the silhouette pass; putting it in material emissive colours every texel
+    // equally and reads as recoloured skin. This tiny neutral lift only prevents
+    // crushed detail and carries a deliberately faint audio response.
+    const armMaterials: THREE.MeshStandardMaterial[] = [];
+    const baseHandEmissive = new THREE.Color(0x101722);
+    const baseHandEmissiveIntensity = 0.08;
+    let handAudioPulse = 0;
 
-/** How far the hands' base tonal response may drift toward the palette hue. */
-const HAND_ACCENT_STRENGTH = 0.22;
-
-// Reused scratch colour so the per-frame accent update allocates nothing.
-const armTintScratch = new THREE.Color();
-
-const applyArmAccent = (col: THREE.Color) => {
-  armTintScratch.copy(baseHandEmissive).lerp(col, HAND_ACCENT_STRENGTH);
-  for (const mat of armMaterials) {
-    mat.emissive.copy(armTintScratch);
-    mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.4);
-  }
-  activeArmAccent.copy(col);
-};
+    const applyArmMaterialLift = () => {
+      for (const mat of armMaterials) {
+        mat.emissive.copy(baseHandEmissive);
+        mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.2);
+      }
+    };
 
     // Configure Arms Materials and Textures
     if (gloveTexture) {
@@ -232,9 +219,6 @@ const applyArmAccent = (col: THREE.Color) => {
       const blended = col.clone().lerp(canonicalAnchor, 0.2);
       activeAccent.copy(blended);
 
-      // Hands inherit the same palette-driven reflected light as the knife.
-      applyArmAccent(blended);
-
       if (cosmicMaterial) {
         const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
         if (equipped.profile.isCanonical) {
@@ -245,7 +229,7 @@ const applyArmAccent = (col: THREE.Color) => {
 
     const setAudioPulse = (pulse: number) => {
       handAudioPulse = Math.max(0, Math.min(0.32, pulse));
-      applyArmAccent(activeArmAccent);
+      applyArmMaterialLift();
     };
 
     const dispose = () => {

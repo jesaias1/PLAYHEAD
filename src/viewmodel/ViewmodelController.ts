@@ -65,14 +65,10 @@ export class ViewmodelController {
    * knife. Moving this shifts the entire viewmodel as one rigid unit, so the
    * hand-to-knife relationship and the calibrated knife socket transform are
    * completely unaffected. Small downward shift to sit the arms/blade slightly
-   * lower and less centrally on screen.
-   *
-   * Magnitude verified against the composited frame: the bright viewmodel
-   * silhouette band moves from ~23% to ~13% up from the bottom edge, while the
-   * bottom-edge luminance stays at its baseline value (no clipping). Values at
-   * or beyond -0.10 begin clipping the bottom edge.
+   * lower and less centrally on screen. Keep this modest: framing belongs here,
+   * never in the calibrated knife socket or individual hand transforms.
    */
-  private readonly presentationOffset = new THREE.Vector3(0, -0.09, 0);
+  private readonly presentationOffset = new THREE.Vector3(0, -0.105, 0);
 
   // Authoritative Knife Transform relative to handR socket (calibrated and authoritative)
   public knifeSocketPos = new THREE.Vector3(0.0093, 0.1107, 0.0033);
@@ -139,7 +135,7 @@ export class ViewmodelController {
     this.fillLight.position.set(-2.0, 1.5, 1.5);
     this.scene.add(this.fillLight);
 
-    this.rimLight = new THREE.DirectionalLight(0x00f0ff, 1.1);
+    this.rimLight = new THREE.DirectionalLight(0x00f0ff, 0.75);
     this.rimLight.position.set(-1.0, -1.8, -1.2);
     this.scene.add(this.rimLight);
 
@@ -575,7 +571,7 @@ export class ViewmodelController {
       this.styleFilter.setAudioPulse(0);
       this.rigInstance.setAudioPulse(0);
     } else if (vmAccent === 'DEFAULT_CYAN') {
-      this.rimLight.intensity = 1.1;
+      this.rimLight.intensity = 0.75;
       this.rimLight.color.set(0x00f0ff);
       this.accentColor.set(0x00f0ff);
       this.rigInstance.setAccentColor(this.accentColor);
@@ -586,7 +582,7 @@ export class ViewmodelController {
       // ADAPTIVE: smoothly follow active map/track palette
       this.accentColor.lerp(this.targetAccentColor, Math.min(1.0, dt * 6.0));
       this.rimLight.color.copy(this.accentColor);
-      this.rimLight.intensity = 1.1 * (1.0 + this.viewmodelAudioPulse * 0.35);
+      this.rimLight.intensity = 0.75 * (1.0 + this.viewmodelAudioPulse * 0.25);
       this.rigInstance.setAccentColor(this.accentColor);
       this.styleFilter.setAudioPulse(this.viewmodelAudioPulse);
       this.rigInstance.setAudioPulse(this.viewmodelAudioPulse);

@@ -49,6 +49,10 @@ describe('Viewmodel System — Hands & Karambit', () => {
     expect(vm.camera.position.y).toBe(0);
     expect(vm.camera.position.z).toBe(0);
 
+    // Framing is applied once at the common parent so hands and knife move
+    // together without disturbing the calibrated knife socket.
+    expect(vm['rootGroup'].position.toArray()).toEqual([0, -0.105, 0]);
+
     vm.dispose();
   });
 
