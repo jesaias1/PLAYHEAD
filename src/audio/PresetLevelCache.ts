@@ -7,7 +7,8 @@
 import { TrackAnalysis } from './AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { SpectacleEvent } from '../world/SpectaclePlanner';
-import { RouteGenerator } from '../generation/RouteGenerator';
+import { ROUTE_GENERATION_VERSION, RouteGenerator } from '../generation/RouteGenerator';
+import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
 import { SeededRandom } from '../generation/SeededRandom';
 
 export interface PrecomputedLevelData {
@@ -46,10 +47,15 @@ export class PresetLevelCache {
       }
 
       let track: GeneratedTrack = json.track;
-      // Ensure stale presets lacking modern ascent metadata are recomputed with dynamic ascent coverage
-      const hasStaleAscent = !track?.route || track.route.some((n: any) => n.type === 'STEP_UP' && !n.ascentVariant);
-      if (hasStaleAscent && json.analysis) {
+      // Route packages are versioned so official cached levels cannot silently
+      // retain obsolete giant ascents or omit gameplay challenges.
+      const hasStaleRoute = !track?.route || track.generationVersion !== ROUTE_GENERATION_VERSION;
+      if (hasStaleRoute && json.analysis) {
         track = RouteGenerator.generate(json.analysis);
+      }
+
+      if (!track.obstacles && json.analysis) {
+        track.obstacles = RouteChallengeGenerator.generate(track.route, json.analysis);
       }
 
       // Ensure optional side-surf skill ramps are present even in cached presets

@@ -16,6 +16,7 @@ import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { ReactiveChannel } from './PlayheadSystem';
+import { FINISH_GATE_HEIGHT } from '../gameplay/FinishGateDetector';
 
 export interface RouteEdgeItem {
   mesh: THREE.LineSegments;
@@ -205,6 +206,25 @@ export class GeometryBuilder {
     // Tertiary detailing: floating header signal bar.
     const headerBarMaterial = makeBeaconMaterial(0x080c14, secondaryCol.clone(), 0.45, 0.8);
 
+    // Gameplay obstacles use one dark structural material and one shared signal
+    // material. Their silhouettes remain readable even when the emissive pulse
+    // is at rest, while the approach strip telegraphs the required response.
+    const obstacleBodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x070a10,
+      emissive: secondaryCol,
+      emissiveIntensity: 0.12,
+      roughness: 0.62,
+      metalness: 0.48,
+      map: basaltTex
+    });
+    const obstacleSignalMaterial = makeBeaconMaterial(0x0a111a, primaryCol.clone(), 0.48, 0.9);
+    const obstacleTelegraphMaterial = new THREE.MeshBasicMaterial({
+      color: primaryCol,
+      transparent: true,
+      opacity: 0.32,
+      depthWrite: false
+    });
+
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
       const node = track.route[i];
@@ -292,6 +312,67 @@ export class GeometryBuilder {
       if (node.isSurf && i % 2 === 0) {
         const canyon = createSurfFlank(node, backgroundMonolithMaterial, corridor);
         if (canyon) decorativeGroup.add(canyon);
+      }
+    }
+
+    // Deterministic route challenges. Collision consumes these exact same box
+    // dimensions in PhysicsWorld; only the thin floor strip is non-colliding
+    // telegraph geometry.
+    if (track.obstacles) {
+      for (const obstacle of track.obstacles) {
+        const geom = new THREE.BoxGeometry(
+          obstacle.dimensions.x,
+          obstacle.dimensions.y,
+          obstacle.dimensions.z
+        );
+        const bodyMaterial = obstacle.obstacleType === 'SCAN_BAR'
+          ? obstacleSignalMaterial
+          : obstacleBodyMaterial;
+        const mesh = new THREE.Mesh(geom, bodyMaterial);
+        mesh.name = `RouteObstacle:${obstacle.obstacleType}:${obstacle.id}`;
+        mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
+        mesh.rotation.set(0, obstacle.yaw, 0, 'YXZ');
+        mesh.userData.routeObstacleId = obstacle.id;
+        rootGroup.add(mesh);
+        if (obstacle.obstacleType === 'SCAN_BAR') registerBeacon(mesh, 'ACCENT_TRIM');
+
+        const outline = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geom),
+          new THREE.LineBasicMaterial({ color: primaryCol, transparent: true, opacity: 0.95 })
+        );
+        outline.name = `RouteObstacleOutline:${obstacle.id}`;
+        outline.position.copy(mesh.position);
+        outline.rotation.copy(mesh.rotation);
+        rootGroup.add(outline);
+        edgeLines.push(outline);
+        routeEdgeItems.push({ mesh: outline, nodeArcLength: obstacle.arcLength, nodeTime: obstacle.time });
+
+        const source = track.route.find(node => node.id === obstacle.obstacleSourceNodeId);
+        if (source) {
+          const telegraphLength = obstacle.obstacleTelegraphDistance ?? 15;
+          const telegraphWidth = obstacle.obstacleType === 'SPLIT_GATE'
+            ? Math.max(2.4, source.dimensions.x * 0.28)
+            : Math.min(source.dimensions.x - 1, 6.0);
+          const telegraph = new THREE.Mesh(
+            new THREE.BoxGeometry(telegraphWidth, 0.035, telegraphLength),
+            obstacleTelegraphMaterial
+          );
+          const laneSign = obstacle.obstacleSafeLane === 'LEFT' ? -1
+            : obstacle.obstacleSafeLane === 'RIGHT' ? 1
+              : 0;
+          const localX = laneSign * source.dimensions.x * 0.25;
+          const forwardOffset = -(telegraphLength * 0.5 + 1.0);
+          const sin = Math.sin(source.yaw);
+          const cos = Math.cos(source.yaw);
+          telegraph.position.set(
+            obstacle.position.x + cos * localX + sin * forwardOffset,
+            source.position.y + source.dimensions.y * 0.5 + 0.025,
+            obstacle.position.z - sin * localX + cos * forwardOffset
+          );
+          telegraph.rotation.y = source.yaw;
+          telegraph.name = `RouteObstacleTelegraph:${obstacle.id}`;
+          rootGroup.add(telegraph);
+        }
       }
     }
 
@@ -471,7 +552,7 @@ function createFinishMonument(
   group.position.set(node.position.x, node.position.y, node.position.z);
   group.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
-  const planeHeight = 24.0;
+  const planeHeight = FINISH_GATE_HEIGHT;
   const halfWidth = node.dimensions.x * 0.5;
   const pylonWidth = 1.8;
 

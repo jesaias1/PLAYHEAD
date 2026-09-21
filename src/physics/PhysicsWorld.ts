@@ -41,7 +41,12 @@ export class PhysicsWorld {
       : this.killPlaneY;
   }
 
-  public buildFromRoute(route: RouteNode[], optionalRamps?: RouteNode[], recoveryShelves?: RouteNode[]): void {
+  public buildFromRoute(
+    route: RouteNode[],
+    optionalRamps?: RouteNode[],
+    recoveryShelves?: RouteNode[],
+    obstacles?: RouteNode[]
+  ): void {
     this.colliders = [];
     let lowestY = Infinity;
 
@@ -68,6 +73,15 @@ export class PhysicsWorld {
         this.colliders.push(col);
         const bottomY = shelf.position.y - shelf.dimensions.y * 0.5;
         if (bottomY < lowestY) lowestY = bottomY;
+      }
+    }
+
+    // Obstacles are intentional above-route solids. They collide normally but
+    // never lower the authoritative void boundary, which is derived only from
+    // playable route/surf/recovery geometry.
+    if (obstacles) {
+      for (const obstacle of obstacles) {
+        this.colliders.push(new BoxCollider(obstacle));
       }
     }
 

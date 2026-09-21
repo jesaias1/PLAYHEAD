@@ -37,7 +37,7 @@ function ascentPhrases(nodes: RouteNode[]): RouteNode[][] {
 }
 
 describe('flow ascent generation', () => {
-  it('is deterministic, finite, and uses broad flared landing geometry', () => {
+  it('is deterministic, finite, and uses moderate flared landing geometry', () => {
     const first = RouteGenerator.generate(analysisFor(0x504c4159));
     const second = RouteGenerator.generate(analysisFor(0x504c4159));
     expect(second.route).toEqual(first.route);
@@ -50,17 +50,21 @@ describe('flow ascent generation', () => {
         expect(Number.isFinite(node.position.x)).toBe(true);
         expect(Number.isFinite(node.position.y)).toBe(true);
         expect(Number.isFinite(node.position.z)).toBe(true);
-        expect(node.dimensions.x).toBeGreaterThanOrEqual(14);
-        expect(node.dimensions.z).toBeGreaterThanOrEqual(29);
+        expect(node.dimensions.x).toBeGreaterThanOrEqual(13);
+        expect(node.dimensions.x).toBeLessThanOrEqual(19);
+        expect(node.dimensions.z).toBeGreaterThanOrEqual(23);
+        expect(node.dimensions.z).toBeLessThanOrEqual(36);
         expect(node.exitWidth!).toBeGreaterThan(node.dimensions.x);
         expect(Math.abs(node.exitLateralOffset!)).toBeGreaterThan(1);
         expect(node.ascentExpectedSpeed).toBeGreaterThanOrEqual(22);
-        expect(node.ascentPostLandingRunway!).toBeGreaterThan(node.ascentExpectedSpeed! * 0.6);
+        expect(node.ascentPostLandingRunway!).toBeGreaterThan(node.ascentExpectedSpeed! * 0.5);
       }
 
       const catchStep = phrase.at(-1)!;
-      expect(catchStep.dimensions.x).toBeGreaterThanOrEqual(19);
-      expect(catchStep.dimensions.z).toBeGreaterThanOrEqual(40);
+      expect(catchStep.dimensions.x).toBeGreaterThanOrEqual(16);
+      expect(catchStep.dimensions.x).toBeLessThanOrEqual(19);
+      expect(catchStep.dimensions.z).toBeGreaterThanOrEqual(30);
+      expect(catchStep.dimensions.z).toBeLessThanOrEqual(36);
     }
   });
 
@@ -119,7 +123,7 @@ describe('flow ascent generation', () => {
     expect(high.width).toBeGreaterThan(low.width);
     expect(high.minimumApproach).toBeGreaterThan(low.minimumApproach);
     expect(high.exitLateralOffset).toBeGreaterThan(low.exitLateralOffset);
-    expect(catchZone.depth).toBeGreaterThan(high.depth + 8);
+    expect(catchZone.depth).toBeGreaterThan(high.depth + 5);
     expect(catchZone.postLandingRunway).toBeGreaterThan(high.postLandingRunway);
   });
 

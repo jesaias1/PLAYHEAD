@@ -13,6 +13,9 @@ import { SurfPhraseGenerator } from './SurfPhraseGenerator';
 import { SurfValidator } from './SurfValidator';
 import { getPlatformLateralEnvelope, getPlatformMaxHalfWidth } from './PlatformShape';
 import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowGeometry';
+import { RouteChallengeGenerator } from './RouteChallengeGenerator';
+
+export const ROUTE_GENERATION_VERSION = 2;
 
 export class RouteGenerator {
   public static generate(analysis: TrackAnalysis): GeneratedTrack {
@@ -595,12 +598,15 @@ export class RouteGenerator {
       repairedNodes,
       recoveryShelves
     );
+    const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis);
 
     return {
+      generationVersion: ROUTE_GENERATION_VERSION,
       seed: analysis.seed,
       route: repairedNodes,
       optionalRamps,
       recoveryShelves,
+      obstacles,
       checkpoints,
       finish,
       totalDistance: cumulativeDistance,
@@ -1146,10 +1152,13 @@ export class RouteGenerator {
       yaw: currentYaw
     };
 
+    const obstacles = RouteChallengeGenerator.generate(nodes, analysis);
     return {
+      generationVersion: ROUTE_GENERATION_VERSION,
       seed: analysis.seed,
       route: nodes,
       recoveryShelves: [],
+      obstacles,
       checkpoints,
       finish,
       totalDistance: cumulativeDistance,

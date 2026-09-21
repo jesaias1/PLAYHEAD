@@ -38,6 +38,7 @@ import { RestoreReason } from '../player/RestorePolicy';
 import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics, RawMouseSpikeDetector } from './MovementDiagnostics';
 import { PointerInputProbe } from './PointerInputProbe';
 import { BUILD_LABEL } from './BuildInfo';
+import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -67,6 +68,7 @@ export class Game {
   private runElapsedTime = 0;
   private isFinished = false;
   private isOvertime = false;
+  private finishGateDetector = new FinishGateDetector();
 
   private isFirstContactCourse = false;
   private shownOnboardingCues = new Set<string>();
@@ -629,6 +631,7 @@ export class Game {
       z: startNode.position.z - Math.cos(startNode.yaw) * backDist
     };
     this.playerController.setPosition(spawnPos);
+    this.finishGateDetector.reset(spawnPos);
     this.syncAuthoritativeVoidBoundary();
     this.playerController.lastTouchedSurfaceType = 'PLATFORM';
     // Re-arm the camera-translation monitor for the new track.
@@ -1075,6 +1078,7 @@ export class Game {
       }
 
       this.playerController.setPosition(spawnPos);
+      this.finishGateDetector.resetMotion(spawnPos);
       this.playerController.setOrientation(spawnYaw);
       this.playerController.lastTouchedSurfaceType = 'PLATFORM';
       this.playerController.resetKeys();
@@ -1751,10 +1755,21 @@ export class Game {
 
         // Finish Gate check (distinct PLAYHEAD end plane / signal line)
         const finish = this.currentTrack.finish;
-        const fdx = this.playerController.position.x - finish.position.x;
-        const fdy = this.playerController.position.y - finish.position.y;
-        const fdz = this.playerController.position.z - finish.position.z;
-        if (!this.isFinished && fdx * fdx + fdz * fdz < 16.0 * 16.0 && Math.abs(fdy) < 7.0 && this.playerController.position.y >= finish.position.y - 2.0) {
+        const finishNode = this.currentTrack.route.find(node => node.id === finish.routeNodeId);
+        if (
+          !this.isFinished &&
+          finishNode &&
+          this.finishGateDetector.sample(
+            this.playerController.position,
+            {
+              position: finish.position,
+              yaw: finish.yaw,
+              width: finishNode.dimensions.x,
+              height: FINISH_GATE_HEIGHT
+            },
+            this.playerController.config.playerHeight
+          )
+        ) {
           this.handleFinishSequence();
         }
       }

@@ -7,6 +7,7 @@ import { RunRank, RunResults } from '../player/PlayerStats';
 import { formatSpeed, formatTime } from '../utils/math';
 import { seedToHex } from '../utils/hash';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { getUnrankedReason } from './RankResultCopy';
 
 export class ResultsScreen {
   public element: HTMLElement;
@@ -175,9 +176,7 @@ export class ResultsScreen {
     if (results.rank === 'UNRANKED') {
       this.rankElem.textContent = 'UNRANKED';
       this.rankElem.className = 'rank-badge rank-unranked';
-      this.rankSubElem.textContent = overtimeInfo?.isOvertime
-        ? '// COMPLETION OUTSIDE RANK BAND // OVERTIME'
-        : '// TRAVERSAL NOT QUALIFIED';
+      this.rankSubElem.textContent = getUnrankedReason(results, overtimeInfo?.isOvertime === true);
       this.syncElem.textContent = overtimeInfo?.isOvertime
         ? `OVERTIME +${overtimeInfo.overtimeDuration.toFixed(2)}s`
         : `+${Math.max(0, results.syncDelta).toFixed(2)}s`;

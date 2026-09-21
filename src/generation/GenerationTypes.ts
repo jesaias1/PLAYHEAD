@@ -39,8 +39,16 @@ export enum RouteNodeType {
   LANDING = 'LANDING',
   SECTION_GATE = 'SECTION_GATE',
   CHECKPOINT = 'CHECKPOINT',
-  FINISH = 'FINISH'
+  FINISH = 'FINISH',
+  SIGNAL_SHUTTER = 'SIGNAL_SHUTTER',
+  SCAN_BAR = 'SCAN_BAR',
+  SPLIT_GATE = 'SPLIT_GATE'
 }
+
+export type RouteObstacleType =
+  | 'SIGNAL_SHUTTER'
+  | 'SCAN_BAR'
+  | 'SPLIT_GATE';
 
 export type AscentVariant =
   | 'FLOW_STAIR'
@@ -77,6 +85,11 @@ export interface RouteNode {
   ascentMinimumApproach?: number;
   ascentPostLandingRunway?: number;
   isRecoveryShelf?: boolean;
+  obstacleType?: RouteObstacleType;
+  obstacleGroupId?: number;
+  obstacleSafeLane?: 'LEFT' | 'RIGHT' | 'BOTH' | 'JUMP';
+  obstacleTelegraphDistance?: number;
+  obstacleSourceNodeId?: number;
 }
 
 export interface CheckpointDefinition {
@@ -96,10 +109,12 @@ export interface FinishDefinition {
 }
 
 export interface GeneratedTrack {
+  generationVersion?: number;
   seed: number;
   route: RouteNode[];
   optionalRamps?: RouteNode[];
   recoveryShelves?: RouteNode[];
+  obstacles?: RouteNode[];
   checkpoints: CheckpointDefinition[];
   finish: FinishDefinition;
   totalDistance: number;

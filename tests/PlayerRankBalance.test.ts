@@ -29,6 +29,15 @@ describe('rank balance performance bands', () => {
     expect(completedRun({ completionTime: 67, falls: 1 }).rank).toBe('GOLD');
   });
 
+  it('ranks the reported fast one-fall Signal Drift-style run as Gold', () => {
+    expect(completedRun({
+      completionTime: 81.8,
+      targetTime: 116.099,
+      falls: 1,
+      efficientFrames: 31
+    }).rank).toBe('GOLD');
+  });
+
   it('does not award Diamond to a very fast run with repeated deaths', () => {
     expect(completedRun({ completionTime: 54, falls: 4, efficientFrames: 90 }).rank).toBe('BRONZE');
   });
@@ -36,6 +45,10 @@ describe('rank balance performance bands', () => {
   it('awards Diamond only to a clean high-performance run', () => {
     expect(completedRun({ completionTime: 60.5, efficientFrames: 82 }).rank).toBe('DIAMOND');
     expect(completedRun({ completionTime: 60.5, restarts: 1, efficientFrames: 82 }).rank).not.toBe('DIAMOND');
+  });
+
+  it('does not use low strafe efficiency as a hidden qualification gate', () => {
+    expect(completedRun({ completionTime: 66, efficientFrames: 0 }).rank).toBe('GOLD');
   });
 
   it('retains Unranked for clearly poor or unfinished performance', () => {

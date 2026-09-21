@@ -72,7 +72,7 @@ export class World {
     }
 
     // 2. Build Physics Colliders (frozen authoritative physics)
-    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves);
+    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves, track.obstacles);
 
     // 3. Build Procedural Route & Monolith Meshes
     this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette);

@@ -40,16 +40,19 @@ export function deriveAscentLandingEnvelope(
   );
 
   const speedSurplus = expectedSpeed - 20;
-  const width = 15.0 + speedSurplus * 0.35 + (isCatch ? 6.0 : 0);
-  const depth = 20.0 + expectedSpeed * 0.65 + (isCatch ? 10.0 + expectedSpeed * 0.15 : 0);
+  // Keep each step visibly distinct. Speed expands the useful landing envelope,
+  // but the outside wing carries most of that extra catch area instead of the
+  // entire platform becoming a huge rectangle.
+  const width = 13.0 + speedSurplus * 0.18 + (isCatch ? 3.5 : 0);
+  const depth = 16.0 + expectedSpeed * 0.36 + (isCatch ? 6.0 + expectedSpeed * 0.06 : 0);
   const flareRatio = variant === 'FLARED_ASCENT'
-    ? 1.58
+    ? 1.46
     : variant === 'OFFSET_ASCENT'
-      ? 1.5
-      : 1.44;
+      ? 1.4
+      : 1.36;
   const exitWidth = width * flareRatio;
-  const exitLateralOffset = curveDirection * (exitWidth - width) * 0.3;
-  const postLandingRunway = depth * (isCatch ? 0.72 : 0.62);
+  const exitLateralOffset = curveDirection * (exitWidth - width) * 0.42;
+  const postLandingRunway = depth * (isCatch ? 0.68 : 0.58);
 
   return {
     expectedSpeed,

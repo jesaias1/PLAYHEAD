@@ -157,8 +157,8 @@ describe('Ascent Platform Trapezoidal Collider Tests', () => {
 
       for (const step of stepUpNodes) {
         expect(step.exitWidth).toBeDefined();
-        expect(step.exitWidth!).toBeGreaterThanOrEqual(step.dimensions.x * 1.38);
-        expect(step.exitWidth!).toBeLessThanOrEqual(step.dimensions.x * 1.59);
+        expect(step.exitWidth!).toBeGreaterThanOrEqual(step.dimensions.x * 1.36);
+        expect(step.exitWidth!).toBeLessThanOrEqual(step.dimensions.x * 1.47);
         expect(step.exitWidth!).toBeGreaterThan(step.dimensions.x);
         expect(step.ascentVariant).toBeDefined();
         expect(step.ascentPhraseId).toBeDefined();

@@ -15,7 +15,17 @@ export interface RunResults {
   fallsCount: number;
   restartsCount: number;
   rank: RunResultRank;
+  rankFailureReason?: RankFailureReason;
+  bronzeTimeOverage?: number;
   score: number;
+}
+
+export type RankFailureReason = 'NONE' | 'UNFINISHED' | 'INVALID_RUN' | 'BRONZE_TIME_MISSED';
+
+export interface RankDecision {
+  rank: RunResultRank;
+  failureReason: RankFailureReason;
+  bronzeTimeOverage: number;
 }
 
 export interface RankEvaluation {
@@ -34,17 +44,19 @@ export const RANK_TIME_MULTIPLIERS = {
   BRONZE: 1.85
 } as const;
 
-/** Duration-scaled performance bands with explicit mistake ceilings. */
-export function evaluateRunRank(run: RankEvaluation): RunResultRank {
+/** Duration-scaled performance bands with time as the primary qualifier. */
+export function evaluateRunRankDetailed(run: RankEvaluation): RankDecision {
   const finished = run.finished ?? true;
+  if (!finished) {
+    return { rank: 'UNRANKED', failureReason: 'UNFINISHED', bronzeTimeOverage: 0 };
+  }
   if (
-    !finished ||
     !Number.isFinite(run.completionTime) ||
     !Number.isFinite(run.targetTime) ||
     run.completionTime < 0 ||
     run.targetTime <= 0
   ) {
-    return 'UNRANKED';
+    return { rank: 'UNRANKED', failureReason: 'INVALID_RUN', bronzeTimeOverage: 0 };
   }
 
   const paceRatio = run.completionTime / run.targetTime;
@@ -52,32 +64,29 @@ export function evaluateRunRank(run: RankEvaluation): RunResultRank {
 
   if (
     paceRatio <= RANK_TIME_MULTIPLIERS.DIAMOND &&
-    run.fallsCount === 0 &&
-    run.restartsCount === 0 &&
-    run.strafeEfficiency >= 65
+    totalMistakes === 0
   ) {
-    return 'DIAMOND';
+    return { rank: 'DIAMOND', failureReason: 'NONE', bronzeTimeOverage: 0 };
   }
   if (paceRatio <= RANK_TIME_MULTIPLIERS.GOLD && totalMistakes <= 1) {
-    return 'GOLD';
+    return { rank: 'GOLD', failureReason: 'NONE', bronzeTimeOverage: 0 };
   }
-  if (
-    paceRatio <= RANK_TIME_MULTIPLIERS.SILVER &&
-    run.fallsCount <= 2 &&
-    run.restartsCount <= 2 &&
-    totalMistakes <= 3
-  ) {
-    return 'SILVER';
+  if (paceRatio <= RANK_TIME_MULTIPLIERS.SILVER && totalMistakes <= 3) {
+    return { rank: 'SILVER', failureReason: 'NONE', bronzeTimeOverage: 0 };
   }
-  if (
-    paceRatio <= RANK_TIME_MULTIPLIERS.BRONZE &&
-    run.fallsCount <= 8 &&
-    run.restartsCount <= 5 &&
-    totalMistakes <= 10
-  ) {
-    return 'BRONZE';
+  if (paceRatio <= RANK_TIME_MULTIPLIERS.BRONZE) {
+    return { rank: 'BRONZE', failureReason: 'NONE', bronzeTimeOverage: 0 };
   }
-  return 'UNRANKED';
+  const bronzeTarget = run.targetTime * RANK_TIME_MULTIPLIERS.BRONZE;
+  return {
+    rank: 'UNRANKED',
+    failureReason: 'BRONZE_TIME_MISSED',
+    bronzeTimeOverage: Math.max(0, run.completionTime - bronzeTarget)
+  };
+}
+
+export function evaluateRunRank(run: RankEvaluation): RunResultRank {
+  return evaluateRunRankDetailed(run).rank;
 }
 
 export class PlayerStats {
@@ -149,7 +158,7 @@ export class PlayerStats {
 
     const score = Math.max(100, Math.round(5000 + speedScore + efficiencyBonus - syncPenalty - fallPenalty));
 
-    const rank = evaluateRunRank({
+    const rankDecision = evaluateRunRankDetailed({
       completionTime,
       targetTime,
       fallsCount: this.fallsCount,
@@ -166,7 +175,9 @@ export class PlayerStats {
       strafeEfficiency,
       fallsCount: this.fallsCount,
       restartsCount: this.restartsCount,
-      rank,
+      rank: rankDecision.rank,
+      rankFailureReason: rankDecision.failureReason,
+      bronzeTimeOverage: rankDecision.bronzeTimeOverage,
       score
     };
   }
