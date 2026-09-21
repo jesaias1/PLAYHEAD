@@ -405,16 +405,17 @@ export class GeometryBuilder {
     if (track.signalSpines) {
       for (const spine of track.signalSpines) {
         const geom = new THREE.BoxGeometry(spine.dimensions.x, spine.dimensions.y, spine.dimensions.z);
-        const meshMat = spine.isSurf
-          ? [
-              accentMaterial,
-              accentMaterial,
-              surfMaterial,
-              backgroundMonolithMaterial,
-              accentMaterial,
-              accentMaterial
-            ]
-          : backgroundMonolithMaterial;
+        // Multi-material: Top face (+Y, index 2) matches platformMaterial (playable concrete aggregate).
+        // Underside (-Y, index 3) gets backgroundMonolithMaterial (dark brutalist basalt).
+        // Side faces (indices 0, 1, 4, 5) get accentMaterial (dark with audio-reactive accent trim).
+        const meshMat = [
+          accentMaterial,
+          accentMaterial,
+          spine.isSurf ? surfMaterial : platformMaterial,
+          backgroundMonolithMaterial,
+          accentMaterial,
+          accentMaterial
+        ];
 
         const mesh = new THREE.Mesh(geom, meshMat);
         mesh.position.set(spine.position.x, spine.position.y, spine.position.z);

@@ -16,7 +16,7 @@ import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowG
 import { RouteChallengeGenerator } from './RouteChallengeGenerator';
 import { SignalSpineGenerator } from './SignalSpineGenerator';
 
-export const ROUTE_GENERATION_VERSION = 2;
+export const ROUTE_GENERATION_VERSION = 3;
 
 export class RouteGenerator {
   public static generate(analysis: TrackAnalysis): GeneratedTrack {

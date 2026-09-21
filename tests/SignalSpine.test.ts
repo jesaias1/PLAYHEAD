@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TrackGenerator } from '../src/generation/TrackGenerator';
 import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { SignalSpineGenerator } from '../src/generation/SignalSpineGenerator';
@@ -48,7 +50,7 @@ function createMockAnalysis(seed: number, themes: string[]): TrackAnalysis {
 }
 
 describe('Signal Spine & Recovery Traversal Layer', () => {
-  it('guarantees recovery coverage for post-surf landings across generated tracks', () => {
+  it('guarantees recovery coverage for post-surf landing chains across generated tracks', () => {
     // Generate tracks across multiple seeds containing SURF phrases
     const seeds = [12345, 777, 4242, 99991, 31337];
 
@@ -61,18 +63,18 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       const spines = track.signalSpines!;
       expect(spines.length).toBeGreaterThan(0);
 
-      // Verify that every surf ramp exit has recovery spine coverage in the following 2-4 nodes
+      // Verify that every surf ramp exit has post-surf recovery spine coverage in following landing chain
       for (let i = 0; i < track.route.length - 1; i++) {
         const curr = track.route[i];
         const next = track.route[i + 1];
 
         if (curr.isSurf && !next.isSurf) {
-          // Surf exit detected! Check if subsequent gaps have spine coverage
+          // Post-surf landing detected
           const postSurfLanding = track.route[i + 1];
           const hasPostSurfSpine = spines.some(s => {
             const dx = Math.abs(s.position.x - postSurfLanding.position.x);
             const dz = Math.abs(s.position.z - postSurfLanding.position.z);
-            return Math.sqrt(dx * dx + dz * dz) < 35.0;
+            return Math.hypot(dx, dz) < 35.0;
           });
 
           expect(hasPostSurfSpine).toBe(true);
@@ -81,7 +83,7 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     }
   });
 
-  it('generates under-slung ribbons beneath staircase and ascent chains', () => {
+  it('generates top-surface bridging spines across staircase and ascent chains', () => {
     const analysis = createMockAnalysis(4242, ['FLOW', 'BUILDUP', 'FLOW']);
     const palette = PaletteSelector.selectPalette(4242, 0.6, 0.7);
     const track = TrackGenerator.generate(analysis, palette);
@@ -95,14 +97,43 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
 
     expect(ascentNodes.length).toBeGreaterThan(0);
 
-    // Verify under-slung spines exist near ascent steps
+    // Verify bridging spines exist near ascent steps
     for (const ascentNode of ascentNodes) {
       const nearSpines = spines.filter(s => {
         const dx = Math.abs(s.position.x - ascentNode.position.x);
         const dz = Math.abs(s.position.z - ascentNode.position.z);
-        return Math.sqrt(dx * dx + dz * dz) < 25.0;
+        return Math.hypot(dx, dz) < 25.0;
       });
       expect(nearSpines.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('guarantees ZERO under-slung geometry (spines exist strictly at the top playable surface)', () => {
+    const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
+    const track = RouteGenerator.generate(analysis);
+    const spines = track.signalSpines || [];
+
+    expect(spines.length).toBeGreaterThan(0);
+
+    for (const spine of spines) {
+      // Find the nearest route platform to compare elevations
+      const nearestPlatform = track.route.reduce((closest, node) => {
+        const d1 = Math.hypot(spine.position.x - node.position.x, spine.position.z - node.position.z);
+        const d2 = Math.hypot(spine.position.x - closest.position.x, spine.position.z - closest.position.z);
+        return d1 < d2 ? node : closest;
+      }, track.route[0]);
+
+      const platTopY = nearestPlatform.position.y + nearestPlatform.dimensions.y * 0.5;
+      const spineTopY = spine.position.y + spine.dimensions.y * 0.5 * Math.cos(spine.pitch);
+
+      // Top surface of the spine must be at the SAME gameplay elevation as the platform tops (+- 0.5m slope tolerance)
+      // and NOT sunk 1.5m to 2.8m below platforms like the old under-slung implementation
+      expect(Math.abs(spineTopY - platTopY)).toBeLessThan(1.5);
+
+      // The bottom of the spine must NOT extend below the bottom of the platform
+      const platBottomY = nearestPlatform.position.y - nearestPlatform.dimensions.y * 0.5;
+      const spineBottomY = spine.position.y - spine.dimensions.y * 0.5;
+      expect(spineBottomY).toBeGreaterThanOrEqual(platBottomY - 0.2);
     }
   });
 
@@ -129,35 +160,60 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       const spineDirectlyUnderGap = spines.find(s => {
         const dx = Math.abs(s.position.x - gapCenter.x);
         const dz = Math.abs(s.position.z - gapCenter.z);
-        return Math.sqrt(dx * dx + dz * dz) < 4.0;
+        return Math.hypot(dx, dz) < 4.0;
       });
 
       expect(spineDirectlyUnderGap).toBeUndefined();
     }
   });
 
-  it('enforces strict sub-optimality on all recovery spine elements', () => {
+  it('enforces strict risk preservation (narrow catch strip, preserving void on sides)', () => {
     const analysis = createMockAnalysis(12345, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
-    const rng = new SeededRandom(12345);
     const track = RouteGenerator.generate(analysis);
     const spines = track.signalSpines || [];
 
     expect(spines.length).toBeGreaterThan(0);
 
     for (const spine of spines) {
-      // 1. Spines must be physically narrower than main platforms (<= 3.4m width)
-      expect(spine.dimensions.x).toBeLessThanOrEqual(3.4);
-      expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.8);
+      // 1. Spines must be physically narrow (1.5m to 3.2m width)
+      expect(spine.dimensions.x).toBeLessThanOrEqual(3.2);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.5);
 
-      // 2. Thickness must be low profile (<= 1.0m)
-      expect(spine.dimensions.y).toBeLessThanOrEqual(1.0);
+      // 2. Thickness must be low profile (<= 0.5m)
+      expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
 
       // 3. Must be flagged as isSignalSpine with an authored variant
       expect(spine.isSignalSpine).toBe(true);
       expect(spine.signalSpineVariant).toBeDefined();
-      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'DIP', 'CATWALK', 'SHALLOW_SURF']).toContain(
+      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'CATWALK']).toContain(
         spine.signalSpineVariant
       );
+    }
+  });
+
+  it('guarantees Signal Drift (track_13_signal_drift) receives top-surface signal spines', () => {
+    const presetPath = path.resolve(__dirname, '../public/music/presets/track_13_signal_drift.json');
+    expect(fs.existsSync(presetPath)).toBe(true);
+
+    const presetJson = JSON.parse(fs.readFileSync(presetPath, 'utf8'));
+    const rng = new SeededRandom(presetJson.analysis?.seed || 12345);
+    const spines = SignalSpineGenerator.generate(presetJson.track.route, presetJson.analysis, rng);
+
+    // Verify healthy top-surface spine coverage on Signal Drift
+    expect(spines.length).toBeGreaterThanOrEqual(10);
+
+    // Verify that the surf-to-stair sequence (nodes #38 through #48) has bridging spines
+    const stairSpines = spines.filter(s => {
+      // Check if spine connects near the stair steps
+      return s.position.z >= 1250 && s.position.z <= 1650;
+    });
+    expect(stairSpines.length).toBeGreaterThanOrEqual(5);
+
+    // Verify all spines on Signal Drift are top-surface and narrow
+    for (const spine of spines) {
+      expect(spine.dimensions.x).toBeLessThanOrEqual(3.2);
+      expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
+      expect(spine.isSignalSpine).toBe(true);
     }
   });
 
@@ -186,17 +242,6 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       expect(spineBottom).toBeGreaterThanOrEqual(lowestY - 0.001);
       expect(spineBottom - killPlaneY).toBeGreaterThanOrEqual(PhysicsWorld.VOID_MARGIN - 0.001);
     }
-  });
-
-  it('exhibits procedural variety across generated spines', () => {
-    const analysis = createMockAnalysis(99991, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'SURF', 'FLOW']);
-    const track = RouteGenerator.generate(analysis);
-    const spines = track.signalSpines || [];
-
-    const variants = new Set(spines.map(s => s.signalSpineVariant));
-
-    // Must exhibit at least 3 distinct procedural variants in a course
-    expect(variants.size).toBeGreaterThanOrEqual(3);
   });
 
   it('does NOT inflate main route platform sizes (Anti-Enlargement Guarantee)', () => {

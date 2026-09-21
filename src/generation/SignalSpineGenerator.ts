@@ -1,22 +1,24 @@
 /**
  * SignalSpineGenerator for PLAYHEAD
  *
- * Generates procedural secondary traversal geometry ("Signal Spine") to prevent
+ * Generates procedural top-surface bridging geometry ("Signal Spine") to prevent
  * unfair void deaths across high-variance gameplay sequences:
- * 1. Post-surf recovery sequences (guaranteed recovery lines for the first 2-4 landings).
- * 2. Staircases & small-platform chains (under-slung ribbons catching missed steps).
+ * 1. Post-surf landing platform chains (where landing speed varies widely).
+ * 2. Staircase & ascent chains (where missed steps drop the player into the void).
  * 3. High-speed transfers (secondary catch surfaces on high-velocity gaps).
  *
  * Strict Design Invariants:
- * - NOT an invisible floor or oversized safety net.
- * - NOT an aircraft-carrier platform enlargement (main route platforms remain untouched).
- * - Visible brutalist concrete / signal geometry layer.
- * - Strict sub-optimality: narrower (1.8m-3.2m), lower (y - 1.5m to -2.8m), or laterally offset.
- *   Taking the recovery line incurs elevation, speed, and time penalties compared to the clean main line.
- * - Selective placement: true hero jumps, committed launches, and deliberate precision setpieces
- *   (e.g. PRECISION sections, major DROP leaps, FINISH gates) retain pure open void below.
+ * - NO UNDER-SLUNG CONNECTORS: Zero connector bars or support beams under platforms.
+ * - TOP-SURFACE SPINE ONLY: Connector exists at the SAME gameplay elevation as the platform tops,
+ *   bridging from the exit edge of one platform to the entry edge of the next.
+ * - Collider and visible mesh match exactly: player can skate / bhop / run across it.
+ * - KEEP RISK: Narrow profile (20% to 35% of platform width), preserving open void on the sides.
+ * - ORGANIC VARIATION: Authored variants include STRAIGHT, OFFSET, CATWALK, and CURVED.
+ * - SELECTIVE PLACEMENT: Deliberate open void preserved for PRECISION sections, major DROP leaps,
+ *   and FINISH gates.
  */
 
+import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { RouteNode, RouteNodeType } from './GenerationTypes';
 import { SeededRandom } from './SeededRandom';
@@ -41,55 +43,50 @@ export class SignalSpineGenerator {
     const coveredGaps = new Set<string>();
 
     // -------------------------------------------------------------------------
-    // 1. POST-SURF RECOVERY SEQUENCES
-    // Every surf exit must guarantee a recovery line for the first 2-4 landings.
+    // 1. POST-SURF LANDING PLATFORM CHAINS
+    // High-variance exit speed: bridge consecutive landings for the first 2-4 platforms.
     // -------------------------------------------------------------------------
     for (let i = 0; i < route.length - 1; i++) {
       const curr = route[i];
       const next = route[i + 1];
 
-      // Identify surf exit (surf ramp transitioning to non-surf landing or runway)
+      // Surf exit: surf ramp transitioning to first non-surf landing platform
       if (curr.isSurf && !next.isSurf) {
-        // Guarantee recovery coverage for the first 2 to 4 landings post-surf
-        const maxCoverageNodes = Math.min(route.length - 1, i + 4);
+        const maxCoverageNodes = Math.min(route.length - 1, i + 5);
 
-        for (let j = i; j < maxCoverageNodes; j++) {
+        for (let j = i + 1; j < maxCoverageNodes; j++) {
           const a = route[j];
           const b = route[j + 1];
-          if (b.type === RouteNodeType.FINISH) break;
+          if (b.isSurf || b.type === RouteNodeType.FINISH) break;
 
           const gapKey = `${a.id}->${b.id}`;
           if (coveredGaps.has(gapKey)) continue;
-          coveredGaps.add(gapKey);
 
-          const spine = SignalSpineGenerator.createPostSurfSpine(
+          // Variant selection
+          const isCurved = Math.abs(b.yaw - a.yaw) > 0.08;
+          const variant = isCurved
+            ? 'CURVED'
+            : (rng.nextBool(0.45) ? 'OFFSET' : (rng.nextBool(0.3) ? 'CATWALK' : 'STRAIGHT'));
+
+          const spine = SignalSpineGenerator.createTopSurfaceSpine(
             spineId++,
             a,
             b,
-            j - i, // step index after surf
+            variant,
             rng
           );
-          if (spine) spines.push(spine);
-        }
 
-        // On the first landing directly following surf exit, also add an outside-drift
-        // recovery catch wing to guarantee that high-speed exit lateral drift doesn't plunge
-        if (i + 1 < route.length) {
-          const landing = route[i + 1];
-          const driftWing = SignalSpineGenerator.createCatchWingSpine(
-            spineId++,
-            curr,
-            landing,
-            rng
-          );
-          if (driftWing) spines.push(driftWing);
+          if (spine) {
+            coveredGaps.add(gapKey);
+            spines.push(spine);
+          }
         }
       }
     }
 
     // -------------------------------------------------------------------------
     // 2. STAIRCASES & SMALL PLATFORM CHAINS
-    // Under-slung ribbons beneath rapid vertical changes or small-footprint platforms.
+    // Bridges between consecutive steps in steep or narrow ascent sequences.
     // -------------------------------------------------------------------------
     for (let i = 0; i < route.length - 1; i++) {
       const a = route[i];
@@ -115,9 +112,21 @@ export class SignalSpineGenerator {
       const isSteepOrSmall = isAscentChain || (isSmallFootprint && verticalStep > 0.3);
 
       if (isSteepOrSmall) {
-        coveredGaps.add(gapKey);
-        const spine = SignalSpineGenerator.createStaircaseSpine(spineId++, a, b, rng);
-        if (spine) spines.push(spine);
+        const isCurved = Math.abs(b.yaw - a.yaw) > 0.08;
+        const variant = isCurved ? 'CURVED' : (rng.nextBool(0.35) ? 'CATWALK' : 'STRAIGHT');
+
+        const spine = SignalSpineGenerator.createTopSurfaceSpine(
+          spineId++,
+          a,
+          b,
+          variant,
+          rng
+        );
+
+        if (spine) {
+          coveredGaps.add(gapKey);
+          spines.push(spine);
+        }
       }
     }
 
@@ -144,15 +153,26 @@ export class SignalSpineGenerator {
 
       const dx = b.position.x - a.position.x;
       const dz = b.position.z - a.position.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      const horizontalDist = Math.hypot(dx, dz);
 
       const isPostBoost = a.isBoost || a.type === RouteNodeType.BOOST;
-      const isHighSpeedGap = (isPostBoost && horizontalDist > 5.0) || (horizontalDist > 8.0 && (section?.intensity ?? 0.5) > 0.6);
+      const isHighSpeedGap = (isPostBoost && horizontalDist > 4.0 && horizontalDist < 18.0) ||
+        (horizontalDist > 6.0 && horizontalDist < 16.0 && (section?.intensity ?? 0.5) > 0.6);
 
       if (isHighSpeedGap) {
-        coveredGaps.add(gapKey);
-        const spine = SignalSpineGenerator.createHighSpeedTransferSpine(spineId++, a, b, rng);
-        if (spine) spines.push(spine);
+        const variant = rng.nextBool(0.45) ? 'OFFSET' : 'STRAIGHT';
+        const spine = SignalSpineGenerator.createTopSurfaceSpine(
+          spineId++,
+          a,
+          b,
+          variant,
+          rng
+        );
+
+        if (spine) {
+          coveredGaps.add(gapKey);
+          spines.push(spine);
+        }
       }
     }
 
@@ -160,205 +180,108 @@ export class SignalSpineGenerator {
   }
 
   /**
-   * Post-surf recovery spine: spans the gap between post-surf landings.
-   * Narrower and placed 1.8m-2.4m below the main line.
+   * Calculates the exact front exit anchor on the TOP playable surface of a node.
    */
-  private static createPostSurfSpine(
+  public static getNodeExitTop(node: RouteNode): THREE.Vector3 {
+    const euler = new THREE.Euler(node.pitch || 0, node.yaw || 0, node.roll || 0, 'YXZ');
+    const localExit = new THREE.Vector3(
+      node.exitLateralOffset || 0,
+      node.dimensions.y * 0.5,
+      node.dimensions.z * 0.5
+    ).applyEuler(euler);
+    return new THREE.Vector3(
+      node.position.x + localExit.x,
+      node.position.y + localExit.y,
+      node.position.z + localExit.z
+    );
+  }
+
+  /**
+   * Calculates the exact rear entry anchor on the TOP playable surface of a node.
+   */
+  public static getNodeEntryTop(node: RouteNode): THREE.Vector3 {
+    const euler = new THREE.Euler(node.pitch || 0, node.yaw || 0, node.roll || 0, 'YXZ');
+    const localEntry = new THREE.Vector3(
+      0,
+      node.dimensions.y * 0.5,
+      -node.dimensions.z * 0.5
+    ).applyEuler(euler);
+    return new THREE.Vector3(
+      node.position.x + localEntry.x,
+      node.position.y + localEntry.y,
+      node.position.z + localEntry.z
+    );
+  }
+
+  /**
+   * Creates a narrow, top-surface bridging spine between two consecutive route platforms.
+   * Ensures zero under-slung geometry: top surface is mathematically flush with platform tops.
+   */
+  private static createTopSurfaceSpine(
     id: number,
     a: RouteNode,
     b: RouteNode,
-    postSurfStep: number,
+    variant: 'STRAIGHT' | 'OFFSET' | 'CATWALK' | 'CURVED',
     rng: SeededRandom
-  ): RouteNode {
-    const dx = b.position.x - a.position.x;
-    const dz = b.position.z - a.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
+  ): RouteNode | null {
+    const exitTopA = SignalSpineGenerator.getNodeExitTop(a);
+    const entryTopB = SignalSpineGenerator.getNodeEntryTop(b);
+
+    const dx = entryTopB.x - exitTopA.x;
+    const dy = entryTopB.y - exitTopA.y;
+    const dz = entryTopB.z - exitTopA.z;
+    const horizDist = Math.hypot(dx, dz);
+    const dist = Math.hypot(horizDist, dy);
+
+    // Skip if platforms overlap/abut or gap is too colossal for a catch strip
+    if (horizDist < 0.2 || dist > 28.0) return null;
 
     const yaw = Math.atan2(dx, dz);
-    const midX = (a.position.x + b.position.x) * 0.5;
-    const midZ = (a.position.z + b.position.z) * 0.5;
+    const pitch = -Math.atan2(dy, horizDist);
 
-    // Sub-optimal elevation: 1.8m to 2.4m below the lower of the two platforms
-    const lowerY = Math.min(a.position.y, b.position.y);
-    const spineY = lowerY - 2.0;
+    // Ensure runnable / skateable pitch (slope <= 30 degrees)
+    if (Math.abs(pitch) > 0.6) return null;
 
-    // Span the gap plus generous overlap so no void hole exists between platform and spine
-    const spineLength = Math.max(12.0, dist + 4.0);
-    // Narrow catch profile (2.8m - 3.4m) vs wide landing (16m - 26m)
-    const spineWidth = 3.0;
-    const spineThickness = 0.8;
+    // Narrow catch profile (20% to 35% of platform width) preserving open void on sides
+    const minPlatWidth = Math.min(a.dimensions.x, b.dimensions.x);
+    let widthRatio = 0.25;
+    if (variant === 'CATWALK') widthRatio = 0.20;
+    else if (variant === 'OFFSET') widthRatio = 0.28;
+    else if (variant === 'CURVED') widthRatio = 0.30;
 
-    // Variant selection
-    const isShallowSurf = postSurfStep === 0 && (b.position.y < a.position.y - 1.5);
-    const variant = isShallowSurf ? 'SHALLOW_SURF' : (postSurfStep % 2 === 1 ? 'OFFSET' : 'STRAIGHT');
+    const spineWidth = Math.max(1.5, Math.min(3.2, minPlatWidth * widthRatio));
+    const spineThickness = Math.min(0.45, Math.min(a.dimensions.y, b.dimensions.y) * 0.45);
+    const overlap = 0.5; // Generous 0.5m overlap into platform lips to prevent microscopic seams
+    const spineLength = dist + overlap * 2.0;
 
-    const lateralShift = variant === 'OFFSET' ? (rng.nextBool() ? 3.5 : -3.5) : 0;
-    const perpX = Math.cos(yaw) * lateralShift;
-    const perpZ = -Math.sin(yaw) * lateralShift;
+    // Midpoint on top playable surface
+    const topMid = new THREE.Vector3().addVectors(exitTopA, entryTopB).multiplyScalar(0.5);
 
-    const roll = isShallowSurf ? (rng.nextBool() ? 0.52 : -0.52) : 0;
-    const pitch = (b.position.y - a.position.y) / Math.max(1.0, dist) * 0.5;
+    // Apply lateral offset if variant is OFFSET (following strafe arc or outer curve)
+    if (variant === 'OFFSET') {
+      const sideSign = rng.nextBool() ? 1 : -1;
+      const maxShift = Math.min(2.5, (minPlatWidth - spineWidth) * 0.32);
+      const shift = sideSign * maxShift;
+      topMid.x += Math.cos(yaw) * shift;
+      topMid.z -= Math.sin(yaw) * shift;
+    }
 
-    const surfNormal = isShallowSurf
-      ? { x: Math.sin(roll) * Math.cos(yaw), y: Math.cos(roll), z: Math.sin(roll) * -Math.sin(yaw) }
-      : undefined;
+    // Offset from top playable surface to box center
+    const topOffset = new THREE.Vector3(0, spineThickness * 0.5, 0).applyEuler(
+      new THREE.Euler(pitch, yaw, 0, 'YXZ')
+    );
+    const spinePos = new THREE.Vector3().subVectors(topMid, topOffset);
 
     return {
       id,
       time: a.time,
-      position: { x: midX + perpX, y: spineY, z: midZ + perpZ },
+      position: { x: spinePos.x, y: spinePos.y, z: spinePos.z },
       dimensions: { x: spineWidth, y: spineThickness, z: spineLength },
       yaw,
       pitch,
-      roll,
+      roll: 0,
       type: RouteNodeType.RUNWAY,
       intensity: a.intensity * 0.8,
-      sectionIndex: a.sectionIndex,
-      arcLength: a.arcLength,
-      isSurf: isShallowSurf,
-      surfNormal,
-      isBoost: false,
-      isOptional: true,
-      isSignalSpine: true,
-      signalSpineVariant: variant
-    };
-  }
-
-  /**
-   * Creates an outside-drift catch wing on the first landing directly following surf exit.
-   */
-  private static createCatchWingSpine(
-    id: number,
-    surfRamp: RouteNode,
-    landing: RouteNode,
-    _rng: SeededRandom
-  ): RouteNode {
-    const yaw = landing.yaw;
-    const fwdX = Math.sin(yaw);
-    const fwdZ = Math.cos(yaw);
-    const rightX = fwdZ;
-    const rightZ = -fwdX;
-
-    // Place on the outside curve / surf bank side
-    const bankSign = surfRamp.roll > 0 ? 1 : -1;
-    const lateralDist = bankSign * (landing.dimensions.x * 0.5 + 2.2);
-
-    const wingLength = Math.max(16.0, landing.dimensions.z * 0.75);
-    const wingWidth = 2.8;
-    const wingThickness = 0.8;
-
-    return {
-      id,
-      time: landing.time,
-      position: {
-        x: landing.position.x + rightX * lateralDist,
-        y: landing.position.y - 1.5,
-        z: landing.position.z + rightZ * lateralDist
-      },
-      dimensions: { x: wingWidth, y: wingThickness, z: wingLength },
-      yaw,
-      pitch: 0,
-      roll: 0,
-      type: RouteNodeType.RUNWAY,
-      intensity: landing.intensity * 0.7,
-      sectionIndex: landing.sectionIndex,
-      arcLength: landing.arcLength,
-      isSurf: false,
-      isBoost: false,
-      isOptional: true,
-      isSignalSpine: true,
-      signalSpineVariant: 'CATWALK'
-    };
-  }
-
-  /**
-   * Staircase / Ascent recovery spine: under-slung ribbon running beneath steps.
-   */
-  private static createStaircaseSpine(
-    id: number,
-    a: RouteNode,
-    b: RouteNode,
-    rng: SeededRandom
-  ): RouteNode {
-    const dx = b.position.x - a.position.x;
-    const dz = b.position.z - a.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    const yaw = Math.atan2(dx, dz);
-
-    const midX = (a.position.x + b.position.x) * 0.5;
-    const midZ = (a.position.z + b.position.z) * 0.5;
-    const lowerY = Math.min(a.position.y, b.position.y);
-    const spineY = lowerY - 2.0;
-
-    const spineLength = Math.max(8.0, dist + 3.0);
-    const spineWidth = 2.6;
-    const spineThickness = 0.7;
-
-    const isCurved = Math.abs(b.yaw - a.yaw) > 0.08;
-    const variant = isCurved ? 'CURVED' : (rng.nextBool(0.4) ? 'DIP' : 'STRAIGHT');
-
-    const pitch = (b.position.y - a.position.y) / Math.max(1.0, dist) * 0.65;
-
-    return {
-      id,
-      time: a.time,
-      position: { x: midX, y: spineY, z: midZ },
-      dimensions: { x: spineWidth, y: spineThickness, z: spineLength },
-      yaw,
-      pitch,
-      roll: 0,
-      type: RouteNodeType.RUNWAY,
-      intensity: a.intensity * 0.6,
-      sectionIndex: a.sectionIndex,
-      arcLength: a.arcLength,
-      isSurf: false,
-      isBoost: false,
-      isOptional: true,
-      isSignalSpine: true,
-      signalSpineVariant: variant
-    };
-  }
-
-  /**
-   * High-speed transfer spine: secondary catch surface under high-velocity gaps.
-   */
-  private static createHighSpeedTransferSpine(
-    id: number,
-    a: RouteNode,
-    b: RouteNode,
-    rng: SeededRandom
-  ): RouteNode {
-    const dx = b.position.x - a.position.x;
-    const dz = b.position.z - a.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    const yaw = Math.atan2(dx, dz);
-
-    const midX = (a.position.x + b.position.x) * 0.5;
-    const midZ = (a.position.z + b.position.z) * 0.5;
-    const lowerY = Math.min(a.position.y, b.position.y);
-    const spineY = lowerY - 2.2;
-
-    const spineLength = Math.max(10.0, dist + 2.5);
-    const spineWidth = 2.8;
-    const spineThickness = 0.7;
-
-    const useOffset = rng.nextBool(0.5);
-    const variant = useOffset ? 'OFFSET' : 'STRAIGHT';
-
-    const lateralShift = useOffset ? (rng.nextBool() ? 3.8 : -3.8) : 0;
-    const perpX = Math.cos(yaw) * lateralShift;
-    const perpZ = -Math.sin(yaw) * lateralShift;
-
-    return {
-      id,
-      time: a.time,
-      position: { x: midX + perpX, y: spineY, z: midZ + perpZ },
-      dimensions: { x: spineWidth, y: spineThickness, z: spineLength },
-      yaw,
-      pitch: 0,
-      roll: 0,
-      type: RouteNodeType.RUNWAY,
-      intensity: a.intensity * 0.7,
       sectionIndex: a.sectionIndex,
       arcLength: a.arcLength,
       isSurf: false,

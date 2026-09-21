@@ -9,6 +9,7 @@ import { GeneratedTrack } from '../generation/GenerationTypes';
 import { SpectacleEvent } from '../world/SpectaclePlanner';
 import { ROUTE_GENERATION_VERSION, RouteGenerator } from '../generation/RouteGenerator';
 import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
+import { SignalSpineGenerator } from '../generation/SignalSpineGenerator';
 import { SeededRandom } from '../generation/SeededRandom';
 
 export interface PrecomputedLevelData {
@@ -62,6 +63,14 @@ export class PresetLevelCache {
       if (!track.optionalRamps || track.optionalRamps.length === 0) {
         const rng = new SeededRandom(json.analysis?.seed || 12345);
         track.optionalRamps = RouteGenerator.generateOptionalSideSurfs(track.route, rng);
+      }
+
+      // Ensure procedural top-surface signal spines are present even in cached presets
+      if (!track.signalSpines || track.signalSpines.length === 0) {
+        if (json.analysis) {
+          const rng = new SeededRandom(json.analysis?.seed || 12345);
+          track.signalSpines = SignalSpineGenerator.generate(track.route, json.analysis, rng);
+        }
       }
 
       const data: PrecomputedLevelData = {
