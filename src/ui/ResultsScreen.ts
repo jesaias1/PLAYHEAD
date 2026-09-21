@@ -8,6 +8,7 @@ import { formatSpeed, formatTime } from '../utils/math';
 import { seedToHex } from '../utils/hash';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { getUnrankedReason } from './RankResultCopy';
+import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 
 export class ResultsScreen {
   public element: HTMLElement;
@@ -25,6 +26,8 @@ export class ResultsScreen {
   private fallsElem: HTMLElement;
   private scoreElem: HTMLElement;
   private rivalElem: HTMLElement;
+  private pbValElem: HTMLElement;
+  private localFirstElem: HTMLElement;
 
   private statsGrid: HTMLElement;
   private actionsRow: HTMLElement;
@@ -37,6 +40,9 @@ export class ResultsScreen {
   private replayBtn: HTMLButtonElement;
   private againBtn: HTMLButtonElement;
   private newTrackBtn: HTMLButtonElement;
+  private leaderboardBtn: HTMLButtonElement;
+  private leaderboardFeedbackElem: HTMLElement;
+  private activeCandidate: LeaderboardSubmissionCandidate | null = null;
 
   private onReplayCallback?: () => void;
   private onAgainCallback?: () => void;
@@ -76,6 +82,18 @@ export class ResultsScreen {
             <div class="stat-value" id="res-sync">+0.00s</div>
           </div>
           <div class="stat-card">
+            <div class="stat-label">[RECORD] PERSONAL BEST</div>
+            <div class="stat-value" id="res-pb-val">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">[RECORD] LOCAL #1</div>
+            <div class="stat-value" id="res-local-first">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">[GHOST] VS THE ECHO</div>
+            <div class="stat-value" id="res-rival">—</div>
+          </div>
+          <div class="stat-card">
             <div class="stat-label">[RUN] MAX SPEED</div>
             <div class="stat-value" id="res-max-speed">0 u/s</div>
           </div>
@@ -96,8 +114,8 @@ export class ResultsScreen {
             <div class="stat-value" id="res-score">0</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">[GHOST] VS THE ECHO</div>
-            <div class="stat-value" id="res-rival">—</div>
+            <div class="stat-label">[SYS] VERIFICATION</div>
+            <div class="stat-value" id="res-verification" style="font-size: 0.72rem; color: #00f0ff;">DETERMINISTIC</div>
           </div>
         </div>
 
@@ -110,10 +128,15 @@ export class ResultsScreen {
           <button class="btn-preview signal-drop-open" id="btn-res-signal-drop">DECODE SIGNAL</button>
         </div>
 
+        <div class="leaderboard-feedback-bar hidden" id="res-leaderboard-feedback">
+          LEADERBOARD ENTRY SAVED // ONLINE SUBMISSION COMING LATER
+        </div>
+
         <div class="results-actions" id="res-actions">
-          <button class="btn-hero" id="btn-res-again">RUN AGAIN</button>
-          <button class="btn-preview" id="btn-res-replay">REPLAY RUN</button>
-          <button class="btn-preview" id="btn-res-new">NEW TRACK</button>
+          <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
+          <button class="btn-preview hidden" id="btn-res-leaderboard">[ ADD TO LEADERBOARD ]</button>
+          <button class="btn-preview" id="btn-res-replay">[ REPLAY ]</button>
+          <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
         </div>
       </div>
     `;
@@ -132,6 +155,8 @@ export class ResultsScreen {
     this.fallsElem = this.element.querySelector('#res-falls') as HTMLElement;
     this.scoreElem = this.element.querySelector('#res-score') as HTMLElement;
     this.rivalElem = this.element.querySelector('#res-rival') as HTMLElement;
+    this.pbValElem = this.element.querySelector('#res-pb-val') as HTMLElement;
+    this.localFirstElem = this.element.querySelector('#res-local-first') as HTMLElement;
 
     this.statsGrid = this.element.querySelector('#res-grid') as HTMLElement;
     this.actionsRow = this.element.querySelector('#res-actions') as HTMLElement;
@@ -144,6 +169,8 @@ export class ResultsScreen {
     this.againBtn = this.element.querySelector('#btn-res-again') as HTMLButtonElement;
     this.replayBtn = this.element.querySelector('#btn-res-replay') as HTMLButtonElement;
     this.newTrackBtn = this.element.querySelector('#btn-res-new') as HTMLButtonElement;
+    this.leaderboardBtn = this.element.querySelector('#btn-res-leaderboard') as HTMLButtonElement;
+    this.leaderboardFeedbackElem = this.element.querySelector('#res-leaderboard-feedback') as HTMLElement;
 
     this.initEvents();
   }
@@ -164,13 +191,45 @@ export class ResultsScreen {
     ghostInfo?: { rivalDelta?: number; isNewPB?: boolean },
     trackTitle = 'PLAYHEAD TRACK',
     overtimeInfo?: { isOvertime: boolean; overtimeDuration: number },
-    progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank }
+    progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank },
+    officialInfo?: {
+      isOfficial: boolean;
+      trackId: string;
+      candidate?: LeaderboardSubmissionCandidate;
+      isNewLocalFirst?: boolean;
+    },
+    customRewardInfo?: {
+      isCustomAudio: boolean;
+      eligible: boolean;
+      statusMessage: string;
+      reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
+    }
   ): void {
     this.clearTimeouts();
 
     this.trackTitleElem.textContent = trackTitle.toUpperCase();
     const isNewPersonalBest = !overtimeInfo?.isOvertime && ghostInfo?.isNewPB === true;
-    this.pbStatusElem.classList.toggle('hidden', !isNewPersonalBest);
+
+    // Personal Best and Local #1 Display
+    const recSummary = officialInfo?.trackId
+      ? LeaderboardManager.getInstance().getRecordSummary(officialInfo.trackId)
+      : null;
+    this.pbValElem.textContent = recSummary?.pbTime !== null && recSummary?.pbTime !== undefined
+      ? formatTime(recSummary.pbTime)
+      : '—';
+    this.localFirstElem.textContent = recSummary?.localFirstTime !== null && recSummary?.localFirstTime !== undefined
+      ? formatTime(recSummary.localFirstTime)
+      : '—';
+
+    if (officialInfo?.isNewLocalFirst && !overtimeInfo?.isOvertime) {
+      this.pbStatusElem.textContent = '[LOCAL #1] NEW LOCAL FIRST RECORD';
+      this.pbStatusElem.classList.remove('hidden');
+    } else if (isNewPersonalBest) {
+      this.pbStatusElem.textContent = '[PB] NEW PERSONAL BEST';
+      this.pbStatusElem.classList.remove('hidden');
+    } else {
+      this.pbStatusElem.classList.add('hidden');
+    }
 
     // Format Typographic Rank & Overtime State
     if (results.rank === 'UNRANKED') {
@@ -218,7 +277,30 @@ export class ResultsScreen {
     this.strafeEffElem.textContent = results.strafeEfficiency >= 0 ? `${results.strafeEfficiency}%` : '—';
     this.fallsElem.textContent = `${results.fallsCount}`;
     this.scoreElem.textContent = results.score.toLocaleString();
-    this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank);
+    this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank, customRewardInfo);
+
+    // Leaderboard Action Setup
+    this.activeCandidate = officialInfo?.candidate || null;
+    this.leaderboardFeedbackElem.classList.add('hidden');
+
+    if (
+      officialInfo?.isOfficial &&
+      this.activeCandidate &&
+      results.rank !== 'UNRANKED' &&
+      !overtimeInfo?.isOvertime
+    ) {
+      this.leaderboardBtn.classList.remove('hidden');
+      const isAlreadyQueued = LeaderboardManager.getInstance().isCandidateQueued(this.activeCandidate.submissionId);
+      if (isAlreadyQueued) {
+        this.leaderboardBtn.textContent = '[ ENTRY SAVED ]';
+        this.leaderboardBtn.disabled = true;
+      } else {
+        this.leaderboardBtn.textContent = '[ ADD TO LEADERBOARD ]';
+        this.leaderboardBtn.disabled = false;
+      }
+    } else {
+      this.leaderboardBtn.classList.add('hidden');
+    }
 
     // Temporal Rival & Ghost Info
     if (ghostInfo?.rivalDelta !== undefined) {
@@ -262,10 +344,55 @@ export class ResultsScreen {
     }, 660));
   }
 
-  private prepareSignalDropPanel(newlyAwardedCount: number, bestDropRank?: RunRank): void {
+  private prepareSignalDropPanel(
+    newlyAwardedCount: number,
+    bestDropRank?: RunRank,
+    customRewardInfo?: {
+      isCustomAudio: boolean;
+      eligible: boolean;
+      statusMessage: string;
+      reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
+    }
+  ): void {
     const skinSystem = KarambitSkinSystem.getInstance();
     const pending = skinSystem.getPendingDropCount();
+    const isCollectionComplete = skinSystem.isCollectionComplete();
     this.signalDropPanel.className = 'signal-drop-panel';
+
+    if (isCollectionComplete) {
+      this.signalDropPanel.classList.remove('hidden');
+      this.signalDropStatus.textContent = 'ALL SIGNALS DECODED // ARCHIVE COMPLETE';
+      this.signalDropReward.textContent = '100% COSMETIC ARCHIVE UNLOCKED';
+      this.signalDropCount.textContent = 'NO DUPLICATES AWARDED';
+      this.signalDropOpenBtn.textContent = 'ARCHIVE COMPLETE';
+      this.signalDropOpenBtn.disabled = true;
+      return;
+    }
+
+    if (customRewardInfo?.isCustomAudio) {
+      this.signalDropPanel.classList.remove('hidden');
+      if (customRewardInfo.eligible) {
+        this.signalDropStatus.textContent = 'SIGNAL ACQUIRED // 1 SIGNAL DROP';
+        this.signalDropReward.textContent = 'FIRST COMPLETION SIGNAL DROP';
+        this.signalDropCount.textContent = `${pending.toString().padStart(2, '0')} STORED SIGNAL${pending === 1 ? '' : 'S'}`;
+        this.signalDropOpenBtn.textContent = 'DECODE SIGNAL';
+        this.signalDropOpenBtn.disabled = false;
+      } else if (customRewardInfo.reason === 'TOO_SHORT') {
+        this.signalDropStatus.textContent = 'SIGNAL TOO SHORT // 01:00 MIN REQUIRED';
+        this.signalDropReward.textContent = 'AUDIO DURATION < 60 SECONDS';
+        this.signalDropCount.textContent = 'INELIGIBLE FOR SIGNAL DROP';
+        this.signalDropOpenBtn.textContent = 'TOO SHORT';
+        this.signalDropOpenBtn.disabled = true;
+      } else {
+        this.signalDropStatus.textContent = 'SIGNAL ARCHIVED // COMPLETION REWARD CLAIMED';
+        this.signalDropReward.textContent = 'PREVIOUSLY CLAIMED AUDIO CONTENT';
+        this.signalDropCount.textContent = 'ONE-TIME DROP PREVIOUSLY CLAIMED';
+        this.signalDropOpenBtn.textContent = 'CLAIMED';
+        this.signalDropOpenBtn.disabled = true;
+      }
+      return;
+    }
+
     if (pending <= 0) {
       this.signalDropPanel.classList.add('hidden');
       return;
@@ -358,5 +485,15 @@ export class ResultsScreen {
     this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.newTrackBtn.addEventListener('click', () => this.onNewTrackCallback?.());
     this.signalDropOpenBtn.addEventListener('click', () => this.openSignalDrop());
+    this.leaderboardBtn.addEventListener('click', () => {
+      if (!this.activeCandidate) return;
+      const queued = LeaderboardManager.getInstance().queueCandidate(this.activeCandidate);
+      if (queued) {
+        this.leaderboardBtn.textContent = '[ ENTRY SAVED ]';
+        this.leaderboardBtn.disabled = true;
+        this.leaderboardFeedbackElem.textContent = 'LEADERBOARD ENTRY SAVED // ONLINE SUBMISSION COMING LATER';
+        this.leaderboardFeedbackElem.classList.remove('hidden');
+      }
+    });
   }
 }

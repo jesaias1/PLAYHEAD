@@ -150,9 +150,9 @@ export class PlayerController {
   public updateFixed(dt: number): void {
     if (this.rKeyDownTime !== null && !this.rFullRestartTriggered) {
       const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
-      const progress = Math.min(1.0, elapsedSec / 2.0);
+      const progress = Math.min(1.0, elapsedSec / 1.0);
       this.onHoldProgressCallback?.(progress);
-      if (elapsedSec >= 2.0) {
+      if (elapsedSec >= 1.0) {
         this.rFullRestartTriggered = true;
         this.rKeyDownTime = null;
         this.onHoldProgressCallback?.(null);
@@ -538,7 +538,7 @@ export class PlayerController {
           const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
           this.rKeyDownTime = null;
           this.onHoldProgressCallback?.(null);
-          if (elapsedSec < 2.0) {
+          if (elapsedSec < 1.0) {
             this.stats.recordRestart();
             this.onRestoreCallback?.();
           }

@@ -38,6 +38,8 @@ import { RestoreReason } from '../player/RestorePolicy';
 import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics, RawMouseSpikeDetector } from './MovementDiagnostics';
 import { PointerInputProbe } from './PointerInputProbe';
 import { BUILD_LABEL } from './BuildInfo';
+import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
+import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 
 export class Game {
@@ -72,6 +74,7 @@ export class Game {
 
   private isFirstContactCourse = false;
   private shownOnboardingCues = new Set<string>();
+  private currentCustomAudioBuffer: AudioBuffer | null = null;
 
   private movementLab: MovementLab | null = null;
   private previousStateBeforePause: GameState = GameState.PLAYING;
@@ -448,20 +451,79 @@ export class Game {
             const rivalTime = this.ghostManager.getRivalTime();
             const rivalDelta = rivalTime !== null ? results.completionTime - rivalTime : undefined;
 
-            // Record cosmetic progression on any earned rank, including a
-            // mistake-tolerant Bronze completed after the audio window.
+            // Record cosmetic progression and official leaderboard / custom audio rewards
             let dropsAwarded = 0;
             let bestDropRank: RunRank | undefined;
-            if (results.rank !== 'UNRANKED') {
+            let officialInfo: {
+              isOfficial: boolean;
+              trackId: string;
+              candidate?: import('../leaderboard/LeaderboardManager').LeaderboardSubmissionCandidate;
+              isNewLocalFirst?: boolean;
+            } | undefined;
+            let customRewardInfo: {
+              isCustomAudio: boolean;
+              eligible: boolean;
+              statusMessage: string;
+              reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
+            } | undefined;
+
+            if (this.currentOfficialTrackId) {
               const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
-              const progressionKey = this.currentOfficialTrackId || trackName;
-              const completionReward = KarambitSkinSystem.getInstance().recordTrackCompletion(
-                progressionKey,
-                results.rank,
-                this.currentOfficialTrackId
+              const progressionKey = this.currentOfficialTrackId;
+              if (results.rank !== 'UNRANKED') {
+                const completionReward = KarambitSkinSystem.getInstance().recordTrackCompletion(
+                  progressionKey,
+                  results.rank,
+                  this.currentOfficialTrackId
+                );
+                dropsAwarded = completionReward.dropsAwarded;
+                bestDropRank = completionReward.awardedDropRanks[0];
+              }
+
+              // Record official run in LeaderboardManager
+              const isOfficialValid = !this.movementLab && results.rank !== 'UNRANKED';
+              const trackSeed = this.currentTrack.seed;
+              const lbResult = LeaderboardManager.getInstance().recordOfficialRun(
+                this.currentOfficialTrackId,
+                trackSeed,
+                results,
+                isOfficialValid
               );
-              dropsAwarded = completionReward.dropsAwarded;
-              bestDropRank = completionReward.awardedDropRanks[0];
+
+              const candidate = isOfficialValid
+                ? LeaderboardManager.getInstance().prepareSubmissionCandidate(
+                    this.currentOfficialTrackId,
+                    trackName,
+                    trackSeed,
+                    results,
+                    isOfficialValid
+                  )
+                : undefined;
+
+              officialInfo = {
+                isOfficial: true,
+                trackId: this.currentOfficialTrackId,
+                candidate,
+                isNewLocalFirst: lbResult.isNewLocalFirst
+              };
+            } else if (this.currentCustomAudioBuffer) {
+              // Custom audio run
+              const dur = this.currentCustomAudioBuffer.duration;
+              const fp = CustomAudioRewardService.computeAudioFingerprint(this.currentCustomAudioBuffer);
+              const elig = CustomAudioRewardService.getInstance().checkEligibility(dur, fp);
+              customRewardInfo = {
+                isCustomAudio: true,
+                eligible: elig.eligible,
+                statusMessage: elig.statusMessage,
+                reason: elig.reason
+              };
+
+              if (elig.eligible && results.rank !== 'UNRANKED') {
+                CustomAudioRewardService.getInstance().claimReward(fp);
+                KarambitSkinSystem.getInstance().grantSignalDrop('BRONZE');
+                dropsAwarded = 1;
+                bestDropRank = 'BRONZE';
+              }
             }
 
             this.ui.resultsScreen.showResults(
@@ -470,7 +532,9 @@ export class Game {
               { rivalDelta, isNewPB },
               this.currentAnalysis.filename || 'PLAYHEAD TRACK',
               { isOvertime, overtimeDuration },
-              { dropsAwarded, bestDropRank }
+              { dropsAwarded, bestDropRank },
+              officialInfo,
+              customRewardInfo
             );
           }
           break;
@@ -495,6 +559,7 @@ export class Game {
   private async handleCatalogTrackSelected(trackEntry: TrackCatalogEntry): Promise<void> {
     try {
       this.currentOfficialTrackId = trackEntry.id;
+      this.currentCustomAudioBuffer = null;
       this.isFirstContactCourse = !!trackEntry.isFirstContact;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(trackEntry.title);
@@ -537,6 +602,7 @@ export class Game {
       await this.processBuffer(buffer, trackEntry.title);
     } catch (err: unknown) {
       this.currentOfficialTrackId = null;
+      this.currentCustomAudioBuffer = null;
       const msg = err instanceof Error ? err.message : 'Track load failed';
       alert(msg);
       this.stateMachine.transitionTo(GameState.IMPORT);
@@ -552,9 +618,11 @@ export class Game {
       this.ui.analysisScreen.setStage('[SIGNAL] INPUT RECEIVED', 0.02);
 
       const { buffer, filename } = await AudioLoader.loadFromFile(file);
+      this.currentCustomAudioBuffer = buffer;
       this.ui.analysisScreen.setStage('[AUDIO] PCM DECODED', 0.08);
       await this.processBuffer(buffer, filename);
     } catch (err: unknown) {
+      this.currentCustomAudioBuffer = null;
       const msg = err instanceof Error ? err.message : 'Audio load failed';
       alert(msg);
       this.stateMachine.transitionTo(GameState.IMPORT);
@@ -564,6 +632,7 @@ export class Game {
   private async handleDevTrackSelected(genre: SyntheticGenre = 'ELECTRONIC_DROP'): Promise<void> {
     try {
       this.currentOfficialTrackId = null;
+      this.currentCustomAudioBuffer = null;
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       const title = `DEV ${genre.replace('_', ' ')}`;

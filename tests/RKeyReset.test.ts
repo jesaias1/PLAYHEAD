@@ -34,7 +34,7 @@ describe('R Key Tap vs Hold Logic', () => {
     vi.restoreAllMocks();
   });
 
-  it('triggers quick tap restore when released within 2.0s', () => {
+  it('triggers quick tap restore when released within 1.0s (including 0.9s hold)', () => {
     const camera = new THREE.PerspectiveCamera();
     const cameraController = new CameraController(camera);
     const physicsWorld = new PhysicsWorld();
@@ -48,6 +48,9 @@ describe('R Key Tap vs Hold Logic', () => {
     player.onFullRestartCallback = onFullRestart;
     player.onHoldProgressCallback = onProgress;
 
+    let mockTime = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime);
+
     // Simulate keydown on KeyR
     mockWindow.dispatchEvent({ type: 'keydown', code: 'KeyR', repeat: false });
 
@@ -55,7 +58,13 @@ describe('R Key Tap vs Hold Logic', () => {
     expect(onRestore).not.toHaveBeenCalled();
     expect(onFullRestart).not.toHaveBeenCalled();
 
-    // Simulate quick release after 150ms
+    // Advance 0.9s (900ms)
+    mockTime = 1900;
+    player.updateFixed(0.016);
+    expect(onProgress).toHaveBeenCalledWith(0.9);
+    expect(onFullRestart).not.toHaveBeenCalled();
+
+    // Release at 0.9s -> triggers checkpoint restore
     mockWindow.dispatchEvent({ type: 'keyup', code: 'KeyR' });
 
     expect(onRestore).toHaveBeenCalledTimes(1);
@@ -63,7 +72,7 @@ describe('R Key Tap vs Hold Logic', () => {
     expect(onProgress).toHaveBeenLastCalledWith(null);
   });
 
-  it('triggers full level restart when held for 2.0s and does not trigger quick tap on release', () => {
+  it('triggers full level restart when held for >= 1.0s and does not trigger quick tap on release', () => {
     const camera = new THREE.PerspectiveCamera();
     const cameraController = new CameraController(camera);
     const physicsWorld = new PhysicsWorld();
@@ -84,14 +93,14 @@ describe('R Key Tap vs Hold Logic', () => {
     mockWindow.dispatchEvent({ type: 'keydown', code: 'KeyR', repeat: false });
     expect(onProgress).toHaveBeenCalledWith(0.01);
 
-    // Advance 1.0s -> 50% hold progress
-    mockTime = 2000;
+    // Advance 0.5s -> 50% hold progress
+    mockTime = 1500;
     player.updateFixed(0.016);
     expect(onProgress).toHaveBeenCalledWith(0.5);
     expect(onFullRestart).not.toHaveBeenCalled();
 
-    // Advance to 2.1s -> triggers full restart
-    mockTime = 3100;
+    // Advance to 1.05s -> triggers full restart
+    mockTime = 2050;
     player.updateFixed(0.016);
     expect(onFullRestart).toHaveBeenCalledTimes(1);
     expect(onRestore).not.toHaveBeenCalled();

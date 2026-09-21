@@ -128,16 +128,18 @@ export class GeometryBuilder {
     });
     reactiveMaterials.push(accentMaterial);
 
-    // 3b. Dedicated Signal Spine Top Material (Clean dark aggregate with subtle palette signal identity)
+    // 3b. Dedicated Signal Spine Top Material:
+    // Primarily uses the normal platform grey family (78%) blended with subtle signal tint (22%).
+    // Sits close to ordinary platform concrete architecture without looking like a loud brightly colored bridge.
     const spineTopMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0e141f,
+      color: surfaceCol.clone().lerp(primaryCol, 0.22),
       emissive: primaryCol,
-      emissiveIntensity: 0.18,
-      roughness: 0.52,
-      metalness: 0.48,
+      emissiveIntensity: 0.05,
+      roughness: 0.68,
+      metalness: 0.16,
       map: concreteTex,
       bumpMap: concreteTex,
-      bumpScale: 0.03
+      bumpScale: 0.04
     });
     reactiveMaterials.push(spineTopMaterial);
 

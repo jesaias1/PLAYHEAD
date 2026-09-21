@@ -27,7 +27,7 @@ export class PauseScreen {
         <button class="secondary" id="btn-pause-restart-track">RESTART TRACK</button>
         <button class="secondary" id="btn-pause-armory">> ARMORY</button>
         <button class="secondary" id="btn-pause-settings">SETTINGS</button>
-        <button class="secondary" id="btn-pause-new-track">NEW TRACK</button>
+        <button class="secondary" id="btn-pause-new-track">MAIN MENU</button>
       </div>
     `;
 

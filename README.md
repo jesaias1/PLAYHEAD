@@ -1,6 +1,6 @@
 # PLAYHEAD
 
-> **DROP A SONG. ENTER IT.**
+> **ENTER THE SIGNAL.**
 > *BECOME THE PLAYHEAD.*
 
 PLAYHEAD is an experimental first-person movement game that transforms any client-side audio file into a monumental procedural 3D world. You do not simply run while music plays; **the song has become a place, and you are the playhead physically strafing through your music.**

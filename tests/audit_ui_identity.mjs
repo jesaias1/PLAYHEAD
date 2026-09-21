@@ -60,7 +60,7 @@ try {
     console.log(`[UI IDENTITY] ${viewport.name} logo=${Math.round(state.logoRect?.width ?? 0)}x${Math.round(state.logoRect?.height ?? 0)} execBottom=${Math.round(state.enterRect?.bottom ?? 0)}`);
 
     assert(state.title === 'PLAYHEAD', `${viewport.name}: PLAYHEAD logo is missing`);
-    assert(state.tagline?.startsWith('DROP A SONG. ENTER IT.'), `${viewport.name}: primary tagline is missing`);
+    assert(state.tagline?.startsWith('ENTER THE SIGNAL.'), `${viewport.name}: primary tagline is missing`);
     assert(state.secondary === 'BECOME THE PLAYHEAD.', `${viewport.name}: secondary tagline is missing`);
     assert(state.logoRect && state.logoRect.height >= 45, `${viewport.name}: logo is not visually prominent`);
     assert(state.statusRect && state.logoRect.bottom < state.statusRect.top, `${viewport.name}: system status competes above the PLAYHEAD brand`);

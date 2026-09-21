@@ -11,6 +11,8 @@ import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
 import { createProgramFingerprint } from './SignalIdentity';
+import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
+import { formatTime } from '../utils/math';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -86,7 +88,7 @@ export class ImportScreen {
             <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
             <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
           </div>
-          <p class="brand-tagline">DROP A SONG. ENTER IT.<span class="terminal-cursor" aria-hidden="true"></span></p>
+          <p class="brand-tagline">ENTER THE SIGNAL.<span class="terminal-cursor" aria-hidden="true"></span></p>
           <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
         </div>
 
@@ -113,6 +115,21 @@ export class ImportScreen {
               <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
               <span class="showcase-badge" id="showcase-duration">01:12</span>
               <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
+            </div>
+
+            <div class="showcase-records-strip" id="showcase-records-strip">
+              <div class="showcase-record-pill rank">
+                <span class="record-label">BEST //</span>
+                <span class="record-val" id="showcase-best-rank">—</span>
+              </div>
+              <div class="showcase-record-pill pb">
+                <span class="record-label">PB //</span>
+                <span class="record-val" id="showcase-pb-time">—</span>
+              </div>
+              <div class="showcase-record-pill local-first">
+                <span class="record-label">LOCAL #1 //</span>
+                <span class="record-val" id="showcase-local-first">—</span>
+              </div>
             </div>
 
             <div class="showcase-desc" id="showcase-desc">
@@ -279,10 +296,40 @@ export class ImportScreen {
 
   private buildStrip(): void {
     this.selectorStripElem.innerHTML = '';
-    this.catalog.forEach((t, idx) => {
+
+    // Build catalog list with slot reserved for optional 00 // CALIBRATION // TUTORIAL
+    const itemsToRender: Array<{
+      entry: TrackCatalogEntry;
+      displayIndex: string;
+      isTutorial?: boolean;
+    }> = [];
+
+    const tutorialTrack = this.catalog.find(t => t.id === 'tutorial_00' || (t as any).isTutorial);
+    if (tutorialTrack) {
+      itemsToRender.push({
+        entry: tutorialTrack,
+        displayIndex: '00',
+        isTutorial: true
+      });
+    }
+
+    let officialIdx = 1;
+    for (const t of this.catalog) {
+      if (t === tutorialTrack) continue;
+      itemsToRender.push({
+        entry: t,
+        displayIndex: (officialIdx++).toString().padStart(2, '0')
+      });
+    }
+
+    itemsToRender.forEach(({ entry: t, displayIndex, isTutorial }) => {
+      const summary = LeaderboardManager.getInstance().getRecordSummary(t.id);
+      const bestRank = summary.bestRank;
+      const rankClass = bestRank ? `rank-${bestRank.toLowerCase()}` : '';
+
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = `strip-item terminal-strip-item ${t.id === this.selectedTrack.id ? 'active' : ''}`;
+      item.className = `strip-item terminal-strip-item ${rankClass} ${t.id === this.selectedTrack.id ? 'active' : ''}`;
       item.dataset.trackId = t.id;
       item.setAttribute('aria-pressed', t.id === this.selectedTrack.id ? 'true' : 'false');
 
@@ -291,7 +338,10 @@ export class ImportScreen {
       const duration = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
       item.innerHTML = `
-        <div class="strip-item-num">[${(idx + 1).toString().padStart(2, '0')}] // ${t.difficultyLabel}</div>
+        <div class="strip-item-header">
+          <span class="strip-item-num">[${displayIndex}] // ${isTutorial ? 'CALIBRATION // TUTORIAL' : t.difficultyLabel}</span>
+          ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
+        </div>
         <div class="strip-item-title">${t.title}</div>
         <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
         <div class="strip-signal-bars" aria-hidden="true"></div>
@@ -326,6 +376,11 @@ export class ImportScreen {
     });
   }
 
+  public refreshProgression(): void {
+    this.buildStrip();
+    this.updateShowcaseCard(this.selectedTrack);
+  }
+
   private updateShowcaseCard(t: TrackCatalogEntry): void {
     this.showcaseTitleElem.textContent = t.title;
     this.showcaseArtistElem.textContent = t.artist;
@@ -338,6 +393,29 @@ export class ImportScreen {
 
     this.showcaseDiffElem.textContent = `TIER ${'I'.repeat(Math.min(5, t.difficulty))} · ${t.difficultyLabel}`;
     this.showcaseDescElem.textContent = `> ${t.description}`;
+
+    const summary = LeaderboardManager.getInstance().getRecordSummary(t.id);
+    const bestRankElem = this.element.querySelector('#showcase-best-rank') as HTMLElement;
+    const pbElem = this.element.querySelector('#showcase-pb-time') as HTMLElement;
+    const local1Elem = this.element.querySelector('#showcase-local-first') as HTMLElement;
+
+    if (bestRankElem) {
+      if (summary.bestRank) {
+        bestRankElem.textContent = summary.bestRank;
+        bestRankElem.className = `record-val rank-${summary.bestRank.toLowerCase()}`;
+      } else {
+        bestRankElem.textContent = '—';
+        bestRankElem.className = 'record-val';
+      }
+    }
+
+    if (pbElem) {
+      pbElem.textContent = summary.pbTime !== null ? formatTime(summary.pbTime) : '—';
+    }
+
+    if (local1Elem) {
+      local1Elem.textContent = summary.localFirstTime !== null ? formatTime(summary.localFirstTime) : '—';
+    }
 
     const card = this.element.querySelector('#showcase-card') as HTMLElement;
     if (card) {

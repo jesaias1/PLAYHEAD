@@ -15,7 +15,7 @@ import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { RunRank } from '../player/PlayerStats';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 
-export type CosmeticRarity = 'STANDARD' | 'RARE' | 'RELIC' | 'ARTIFACT';
+export type CosmeticRarity = 'STANDARD' | 'RARE' | 'RELIC' | 'ARTIFACT' | 'OVERCLOCKED';
 
 interface SignalDropProgressionV2 {
   version: 2;
@@ -48,10 +48,10 @@ export const SIGNAL_DROP_STORAGE_KEY = 'playhead.armory.signalDrops';
 const DEFAULT_REWARD_RNG_STATE = 0x504c4159;
 const RANK_THRESHOLDS: RunRank[] = ['BRONZE', 'SILVER', 'GOLD', 'DIAMOND'];
 export const SIGNAL_DROP_RARITY_WEIGHTS: Record<RunRank, Record<CosmeticRarity, number>> = {
-  BRONZE: { STANDARD: 12, RARE: 7, RELIC: 2, ARTIFACT: 1 },
-  SILVER: { STANDARD: 7, RARE: 10, RELIC: 5, ARTIFACT: 2 },
-  GOLD: { STANDARD: 3, RARE: 6, RELIC: 11, ARTIFACT: 5 },
-  DIAMOND: { STANDARD: 1, RARE: 5, RELIC: 12, ARTIFACT: 10 }
+  BRONZE: { STANDARD: 120, RARE: 70, RELIC: 20, ARTIFACT: 10, OVERCLOCKED: 1 },
+  SILVER: { STANDARD: 70, RARE: 100, RELIC: 50, ARTIFACT: 20, OVERCLOCKED: 3 },
+  GOLD: { STANDARD: 30, RARE: 60, RELIC: 110, ARTIFACT: 50, OVERCLOCKED: 8 },
+  DIAMOND: { STANDARD: 10, RARE: 50, RELIC: 120, ARTIFACT: 100, OVERCLOCKED: 20 }
 };
 
 export interface SkinMaterialProfile {
@@ -452,10 +452,10 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
     shortRequirement: 'SIGNAL DROP',
     tier: 9,
-    rarity: 'ARTIFACT',
+    rarity: 'OVERCLOCKED',
     dropEligible: true,
     dropWeight: 1,
-    paletteTag: 'CYBER // #00FF88',
+    paletteTag: 'OVERCLOCKED // #00FF88',
     profile: {
       baseColor: new THREE.Color(0x0a1410),
       nebulaPrimary: new THREE.Color(0x00ff88),
@@ -1266,6 +1266,15 @@ export class KarambitSkinSystem {
    */
   public clearDevPendingSignals(): void {
     this.progression.pendingDropRanks = [];
+    this.saveState();
+    this.notifyListeners();
+  }
+
+  /**
+   * Grants a single signal drop (e.g. for custom audio first completion).
+   */
+  public grantSignalDrop(rank: RunRank = 'BRONZE'): void {
+    this.progression.pendingDropRanks.push(rank);
     this.saveState();
     this.notifyListeners();
   }

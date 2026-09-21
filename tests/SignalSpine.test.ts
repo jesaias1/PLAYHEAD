@@ -278,11 +278,12 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
         );
         if (isSpineMesh) {
           foundSpineMeshes++;
-          // Top surface material (index 2) must be clean dark aggregate (spineTopMaterial)
+          // Top surface material (index 2) must be clean platform concrete blend (spineTopMaterial)
           const topMat = obj.material[2] as THREE.MeshStandardMaterial;
           expect(topMat).toBeDefined();
           expect(topMat.wireframe).toBeFalsy();
-          expect(topMat.color.getHex()).toBe(0x0e141f);
+          const expectedSpineColor = new THREE.Color(palette.surface).lerp(new THREE.Color(palette.primary), 0.22);
+          expect(topMat.color.getHex()).toBe(expectedSpineColor.getHex());
         }
       }
 

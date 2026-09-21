@@ -67,12 +67,18 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
       expect(skin.profile.rimColor).toBeInstanceOf(THREE.Color);
       expect(skin.profile.parallaxDepth).toBeGreaterThan(0);
       expect(skin.profile.layer2Scale).toBeGreaterThan(1.0);
-      expect(['STANDARD', 'RARE', 'RELIC', 'ARTIFACT']).toContain(skin.rarity);
+      expect(['STANDARD', 'RARE', 'RELIC', 'ARTIFACT', 'OVERCLOCKED']).toContain(skin.rarity);
     }
 
     const artifacts = skins.filter(skin => skin.rarity === 'ARTIFACT');
-    expect(artifacts).toHaveLength(15);
+    expect(artifacts).toHaveLength(14);
     expect(artifacts.every(skin => skin.profile.isVideoArtifact && skin.profile.videoPath)).toBe(true);
+
+    const overclocked = skins.filter(skin => skin.rarity === 'OVERCLOCKED');
+    expect(overclocked).toHaveLength(1);
+    expect(overclocked[0].id).toBe('CYBER_ARTIFACT');
+    expect(overclocked[0].profile.isVideoArtifact).toBe(true);
+
     expect(SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.ARTIFACT).toBeGreaterThan(0);
     expect(SIGNAL_DROP_RARITY_WEIGHTS.DIAMOND.ARTIFACT).toBeGreaterThan(
       SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.ARTIFACT

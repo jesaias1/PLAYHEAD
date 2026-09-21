@@ -20,7 +20,7 @@ function init() {
   const game = new Game(canvasContainer, uiRoot);
   (window as unknown as { game: Game; PresetGenerator: typeof PresetGenerator }).game = game;
   (window as unknown as { game: Game; PresetGenerator: typeof PresetGenerator }).PresetGenerator = PresetGenerator;
-  console.log('[PLAYHEAD] System online. Drop a song to enter it.');
+  console.log('[PLAYHEAD] System online. Enter the signal.');
 }
 
 if (document.readyState === 'loading') {

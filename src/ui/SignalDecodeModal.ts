@@ -4,6 +4,7 @@
  */
 
 import { KarambitSkin, KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
+import { SignalDecoderAudio } from '../audio/SignalDecoderAudio';
 
 export class SignalDecodeModal {
   public element: HTMLElement;
@@ -18,8 +19,10 @@ export class SignalDecodeModal {
   private onCompleteCallback?: (skin: KarambitSkin) => void;
 
   private skinSystem = KarambitSkinSystem.getInstance();
+  private decoderAudio = SignalDecoderAudio.getInstance();
   private isRolling = false;
   private rollTimeout: number | null = null;
+  private animFrameId: number | null = null;
   private activeReward: OpenedSignalDrop | null = null;
   private currentTargetOffset = 0;
 
@@ -227,10 +230,42 @@ export class SignalDecodeModal {
     this.stripInner.style.transition = `transform ${durationMs}ms cubic-bezier(0.06, 0.78, 0.12, 1.0)`;
     this.stripInner.style.transform = `translateX(${-this.currentTargetOffset}px)`;
 
+    // Real-time item crossing tick tracking
+    this.stopTickMonitor();
+    let lastCrossedCard = 0;
+    const stride = CARD_WIDTH + CARD_GAP; // 140
+    const startX = CARD_WIDTH / 2; // 65
+
+    const tickMonitor = () => {
+      if (!this.isRolling) return;
+      try {
+        const matrix = new DOMMatrixReadOnly(window.getComputedStyle(this.stripInner).transform);
+        const currentX = -matrix.m41;
+        const currentCard = Math.floor((currentX - startX + (stride / 2)) / stride);
+        if (currentCard > lastCrossedCard && currentCard <= TARGET_INDEX) {
+          this.decoderAudio.playTick();
+          lastCrossedCard = currentCard;
+        }
+      } catch {
+        // Fallback in case DOMMatrix unavailable
+      }
+      this.animFrameId = requestAnimationFrame(tickMonitor);
+    };
+    this.animFrameId = requestAnimationFrame(tickMonitor);
+
     this.rollTimeout = window.setTimeout(() => {
+      this.stopTickMonitor();
       this.isRolling = false;
+      this.decoderAudio.playLockImpact();
       this.revealAward(reward);
     }, durationMs + 100);
+  }
+
+  private stopTickMonitor(): void {
+    if (this.animFrameId !== null) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
   }
 
   private skipReveal(): void {
@@ -245,7 +280,9 @@ export class SignalDecodeModal {
     this.stripInner.style.transform = `translateX(${-this.currentTargetOffset}px)`;
 
     this.rollTimeout = window.setTimeout(() => {
+      this.stopTickMonitor();
       this.isRolling = false;
+      this.decoderAudio.playLockImpact();
       if (this.activeReward) {
         this.revealAward(this.activeReward);
       }
@@ -253,11 +290,19 @@ export class SignalDecodeModal {
   }
 
   private revealAward(reward: OpenedSignalDrop): void {
+    this.decoderAudio.playRevealAccent(reward.skin.rarity);
     this.skipBtn.style.display = 'none';
     const rarityColor = this.getRarityColor(reward.skin.rarity);
-    const isHighTier = reward.skin.rarity === 'ARTIFACT' || reward.skin.rarity === 'RELIC';
+    const isOverclocked = reward.skin.rarity === 'OVERCLOCKED';
+    const isHighTier = isOverclocked || reward.skin.rarity === 'ARTIFACT' || reward.skin.rarity === 'RELIC';
 
-    this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
+    if (isOverclocked) {
+      this.titleElem.textContent = 'SYSTEM LIMIT EXCEEDED // OVERCLOCKED SIGNAL ACQUIRED';
+      this.kickerElem.textContent = '// APEX SIGNAL EXTRACTION';
+    } else {
+      this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
+      this.kickerElem.textContent = '// SIGNAL RECOVERY BUS';
+    }
     this.statusElem.textContent = reward.skin.rarity;
     this.statusElem.style.borderColor = rarityColor;
     this.statusElem.style.color = rarityColor;
@@ -265,16 +310,20 @@ export class SignalDecodeModal {
     this.celebrationCard.classList.remove('hidden');
     this.celebrationCard.style.borderColor = rarityColor;
     this.celebrationCard.style.borderLeftColor = rarityColor;
-    this.celebrationCard.style.background = isHighTier
-      ? `radial-gradient(circle at top right, ${rarityColor}28, rgba(10, 18, 28, 0.95))`
-      : 'rgba(10, 18, 28, 0.90)';
-    this.celebrationCard.style.boxShadow = `0 0 32px ${rarityColor}44, inset 0 0 16px ${rarityColor}18`;
+    this.celebrationCard.style.background = isOverclocked
+      ? `radial-gradient(circle at top right, ${rarityColor}35, rgba(14, 18, 28, 0.96))`
+      : (isHighTier
+        ? `radial-gradient(circle at top right, ${rarityColor}28, rgba(10, 18, 28, 0.95))`
+        : 'rgba(10, 18, 28, 0.90)');
+    this.celebrationCard.style.boxShadow = isOverclocked
+      ? `0 0 42px ${rarityColor}66, inset 0 0 24px ${rarityColor}25`
+      : `0 0 32px ${rarityColor}44, inset 0 0 16px ${rarityColor}18`;
 
     this.celebrationCard.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
         <div>
           <div style="font-family: var(--font-mono); font-size: 0.62rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
-            [${reward.qualityLabel} // ${reward.skin.rarity}] ${isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : ''}
+            [${reward.qualityLabel} // ${reward.skin.rarity}] ${isOverclocked ? '★ APEX SYSTEM OVERCLOCK ACHIEVED' : (isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : '')}
           </div>
           <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 3px; letter-spacing: 0.04em;">
             ${reward.skin.name}
@@ -321,6 +370,7 @@ export class SignalDecodeModal {
 
   public hide(): void {
     if (this.isRolling) return;
+    this.stopTickMonitor();
     if (this.rollTimeout !== null) {
       window.clearTimeout(this.rollTimeout);
       this.rollTimeout = null;
@@ -336,6 +386,7 @@ export class SignalDecodeModal {
 
   private getRarityColor(rarity: string): string {
     switch (rarity) {
+      case 'OVERCLOCKED': return '#ff0055';
       case 'ARTIFACT': return '#ffd700';
       case 'RELIC': return '#c084fc';
       case 'RARE': return '#38bdf8';
