@@ -80,10 +80,13 @@ export class ViewmodelController {
   public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.034, 0.3737, 0.2205);
   public static readonly DEFAULT_KNIFE_SCALE = new THREE.Vector3(1.011, 1.011, 1.011);
 
-  // Viewmodel Actions (F signal pulse & Mouse1 cosmetic sweep)
-  private activeAction: 'NONE' | 'PULSE' | 'SWEEP' = 'NONE';
+  // Viewmodel Actions (F signal pulse & Mouse1 presentation-only micro-jab)
+  private activeAction: 'NONE' | 'PULSE' | 'JAB' = 'NONE';
   private actionTimer = 0;
   private actionDuration = 0;
+  private jabBlend = 0;
+  private jabStartBlend = 0;
+  private readonly leftHandActionOffset = new THREE.Vector3();
   private targetAccentColor = new THREE.Color(0x00f0ff);
 
   // Spring Physics State (Damped Harmonic Oscillator)
@@ -336,10 +339,11 @@ export class ViewmodelController {
     this.audioImpact = Math.max(this.audioImpact, 1.8);
   }
 
-  public triggerCosmeticSweep(): void {
-    this.activeAction = 'SWEEP';
+  public triggerMicroJab(): void {
+    this.jabStartBlend = this.activeAction === 'JAB' ? this.jabBlend : 0;
+    this.activeAction = 'JAB';
     this.actionTimer = 0;
-    this.actionDuration = 0.20;
+    this.actionDuration = 0.24;
     this.audioImpact = Math.max(this.audioImpact, 1.4);
   }
 
@@ -358,6 +362,14 @@ export class ViewmodelController {
     if (this.isSuppressed() || settings.viewmodelMode === 'OFF') return;
 
     // Update skeletal animation mixer for idle finger breathing
+    // Remove last frame's additive left-hand recoil before the animation mixer
+    // evaluates its authored pose. This keeps the jab non-accumulating and safe
+    // for both animated and fallback rigs.
+    if (this.leftHandActionOffset.lengthSq() > 0 && this.rigInstance.handLBone) {
+      this.rigInstance.handLBone.position.sub(this.leftHandActionOffset);
+      this.leftHandActionOffset.set(0, 0, 0);
+    }
+
     if (this.rigInstance.mixer) {
       this.rigInstance.mixer.update(dt);
     }
@@ -521,7 +533,7 @@ export class ViewmodelController {
       }
     }
 
-    // 10. Action Motion on actionGroup (F Signal Pulse & Mouse1 Cosmetic Sweep)
+    // 10. Action Motion on actionGroup (F Signal Pulse & Mouse1 Micro-Jab)
     // Moves hand + knife together through additive actionGroup, preserving calibrated knifeGroup transform
     if (this.activeAction !== 'NONE') {
       this.actionTimer += dt;
@@ -530,13 +542,36 @@ export class ViewmodelController {
         const p = Math.sin(progress * Math.PI);
         this.actionGroup.position.set(0.002 * p, 0.014 * p, -0.012 * p);
         this.actionGroup.rotation.set(-0.14 * p, 0.04 * p, -0.09 * p);
-      } else if (this.activeAction === 'SWEEP') {
-        const p = Math.sin(progress * Math.PI);
-        this.actionGroup.position.set(-0.022 * p, 0.006 * p, 0.008 * p);
-        this.actionGroup.rotation.set(0.05 * p, -0.16 * p, 0.16 * p);
+      } else if (this.activeAction === 'JAB') {
+        const extensionDuration = 0.095;
+        if (this.actionTimer <= extensionDuration) {
+          const t = Math.min(1, this.actionTimer / extensionDuration);
+          const easeOut = 1 - Math.pow(1 - t, 3);
+          this.jabBlend = this.jabStartBlend + (1 - this.jabStartBlend) * easeOut;
+        } else {
+          const t = Math.min(1, (this.actionTimer - extensionDuration) / (this.actionDuration - extensionDuration));
+          const smoothReturn = t * t * (3 - 2 * t);
+          this.jabBlend = 1 - smoothReturn;
+        }
+
+        // The common action group carries the right hand and knife forward and
+        // slightly inward. A much smaller inverse offset on the left hand sells
+        // the upper-body counter-motion without touching the knife socket.
+        const p = this.jabBlend;
+        this.actionGroup.position.set(-0.006 * p, 0.002 * p, -0.030 * p);
+        this.actionGroup.rotation.set(-0.035 * p, 0.025 * p, -0.018 * p);
+        if (this.rigInstance.handLBone) {
+          // Arms are authored facing +Z then rotated 180 degrees by the rig,
+          // so negative local Z counters the action group's forward motion.
+          // The net left-hand recoil is ~9 mm versus the right's 30 mm jab.
+          this.leftHandActionOffset.set(0.002 * p, -0.001 * p, -0.039 * p);
+          this.rigInstance.handLBone.position.add(this.leftHandActionOffset);
+        }
       }
       if (progress >= 1.0) {
         this.activeAction = 'NONE';
+        this.jabBlend = 0;
+        this.jabStartBlend = 0;
         this.actionGroup.position.set(0, 0, 0);
         this.actionGroup.rotation.set(0, 0, 0);
       }

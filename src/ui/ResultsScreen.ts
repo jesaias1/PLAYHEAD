@@ -3,9 +3,10 @@
  * "Editorial Graphic Design": Staged quick reveal over the completed world.
  */
 
-import { RunResults } from '../player/PlayerStats';
+import { RunRank, RunResults } from '../player/PlayerStats';
 import { formatSpeed, formatTime } from '../utils/math';
 import { seedToHex } from '../utils/hash';
+import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 
 export class ResultsScreen {
   public element: HTMLElement;
@@ -25,6 +26,11 @@ export class ResultsScreen {
 
   private statsGrid: HTMLElement;
   private actionsRow: HTMLElement;
+  private signalDropPanel: HTMLElement;
+  private signalDropStatus: HTMLElement;
+  private signalDropReward: HTMLElement;
+  private signalDropCount: HTMLElement;
+  private signalDropOpenBtn: HTMLButtonElement;
 
   private replayBtn: HTMLButtonElement;
   private againBtn: HTMLButtonElement;
@@ -91,6 +97,15 @@ export class ResultsScreen {
           </div>
         </div>
 
+        <div class="signal-drop-panel hidden" id="res-signal-drop" aria-live="polite">
+          <div class="signal-drop-copy">
+            <div class="signal-drop-kicker" id="res-signal-drop-status">SIGNAL ACQUIRED</div>
+            <div class="signal-drop-reward" id="res-signal-drop-reward">DIAMOND PACKET READY</div>
+            <div class="signal-drop-count" id="res-signal-drop-count">01 STORED SIGNAL</div>
+          </div>
+          <button class="btn-preview signal-drop-open" id="btn-res-signal-drop">DECODE SIGNAL</button>
+        </div>
+
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">RUN AGAIN</button>
           <button class="btn-preview" id="btn-res-replay">REPLAY RUN</button>
@@ -115,6 +130,11 @@ export class ResultsScreen {
 
     this.statsGrid = this.element.querySelector('#res-grid') as HTMLElement;
     this.actionsRow = this.element.querySelector('#res-actions') as HTMLElement;
+    this.signalDropPanel = this.element.querySelector('#res-signal-drop') as HTMLElement;
+    this.signalDropStatus = this.element.querySelector('#res-signal-drop-status') as HTMLElement;
+    this.signalDropReward = this.element.querySelector('#res-signal-drop-reward') as HTMLElement;
+    this.signalDropCount = this.element.querySelector('#res-signal-drop-count') as HTMLElement;
+    this.signalDropOpenBtn = this.element.querySelector('#btn-res-signal-drop') as HTMLButtonElement;
 
     this.againBtn = this.element.querySelector('#btn-res-again') as HTMLButtonElement;
     this.replayBtn = this.element.querySelector('#btn-res-replay') as HTMLButtonElement;
@@ -138,7 +158,8 @@ export class ResultsScreen {
     seed: number,
     ghostInfo?: { rivalDelta?: number; isNewPB?: boolean },
     trackTitle = 'PLAYHEAD TRACK',
-    overtimeInfo?: { isOvertime: boolean; overtimeDuration: number }
+    overtimeInfo?: { isOvertime: boolean; overtimeDuration: number },
+    progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank }
   ): void {
     this.clearTimeouts();
 
@@ -188,6 +209,7 @@ export class ResultsScreen {
     this.strafeEffElem.textContent = results.strafeEfficiency >= 0 ? `${results.strafeEfficiency}%` : '—';
     this.fallsElem.textContent = `${results.fallsCount}`;
     this.scoreElem.textContent = results.score.toLocaleString();
+    this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank);
 
     // Temporal Rival & Ghost Info
     if (ghostInfo?.rivalDelta !== undefined) {
@@ -223,8 +245,61 @@ export class ResultsScreen {
     this.revealTimeouts.push(window.setTimeout(() => {
       this.actionsRow.style.transition = 'opacity var(--motion-normal)';
       this.actionsRow.style.opacity = '1';
-      this.againBtn.focus();
+      if ((progressionInfo?.dropsAwarded ?? 0) > 0 && KarambitSkinSystem.getInstance().getPendingDropCount() > 0) {
+        this.signalDropOpenBtn.focus();
+      } else {
+        this.againBtn.focus();
+      }
     }, 660));
+  }
+
+  private prepareSignalDropPanel(newlyAwardedCount: number, bestDropRank?: RunRank): void {
+    const skinSystem = KarambitSkinSystem.getInstance();
+    const pending = skinSystem.getPendingDropCount();
+    this.signalDropPanel.className = 'signal-drop-panel';
+    if (pending <= 0) {
+      this.signalDropPanel.classList.add('hidden');
+      return;
+    }
+
+    this.signalDropStatus.textContent = newlyAwardedCount > 0
+      ? `${newlyAwardedCount.toString().padStart(2, '0')} SIGNAL${newlyAwardedCount === 1 ? '' : 'S'} ACQUIRED`
+      : 'STORED SIGNAL READY';
+    this.signalDropReward.textContent = newlyAwardedCount > 0
+      ? (bestDropRank === 'DIAMOND' ? 'PRISTINE SIGNAL DROP INCLUDED' : `${bestDropRank ?? 'RANK'} THRESHOLD PACKET RECEIVED`)
+      : 'UNDECODED ARMORY PACKET';
+    this.signalDropCount.textContent = `${pending.toString().padStart(2, '0')} STORED SIGNAL${pending === 1 ? '' : 'S'}`;
+    this.signalDropOpenBtn.textContent = 'DECODE SIGNAL';
+    this.signalDropOpenBtn.disabled = false;
+  }
+
+  private openSignalDrop(): void {
+    const skinSystem = KarambitSkinSystem.getInstance();
+    const reward = skinSystem.openSignalDrop();
+    if (!reward) {
+      this.prepareSignalDropPanel(0);
+      return;
+    }
+
+    this.signalDropOpenBtn.disabled = true;
+    this.signalDropPanel.classList.add('decoding');
+    this.signalDropStatus.textContent = 'DECODING...';
+    this.signalDropReward.textContent = '/// SIGNAL INTERFERENCE ///';
+
+    this.revealTimeouts.push(window.setTimeout(() => {
+      this.signalDropPanel.classList.remove('decoding');
+      this.signalDropPanel.classList.add(`rarity-${reward.skin.rarity.toLowerCase()}`);
+      this.signalDropStatus.textContent = `${reward.qualityLabel} // ${reward.skin.rarity} FOUND`;
+      this.signalDropReward.textContent = reward.skin.name;
+      const pending = skinSystem.getPendingDropCount();
+      this.signalDropCount.textContent = `${pending.toString().padStart(2, '0')} SIGNAL${pending === 1 ? '' : 'S'} REMAINING`;
+      if (pending > 0) {
+        this.signalDropOpenBtn.textContent = 'DECODE NEXT SIGNAL';
+        this.signalDropOpenBtn.disabled = false;
+      } else {
+        this.signalDropOpenBtn.textContent = 'SIGNAL ARCHIVED';
+      }
+    }, 320));
   }
 
   public hide(): void {
@@ -260,5 +335,6 @@ export class ResultsScreen {
     this.againBtn.addEventListener('click', () => this.onAgainCallback?.());
     this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.newTrackBtn.addEventListener('click', () => this.onNewTrackCallback?.());
+    this.signalDropOpenBtn.addEventListener('click', () => this.openSignalDrop());
   }
 }

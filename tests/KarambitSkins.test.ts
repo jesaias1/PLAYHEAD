@@ -1,31 +1,57 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   KarambitSkinSystem,
   KARAMBIT_SKINS,
+  SIGNAL_DROP_RARITY_WEIGHTS,
+  SIGNAL_DROP_STORAGE_KEY,
   TOTAL_SIGNAL_PACK_TRACKS
 } from '../src/viewmodel/KarambitSkinSystem';
 import { KarambitCosmicMaterial } from '../src/viewmodel/KarambitCosmicShader';
 import { GrainScanlinePass } from '../src/rendering/GrainScanlinePass';
+import { SignalPackCatalog } from '../src/audio/SignalPackCatalog';
+
+function createLocalStorageMock(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => { values.delete(key); },
+    setItem: (key: string, value: string) => { values.set(key, String(value)); }
+  };
+}
 
 describe('Karambit Skin System & Cosmic Shaders', () => {
   let skinSystem: KarambitSkinSystem;
 
   beforeEach(() => {
-    // Clear localStorage simulation if present
-    if (typeof localStorage !== 'undefined') {
-      localStorage.clear();
-    }
-    // Re-instantiate or reset singleton
+    (KarambitSkinSystem as any).instance?.dispose?.();
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: createLocalStorageMock(),
+      configurable: true,
+      writable: true
+    });
     (KarambitSkinSystem as any).instance = null;
     skinSystem = KarambitSkinSystem.getInstance();
   });
 
-  it('defines exactly 6 authored karambit skins with full metadata and material profiles', () => {
-    const skins = skinSystem.getSkins();
-    expect(skins).toHaveLength(6);
+  afterEach(() => {
+    (KarambitSkinSystem as any).instance?.dispose?.();
+    (KarambitSkinSystem as any).instance = null;
+    vi.restoreAllMocks();
+  });
 
-    const expectedIds = ['SIGNAL_CYAN', 'ASTRAL', 'VOID_SIGNAL', 'REDSHIFT', 'PRISM_STATIC', 'BLACKSTAR'];
+  it('defines the static collection and three video Artifact skins with complete rarity metadata', () => {
+    const skins = skinSystem.getSkins();
+    expect(skins).toHaveLength(11);
+
+    const expectedIds = [
+      'SIGNAL_CYAN', 'ASTRAL', 'VOID_SIGNAL', 'REDSHIFT', 'PRISM_STATIC', 'BLACKSTAR',
+      'AMBER_SIGNAL', 'WHITE_NOISE',
+      'SIGNALISM_ARTIFACT', 'GOD_RUN_ARTIFACT', 'PRISM_ARTIFACT'
+    ];
     expect(skins.map(s => s.id)).toEqual(expectedIds);
 
     for (const skin of skins) {
@@ -38,7 +64,19 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
       expect(skin.profile.rimColor).toBeInstanceOf(THREE.Color);
       expect(skin.profile.parallaxDepth).toBeGreaterThan(0);
       expect(skin.profile.layer2Scale).toBeGreaterThan(1.0);
+      expect(['STANDARD', 'RARE', 'RELIC', 'ARTIFACT']).toContain(skin.rarity);
     }
+
+    const artifacts = skins.filter(skin => skin.rarity === 'ARTIFACT');
+    expect(artifacts).toHaveLength(3);
+    expect(artifacts.every(skin => skin.profile.isVideoArtifact && skin.profile.videoPath)).toBe(true);
+    expect(SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.ARTIFACT).toBeGreaterThan(0);
+    expect(SIGNAL_DROP_RARITY_WEIGHTS.DIAMOND.ARTIFACT).toBeGreaterThan(
+      SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.ARTIFACT
+    );
+    expect(SIGNAL_DROP_RARITY_WEIGHTS.BRONZE.STANDARD).toBeGreaterThan(
+      SIGNAL_DROP_RARITY_WEIGHTS.DIAMOND.STANDARD
+    );
   });
 
   it('guarantees 00 // SIGNAL CYAN is the default equipped canonical skin and always unlocked', () => {
@@ -132,6 +170,138 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     expect(mat.uniforms.uIsCanonical.value).toBe(1.0);
 
     mat.dispose();
+  });
+
+  it('awards each official level rank threshold once and never rewards custom audio', () => {
+    const [first, second] = SignalPackCatalog.getTracks();
+
+    const bronze = skinSystem.recordTrackCompletion(first.id, 'BRONZE', first.id);
+    expect(bronze.awardedDropRanks).toEqual(['BRONZE']);
+    expect(bronze.pendingDrops).toBe(1);
+
+    const repeatClear = skinSystem.recordTrackCompletion(first.id, 'BRONZE', first.id);
+    expect(repeatClear.dropAwarded).toBe(false);
+    expect(repeatClear.pendingDrops).toBe(1);
+
+    expect(skinSystem.recordTrackCompletion(first.id, 'SILVER', first.id).awardedDropRanks).toEqual(['SILVER']);
+    expect(skinSystem.recordTrackCompletion(first.id, 'GOLD', first.id).awardedDropRanks).toEqual(['GOLD']);
+    expect(skinSystem.recordTrackCompletion(first.id, 'DIAMOND', first.id).awardedDropRanks).toEqual(['DIAMOND']);
+
+    const firstDiamond = skinSystem.recordTrackCompletion(second.id, 'DIAMOND', second.id);
+    expect(firstDiamond.awardedDropRanks).toEqual(['DIAMOND', 'GOLD', 'SILVER', 'BRONZE']);
+    expect(firstDiamond.pendingDrops).toBe(8);
+
+    const customClear = skinSystem.recordTrackCompletion('custom-upload.wav', 'DIAMOND', 'custom-upload');
+    expect(customClear.dropAwarded).toBe(false);
+    expect(customClear.pendingDrops).toBe(8);
+  });
+
+  it('preserves pending drops and reward ownership across reloads', () => {
+    const official = SignalPackCatalog.getTracks()[0];
+    skinSystem.recordTrackCompletion(official.id, 'DIAMOND', official.id);
+
+    (KarambitSkinSystem as any).instance = null;
+    skinSystem = KarambitSkinSystem.getInstance();
+    expect(skinSystem.getPendingDropCount()).toBe(4);
+    expect(skinSystem.getAwardedDiamondLevelIds()).toEqual([official.id]);
+
+    const reward = skinSystem.openSignalDrop();
+    expect(reward).not.toBeNull();
+    expect(reward!.sourceRank).toBe('DIAMOND');
+    expect(reward!.qualityLabel).toBe('PRISTINE SIGNAL');
+    expect(skinSystem.isSkinRewardOwned(reward!.skin.id)).toBe(true);
+
+    (KarambitSkinSystem as any).instance = null;
+    skinSystem = KarambitSkinSystem.getInstance();
+    expect(skinSystem.getPendingDropCount()).toBe(3);
+    expect(skinSystem.isSkinRewardOwned(reward!.skin.id)).toBe(true);
+    expect(skinSystem.isSkinUnlocked(reward!.skin.id)).toBe(true);
+  });
+
+  it('uses a deterministic persisted bag, protects unowned rewards, and avoids identical streaks', () => {
+    const runCollection = (): string[] => {
+      const system = KarambitSkinSystem.getInstance();
+      for (const track of SignalPackCatalog.getTracks()) {
+        system.recordTrackCompletion(track.id, 'DIAMOND', track.id);
+      }
+      const rewards: string[] = [];
+      while (system.getPendingDropCount() > 0) {
+        rewards.push(system.openSignalDrop()!.skin.id);
+      }
+      return rewards;
+    };
+
+    const firstSequence = runCollection();
+    expect(firstSequence).toHaveLength(TOTAL_SIGNAL_PACK_TRACKS * 4);
+    expect(new Set(firstSequence.slice(0, 5))).toEqual(
+      new Set(['AMBER_SIGNAL', 'WHITE_NOISE', 'SIGNALISM_ARTIFACT', 'GOD_RUN_ARTIFACT', 'PRISM_ARTIFACT'])
+    );
+    for (let i = 1; i < firstSequence.length; i++) {
+      expect(firstSequence[i]).not.toBe(firstSequence[i - 1]);
+    }
+
+    localStorage.clear();
+    (KarambitSkinSystem as any).instance = null;
+    const secondSequence = runCollection();
+    expect(secondSequence).toEqual(firstSequence);
+  });
+
+  it('sanitizes corrupt versioned progression without damaging legacy skin records', () => {
+    localStorage.setItem('playhead.karambit.trackRecords', JSON.stringify({ legacy_track: 'GOLD' }));
+    localStorage.setItem(SIGNAL_DROP_STORAGE_KEY, '{not-json');
+    (KarambitSkinSystem as any).instance = null;
+    skinSystem = KarambitSkinSystem.getInstance();
+
+    expect(skinSystem.getTrackRecords()).toEqual({ legacy_track: 'GOLD' });
+    expect(skinSystem.getPendingDropCount()).toBe(0);
+    expect(skinSystem.getRewardOwnedSkinIds()).toEqual([]);
+  });
+
+  it('creates video resources only for an equipped owned Artifact and releases them on unequip', async () => {
+    for (const track of SignalPackCatalog.getTracks()) {
+      skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
+    }
+    let opened = skinSystem.openSignalDrop()!;
+    while (opened.skin.rarity !== 'ARTIFACT') opened = skinSystem.openSignalDrop()!;
+    const artifact = opened.skin;
+
+    const fakeVideo = {
+      src: '', muted: false, defaultMuted: false, loop: false, playsInline: false,
+      preload: '', crossOrigin: '', controls: true, disablePictureInPicture: false,
+      play: vi.fn(() => Promise.resolve()),
+      pause: vi.fn(),
+      removeAttribute: vi.fn(),
+      load: vi.fn()
+    };
+    const originalDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'document', {
+      value: { createElement: vi.fn(() => fakeVideo) },
+      configurable: true
+    });
+
+    const mat = new KarambitCosmicMaterial();
+    skinSystem.applyToMaterial(mat, artifact.id);
+    expect(fakeVideo.play).not.toHaveBeenCalled();
+    expect(skinSystem.getActiveVideoSkinId()).toBeNull();
+
+    expect(skinSystem.equipSkin(artifact.id)).toBe(true);
+    skinSystem.applyToMaterial(mat, artifact.id);
+    expect(fakeVideo.play).toHaveBeenCalledTimes(1);
+    expect(fakeVideo.muted).toBe(true);
+    expect(mat.uniforms.uIsVideoArtifact.value).toBe(1);
+    expect(mat.uniforms.uHasCosmicTexture.value).toBe(1);
+    expect(skinSystem.getActiveVideoSkinId()).toBe(artifact.id);
+
+    expect(skinSystem.equipSkin('SIGNAL_CYAN')).toBe(true);
+    expect(fakeVideo.pause).toHaveBeenCalledTimes(1);
+    expect(fakeVideo.removeAttribute).toHaveBeenCalledWith('src');
+    expect(skinSystem.getActiveVideoSkinId()).toBeNull();
+
+    mat.dispose();
+    Object.defineProperty(globalThis, 'document', {
+      value: originalDocument,
+      configurable: true
+    });
   });
 
   it('configures GrainScanlinePass with restrained film grain and scanlines', () => {

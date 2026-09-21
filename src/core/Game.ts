@@ -19,6 +19,7 @@ import { Environment } from '../world/Environment';
 import { World } from '../world/World';
 import { CameraController } from '../player/CameraController';
 import { PlayerController } from '../player/PlayerController';
+import type { RunRank } from '../player/PlayerStats';
 import { ReplayRecorder } from '../replay/ReplayRecorder';
 import { ReplayPlayer } from '../replay/ReplayPlayer';
 import { GhostManager } from '../replay/GhostManager';
@@ -59,6 +60,7 @@ export class Game {
 
   private currentAnalysis: TrackAnalysis | null = null;
   private currentTrack: GeneratedTrack | null = null;
+  private currentOfficialTrackId: string | null = null;
 
   private currentCheckpoint: CheckpointDefinition | null = null;
   private passedCheckpoints = new Set<number>();
@@ -256,6 +258,7 @@ export class Game {
   }
 
   private async enterMovementLab(trackId?: string): Promise<void> {
+    this.currentOfficialTrackId = null;
     this.stateMachine.transitionTo(GameState.MOVEMENT_LAB);
     if (trackId && trackId !== 'NONE') {
       const trackEntry = MusicPack.getTrackById(trackId);
@@ -395,10 +398,20 @@ export class Game {
             const rivalTime = this.ghostManager.getRivalTime();
             const rivalDelta = rivalTime !== null ? results.completionTime - rivalTime : undefined;
 
-            // Record track completion and rank for Karambit skin unlocks ONLY on valid ranked runs
+            // Record cosmetic progression only on valid ranked runs. Signal Drops
+            // additionally require the stable ID of an official catalog level.
+            let dropsAwarded = 0;
+            let bestDropRank: RunRank | undefined;
             if (!isOvertime) {
               const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
-              KarambitSkinSystem.getInstance().recordTrackCompletion(trackName, results.rank);
+              const progressionKey = this.currentOfficialTrackId || trackName;
+              const completionReward = KarambitSkinSystem.getInstance().recordTrackCompletion(
+                progressionKey,
+                results.rank,
+                this.currentOfficialTrackId
+              );
+              dropsAwarded = completionReward.dropsAwarded;
+              bestDropRank = completionReward.awardedDropRanks[0];
             }
 
             this.ui.resultsScreen.showResults(
@@ -406,7 +419,8 @@ export class Game {
               this.currentTrack.seed,
               { rivalDelta, isNewPB },
               this.currentAnalysis.filename || 'PLAYHEAD TRACK',
-              { isOvertime, overtimeDuration }
+              { isOvertime, overtimeDuration },
+              { dropsAwarded, bestDropRank }
             );
           }
           break;
@@ -430,6 +444,7 @@ export class Game {
 
   private async handleCatalogTrackSelected(trackEntry: TrackCatalogEntry): Promise<void> {
     try {
+      this.currentOfficialTrackId = trackEntry.id;
       this.isFirstContactCourse = !!trackEntry.isFirstContact;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(trackEntry.title);
@@ -467,6 +482,7 @@ export class Game {
       // Fallback: standard full analysis pipeline
       await this.processBuffer(buffer, trackEntry.title);
     } catch (err: unknown) {
+      this.currentOfficialTrackId = null;
       const msg = err instanceof Error ? err.message : 'Track load failed';
       alert(msg);
       this.stateMachine.transitionTo(GameState.IMPORT);
@@ -475,6 +491,7 @@ export class Game {
 
   private async handleFileSelected(file: File): Promise<void> {
     try {
+      this.currentOfficialTrackId = null;
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(file.name);
@@ -490,6 +507,7 @@ export class Game {
 
   private async handleDevTrackSelected(genre: SyntheticGenre = 'ELECTRONIC_DROP'): Promise<void> {
     try {
+      this.currentOfficialTrackId = null;
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       const title = `DEV ${genre.replace('_', ' ')}`;
@@ -1190,6 +1208,7 @@ export class Game {
     }
     this.currentAnalysis = null;
     this.currentTrack = null;
+    this.currentOfficialTrackId = null;
     this.stateMachine.transitionTo(GameState.IMPORT);
   }
 
@@ -1382,7 +1401,7 @@ export class Game {
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0 && this.cameraController.getIsLocked()) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          this.viewmodelController.triggerCosmeticSweep();
+          this.viewmodelController.triggerMicroJab();
         }
       }
     });
