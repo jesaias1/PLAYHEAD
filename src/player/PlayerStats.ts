@@ -3,6 +3,7 @@
  */
 
 export type RunRank = 'BRONZE' | 'SILVER' | 'GOLD' | 'DIAMOND';
+export type RunResultRank = 'UNRANKED' | RunRank;
 
 export interface RunResults {
   completionTime: number;       // Seconds
@@ -13,8 +14,70 @@ export interface RunResults {
   strafeEfficiency: number;     // 0..100%
   fallsCount: number;
   restartsCount: number;
-  rank: RunRank;
+  rank: RunResultRank;
   score: number;
+}
+
+export interface RankEvaluation {
+  completionTime: number;
+  targetTime: number;
+  fallsCount: number;
+  restartsCount: number;
+  strafeEfficiency: number;
+  finished?: boolean;
+}
+
+export const RANK_TIME_MULTIPLIERS = {
+  DIAMOND: 1.04,
+  GOLD: 1.18,
+  SILVER: 1.40,
+  BRONZE: 1.85
+} as const;
+
+/** Duration-scaled performance bands with explicit mistake ceilings. */
+export function evaluateRunRank(run: RankEvaluation): RunResultRank {
+  const finished = run.finished ?? true;
+  if (
+    !finished ||
+    !Number.isFinite(run.completionTime) ||
+    !Number.isFinite(run.targetTime) ||
+    run.completionTime < 0 ||
+    run.targetTime <= 0
+  ) {
+    return 'UNRANKED';
+  }
+
+  const paceRatio = run.completionTime / run.targetTime;
+  const totalMistakes = Math.max(0, run.fallsCount) + Math.max(0, run.restartsCount);
+
+  if (
+    paceRatio <= RANK_TIME_MULTIPLIERS.DIAMOND &&
+    run.fallsCount === 0 &&
+    run.restartsCount === 0 &&
+    run.strafeEfficiency >= 65
+  ) {
+    return 'DIAMOND';
+  }
+  if (paceRatio <= RANK_TIME_MULTIPLIERS.GOLD && totalMistakes <= 1) {
+    return 'GOLD';
+  }
+  if (
+    paceRatio <= RANK_TIME_MULTIPLIERS.SILVER &&
+    run.fallsCount <= 2 &&
+    run.restartsCount <= 2 &&
+    totalMistakes <= 3
+  ) {
+    return 'SILVER';
+  }
+  if (
+    paceRatio <= RANK_TIME_MULTIPLIERS.BRONZE &&
+    run.fallsCount <= 8 &&
+    run.restartsCount <= 5 &&
+    totalMistakes <= 10
+  ) {
+    return 'BRONZE';
+  }
+  return 'UNRANKED';
 }
 
 export class PlayerStats {
@@ -86,17 +149,13 @@ export class PlayerStats {
 
     const score = Math.max(100, Math.round(5000 + speedScore + efficiencyBonus - syncPenalty - fallPenalty));
 
-    // Rank evaluation
-    let rank: RunRank = 'BRONZE';
-    if (this.fallsCount === 0 && Math.abs(syncDelta) < 3.0 && strafeEfficiency > 65) {
-      rank = 'DIAMOND';
-    } else if (this.fallsCount <= 1 && Math.abs(syncDelta) < 6.0) {
-      rank = 'GOLD';
-    } else if (this.fallsCount <= 3 && Math.abs(syncDelta) < 15.0) {
-      rank = 'SILVER';
-    } else {
-      rank = 'BRONZE';
-    }
+    const rank = evaluateRunRank({
+      completionTime,
+      targetTime,
+      fallsCount: this.fallsCount,
+      restartsCount: this.restartsCount,
+      strafeEfficiency
+    });
 
     return {
       completionTime,

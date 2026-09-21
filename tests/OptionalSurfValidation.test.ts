@@ -5,6 +5,7 @@ import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { AnalysisSection, SectionTheme, TrackAnalysis } from '../src/audio/AudioFeatures';
 import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
 import { SeededRandom } from '../src/generation/SeededRandom';
+import { getPlatformMaxHalfWidth } from '../src/generation/PlatformShape';
 
 function createMockAnalysis(duration: number, seed: number): TrackAnalysis {
   const count = Math.max(4, Math.floor(duration / 18));
@@ -231,18 +232,21 @@ describe('Optional Side Surf Ramps Redesign', () => {
           }
         }
 
+        const sourceNode = track.route.find(node =>
+          Math.abs(node.arcLength - ramp.arcLength) < 1e-6 && Math.abs(node.time - ramp.time) < 1e-6
+        ) ?? closestNode;
         const rollAngle = Math.abs(ramp.roll);
         const rampWidth = ramp.dimensions.x;
         const rampEffectiveHalfW = (rampWidth * 0.5) * Math.cos(rollAngle);
-        const platHalfW = closestNode.dimensions.x * 0.5;
+        const platHalfW = getPlatformMaxHalfWidth(sourceNode);
 
         // Perpendicular unit vector in horizontal plane (perpendicular to ramp heading)
         const perpX = Math.cos(ramp.yaw);
         const perpZ = -Math.sin(ramp.yaw);
 
         // Project horizontal displacement onto perpendicular axis to obtain pure lateral distance
-        const dx = ramp.position.x - closestNode.position.x;
-        const dz = ramp.position.z - closestNode.position.z;
+        const dx = ramp.position.x - sourceNode.position.x;
+        const dz = ramp.position.z - sourceNode.position.z;
         const lateralDist = Math.abs(dx * perpX + dz * perpZ);
 
         // Visible edge-to-edge gap

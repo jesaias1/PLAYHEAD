@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { TrackAnalysis } from '../src/audio/AudioFeatures';
 import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { AscentVariant, RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
+import { deriveAscentLandingEnvelope } from '../src/generation/AscentFlowGeometry';
+import { getNodeEntryAnchor, getNodeExitAnchor } from '../src/generation/RouteConnectivityValidator';
+import { PLAYHEAD_MOVEMENT_V1 } from '../src/player/MovementConfig';
 
 function analysisFor(seed: number): TrackAnalysis {
   return {
@@ -48,13 +51,16 @@ describe('flow ascent generation', () => {
         expect(Number.isFinite(node.position.y)).toBe(true);
         expect(Number.isFinite(node.position.z)).toBe(true);
         expect(node.dimensions.x).toBeGreaterThanOrEqual(14);
-        expect(node.dimensions.z).toBeGreaterThanOrEqual(18);
+        expect(node.dimensions.z).toBeGreaterThanOrEqual(29);
         expect(node.exitWidth!).toBeGreaterThan(node.dimensions.x);
+        expect(Math.abs(node.exitLateralOffset!)).toBeGreaterThan(1);
+        expect(node.ascentExpectedSpeed).toBeGreaterThanOrEqual(22);
+        expect(node.ascentPostLandingRunway!).toBeGreaterThan(node.ascentExpectedSpeed! * 0.6);
       }
 
       const catchStep = phrase.at(-1)!;
-      expect(catchStep.dimensions.x).toBeGreaterThanOrEqual(16.5);
-      expect(catchStep.dimensions.z).toBeGreaterThanOrEqual(22);
+      expect(catchStep.dimensions.x).toBeGreaterThanOrEqual(19);
+      expect(catchStep.dimensions.z).toBeGreaterThanOrEqual(40);
     }
   });
 
@@ -65,23 +71,65 @@ describe('flow ascent generation', () => {
     for (const phrase of phrases) {
       const yawDeltas = phrase.slice(1).map((node, index) => node.yaw - phrase[index].yaw);
       expect(yawDeltas.some(delta => Math.abs(delta) >= 0.025)).toBe(true);
-      expect(yawDeltas.every(delta => Math.abs(delta) <= 0.11)).toBe(true);
+      expect(yawDeltas.every(delta => Math.abs(delta) <= 0.22)).toBe(true);
       const signs = yawDeltas.filter(delta => Math.abs(delta) > 0.001).map(Math.sign);
       expect(new Set(signs).size).toBe(1);
+      const wingSigns = phrase.map(node => Math.sign(node.exitLateralOffset!));
+      expect(new Set(wingSigns).size).toBe(1);
 
       for (let i = 1; i < phrase.length; i++) {
         const rise = phrase[i].position.y - phrase[i - 1].position.y;
-        expect(rise).toBeGreaterThanOrEqual(0.3);
-        expect(rise).toBeLessThanOrEqual(0.65);
+        expect(rise).toBeGreaterThanOrEqual(0.2);
+        expect(rise).toBeLessThanOrEqual(0.5);
+
+        const exit = getNodeExitAnchor(phrase[i - 1]).position;
+        const entry = getNodeEntryAnchor(phrase[i]).position;
+        const dx = entry.x - exit.x;
+        const dz = entry.z - exit.z;
+        const gap = Math.hypot(dx, dz);
+        expect(gap).toBeGreaterThanOrEqual(phrase[i].ascentMinimumApproach! - 0.01);
+
+        // Frozen jump arc must clear the next top before the leading face.
+        const flightTime = gap / phrase[i].ascentExpectedSpeed!;
+        const jumpHeight = PLAYHEAD_MOVEMENT_V1.jumpVelocity * flightTime -
+          0.5 * PLAYHEAD_MOVEMENT_V1.gravity * flightTime * flightTime;
+        expect(jumpHeight).toBeGreaterThan(rise + PLAYHEAD_MOVEMENT_V1.playerRadius * 0.45);
+
+        const approachYaw = Math.atan2(dx, dz);
+        const tangentYaw = phrase[i - 1].yaw + (phrase[i].yaw - phrase[i - 1].yaw) * 0.55;
+        expect(Math.abs(Math.atan2(Math.sin(approachYaw - tangentYaw), Math.cos(approachYaw - tangentYaw))))
+          .toBeLessThan(0.02);
       }
+
+      const entry = getNodeEntryAnchor(phrase[0]).position;
+      const exit = getNodeExitAnchor(phrase.at(-1)!).position;
+      const dx = exit.x - entry.x;
+      const dz = exit.z - entry.z;
+      const localLateral = dx * Math.cos(phrase[0].yaw) - dz * Math.sin(phrase[0].yaw);
+      expect(Math.abs(localLateral)).toBeGreaterThan(8);
     }
+  });
+
+  it('scales landing depth, outside wing, and approach clearance for high-speed arrivals', () => {
+    const low = deriveAscentLandingEnvelope(20, 20, 0.35, false, 'FLOW_STAIR', 1);
+    const high = deriveAscentLandingEnvelope(30, 20, 0.35, false, 'FLOW_STAIR', 1);
+    const catchZone = deriveAscentLandingEnvelope(30, 20, 0.35, true, 'BREATHER_ASCENT', 1);
+
+    expect(high.depth).toBeGreaterThan(low.depth);
+    expect(high.width).toBeGreaterThan(low.width);
+    expect(high.minimumApproach).toBeGreaterThan(low.minimumApproach);
+    expect(high.exitLateralOffset).toBeGreaterThan(low.exitLateralOffset);
+    expect(catchZone.depth).toBeGreaterThan(high.depth + 8);
+    expect(catchZone.postLandingRunway).toBeGreaterThan(high.postLandingRunway);
   });
 
   it('selects a controlled vocabulary of ascent variants across seeds', () => {
     const seen = new Set<AscentVariant>();
+    const directions = new Set<number>();
     for (let seed = 1; seed <= 16; seed++) {
       for (const phrase of ascentPhrases(RouteGenerator.generate(analysisFor(seed)).route)) {
         seen.add(phrase[0].ascentVariant!);
+        directions.add(Math.sign(phrase[0].exitLateralOffset!));
       }
     }
     expect(seen).toEqual(new Set<AscentVariant>([
@@ -90,5 +138,6 @@ describe('flow ascent generation', () => {
       'BREATHER_ASCENT',
       'OFFSET_ASCENT'
     ]));
+    expect(directions).toEqual(new Set([-1, 1]));
   });
 });

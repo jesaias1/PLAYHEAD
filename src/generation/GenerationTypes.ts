@@ -67,10 +67,15 @@ export interface RouteNode {
   isOptional?: boolean;
   isLaunchVariant?: boolean;
   exitWidth?: number;
+  /** Local-X shift of the far/exit edge, used for asymmetric outside catch wings. */
+  exitLateralOffset?: number;
   ascentVariant?: AscentVariant;
   ascentPhraseId?: number;
   ascentStepIndex?: number;
   ascentStepCount?: number;
+  ascentExpectedSpeed?: number;
+  ascentMinimumApproach?: number;
+  ascentPostLandingRunway?: number;
   isRecoveryShelf?: boolean;
 }
 

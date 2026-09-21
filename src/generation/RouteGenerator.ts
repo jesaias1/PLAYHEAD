@@ -11,7 +11,8 @@ import { SeededRandom } from './SeededRandom';
 import { SurfPlanner } from './SurfPlanner';
 import { SurfPhraseGenerator } from './SurfPhraseGenerator';
 import { SurfValidator } from './SurfValidator';
-import { getPlatformMaxHalfWidth } from './PlatformShape';
+import { getPlatformLateralEnvelope, getPlatformMaxHalfWidth } from './PlatformShape';
+import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowGeometry';
 
 export class RouteGenerator {
   public static generate(analysis: TrackAnalysis): GeneratedTrack {
@@ -243,37 +244,48 @@ export class RouteGenerator {
           const steps = 3;
           const phraseId = nodeId;
           const variant: AscentVariant = rng.nextBool(0.52) ? 'FLARED_ASCENT' : 'FLOW_STAIR';
-          const curveDirection = rng.nextBool() ? 1 : -1;
+          const curveDirection: -1 | 1 = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
             const isCatch = st === steps - 1;
-            const gap = rng.nextFloat(3.2, 4.4);
-            const stepLen = isCatch ? rng.nextFloat(23.0, 26.0) : rng.nextFloat(18.0, 21.0);
-            const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
-            const widthBoost = st === 0 ? Math.min(1.3, speedFactor) : 1.0;
-            const stepWidth = (isCatch ? 18.0 : 14.5) * widthBoost;
-            const exitWidth = stepWidth * (variant === 'FLARED_ASCENT' ? 1.55 : 1.42);
-            const rise = rng.nextFloat(0.42, 0.62);
-
-            // One consistent turn direction describes a broad spatial curve instead
-            // of forcing a left/right slalom. The catch step straightens the exit.
-            const turnStrength = isCatch ? 0.035 : (variant === 'FLARED_ASCENT' ? 0.085 : 0.065);
-            currentYaw += curveDirection * turnStrength;
-
-            currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
-            currentPos.y += rise;
-            cumulativeDistance += gap + stepLen * 0.5;
-            sectionCurrentDistance += gap + stepLen * 0.5;
+            const rise = rng.nextFloat(0.28, 0.46);
+            const envelope = deriveAscentLandingEnvelope(
+              estimatedSpeed,
+              22 + section.intensity * 4,
+              rise,
+              isCatch,
+              variant,
+              curveDirection
+            );
+            const gap = envelope.minimumApproach + rng.nextFloat(0.3, 1.1);
+            const nextYaw = currentYaw + curveDirection * getAscentTurnRadians(variant, st, steps);
+            const placement = placeAscentLanding(
+              currentPos,
+              currentYaw,
+              nextYaw,
+              gap,
+              envelope.depth,
+              rise,
+              envelope.exitLateralOffset
+            );
+            currentYaw = nextYaw;
+            currentPos = placement.center;
+            cumulativeDistance += gap + envelope.depth * 0.5;
+            sectionCurrentDistance += gap + envelope.depth * 0.5;
 
             const buildNode: RouteNode = {
               id: nodeId++,
               time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
               position: { ...currentPos },
-              dimensions: { x: stepWidth, y: 2.0, z: stepLen },
-              exitWidth,
+              dimensions: { x: envelope.width, y: 2.0, z: envelope.depth },
+              exitWidth: envelope.exitWidth,
+              exitLateralOffset: envelope.exitLateralOffset,
               ascentVariant: variant,
               ascentPhraseId: phraseId,
               ascentStepIndex: st,
               ascentStepCount: steps,
+              ascentExpectedSpeed: envelope.expectedSpeed,
+              ascentMinimumApproach: envelope.minimumApproach,
+              ascentPostLandingRunway: envelope.postLandingRunway,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -286,11 +298,11 @@ export class RouteGenerator {
             };
             nodes.push(buildNode);
 
-            currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
-            cumulativeDistance += stepLen * 0.5;
-            sectionCurrentDistance += stepLen * 0.5;
-            estimatedSpeed = estimatedSpeed * 0.94;
-            consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
+            currentPos = placement.exit;
+            cumulativeDistance += envelope.depth * 0.5;
+            sectionCurrentDistance += envelope.depth * 0.5;
+            estimatedSpeed = envelope.expectedSpeed * 0.96;
+            consecutiveNarrow = 0;
           }
 
         } else if (theme === 'SURF' && phraseRoll < 0.6) {
@@ -367,43 +379,49 @@ export class RouteGenerator {
           const variant = rng.choice(variants);
           const steps = variant === 'BREATHER_ASCENT' ? 4 : rng.nextInt(3, 4);
           const phraseId = nodeId;
-          const curveDirection = rng.nextBool() ? 1 : -1;
+          const curveDirection: -1 | 1 = rng.nextBool() ? 1 : -1;
           for (let st = 0; st < steps; st++) {
             const isCatch = st === steps - 1;
-            const isBreather = variant === 'BREATHER_ASCENT' && isCatch;
-            const gap = rng.nextFloat(3.1, isCatch ? 4.1 : 4.6);
-            const stepLen = isCatch
-              ? rng.nextFloat(isBreather ? 26.0 : 22.0, isBreather ? 30.0 : 26.0)
-              : rng.nextFloat(18.0, 22.0);
-            const speedFactor = Math.max(1.0, estimatedSpeed / refSpeed);
-            const widthBoost = st === 0 ? Math.min(1.3, speedFactor) : 1.0;
-            const baseWidth = isCatch
-              ? rng.nextFloat(isBreather ? 19.0 : 16.5, isBreather ? 22.0 : 19.5)
-              : rng.nextFloat(14.0, 17.0);
-            const stepWidth = baseWidth * widthBoost;
-            const flareRatio = variant === 'FLARED_ASCENT' ? 1.58 : (variant === 'OFFSET_ASCENT' ? 1.45 : 1.38);
-            const exitWidth = stepWidth * flareRatio;
-            const rise = rng.nextFloat(0.34, 0.58);
-
-            const baseTurn = variant === 'OFFSET_ASCENT' ? 0.105 : (variant === 'FLOW_STAIR' ? 0.08 : 0.065);
-            const turnStrength = isCatch ? baseTurn * 0.42 : baseTurn * (st === 0 ? 0.8 : 1.0);
-            currentYaw += curveDirection * turnStrength;
-
-            currentPos = getOffsetPosition(currentPos, currentYaw, gap + stepLen * 0.5);
-            currentPos.y += rise;
-            cumulativeDistance += gap + stepLen * 0.5;
-            sectionCurrentDistance += gap + stepLen * 0.5;
+            const rise = rng.nextFloat(0.24, 0.42);
+            const highSpeedFloor = 26 + section.intensity * 4 + (variant === 'OFFSET_ASCENT' ? 1.5 : 0);
+            const envelope = deriveAscentLandingEnvelope(
+              estimatedSpeed,
+              highSpeedFloor,
+              rise,
+              isCatch,
+              variant,
+              curveDirection
+            );
+            const gap = envelope.minimumApproach + rng.nextFloat(0.4, 1.3);
+            const nextYaw = currentYaw + curveDirection * getAscentTurnRadians(variant, st, steps);
+            const placement = placeAscentLanding(
+              currentPos,
+              currentYaw,
+              nextYaw,
+              gap,
+              envelope.depth,
+              rise,
+              envelope.exitLateralOffset
+            );
+            currentYaw = nextYaw;
+            currentPos = placement.center;
+            cumulativeDistance += gap + envelope.depth * 0.5;
+            sectionCurrentDistance += gap + envelope.depth * 0.5;
 
             const stepNode: RouteNode = {
               id: nodeId++,
               time: section.start + (sectionCurrentDistance / sectionTargetDistance) * section.duration,
               position: { ...currentPos },
-              dimensions: { x: stepWidth, y: 2.0, z: stepLen },
-              exitWidth,
+              dimensions: { x: envelope.width, y: 2.0, z: envelope.depth },
+              exitWidth: envelope.exitWidth,
+              exitLateralOffset: envelope.exitLateralOffset,
               ascentVariant: variant,
               ascentPhraseId: phraseId,
               ascentStepIndex: st,
               ascentStepCount: steps,
+              ascentExpectedSpeed: envelope.expectedSpeed,
+              ascentMinimumApproach: envelope.minimumApproach,
+              ascentPostLandingRunway: envelope.postLandingRunway,
               yaw: currentYaw,
               pitch: 0,
               roll: 0,
@@ -416,11 +434,11 @@ export class RouteGenerator {
             };
             nodes.push(stepNode);
 
-            currentPos = getOffsetPosition(currentPos, currentYaw, stepLen * 0.5);
-            cumulativeDistance += stepLen * 0.5;
-            sectionCurrentDistance += stepLen * 0.5;
-            estimatedSpeed = estimatedSpeed * 0.94;
-            consecutiveNarrow = (stepWidth < 10.0) ? consecutiveNarrow + 1 : 0;
+            currentPos = placement.exit;
+            cumulativeDistance += envelope.depth * 0.5;
+            sectionCurrentDistance += envelope.depth * 0.5;
+            estimatedSpeed = envelope.expectedSpeed * 0.97;
+            consecutiveNarrow = 0;
           }
 
         } else if (theme === 'DESCENT') {
@@ -599,15 +617,18 @@ export class RouteGenerator {
    * merely touch are not treated as intersecting.
    */
   private static nodeOBB(node: RouteNode, inflate = -0.05): OBB {
-    const maxHalfX = Math.max(node.dimensions.x, node.exitWidth ?? node.dimensions.x) * 0.5;
+    const lateral = getPlatformLateralEnvelope(node);
     const halfSize = new THREE.Vector3(
-      maxHalfX + inflate,
+      lateral.halfWidth + inflate,
       node.dimensions.y * 0.5 + inflate,
       node.dimensions.z * 0.5 + inflate
     );
     const euler = new THREE.Euler(node.pitch, node.yaw, node.roll, 'YXZ');
     const rot = new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromEuler(euler));
-    return new OBB(new THREE.Vector3(node.position.x, node.position.y, node.position.z), halfSize, rot);
+    const center = new THREE.Vector3(lateral.centerX, 0, 0)
+      .applyEuler(euler)
+      .add(new THREE.Vector3(node.position.x, node.position.y, node.position.z));
+    return new OBB(center, halfSize, rot);
   }
 
   /**
@@ -830,14 +851,17 @@ export class RouteGenerator {
           // the intended 1.5m player clearance margin around route geometry so a
           // ramp never clips or brushes the course.
           const CLEARANCE = 1.5;
-          const maxHalfX = Math.max(node.dimensions.x, node.exitWidth ?? node.dimensions.x) * 0.5;
+          const lateral = getPlatformLateralEnvelope(node);
           const nodeHalfSize = new THREE.Vector3(
-            maxHalfX + CLEARANCE,
+            lateral.halfWidth + CLEARANCE,
             node.dimensions.y * 0.5 + CLEARANCE,
             node.dimensions.z * 0.5 + CLEARANCE
           );
+          const nodeCenter = new THREE.Vector3(lateral.centerX, 0, 0)
+            .applyEuler(nodeEuler)
+            .add(new THREE.Vector3(node.position.x, node.position.y, node.position.z));
           const nodeOBB = new OBB(
-            new THREE.Vector3(node.position.x, node.position.y, node.position.z),
+            nodeCenter,
             nodeHalfSize,
             nodeRotMatrix
           );
@@ -1141,4 +1165,27 @@ function getOffsetPosition(origin: Vector3Like, yaw: number, distance: number): 
     y: origin.y,
     z: origin.z + Math.cos(yaw) * distance
   };
+}
+
+function placeAscentLanding(
+  origin: Vector3Like,
+  arrivalYaw: number,
+  landingYaw: number,
+  gap: number,
+  depth: number,
+  rise: number,
+  exitLateralOffset: number
+): { center: Vector3Like; exit: Vector3Like } {
+  // Travel through the gap on the arc tangent, then align the long landing deck
+  // with the velocity direction at contact. This prevents the platform from
+  // presenting a perpendicular wall to a committed strafe.
+  const approachYaw = arrivalYaw + (landingYaw - arrivalYaw) * 0.55;
+  const entry = getOffsetPosition(origin, approachYaw, gap);
+  const center = getOffsetPosition(entry, landingYaw, depth * 0.5);
+  center.y = origin.y + rise;
+
+  const exit = getOffsetPosition(center, landingYaw, depth * 0.5);
+  exit.x += Math.cos(landingYaw) * exitLateralOffset;
+  exit.z -= Math.sin(landingYaw) * exitLateralOffset;
+  return { center, exit };
 }

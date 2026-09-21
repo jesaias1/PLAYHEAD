@@ -4,7 +4,11 @@
 
 import * as THREE from 'three';
 import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
-import { getPlatformFootprint, interpolatePlatformHalfWidth } from '../generation/PlatformShape';
+import {
+  getPlatformFootprint,
+  interpolatePlatformCenterOffset,
+  interpolatePlatformHalfWidth
+} from '../generation/PlatformShape';
 
 export interface CollisionResult {
   hasContact: boolean;
@@ -30,6 +34,7 @@ export class BoxCollider {
   public boundingRadius: number;
   public entryHalfWidth: number;
   public exitHalfWidth: number;
+  public exitLateralOffset: number;
   public isTrapezoid: boolean;
 
   constructor(node: RouteNode) {
@@ -38,9 +43,15 @@ export class BoxCollider {
     this.halfSize.set(footprint.entryHalfWidth, footprint.halfHeight, footprint.halfDepth);
     this.entryHalfWidth = footprint.entryHalfWidth;
     this.exitHalfWidth = footprint.exitHalfWidth;
-    this.isTrapezoid = Math.abs(this.exitHalfWidth - this.entryHalfWidth) > 1e-6;
+    this.exitLateralOffset = footprint.exitLateralOffset;
+    this.isTrapezoid = Math.abs(this.exitHalfWidth - this.entryHalfWidth) > 1e-6 ||
+      Math.abs(this.exitLateralOffset) > 1e-6;
 
-    const maxHalfWidth = Math.max(this.entryHalfWidth, this.exitHalfWidth);
+    const maxHalfWidth = Math.max(
+      this.entryHalfWidth,
+      Math.abs(this.exitLateralOffset - this.exitHalfWidth),
+      Math.abs(this.exitLateralOffset + this.exitHalfWidth)
+    );
     this.boundingRadius = Math.hypot(maxHalfWidth, this.halfSize.y, this.halfSize.z);
     this.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
 
@@ -68,6 +79,7 @@ export class BoxCollider {
     // Find closest point in local AABB / trapezoid
     let clamped: THREE.Vector3;
     let currentHalfW = this.halfSize.x;
+    let currentCenterX = 0;
 
     if (this.isTrapezoid) {
       const clampedZ = Math.max(-this.halfSize.z, Math.min(this.halfSize.z, localPoint.z));
@@ -77,7 +89,15 @@ export class BoxCollider {
         this.halfSize.z,
         clampedZ
       );
-      const clampedX = Math.max(-currentHalfW, Math.min(currentHalfW, localPoint.x));
+      currentCenterX = interpolatePlatformCenterOffset(
+        this.exitLateralOffset,
+        this.halfSize.z,
+        clampedZ
+      );
+      const clampedX = Math.max(
+        currentCenterX - currentHalfW,
+        Math.min(currentCenterX + currentHalfW, localPoint.x)
+      );
       const clampedY = Math.max(-this.halfSize.y, Math.min(this.halfSize.y, localPoint.y));
       clamped = new THREE.Vector3(clampedX, clampedY, clampedZ);
     } else {
@@ -114,7 +134,9 @@ export class BoxCollider {
       penetration = radius - dist;
     } else {
       // Sphere center is inside box - find shallowest face
-      const dx = currentHalfW - Math.abs(localPoint.x);
+      const dxLeft = localPoint.x - (currentCenterX - currentHalfW);
+      const dxRight = (currentCenterX + currentHalfW) - localPoint.x;
+      const dx = Math.min(dxLeft, dxRight);
       const dy = this.halfSize.y - localPoint.y;
       const dz = this.halfSize.z - Math.abs(localPoint.z);
 
@@ -127,7 +149,7 @@ export class BoxCollider {
           localNormal = new THREE.Vector3(0, -1, 0);
           penetration = radius + dyBottom;
         } else if (dx <= dz) {
-          localNormal = new THREE.Vector3(localPoint.x >= 0 ? 1 : -1, 0, 0);
+          localNormal = new THREE.Vector3(dxRight <= dxLeft ? 1 : -1, 0, 0);
           penetration = radius + dx;
         } else {
           localNormal = new THREE.Vector3(0, 0, localPoint.z >= 0 ? 1 : -1);

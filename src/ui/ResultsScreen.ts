@@ -172,11 +172,15 @@ export class ResultsScreen {
     this.pbStatusElem.classList.toggle('hidden', !isNewPersonalBest);
 
     // Format Typographic Rank & Overtime State
-    if (overtimeInfo?.isOvertime) {
+    if (results.rank === 'UNRANKED') {
       this.rankElem.textContent = 'UNRANKED';
       this.rankElem.className = 'rank-badge rank-unranked';
-      this.rankSubElem.textContent = '// TRACK SIGNAL EXPIRED // OVERTIME';
-      this.syncElem.textContent = `OVERTIME +${overtimeInfo.overtimeDuration.toFixed(2)}s`;
+      this.rankSubElem.textContent = overtimeInfo?.isOvertime
+        ? '// COMPLETION OUTSIDE RANK BAND // OVERTIME'
+        : '// TRAVERSAL NOT QUALIFIED';
+      this.syncElem.textContent = overtimeInfo?.isOvertime
+        ? `OVERTIME +${overtimeInfo.overtimeDuration.toFixed(2)}s`
+        : `+${Math.max(0, results.syncDelta).toFixed(2)}s`;
       this.syncElem.style.color = '#f59e0b';
     } else {
       const rank = results.rank.toUpperCase();
@@ -203,8 +207,8 @@ export class ResultsScreen {
       this.syncElem.textContent = `${sign}${Math.abs(results.syncDelta).toFixed(2)}s`;
       this.syncElem.style.color = '';
 
-      // Save Personal Best on valid ranked runs
-      this.savePersonalBest(seed, results);
+      // Preserve the existing rule that overtime runs do not replace PB data.
+      if (!overtimeInfo?.isOvertime) this.savePersonalBest(seed, results);
     }
 
     this.timeElem.textContent = formatTime(results.completionTime);

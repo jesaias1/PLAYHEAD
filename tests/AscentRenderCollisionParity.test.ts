@@ -4,7 +4,12 @@ import { RouteGenerator } from '../src/generation/RouteGenerator';
 import { BoxCollider } from '../src/physics/Collider';
 import { PhysicsWorld } from '../src/physics/PhysicsWorld';
 import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
-import { createPlatformGeometry, getPlatformHalfWidthAtLocalZ } from '../src/generation/PlatformShape';
+import {
+  createPlatformGeometry,
+  getPlatformCenterOffsetAtLocalZ,
+  getPlatformHalfWidthAtLocalZ,
+  getPlatformLateralEnvelope
+} from '../src/generation/PlatformShape';
 import { TrackAnalysis } from '../src/audio/AudioFeatures';
 
 /**
@@ -61,14 +66,16 @@ describe('AscentRenderCollisionParity', () => {
       const farZ = halfLenZ - 0.15;
       const nearHalfW = getPlatformHalfWidthAtLocalZ(node, nearZ);
       const farHalfW = getPlatformHalfWidthAtLocalZ(node, farZ);
+      const nearCenterX = getPlatformCenterOffsetAtLocalZ(node, nearZ);
+      const farCenterX = getPlatformCenterOffsetAtLocalZ(node, farZ);
       const samples: Array<{ name: string; x: number; z: number }> = [
         { name: 'centre', x: 0, z: 0 },
-        { name: 'near-left', x: -(nearHalfW - 0.15), z: nearZ },
-        { name: 'near-right', x: nearHalfW - 0.15, z: nearZ },
-        { name: 'far-middle', x: 0, z: farZ },
-        { name: 'far-left-widened-corner', x: -(farHalfW - 0.15), z: farZ },
-        { name: 'far-right-widened-corner', x: farHalfW - 0.15, z: farZ },
-        { name: 'exit-edge', x: 0, z: halfLenZ - 0.04 }
+        { name: 'near-left', x: nearCenterX - nearHalfW + 0.15, z: nearZ },
+        { name: 'near-right', x: nearCenterX + nearHalfW - 0.15, z: nearZ },
+        { name: 'far-middle', x: farCenterX, z: farZ },
+        { name: 'far-left-widened-corner', x: farCenterX - farHalfW + 0.15, z: farZ },
+        { name: 'far-right-widened-corner', x: farCenterX + farHalfW - 0.15, z: farZ },
+        { name: 'exit-edge', x: node.exitLateralOffset ?? 0, z: halfLenZ - 0.04 }
       ];
 
       const yaw = node.yaw;
@@ -92,8 +99,9 @@ describe('AscentRenderCollisionParity', () => {
       }
 
       // The render geometry must genuinely include the widened corners.
-      expect(box.max.x).toBeCloseTo(exitHalfW, 4);
-      expect(box.min.x).toBeCloseTo(-exitHalfW, 4);
+      const lateral = getPlatformLateralEnvelope(node);
+      expect(box.max.x).toBeCloseTo(lateral.maxX, 4);
+      expect(box.min.x).toBeCloseTo(lateral.minX, 4);
       expect(box.max.z).toBeCloseTo(halfLenZ, 4);
     }
   });
@@ -110,9 +118,10 @@ describe('AscentRenderCollisionParity', () => {
 
       const farZ = node.dimensions.z * 0.5 - 0.15;
       const farHalfW = getPlatformHalfWidthAtLocalZ(node, farZ);
+      const farCenterX = getPlatformCenterOffsetAtLocalZ(node, farZ);
       const outside = [
-        { name: 'just-outside-right', x: farHalfW + PLAYER_RADIUS + 0.15, z: farZ },
-        { name: 'just-outside-left', x: -(farHalfW + PLAYER_RADIUS + 0.15), z: farZ }
+        { name: 'just-outside-right', x: farCenterX + farHalfW + PLAYER_RADIUS + 0.15, z: farZ },
+        { name: 'just-outside-left', x: farCenterX - farHalfW - PLAYER_RADIUS - 0.15, z: farZ }
       ];
 
       for (const s of outside) {
@@ -143,12 +152,15 @@ describe('AscentRenderCollisionParity', () => {
       const topY = node.dimensions.y * 0.5;
       const exitHalfW = node.exitWidth! * 0.5;
       const halfLenZ = node.dimensions.z * 0.5;
+      const farZ = halfLenZ - 0.15;
+      const farCenterX = getPlatformCenterOffsetAtLocalZ(node, farZ);
+      const farHalfW = getPlatformHalfWidthAtLocalZ(node, farZ);
 
       const spots = [
         new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(exitHalfW - 0.15, 0, halfLenZ - 0.15),
-        new THREE.Vector3(-(exitHalfW - 0.15), 0, halfLenZ - 0.15),
-        new THREE.Vector3(exitHalfW * 0.7, 0, halfLenZ * 0.5)
+        new THREE.Vector3(farCenterX + farHalfW - 0.15, 0, farZ),
+        new THREE.Vector3(farCenterX - farHalfW + 0.15, 0, farZ),
+        new THREE.Vector3(getPlatformCenterOffsetAtLocalZ(node, halfLenZ * 0.5) + exitHalfW * 0.55, 0, halfLenZ * 0.5)
       ];
 
       const yaw = node.yaw;

@@ -420,11 +420,11 @@ export class Game {
             const rivalTime = this.ghostManager.getRivalTime();
             const rivalDelta = rivalTime !== null ? results.completionTime - rivalTime : undefined;
 
-            // Record cosmetic progression only on valid ranked runs. Signal Drops
-            // additionally require the stable ID of an official catalog level.
+            // Record cosmetic progression on any earned rank, including a
+            // mistake-tolerant Bronze completed after the audio window.
             let dropsAwarded = 0;
             let bestDropRank: RunRank | undefined;
-            if (!isOvertime) {
+            if (results.rank !== 'UNRANKED') {
               const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
               const progressionKey = this.currentOfficialTrackId || trackName;
               const completionReward = KarambitSkinSystem.getInstance().recordTrackCompletion(

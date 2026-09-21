@@ -50,7 +50,7 @@ export interface RouteConnectivityResult {
 export function getNodeExitAnchor(node: RouteNode): RouteAnchor {
   const euler = new THREE.Euler(node.pitch || 0, node.yaw || 0, node.roll || 0, 'YXZ');
   const halfLen = (node.dimensions.z || 0) * 0.5;
-  const localOffset = new THREE.Vector3(0, 0, halfLen).applyEuler(euler);
+  const localOffset = new THREE.Vector3(node.exitLateralOffset ?? 0, 0, halfLen).applyEuler(euler);
 
   const pos: Vector3Like = {
     x: node.position.x + localOffset.x,

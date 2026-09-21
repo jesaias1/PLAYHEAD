@@ -222,9 +222,9 @@ export class Hud {
     if (isOvertime) {
       if (!this.isOvertimeActive) {
         this.isOvertimeActive = true;
-        this.showToast('SIGNAL LOST // OVERTIME - UNRANKED', 3000);
+        this.showToast('AUDIO WINDOW COMPLETE // FINISH FOR RANK', 3000);
       }
-      this.sectionElem.textContent = 'SIGNAL LOST // OVERTIME';
+      this.sectionElem.textContent = 'AUDIO COMPLETE // RUN CONTINUES';
       this.sectionElem.classList.add('visible');
       this.syncElem.textContent = `+${overtimeSeconds.toFixed(2)}s OVERTIME`;
       this.syncElem.className = 'hud-sync-val overtime';
