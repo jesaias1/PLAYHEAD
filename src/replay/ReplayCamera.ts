@@ -1,5 +1,11 @@
 /**
  * Cinematic camera controller for Replay mode
+ *
+ * ⚠️ LEGACY / DEV: this is a third-person chase camera, not POV. It trails
+ * behind the recorded position and deliberately IGNORES the recorded pitch
+ * (`_pitch`). First-person POV replay must instead place the camera at the
+ * recorded eye position and orient it by the recorded yaw AND pitch with the
+ * recorded FOV. POV Replay V1 replaces this path.
  */
 
 import * as THREE from 'three';

@@ -1,11 +1,26 @@
 /**
  * Replay player playing recorded run data with smooth interpolation and cinematic camera
+ *
+ * ⚠️ LEGACY / DEV REPLAY — NOT THE PLAYER-FACING REPLAY EXPERIENCE.
+ *
+ * This is a THIRD-PERSON, DEBUG representation: a wireframe cylinder avatar
+ * followed by a cinematic chase camera that trails ~6-9m behind and ignores the
+ * recorded pitch entirely. It exists for DEV inspection only.
+ *
+ * PLAYHEAD replay must be EXACT FIRST-PERSON POV: the same camera, yaw/pitch,
+ * FOV, hands, equipped knife/skin, viewmodel calibration, jumps, surfing,
+ * strafing, landings, audio timing and gate feedback the runner actually had.
+ * That is the POV Replay V1 milestone; see `ReplayIdentity` for the payload
+ * identity it needs. Do not present this avatar-follow replay as finished.
  */
 
 import * as THREE from 'three';
 import { ReplayFrame, ReplayRecorder } from './ReplayRecorder';
 import { ReplayCamera } from './ReplayCamera';
 import { lerp } from '../utils/math';
+
+/** Explicit marker: this replay path is a DEV/LEGACY third-person preview. */
+export const LEGACY_THIRD_PERSON_REPLAY = true;
 
 export class ReplayPlayer {
   public isPlaying = false;

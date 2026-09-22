@@ -135,7 +135,7 @@ export class ResultsScreen {
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
           <button class="btn-preview hidden" id="btn-res-leaderboard">[ ADD TO LEADERBOARD ]</button>
-          <button class="btn-preview" id="btn-res-replay">[ REPLAY ]</button>
+          <button class="btn-preview" id="btn-res-replay" title="DEV/LEGACY third-person preview. First-person POV replay is the next milestone.">[ REPLAY // DEV LEGACY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
         </div>
       </div>
