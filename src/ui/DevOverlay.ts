@@ -151,14 +151,23 @@ export class DevOverlay {
       const info = environment.renderer.info;
       const scale = environment.getRenderScaleInfo();
       const preset = environment.activePreset;
+      const frameMs = fps > 0 ? 1000 / fps : 0;
+      const city = world.skyline ? world.skyline.getVisibleCounts() : null;
       perfBlock =
-        `${BUILD_LABEL} | TIER: ${environment.qualityTier}` +
-        (environment.qualityTier === 'AUTO' ? ` -> ${environment.resolvedTier}` : '') +
-        `\nFPS: ${fps.toFixed(0)} | DRAW CALLS: ${info.render.calls} | TRIS: ${info.render.triangles}` +
-        `\nRENDER SCALE: ${scale.effectiveRatio.toFixed(2)}x (${scale.bufferWidth}x${scale.bufferHeight}) | DPR: ${window.devicePixelRatio.toFixed(2)} cap ${preset.dprCap}` +
-        `\nGPU MEM: ${info.memory.geometries} geo / ${info.memory.textures} tex | PROGRAMS: ${info.programs ? info.programs.length : 'n/a'}` +
-        `\nDECOR LOD: ${preset.decorationLodDistance > 0 ? preset.decorationLodDistance + 'm' : 'off'}` +
-        `\nADAPTIVE FPS: ${environment.averageFps > 0 ? environment.averageFps.toFixed(0) : 'n/a'}`;
+        `PERF` +
+        `\n  FPS            ${fps.toFixed(0)}` +
+        `\n  FRAME          ${frameMs.toFixed(1)} ms` +
+        `\n  DPR            ${scale.effectiveRatio.toFixed(2)} (cap ${preset.dprCap})` +
+        `\n  SCALE          ${preset.renderScale.toFixed(2)} (${scale.bufferWidth}x${scale.bufferHeight})` +
+        `\n  DRAWS          ${info.render.calls}` +
+        `\n  TRIS           ${(info.render.triangles / 1000).toFixed(1)}k` +
+        `\n  LINES          ${info.render.lines} | POINTS ${info.render.points}` +
+        `\n  GEOMETRIES     ${info.memory.geometries} | TEXTURES ${info.memory.textures}` +
+        `\n  PROGRAMS       ${info.programs ? info.programs.length : 'n/a'}` +
+        (city ? `\n  VISIBLE CITY   ${city.visible} / ${city.total}` : '') +
+        `\n  QUALITY        ${environment.qualityTier}${environment.qualityTier === 'AUTO' ? ` -> ${environment.resolvedTier}` : ''}` +
+        `\n  DECOR LOD      ${preset.decorationLodDistance > 0 ? preset.decorationLodDistance + 'm' : 'off'}` +
+        `\n  ADAPTIVE FPS   ${environment.averageFps > 0 ? environment.averageFps.toFixed(0) : 'n/a'}`;
     }
 
     const conn = TrackGenerator.lastReport?.connectivity;

@@ -259,29 +259,21 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     const built = GeometryBuilder.buildWorld(track, palette);
     const rootGroup = built.rootGroup;
 
-    // Find meshes for signal spines
+    // Spines are now batched into one merged mesh per material (a 6-material
+    // array per spine cost 6 draw calls each). The visual intent is unchanged:
+    // the spine surface must use the clean platform-concrete signal blend and
+    // must never carry a debug wireframe.
+    const mergedSpines = rootGroup.getObjectByName('SignalSpinesMerged') as THREE.Mesh;
+    expect(mergedSpines).toBeTruthy();
+    const spineMat = mergedSpines.material as THREE.MeshStandardMaterial;
+    expect(Array.isArray(mergedSpines.material)).toBe(false);
+    expect(spineMat.wireframe).toBeFalsy();
+    const expectedSpineColor = new THREE.Color(palette.surface).lerp(new THREE.Color(palette.primary), 0.22);
+    expect(spineMat.color.getHex()).toBe(expectedSpineColor.getHex());
+
+    // Verify that NO EdgesGeometry wireframe (LineSegments) is co-located with any signal spine
     const spinePositions = (track.signalSpines || []).map(s => s.position);
-    let foundSpineMeshes = 0;
-
     rootGroup.traverse((obj) => {
-      if (obj instanceof THREE.Mesh && Array.isArray(obj.material)) {
-        const isSpineMesh = spinePositions.some(sp =>
-          Math.abs(obj.position.x - sp.x) < 0.01 &&
-          Math.abs(obj.position.y - sp.y) < 0.01 &&
-          Math.abs(obj.position.z - sp.z) < 0.01
-        );
-        if (isSpineMesh) {
-          foundSpineMeshes++;
-          // Top surface material (index 2) must be clean platform concrete blend (spineTopMaterial)
-          const topMat = obj.material[2] as THREE.MeshStandardMaterial;
-          expect(topMat).toBeDefined();
-          expect(topMat.wireframe).toBeFalsy();
-          const expectedSpineColor = new THREE.Color(palette.surface).lerp(new THREE.Color(palette.primary), 0.22);
-          expect(topMat.color.getHex()).toBe(expectedSpineColor.getHex());
-        }
-      }
-
-      // Verify that NO EdgesGeometry wireframe (LineSegments) is co-located with any signal spine
       if (obj instanceof THREE.LineSegments) {
         const isCoLocatedWithSpine = spinePositions.some(sp =>
           Math.abs(obj.position.x - sp.x) < 0.01 &&
@@ -292,7 +284,6 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       }
     });
 
-    expect(foundSpineMeshes).toBeGreaterThan(0);
     built.dispose();
   });
 });

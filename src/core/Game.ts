@@ -1763,6 +1763,9 @@ export class Game {
   private gameLoop = (): void => {
     requestAnimationFrame(this.gameLoop);
 
+    // Per-frame render statistics accumulate across every composer pass.
+    this.environment.resetFrameStats();
+
     const { frameDelta } = this.clock.tick((dt) => {
       // Freeze simulation during viewmodel calibration
       if (this.viewmodelCalibrator.isActive) return;

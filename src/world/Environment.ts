@@ -60,6 +60,10 @@ export class Environment {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
 
+    // Accumulate render statistics across the whole frame (every composer pass)
+    // instead of only reporting the last pass. Game resets this once per frame.
+    this.renderer.info.autoReset = false;
+
     container.appendChild(this.renderer.domElement);
 
     // 4. PostProcessing pipeline (selective bloom + subtle vignette)
@@ -153,6 +157,15 @@ export class Environment {
       bufferWidth: this.renderer.domElement.width,
       bufferHeight: this.renderer.domElement.height
     };
+  }
+
+  /**
+   * Clears accumulated render statistics. Called once per frame by the game
+   * loop because `renderer.info.autoReset` is disabled so the stats cover every
+   * composer pass, not just the last one.
+   */
+  public resetFrameStats(): void {
+    this.renderer.info.reset();
   }
 
   /** Averaged FPS tracked by the adaptive controller (diagnostics). */

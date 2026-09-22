@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { createPlatformGeometry, getPlatformMaxHalfWidth } from '../generation/PlatformShape';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
@@ -328,6 +329,17 @@ export class GeometryBuilder {
       }
     };
 
+    // Static, same-material geometry is baked to world space and merged, so the
+    // route costs a handful of draw calls instead of one per platform/pylon.
+    const platformGeoms: THREE.BufferGeometry[] = [];
+    const surfPlatformGeoms: THREE.BufferGeometry[] = [];
+    const finishPlatformGeoms: THREE.BufferGeometry[] = [];
+    const pylonGeoms: THREE.BufferGeometry[] = [];
+    const platformEuler = new THREE.Euler();
+    const platformMatrix = new THREE.Matrix4();
+    const pylonEuler = new THREE.Euler();
+    const pylonMatrix = new THREE.Matrix4();
+
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
       const node = track.route[i];
@@ -335,23 +347,39 @@ export class GeometryBuilder {
       // Rendering and collision consume the same authoritative footprint.
       const geom = createPlatformGeometry(node);
 
-      // Surf face readability: top (+Y) gets glowing chevrons, bottom/sides get dark basalt
-      const surfMultiMat = [
-        accentMaterial,
-        accentMaterial,
-        surfMaterial,
-        backgroundMonolithMaterial,
-        accentMaterial,
-        accentMaterial
-      ];
-      const mat = node.isSurf
-        ? surfMultiMat
-        : (node.type === RouteNodeType.FINISH ? finishMaterial : platformMaterial);
-      const mesh = new THREE.Mesh(geom, mat);
+      // Edge trim is built from the LOCAL geometry before the platform geometry
+      // is baked into world space for batching.
+      const edgesGeom = new THREE.EdgesGeometry(geom);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: node.isSurf ? secondaryCol : primaryCol,
+        transparent: true,
+        opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.85)
+      });
+      const edges = new THREE.LineSegments(edgesGeom, lineMat);
+      edges.position.set(node.position.x, node.position.y, node.position.z);
+      edges.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
+      rootGroup.add(edges);
+      edgeLines.push(edges);
+      routeEdgeItems.push({
+        mesh: edges,
+        nodeArcLength: node.arcLength,
+        nodeTime: node.time
+      });
 
-      mesh.position.set(node.position.x, node.position.y, node.position.z);
-      mesh.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
-      rootGroup.add(mesh);
+      // DRAW-CALL FIX: platforms are static and share a material, so they are
+      // baked into world space and merged into one mesh per material instead of
+      // one mesh (and one draw call) each.
+      platformEuler.set(node.pitch, node.yaw, node.roll, 'YXZ');
+      platformMatrix.makeRotationFromEuler(platformEuler);
+      platformMatrix.setPosition(node.position.x, node.position.y, node.position.z);
+      geom.applyMatrix4(platformMatrix);
+      if (node.type === RouteNodeType.FINISH) {
+        finishPlatformGeoms.push(geom);
+      } else if (node.isSurf) {
+        surfPlatformGeoms.push(geom);
+      } else {
+        platformGeoms.push(geom);
+      }
 
       // Descending Monolithic Foundation Pillars plunging into the deep void (320m - 540m)
       //
@@ -398,31 +426,13 @@ export class GeometryBuilder {
 
         if (!blocked) {
           const pylonGeom = new THREE.BoxGeometry(pylonWidth, pylonHeight, pylonWidth * 1.2);
-          const pylonMesh = new THREE.Mesh(pylonGeom, backgroundMonolithMaterial);
-          pylonMesh.position.set(node.position.x, pylonTopY - pylonHeight * 0.5, node.position.z);
-          pylonMesh.rotation.set(0, node.yaw, 0);
-          pylonMesh.name = `FoundationPylon:${node.id}`;
-          rootGroup.add(pylonMesh);
+          pylonEuler.set(0, node.yaw, 0, 'YXZ');
+          pylonMatrix.makeRotationFromEuler(pylonEuler);
+          pylonMatrix.setPosition(node.position.x, pylonTopY - pylonHeight * 0.5, node.position.z);
+          pylonGeom.applyMatrix4(pylonMatrix);
+          pylonGeoms.push(pylonGeom);
         }
       }
-
-      // Add Emissive Edge Trim on lateral sides
-      const edgesGeom = new THREE.EdgesGeometry(geom);
-      const lineMat = new THREE.LineBasicMaterial({
-        color: node.isSurf ? secondaryCol : primaryCol,
-        transparent: true,
-        opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.85)
-      });
-      const edges = new THREE.LineSegments(edgesGeom, lineMat);
-      edges.position.copy(mesh.position);
-      edges.rotation.copy(mesh.rotation);
-      rootGroup.add(edges);
-      edgeLines.push(edges);
-      routeEdgeItems.push({
-        mesh: edges,
-        nodeArcLength: node.arcLength,
-        nodeTime: node.time
-      });
 
       // Checkpoint Arch Gateway
       if (node.type === RouteNodeType.CHECKPOINT) {
@@ -459,6 +469,23 @@ export class GeometryBuilder {
         if (canyon) decorativeGroup.add(canyon);
       }
     }
+
+    // Merge the batched static route geometry (one draw call per material).
+    const addBatched = (geoms: THREE.BufferGeometry[], material: THREE.Material, name: string): void => {
+      if (geoms.length === 0) return;
+      const merged = geoms.length === 1 ? geoms[0] : mergeGeometries(geoms, false);
+      if (geoms.length > 1) {
+        for (const g of geoms) g.dispose();
+      }
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.name = name;
+      rootGroup.add(mesh);
+    };
+    addBatched(platformGeoms, platformMaterial, 'RoutePlatformsMerged');
+    addBatched(surfPlatformGeoms, surfMaterial, 'RouteSurfPlatformsMerged');
+    addBatched(finishPlatformGeoms, finishMaterial, 'RouteFinishMerged');
+    addBatched(pylonGeoms, backgroundMonolithMaterial, 'FoundationPylonsMerged');
 
     // Deterministic route challenges. Collision consumes these exact same box
     // dimensions in PhysicsWorld; only the thin floor strip is non-colliding
@@ -546,41 +573,50 @@ export class GeometryBuilder {
     }
 
     // Build Authoritative Signal Spines (Procedural secondary recovery layer)
-    if (track.signalSpines) {
+    //
+    // DRAW-CALL FIX: spines used a 6-material array each, which costs SIX draw
+    // calls per spine (three.js draws one call per material group). With ~110
+    // spines that was ~660 of the frame's ~1100 draw calls — over half the
+    // frame for geometry that is a thin top-surface strip. They are now baked
+    // into a single merged mesh per material (1-2 draws total) with the exact
+    // same transforms and dimensions.
+    if (track.signalSpines && track.signalSpines.length > 0) {
+      const solidSpineGeoms: THREE.BufferGeometry[] = [];
+      const surfSpineGeoms: THREE.BufferGeometry[] = [];
+      const spineEuler = new THREE.Euler();
+      const spineMatrix = new THREE.Matrix4();
+
       for (const spine of track.signalSpines) {
         const geom = new THREE.BoxGeometry(spine.dimensions.x, spine.dimensions.y, spine.dimensions.z);
-        // Multi-material: Top face (+Y, index 2) uses spineTopMaterial (audio-reactive signal aggregate).
-        // Underside (-Y, index 3) gets backgroundMonolithMaterial (dark brutalist basalt).
-        // Side faces (indices 0, 1, 4, 5) get accentMaterial (dark with audio-reactive accent trim).
-        const meshMat = [
-          accentMaterial,
-          accentMaterial,
-          spine.isSurf ? surfMaterial : spineTopMaterial,
-          backgroundMonolithMaterial,
-          accentMaterial,
-          accentMaterial
-        ];
-
-        const mesh = new THREE.Mesh(geom, meshMat);
-        mesh.position.set(spine.position.x, spine.position.y, spine.position.z);
-        mesh.rotation.set(spine.pitch, spine.yaw, spine.roll, 'YXZ');
-        rootGroup.add(mesh);
+        spineEuler.set(spine.pitch, spine.yaw, spine.roll, 'YXZ');
+        spineMatrix.makeRotationFromEuler(spineEuler);
+        spineMatrix.setPosition(spine.position.x, spine.position.y, spine.position.z);
+        geom.applyMatrix4(spineMatrix);
+        (spine.isSurf ? surfSpineGeoms : solidSpineGeoms).push(geom);
       }
+
+      const addMergedSpines = (geoms: THREE.BufferGeometry[], material: THREE.Material, name: string): void => {
+        if (geoms.length === 0) return;
+        const merged = geoms.length === 1 ? geoms[0] : mergeGeometries(geoms, false);
+        if (geoms.length > 1) {
+          for (const g of geoms) g.dispose();
+        }
+        if (!merged) return;
+        const mesh = new THREE.Mesh(merged, material);
+        mesh.name = name;
+        rootGroup.add(mesh);
+      };
+
+      addMergedSpines(solidSpineGeoms, spineTopMaterial, 'SignalSpinesMerged');
+      addMergedSpines(surfSpineGeoms, surfMaterial, 'SignalSpinesSurfMerged');
     }
 
     // Build Optional Side-Surf Skill Ramps
     if (track.optionalRamps) {
       for (const ramp of track.optionalRamps) {
         const geom = new THREE.BoxGeometry(ramp.dimensions.x, ramp.dimensions.y, ramp.dimensions.z);
-        const rampMultiMat = [
-          accentMaterial,
-          accentMaterial,
-          surfMaterial,
-          backgroundMonolithMaterial,
-          accentMaterial,
-          accentMaterial
-        ];
-        const mesh = new THREE.Mesh(geom, rampMultiMat);
+        // Single material (was a 6-material array = 6 draw calls per ramp).
+        const mesh = new THREE.Mesh(geom, surfMaterial);
         mesh.position.set(ramp.position.x, ramp.position.y, ramp.position.z);
         mesh.rotation.set(ramp.pitch, ramp.yaw, ramp.roll, 'YXZ');
         rootGroup.add(mesh);

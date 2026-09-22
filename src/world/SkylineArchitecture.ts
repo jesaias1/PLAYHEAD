@@ -329,15 +329,7 @@ export class SkylineArchitecture {
     }
   }
 
-  /**
-   * Distance-based visibility for purely decorative skyline clusters.
-   *
-   * These sit 155-260m+ out and plunge hundreds of metres, so at long range
-   * they are a large amount of fill for very little on-screen contribution.
-   * Culling individual instances (rather than a whole layer) keeps the
-   * silhouette continuous, and because the cutoff is generous and gradual there
-   * is no popping near the player.
-  /**
+   /**
    * Refreshes the authored transform baseline after the authoritative world-space
    * RouteExclusionCorridor validation pass has run. This guarantees distance culling
    * and instance restoration never resurrect rejected or zeroed-out instances.
@@ -378,6 +370,34 @@ export class SkylineArchitecture {
    * Culling individual instances (rather than a whole layer) keeps the
    * silhouette continuous, and because the cutoff is generous and gradual there
    * is no popping near the player.
+   *
+   * `maxDistance <= 0` disables culling entirely (HIGH / ULTRA).
+   */
+  /**
+   * DEV diagnostics: how many skyline instances are currently drawn vs total.
+   * Cheap (reads the cached visibility flags).
+   */
+  public getVisibleCounts(): { visible: number; total: number } {
+    let visible = 0;
+    let total = 0;
+    const meshes: Array<THREE.InstancedMesh | null> = [
+      this.primaryMonoliths,
+      this.supportStelae,
+      this.backgroundRidges
+    ];
+    for (const mesh of meshes) {
+      if (!mesh) continue;
+      total += mesh.count;
+      const flags = this.hiddenFlags.get(mesh);
+      for (let i = 0; i < mesh.count; i++) {
+        if (!flags || !flags[i]) visible++;
+      }
+    }
+    return { visible, total };
+  }
+
+  /**
+   * Distance-based visibility for purely decorative skyline clusters.
    *
    * `maxDistance <= 0` disables culling entirely (HIGH / ULTRA).
    */
