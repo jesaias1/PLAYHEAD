@@ -14,11 +14,7 @@ import { VisualAccent } from '../audio/AudioFeatures';
 import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 import { AnimatedObstacleItem, GeometryBuilder } from '../world/GeometryBuilder';
 import { MovementLabHUD } from './MovementLabHUD';
-import {
-  GauntletCheckpoint,
-  buildGauntletLayout,
-  gauntletStationTitle
-} from './gauntletLayout';
+import { GauntletCheckpoint, buildGauntletLayout } from './gauntletLayout';
 
 export class MovementLab {
   private scene: THREE.Scene;
@@ -405,16 +401,28 @@ export class MovementLab {
       this.physics.addObstacleCollider(obstacle);
     }
 
-    // Compact station signage (one banner per station entry).
-    for (let i = 0; i < layout.stations.length; i++) {
-      const station = layout.stations[i];
-      const host = layout.route[i];
-      const bannerZ = host.position.z - station.length * 0.5 + 2.0;
-      this.createAreaBanner(gauntletStationTitle(station), 0, 5.5, bannerZ);
+    // Compact side signage, raised and offset beside each platform so the
+    // upcoming obstacle geometry stays visible on approach.
+    for (const sign of layout.signage) {
+      this.createAreaBanner(
+        sign.label,
+        sign.position.x,
+        sign.position.y,
+        sign.position.z,
+        sign.width,
+        sign.height
+      );
     }
   }
 
-  private createAreaBanner(text: string, x: number, y: number, z: number): void {
+  private createAreaBanner(
+    text: string,
+    x: number,
+    y: number,
+    z: number,
+    width = 12,
+    height = 3
+  ): void {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 128;
@@ -435,7 +443,7 @@ export class MovementLab {
 
     const texture = new THREE.CanvasTexture(canvas);
     const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(12, 3), mat);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
     mesh.position.set(x, y, z);
     mesh.rotation.y = Math.PI; // Face player approaching along +Z
     this.rootGroup.add(mesh);

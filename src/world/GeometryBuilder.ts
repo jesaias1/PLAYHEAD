@@ -242,18 +242,95 @@ export class GeometryBuilder {
     // Tertiary detailing: floating header signal bar.
     const headerBarMaterial = makeBeaconMaterial(0x080c14, secondaryCol.clone(), 0.45, 0.8);
 
-    // Gameplay obstacles use one dark structural material and one shared signal
-    // material. Their silhouettes remain readable even when the emissive pulse
-    // is at rest, while the approach strip telegraphs the required response.
+    // Gameplay obstacles share a small family of materials so each obstacle
+    // type reads differently by SHAPE and edge treatment rather than by being
+    // painted a different bright colour. Bodies stay close to PLAYHEAD's dark
+    // architecture; signal colour is used as narrow rails / caps / trim.
     const obstacleBodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x070a10,
+      color: 0x0a0e15,
       emissive: secondaryCol,
-      emissiveIntensity: 0.12,
-      roughness: 0.62,
-      metalness: 0.48,
+      // Dark brutalist mass: signal colour is trim/edge, never a saturated
+      // surface. Low metalness avoids the body picking up the cyan ambient.
+      emissiveIntensity: 0.05,
+      roughness: 0.78,
+      metalness: 0.16,
       map: basaltTex
     });
+    // Full luminous bar (SCAN BAR).
     const obstacleSignalMaterial = makeBeaconMaterial(0x0a111a, primaryCol.clone(), 0.48, 0.9);
+
+    // SWEEP BEAM: dark machined body with a single luminous signal rail on top,
+    // so it reads as a moving mechanical arm rather than a second scan bar.
+    const obstacleRailBodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0a0d13,
+      emissive: secondaryCol,
+      emissiveIntensity: 0.04,
+      roughness: 0.5,
+      metalness: 0.42,
+      map: basaltTex
+    });
+    const obstacleRailTopMaterial = makeBeaconMaterial(0x0d1622, primaryCol.clone(), 0.85, 1.0);
+
+    // PHASE BLOCK / SPLIT GATE: restrained signal cap on an otherwise dark
+    // brutalist mass.
+    const obstacleCapMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0b1017,
+      emissive: secondaryCol,
+      emissiveIntensity: 0.14,
+      roughness: 0.62,
+      metalness: 0.2,
+      map: basaltTex
+    });
+
+    /**
+     * Per-family material assignment. BoxGeometry face order is
+     * [+X, -X, +Y, -Y, +Z, -Z]. Collision always uses obstacle.dimensions, so
+     * the visual box and the collider remain identical.
+     */
+    const obstacleMaterials = (obstacle: RouteNode): THREE.Material | THREE.Material[] => {
+      const isThread =
+        obstacle.obstaclePhraseKind === 'LEFT_RIGHT_THREAD' ||
+        obstacle.obstaclePhraseKind === 'THREE_WALL_THREAD';
+      switch (obstacle.obstacleType) {
+        case 'SCAN_BAR':
+          return obstacleSignalMaterial;
+        case 'SWEEP_BEAM':
+          return [
+            obstacleRailBodyMaterial,
+            obstacleRailBodyMaterial,
+            obstacleRailTopMaterial,
+            obstacleRailBodyMaterial,
+            obstacleRailBodyMaterial,
+            obstacleRailBodyMaterial
+          ];
+        case 'PHASE_BLOCK':
+          // Dark solid mass with a lit cap and a lit approach face.
+          return [
+            obstacleBodyMaterial,
+            obstacleBodyMaterial,
+            obstacleCapMaterial,
+            obstacleBodyMaterial,
+            obstacleBodyMaterial,
+            obstacleCapMaterial
+          ];
+        case 'SPLIT_GATE':
+          // Wall threads are plain tall dark fins; gates get a lit lintel so
+          // they read as a framed portal.
+          return isThread
+            ? obstacleBodyMaterial
+            : [
+                obstacleBodyMaterial,
+                obstacleBodyMaterial,
+                obstacleCapMaterial,
+                obstacleBodyMaterial,
+                obstacleBodyMaterial,
+                obstacleBodyMaterial
+              ];
+        case 'SIGNAL_SHUTTER':
+        default:
+          return obstacleBodyMaterial;
+      }
+    };
 
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
@@ -355,18 +432,19 @@ export class GeometryBuilder {
           obstacle.dimensions.y,
           obstacle.dimensions.z
         );
-        // Jumpable signal beams glow; structural blockers stay dark basalt so
-        // the route reads as architecture rather than an obstacle course.
-        const isSignalElement =
-          obstacle.obstacleType === 'SCAN_BAR' || obstacle.obstacleType === 'SWEEP_BEAM';
-        const bodyMaterial = isSignalElement ? obstacleSignalMaterial : obstacleBodyMaterial;
+        // Per-family silhouettes: dark brutalist bodies, luminous bars, moving
+        // rails. Signal colour is trim, not a full saturated surface.
+        const bodyMaterial = obstacleMaterials(obstacle);
         const mesh = new THREE.Mesh(geom, bodyMaterial);
         mesh.name = `RouteObstacle:${obstacle.obstacleType}:${obstacle.id}`;
         mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
         mesh.rotation.set(0, obstacle.yaw, 0, 'YXZ');
         mesh.userData.routeObstacleId = obstacle.id;
         rootGroup.add(mesh);
-        if (isSignalElement) registerBeacon(mesh, 'ACCENT_TRIM');
+        // Only single-material signal elements can be driven as beacons.
+        if (!Array.isArray(mesh.material) && mesh.material === obstacleSignalMaterial) {
+          registerBeacon(mesh, 'ACCENT_TRIM');
+        }
 
         const outline = new THREE.LineSegments(
           new THREE.EdgesGeometry(geom),

@@ -60,6 +60,20 @@ const JUMP_APEX =
 /** A low beam taller than half the apex becomes an unfair instant wall. */
 const MAX_JUMPABLE_HEIGHT = JUMP_APEX * 0.5;
 
+/**
+ * Conservative sustained air-strafe turn rate used to size high-speed obstacle
+ * geometry. PLAYHEAD's air-strafe can exceed this, so the envelope leaves real
+ * margin; it exists to reject clearly impossible geometry, never to retune
+ * movement.
+ */
+const DESIGN_TURN_RATE = 2.8; // rad/s
+/** Extra forward distance required beyond the minimum lane change. */
+const THREAD_TRAVEL_MARGIN = 1.15;
+/** Thread walls read as thin brutalist fins, not cubes. */
+const THREAD_FIN_DEPTH = 0.6;
+const THREAD_FIN_HEIGHT = 4.4;
+const MIN_WALL_WIDTH = 2.6;
+
 const ELIGIBLE_TYPES = new Set<RouteNodeType>([
   RouteNodeType.RUNWAY,
   RouteNodeType.WIDE_FLOW,
@@ -114,6 +128,40 @@ export class RouteChallengeGenerator {
     return RouteChallengeGenerator.lastReport;
   }
 
+  /**
+   * Conservative minimum forward distance needed to shift laterally by
+   * `lateral` at `speed`, using PLAYHEAD's air-strafe turning capability.
+   * An S-curve lane change needs ~2*sqrt(radius * lateral) of forward travel.
+   */
+  public static laneChangeDistance(
+    lateral: number,
+    speed: number,
+    turnRate = DESIGN_TURN_RATE
+  ): number {
+    if (lateral <= 0.01) return 0;
+    const v = Math.max(1, speed);
+    return 2 * Math.sqrt((lateral * v) / Math.max(0.1, turnRate));
+  }
+
+  /**
+   * Estimates the approach speed a player is likely to carry into a platform,
+   * derived from the authored route pacing and scaled for bhop speed retention.
+   * Clamped so obstacle geometry is never tuned for absurd speeds.
+   */
+  public static estimateApproachSpeed(route: RouteNode[], index: number): number {
+    let paced = 0;
+    for (let k = Math.max(0, index - 3); k < index; k++) {
+      const a = route[k];
+      const b = route[k + 1];
+      if (!a || !b) continue;
+      const dt = b.time - a.time;
+      const ds = b.arcLength - a.arcLength;
+      if (dt > 1e-3 && ds > 0) paced = Math.max(paced, ds / dt);
+    }
+    const base = paced > 0 ? paced : 16;
+    return clamp(base * 1.5, 18, 45);
+  }
+
   public static generate(
     route: RouteNode[],
     analysis: TrackAnalysis,
@@ -159,12 +207,14 @@ export class RouteChallengeGenerator {
       if (candidates.length === 0) continue;
 
       const kind = rng.choice(candidates);
+      const designSpeed = RouteChallengeGenerator.estimateApproachSpeed(route, i);
       const elements = RouteChallengeGenerator.buildPhrase(
         kind,
         node,
         size,
         rng,
-        () => nextObstacleId++
+        () => nextObstacleId++,
+        designSpeed
       );
 
       if (!elements || elements.length === 0) {
@@ -267,12 +317,13 @@ export class RouteChallengeGenerator {
     host: RouteNode,
     rng: SeededRandom,
     nextId: () => number,
-    phraseId: number
+    phraseId: number,
+    designSpeed = 50
   ): RouteNode[] | null {
     const size = RouteChallengeGenerator.classifyPlatform(host);
     if (!size) return null;
 
-    const elements = RouteChallengeGenerator.buildPhrase(kind, host, size, rng, nextId);
+    const elements = RouteChallengeGenerator.buildPhrase(kind, host, size, rng, nextId, designSpeed);
     if (!elements || elements.length === 0) return null;
 
     RouteChallengeGenerator.decoratePhrase(
@@ -434,8 +485,9 @@ export class RouteChallengeGenerator {
     const z = node.dimensions.z;
     switch (kind) {
       case 'THREE_WALL_THREAD':
-        // A three-wall slalom needs a genuinely long, broad deck.
-        return size === 'BROAD' && z >= 30;
+        // A three-wall slalom needs a genuinely long, broad deck: the
+        // speed-aware envelope needs room to space the fins out.
+        return size === 'BROAD' && z >= 34;
       case 'LEFT_RIGHT_THREAD':
         return z >= 23 && x >= 13;
       case 'SHUTTER_APPROACH':
@@ -475,7 +527,8 @@ export class RouteChallengeGenerator {
     node: RouteNode,
     size: SizeClass,
     rng: SeededRandom,
-    nextId: () => number
+    nextId: () => number,
+    designSpeed: number
   ): RouteNode[] | null {
     switch (kind) {
       case 'GATE_COMMIT':
@@ -487,9 +540,9 @@ export class RouteChallengeGenerator {
       case 'JUMP_THEN_STRAFE':
         return RouteChallengeGenerator.buildJumpThenStrafe(node, rng, nextId);
       case 'LEFT_RIGHT_THREAD':
-        return RouteChallengeGenerator.buildThread(node, 2, rng, nextId);
+        return RouteChallengeGenerator.buildThread(node, 2, rng, nextId, designSpeed);
       case 'THREE_WALL_THREAD':
-        return RouteChallengeGenerator.buildThread(node, 3, rng, nextId);
+        return RouteChallengeGenerator.buildThread(node, 3, rng, nextId, designSpeed);
       case 'FALSE_CENTER':
         return RouteChallengeGenerator.buildFalseCenter(node, rng, nextId);
       case 'CUTOUT_SLALOM':
@@ -508,12 +561,17 @@ export class RouteChallengeGenerator {
     nextId: () => number
   ): RouteNode[] | null {
     const x = node.dimensions.x;
-    const opening = clamp(x * 0.34, MIN_SAFE_LANE + EDGE_MARGIN, 8.0);
+    // Deterministic controlled variation: opening width, wall height and depth
+    // all vary a little so gates do not read as identical copies.
+    const openingRatio = rng.nextFloat(0.30, 0.40);
+    const opening = clamp(x * openingRatio, MIN_SAFE_LANE + EDGE_MARGIN, 8.5);
     const wallWidth = x - opening - EDGE_MARGIN;
     if (wallWidth < 3.0) return null;
 
     const openSide: 'LEFT' | 'RIGHT' = rng.nextBool() ? 'LEFT' : 'RIGHT';
-    const wall = RouteChallengeGenerator.makeWall(node, wallWidth, openSide, 0, 4.2, 0.95, nextId());
+    const height = rng.nextFloat(4.0, 4.8);
+    const depth = rng.nextFloat(0.8, 1.1);
+    const wall = RouteChallengeGenerator.makeWall(node, wallWidth, openSide, 0, height, depth, nextId());
     if (!wall) return null;
     return [wall];
   }
@@ -562,38 +620,90 @@ export class RouteChallengeGenerator {
     return [bar, block];
   }
 
-  /** Two or three thin walls with alternating openings; slalom through. */
+  /**
+   * Two or three thin brutalist fins with alternating openings.
+   *
+   * Geometry is SPEED-AWARE. At high approach speed the openings widen and the
+   * fins spread further apart, so the required lateral change stays inside
+   * PLAYHEAD's air-strafe envelope. At low speed the phrase stays tighter.
+   * Combinations that are physically unreasonable at the estimated approach
+   * speed are rejected rather than generated as impossible geometry.
+   */
   private static buildThread(
     node: RouteNode,
     count: 2 | 3,
     rng: SeededRandom,
-    nextId: () => number
+    nextId: () => number,
+    designSpeed: number
   ): RouteNode[] | null {
     const x = node.dimensions.x;
     const z = node.dimensions.z;
+    const playerDiameter = PLAYHEAD_MOVEMENT_V1.playerRadius * 2;
+    // Openings never exceed 44% of the platform, so the fins always read as a
+    // real wall with a real opening rather than degenerating into open space.
+    const maxOpening = Math.min(x - EDGE_MARGIN - MIN_WALL_WIDTH, x * 0.44);
+    if (maxOpening < MIN_OPENING + 0.8) return null;
 
-    // Narrower openings for a 3-wall thread, still comfortably traversable.
-    const targetOpening = count === 3
-      ? clamp(x * 0.24, MIN_OPENING + 0.5, 5.4)
-      : clamp(x * 0.3, MIN_SAFE_LANE, 6.5);
+    const maxSpacing = (z * 0.76) / (count - 1);
+
+    // Openings widen with approach speed (less aggressive at high speed).
+    const speedT = clamp((designSpeed - 20) / 35, 0, 1);
+    const baseRatio = count === 3
+      ? 0.26 + 0.08 * speedT
+      : 0.32 + 0.10 * speedT;
+
+    // Minimum lateral travel between alternating openings, including the
+    // player's own width: they must clear both fins.
+    const lateralFor = (opening: number) =>
+      Math.max(0, x - 2 * opening + playerDiameter);
+
+    let opening = clamp(baseRatio * x, MIN_OPENING + 0.8, maxOpening);
+    let required =
+      RouteChallengeGenerator.laneChangeDistance(lateralFor(opening), designSpeed) * THREAD_TRAVEL_MARGIN;
+
+    // If the deck cannot provide the required spacing, widen the opening (up to
+    // the cap) to reduce the required lateral change.
+    if (required > maxSpacing) {
+      const deltaMax = Math.pow(maxSpacing / (2 * THREAD_TRAVEL_MARGIN), 2) *
+        DESIGN_TURN_RATE / Math.max(1, designSpeed);
+      opening = clamp((x + playerDiameter - deltaMax) * 0.5, opening, maxOpening);
+      required =
+        RouteChallengeGenerator.laneChangeDistance(lateralFor(opening), designSpeed) * THREAD_TRAVEL_MARGIN;
+      // Still unreasonable at this speed: reject rather than emit a trivial
+      // near-open slalom.
+      if (required > maxSpacing + 0.5) return null;
+    }
+
+    const wallWidth = x - opening - EDGE_MARGIN;
+    if (wallWidth < MIN_WALL_WIDTH) return null;
+
+    const spacing = clamp(
+      required * rng.nextFloat(1.0, 1.12),
+      // Higher approach speed also spreads the fins further apart, so the
+      // phrase stays readable and the trajectory is smoother.
+      Math.max(6.0, Math.min(8.0 + 10.0 * speedT, maxSpacing)),
+      maxSpacing
+    );
 
     const startSide: 'LEFT' | 'RIGHT' = rng.nextBool() ? 'LEFT' : 'RIGHT';
-    const spacing = count === 3 ? z * 0.22 : z * 0.16;
-    const startZ = count === 3 ? -z * 0.22 : -z * 0.16;
+    // Bias the span forward within the deck so the player gets a real run-up
+    // to the first fin (readability + speed testing) while keeping an exit.
+    const span = spacing * (count - 1);
+    const slack = Math.max(0, z - span);
+    const approach = Math.max(3.0, Math.min(slack - 3.0, slack * 0.6));
+    const startZ = -z * 0.5 + approach;
 
     const walls: RouteNode[] = [];
     for (let i = 0; i < count; i++) {
       const side: 'LEFT' | 'RIGHT' =
         (i % 2 === 0) === (startSide === 'LEFT') ? 'LEFT' : 'RIGHT';
-      const wallWidth = x - targetOpening - EDGE_MARGIN;
-      if (wallWidth < 2.6) return null;
       const wall = RouteChallengeGenerator.makeWall(
         node,
         wallWidth,
         side,
         startZ + spacing * i,
-        4.2,
-        0.85,
+        THREAD_FIN_HEIGHT,
+        THREAD_FIN_DEPTH,
         nextId()
       );
       if (!wall) return null;
@@ -703,22 +813,31 @@ export class RouteChallengeGenerator {
     );
   }
 
+  /**
+   * Short moving signal rail. Unlike the stationary full-width SCAN BAR, the
+   * sweep beam is a shorter segment that travels across the lane, so its motion
+   * genuinely changes which side is open. It stays low enough to jump.
+   */
   private static makeSweepBeam(
     node: RouteNode,
     localZ: number,
     rng: SeededRandom,
     id: number
   ): RouteNode | null {
-    const width = node.dimensions.x - 1.2;
+    const x = node.dimensions.x;
+    // 30-50% of usable platform width, never a near-full-width bar.
+    const width = clamp(x * 0.4, 3.2, 7.5);
     const height = Math.min(0.62, MAX_JUMPABLE_HEIGHT * 0.85);
-    if (width < 6) return null;
+    // A usable lane must always remain on at least one side.
+    if (x - width < MIN_OPENING * 2) return null;
+
     const beam = RouteChallengeGenerator.element(
-      node, 'SWEEP_BEAM', width, height, 0.55, 0, localZ, 'JUMP', id
+      node, 'SWEEP_BEAM', width, height, 0.5, 0, localZ, 'JUMP', id
     );
-    // Low, jumpable, and slow enough to read on approach.
+    // Travel across the lane so passing left/right/timing all matter.
     beam.obstacleMotion = {
-      amplitude: Math.min(2.4, Math.max(1.2, (node.dimensions.x - width) * 0.5 + 1.4)),
-      speed: rng.nextFloat(0.7, 1.0),
+      amplitude: Math.max(1.0, (x - width) * 0.5 - EDGE_MARGIN),
+      speed: rng.nextFloat(1.4, 2.0),
       phase: rng.nextFloat(0, Math.PI * 2)
     };
     return beam;

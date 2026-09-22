@@ -63,11 +63,25 @@ describe('Movement Lab — obstacle gauntlet', () => {
     const layout = buildGauntletLayout();
     for (let i = 0; i < layout.stations.length; i++) {
       const station = layout.stations[i];
-      if (station.kind === 'START' || station.kind === 'FINISH') continue;
+      if (station.kind === 'START' || station.kind === 'FINISH' || station.kind === 'RUNUP') continue;
       const host = layout.route[i];
       const hosted = layout.obstacles.filter(o => o.obstacleSourceNodeId === host.id);
       expect(hosted.length, `${station.label} produced no obstacle`).toBeGreaterThan(0);
       expect(hosted[0].obstaclePhraseKind, `${station.label} missing phrase metadata`).toBeTruthy();
+    }
+  });
+
+  it('keeps compact signage out of the platform footprint and above head height', () => {
+    const layout = buildGauntletLayout();
+    expect(layout.signage.length).toBe(layout.stations.length);
+    for (let i = 0; i < layout.signage.length; i++) {
+      const sign = layout.signage[i];
+      const station = layout.stations[i];
+      // Beside the route, not over it.
+      expect(Math.abs(sign.position.x)).toBeGreaterThan(station.width * 0.5);
+      // Above the player's head so it cannot obscure the obstacle.
+      expect(sign.position.y).toBeGreaterThan(2.5);
+      expect(sign.width).toBeLessThanOrEqual(7);
     }
   });
 
