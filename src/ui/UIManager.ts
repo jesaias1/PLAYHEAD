@@ -12,6 +12,7 @@ import { SettingsModal } from './SettingsModal';
 import { ArmoryModal } from './ArmoryModal';
 import { MovementLabSongModal } from './MovementLabSongModal';
 import { SignalDecodeModal } from './SignalDecodeModal';
+import { RaceHud } from './RaceHud';
 import { VisualAccent } from '../audio/AudioFeatures';
 
 export class UIManager {
@@ -25,6 +26,8 @@ export class UIManager {
   public armoryModal: ArmoryModal;
   public movementLabSongModal: MovementLabSongModal;
   public decodeModal: SignalDecodeModal;
+  /** Shared best-time session overlay (hidden outside a race). */
+  public raceHud: RaceHud;
 
   public root: HTMLElement;
 
@@ -41,6 +44,7 @@ export class UIManager {
     this.armoryModal = new ArmoryModal();
     this.movementLabSongModal = new MovementLabSongModal();
     this.decodeModal = new SignalDecodeModal();
+    this.raceHud = new RaceHud();
 
     this.armoryModal.setDecodeModal(this.decodeModal);
     this.importScreen.setDecodeModal(this.decodeModal);
@@ -56,6 +60,7 @@ export class UIManager {
     this.root.appendChild(this.armoryModal.element);
     this.root.appendChild(this.movementLabSongModal.element);
     this.root.appendChild(this.decodeModal.element);
+    this.root.appendChild(this.raceHud.element);
   }
 
   public applyAccent(accent: VisualAccent): void {

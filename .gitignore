@@ -7,6 +7,10 @@ dist/
 .env
 .env.local
 .env.*.local
+.env*.txt
+
+# Supabase CLI local artifacts
+supabase/.temp/
 
 # Local measurement / scratch artifacts
 .perf/

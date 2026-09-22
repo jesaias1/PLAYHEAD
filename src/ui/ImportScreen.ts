@@ -13,6 +13,7 @@ import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinS
 import { createProgramFingerprint } from './SignalIdentity';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { formatTime } from '../utils/math';
+import { OnlinePanel } from './OnlinePanel';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -22,6 +23,16 @@ export class ImportScreen {
   private tabCustomBtn: HTMLButtonElement;
   private tabLabBtn: HTMLButtonElement;
   private tabArmoryBtn: HTMLButtonElement;
+  private tabOnlineBtn: HTMLButtonElement;
+  /** Player-facing online experience (leaderboards + friend sessions). */
+  public onlinePanel: OnlinePanel = new OnlinePanel();
+  /** Called when the ONLINE tab is opened (used to refresh leaderboards). */
+  public onOnlineTabOpened?: () => void;
+
+  /** Opens the ONLINE tab programmatically (e.g. from an invite URL). */
+  public openOnlineTab(): void {
+    this.switchModule(4);
+  }
 
   private showcasePanel: HTMLElement;
   private customPanel: HTMLElement;
@@ -97,6 +108,7 @@ export class ImportScreen {
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
           <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // KARAMBIT ARMORY ]</button>
+          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1">[ 05 // ONLINE ]</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL -->
@@ -231,6 +243,9 @@ export class ImportScreen {
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
 
+        <!-- 05: ONLINE PANEL (mounted by OnlinePanel) -->
+        <div id="online-panel-host"></div>
+
         <div class="privacy-notice terminal-footer-status">
           [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
         </div>
@@ -242,6 +257,19 @@ export class ImportScreen {
     this.tabCustomBtn = this.element.querySelector('#tab-btn-custom') as HTMLButtonElement;
     this.tabLabBtn = this.element.querySelector('#tab-btn-lab') as HTMLButtonElement;
     this.tabArmoryBtn = this.element.querySelector('#tab-btn-armory') as HTMLButtonElement;
+    this.tabOnlineBtn = this.element.querySelector('#tab-btn-online') as HTMLButtonElement;
+
+    // ONLINE panel (owned by its own module; mounted into the host slot).
+    const onlineHost = this.element.querySelector('#online-panel-host') as HTMLElement;
+    if (onlineHost) onlineHost.appendChild(this.onlinePanel.element);
+    this.onlinePanel.setCatalog(
+      this.catalog.map((t) => ({
+        id: t.id,
+        title: t.title,
+        bpm: t.bpm,
+        difficultyLabel: t.difficultyLabel
+      }))
+    );
 
     this.showcasePanel = this.element.querySelector('#panel-showcase') as HTMLElement;
     this.customPanel = this.element.querySelector('#panel-custom') as HTMLElement;
@@ -639,7 +667,7 @@ export class ImportScreen {
   }
 
   private initEvents(): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
     tabs.forEach((tab, index) => {
       tab.addEventListener('click', () => this.switchModule(index));
       tab.addEventListener('keydown', (event) => {
@@ -744,8 +772,8 @@ export class ImportScreen {
   }
 
   private switchModule(activeIndex: number): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
-    const panels = [this.showcasePanel, this.customPanel, this.labPanel, this.armoryPanel];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
+    const panels = [this.showcasePanel, this.customPanel, this.labPanel, this.armoryPanel, this.onlinePanel.element];
     if (activeIndex !== 0) this.stopPreview();
 
     tabs.forEach((tab, index) => {
@@ -758,5 +786,6 @@ export class ImportScreen {
     });
 
     if (activeIndex === 3) this.renderArmory();
+    if (activeIndex === 4) this.onOnlineTabOpened?.();
   }
 }

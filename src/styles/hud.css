@@ -339,3 +339,57 @@
   box-shadow: 0 0 8px var(--accent-color);
   transition: width 0.1s linear;
 }
+
+/* ==========================================================================
+   RACE HUD — shared best-time session overlay (minimal, non-obstructive)
+   ========================================================================== */
+
+.race-hud {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  z-index: 5;
+}
+
+.race-hud-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.45);
+}
+.race-hud-clock-label { font-size: 0.62rem; letter-spacing: 0.16em; color: #6d7885; }
+.race-hud-clock-val { font-size: 1rem; letter-spacing: 0.08em; color: var(--accent-color); }
+.race-hud-clock-low { color: #ffb020; }
+
+.race-hud-panel { display: flex; gap: 14px; }
+.race-hud-player {
+  min-width: 168px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+}
+.race-hud-rival { border-color: rgba(255, 255, 255, 0.06); }
+.race-hud-disconnected { opacity: 0.55; }
+.race-hud-name { font-size: 0.66rem; letter-spacing: 0.14em; color: var(--accent-color); margin-bottom: 4px; }
+.race-hud-rival .race-hud-name { color: #9d8cff; }
+.race-hud-row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.74rem; }
+.race-hud-row span { color: #6d7885; font-size: 0.64rem; letter-spacing: 0.1em; align-self: center; }
+.race-hud-row b { color: #d7e3ef; font-weight: 500; }
+
+.race-hud-notice {
+  padding: 4px 12px;
+  border: 1px solid var(--accent-color);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--accent-color);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+}

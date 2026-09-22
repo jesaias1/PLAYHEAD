@@ -531,6 +531,61 @@ describe('Leaderboard — submission gating and anti-cheat V1', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('Online UI — race time formatting', () => {
+  it('formats microsecond values as MM:SS.mmm', async () => {
+    const { formatRaceTime, formatSessionClock } = await import('../src/ui/RaceHud');
+    expect(formatRaceTime(54_821_000)).toBe('00:54.821');
+    expect(formatRaceTime(57_104_000)).toBe('00:57.104');
+    expect(formatRaceTime(0)).toBe('00:00.000');
+    expect(formatRaceTime(3_600_000_000)).toBe('60:00.000');
+    expect(formatRaceTime(null)).toBe('--:--.---');
+    expect(formatRaceTime(-1)).toBe('--:--.---');
+    expect(formatRaceTime(Number.NaN)).toBe('--:--.---');
+  });
+
+  it('formats the shared session clock as MM:SS and clamps at zero', async () => {
+    const { formatSessionClock } = await import('../src/ui/RaceHud');
+    expect(formatSessionClock(300_000)).toBe('05:00');
+    expect(formatSessionClock(221_000)).toBe('03:41');
+    expect(formatSessionClock(0)).toBe('00:00');
+    expect(formatSessionClock(-5000)).toBe('00:00');
+  });
+
+  it('never lets display rounding create a tie', async () => {
+    const { formatRaceTime } = await import('../src/ui/RaceHud');
+    // 59.999999 s displays as 00:59.999 and 60.000000 s as 01:00.000.
+    expect(formatRaceTime(59_999_999)).toBe('00:59.999');
+    expect(formatRaceTime(60_000_000)).toBe('01:00.000');
+    // Two values that DO format identically must still not tie, because
+    // comparison uses raw microseconds (see computeSessionResults).
+    const rows = computeSessionResults([
+      player({ userId: 'a', sessionBestUs: 60_000_000 }),
+      player({ userId: 'b', sessionBestUs: 60_000_001 })
+    ]);
+    expect(formatRaceTime(60_000_000)).toBe(formatRaceTime(60_000_001));
+    expect(rows[0].outcome).toBe('WIN');
+    expect(rows[1].outcome).toBe('LOSS');
+  });
+});
+
+describe('Online UI — invite code parsing', () => {
+  it('accepts the deployed-origin and localhost shapes alike', () => {
+    expect(RaceRoomService.readInviteCodeFromUrl('https://playhead.vercel.app/?room=AB12CD')).toBe('AB12CD');
+    expect(RaceRoomService.readInviteCodeFromUrl('http://localhost:3000/?room=ab12cd')).toBe('AB12CD');
+    expect(RaceRoomService.readInviteCodeFromUrl('https://x.dev/?room=AB12CD&debug=1')).toBe('AB12CD');
+    expect(RaceRoomService.readInviteCodeFromUrl('https://x.dev/?debug=1')).toBeNull();
+  });
+});
+
+// NOTE: the ONLINE panel, race lobby, results table and leaderboard table are
+// DOM components and this project's test runner has no DOM environment. They are
+// verified by the browser probe (.perf/online_ui.json) rather than by unit
+// tests: it confirms the tab exists, both sections render, all 14 tracks are
+// selectable in both selectors, the race HUD exists hidden, the invite URL
+// activates the ONLINE tab, and there are zero console errors.
+
+// ---------------------------------------------------------------------------
+
 describe('Cloud progression — offline-first and no reward duplication', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
