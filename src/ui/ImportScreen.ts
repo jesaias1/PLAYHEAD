@@ -13,7 +13,8 @@ import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinS
 import { createProgramFingerprint } from './SignalIdentity';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { formatTime } from '../utils/math';
-import { OnlinePanel } from './OnlinePanel';
+import { RacePanel } from './RacePanel';
+import { LeaderboardPanel } from './LeaderboardPanel';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -23,15 +24,25 @@ export class ImportScreen {
   private tabCustomBtn: HTMLButtonElement;
   private tabLabBtn: HTMLButtonElement;
   private tabArmoryBtn: HTMLButtonElement;
-  private tabOnlineBtn: HTMLButtonElement;
-  /** Player-facing online experience (leaderboards + friend sessions). */
-  public onlinePanel: OnlinePanel = new OnlinePanel();
-  /** Called when the ONLINE tab is opened (used to refresh leaderboards). */
-  public onOnlineTabOpened?: () => void;
+  private tabRaceBtn: HTMLButtonElement;
+  private tabLeaderboardBtn: HTMLButtonElement;
 
-  /** Opens the ONLINE tab programmatically (e.g. from an invite URL). */
-  public openOnlineTab(): void {
+  /** 05 // RACE WITH FRIENDS � multiplayer session only. */
+  public racePanel: RacePanel = new RacePanel();
+  /** 06 // WORLD LEADERBOARD � competitive rankings only. */
+  public leaderboardPanel: LeaderboardPanel = new LeaderboardPanel();
+
+  /** Called when the leaderboard tab is opened (used to refresh the board). */
+  public onLeaderboardTabOpened?: () => void;
+
+  /** Opens 05 // RACE WITH FRIENDS (e.g. from an invite URL). */
+  public openRaceTab(): void {
     this.switchModule(4);
+  }
+
+  /** Opens 06 // WORLD LEADERBOARD. */
+  public openLeaderboardTab(): void {
+    this.switchModule(5);
   }
 
   private showcasePanel: HTMLElement;
@@ -108,7 +119,8 @@ export class ImportScreen {
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
           <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // KARAMBIT ARMORY ]</button>
-          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1">[ 05 // ONLINE ]</button>
+          <button class="import-tab-btn" id="tab-btn-race" type="button" role="tab" aria-selected="false" aria-controls="panel-race" tabindex="-1" title="RACE WITH FRIENDS">[ 05 // RACE ]</button>
+          <button class="import-tab-btn" id="tab-btn-leaderboard" type="button" role="tab" aria-selected="false" aria-controls="panel-leaderboard" tabindex="-1" title="WORLD LEADERBOARD">[ 06 // LEADERBOARD ]</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL -->
@@ -243,8 +255,9 @@ export class ImportScreen {
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
 
-        <!-- 05: ONLINE PANEL (mounted by OnlinePanel) -->
-        <div id="online-panel-host"></div>
+        <!-- 05 / 06: ONLINE PANELS (mounted by RacePanel + LeaderboardPanel) -->
+        <div id="race-panel-host"></div>
+        <div id="leaderboard-panel-host"></div>
 
         <div class="privacy-notice terminal-footer-status">
           [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
@@ -257,19 +270,23 @@ export class ImportScreen {
     this.tabCustomBtn = this.element.querySelector('#tab-btn-custom') as HTMLButtonElement;
     this.tabLabBtn = this.element.querySelector('#tab-btn-lab') as HTMLButtonElement;
     this.tabArmoryBtn = this.element.querySelector('#tab-btn-armory') as HTMLButtonElement;
-    this.tabOnlineBtn = this.element.querySelector('#tab-btn-online') as HTMLButtonElement;
+    this.tabRaceBtn = this.element.querySelector('#tab-btn-race') as HTMLButtonElement;
+    this.tabLeaderboardBtn = this.element.querySelector('#tab-btn-leaderboard') as HTMLButtonElement;
 
-    // ONLINE panel (owned by its own module; mounted into the host slot).
-    const onlineHost = this.element.querySelector('#online-panel-host') as HTMLElement;
-    if (onlineHost) onlineHost.appendChild(this.onlinePanel.element);
-    this.onlinePanel.setCatalog(
-      this.catalog.map((t) => ({
-        id: t.id,
-        title: t.title,
-        bpm: t.bpm,
-        difficultyLabel: t.difficultyLabel
-      }))
-    );
+    // ONLINE panels (each owned by its own module; mounted into host slots).
+    const raceHost = this.element.querySelector('#race-panel-host') as HTMLElement;
+    if (raceHost) raceHost.appendChild(this.racePanel.element);
+    const leaderboardHost = this.element.querySelector('#leaderboard-panel-host') as HTMLElement;
+    if (leaderboardHost) leaderboardHost.appendChild(this.leaderboardPanel.element);
+
+    const catalogEntries = this.catalog.map((t) => ({
+      id: t.id,
+      title: t.title,
+      bpm: t.bpm,
+      difficultyLabel: t.difficultyLabel
+    }));
+    this.racePanel.setCatalog(catalogEntries);
+    this.leaderboardPanel.setCatalog(catalogEntries);
 
     this.showcasePanel = this.element.querySelector('#panel-showcase') as HTMLElement;
     this.customPanel = this.element.querySelector('#panel-custom') as HTMLElement;
@@ -667,7 +684,7 @@ export class ImportScreen {
   }
 
   private initEvents(): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabRaceBtn, this.tabLeaderboardBtn];
     tabs.forEach((tab, index) => {
       tab.addEventListener('click', () => this.switchModule(index));
       tab.addEventListener('keydown', (event) => {
@@ -772,8 +789,15 @@ export class ImportScreen {
   }
 
   private switchModule(activeIndex: number): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
-    const panels = [this.showcasePanel, this.customPanel, this.labPanel, this.armoryPanel, this.onlinePanel.element];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabRaceBtn, this.tabLeaderboardBtn];
+    const panels = [
+      this.showcasePanel,
+      this.customPanel,
+      this.labPanel,
+      this.armoryPanel,
+      this.racePanel.element,
+      this.leaderboardPanel.element
+    ];
     if (activeIndex !== 0) this.stopPreview();
 
     tabs.forEach((tab, index) => {
@@ -786,6 +810,6 @@ export class ImportScreen {
     });
 
     if (activeIndex === 3) this.renderArmory();
-    if (activeIndex === 4) this.onOnlineTabOpened?.();
+    if (activeIndex === 5) this.onLeaderboardTabOpened?.();
   }
 }

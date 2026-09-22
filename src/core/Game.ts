@@ -2281,37 +2281,45 @@ export class Game {
     // Remote ghost: a translucent signal body in the existing scene.
     this.raceGhost = new RemoteGhostRenderer(this.environment.scene);
 
-    const panel = this.ui.importScreen.onlinePanel;
-    panel.setCallbacks({
-      onPlayTrack: (trackId) => void this.loadPresetTrack(trackId),
-      onRequestLeaderboard: (trackId) => void this.refreshLeaderboard(trackId),
+    const racePanel = this.ui.importScreen.racePanel;
+    const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
+
+    racePanel.setCallbacks({
       onCreateRoom: (trackId) => void this.createRaceRoom(trackId),
       onJoinRoom: (code) => void this.joinRaceRoom(code),
       onSetReady: (ready) => void raceRoomService.setReady(ready),
       onStartSession: () => void this.startRaceSession(),
       onLeaveRoom: () => void this.leaveRaceRoom(),
+      onRetryConnection: () => onlineBootstrap.retry()
+    });
+
+    leaderboardPanel.setCallbacks({
+      onSelectTrack: (trackId) => void this.refreshLeaderboard(trackId),
+      onPlaySignal: (trackId) => void this.loadPresetTrack(trackId),
       onRetryConnection: () => {
         onlineBootstrap.retry();
-        void this.refreshLeaderboard(panel.getSelectedLeaderboardTrack());
+        void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
       }
     });
 
-    this.ui.importScreen.onOnlineTabOpened = () => {
+    this.ui.importScreen.onLeaderboardTabOpened = () => {
       this.refreshOnlineStatus();
-      void this.refreshLeaderboard(panel.getSelectedLeaderboardTrack());
+      void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
     };
 
-    // Online status → panel status bar.
+    // Online status → both status bars.
     onlineBootstrap.subscribe((status) => {
       const tag = onlineBootstrap.getClient().getStatusLabel();
-      panel.setStatus(tag, `${status.state} // ${status.detail}`);
+      const detail = `${status.state} // ${status.detail}`;
+      racePanel.setStatus(tag, detail);
+      leaderboardPanel.setStatus(tag, detail);
     });
     this.refreshOnlineStatus();
 
     // Race room callbacks.
     raceRoomService.setCallbacks({
       onRoomUpdate: (room, players) => {
-        const panelRef = this.ui.importScreen.onlinePanel;
+        const panelRef = this.ui.importScreen.racePanel;
         panelRef.setHost(raceRoomService.isHost());
         panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId());
         // A scheduled start drives the local countdown → session.
@@ -2327,24 +2335,24 @@ export class Game {
         this.ui.raceHud.showNotice('PLAYER DISCONNECTED');
       },
       onFinished: (rows) => this.showRaceResults(rows),
-      onError: (detail) => this.ui.importScreen.onlinePanel.showRaceError(detail)
+      onError: (detail) => this.ui.importScreen.racePanel.showError(detail)
     });
 
-    // Invite URL: ?room=CODE opens the ONLINE tab and joins automatically.
+    // Invite URL: ?room=CODE opens 05 // RACE WITH FRIENDS and joins automatically.
     const invite = RaceRoomService.readInviteCodeFromUrl();
     if (invite) {
       this.pendingInviteCode = invite;
-      this.ui.importScreen.openOnlineTab();
+      this.ui.importScreen.openRaceTab();
       void this.consumePendingInvite();
     }
   }
 
   private refreshOnlineStatus(): void {
     const status = onlineBootstrap.getStatus();
-    this.ui.importScreen.onlinePanel.setStatus(
-      onlineBootstrap.getClient().getStatusLabel(),
-      `${status.state} // ${status.detail}`
-    );
+    const tag = onlineBootstrap.getClient().getStatusLabel();
+    const detail = `${status.state} // ${status.detail}`;
+    this.ui.importScreen.racePanel.setStatus(tag, detail);
+    this.ui.importScreen.leaderboardPanel.setStatus(tag, detail);
   }
 
   /**
@@ -2364,39 +2372,36 @@ export class Game {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     this.pendingInviteCode = null;
-    this.ui.importScreen.onlinePanel.showRaceError(
+    this.ui.importScreen.racePanel.showError(
       'COULD NOT JOIN ROOM // ONLINE SESSION UNAVAILABLE\n' + code
     );
   }
 
   private async refreshLeaderboard(trackId: string): Promise<void> {
-    const panel = this.ui.importScreen.onlinePanel;
+    const panel = this.ui.importScreen.leaderboardPanel;
     const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
-    panel.setLeaderboardLoading(title);
+    panel.setLoading(title);
 
     // The board is scoped to the canonical identity of the local map.
     const level = await PresetLevelCache.loadPreset(trackId);
     if (!level) {
-      panel.renderLeaderboard(
-        { trackId, entries: [], you: null, offline: true },
-        title
-      );
+      panel.render({ trackId, entries: [], you: null, offline: true }, title);
       return;
     }
     const identity = computeMapIdentity(trackId, level.track, level.analysis);
     const view = await leaderboardService.fetchLeaderboard(trackId, identity);
-    panel.renderLeaderboard(view, title);
+    panel.render(view, title);
   }
 
   // -- race lifecycle -------------------------------------------------------
 
   private async createRaceRoom(trackId: string): Promise<void> {
-    const panel = this.ui.importScreen.onlinePanel;
-    panel.clearRaceError();
+    const panel = this.ui.importScreen.racePanel;
+    panel.clearError();
 
     const level = await PresetLevelCache.loadPreset(trackId);
     if (!level) {
-      panel.showRaceError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
+      panel.showError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
       return;
     }
     const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
@@ -2408,7 +2413,7 @@ export class Game {
       identity
     });
     if (!result.ok) {
-      panel.showRaceError(`COULD NOT CREATE ROOM // ${result.detail.toUpperCase()}`);
+      panel.showError(`COULD NOT CREATE ROOM // ${result.detail.toUpperCase()}`);
       return;
     }
     panel.setHost(true);
@@ -2422,25 +2427,25 @@ export class Game {
   }
 
   private async joinRaceRoom(code: string): Promise<void> {
-    const panel = this.ui.importScreen.onlinePanel;
-    panel.clearRaceError();
+    const panel = this.ui.importScreen.racePanel;
+    panel.clearError();
 
     const result = await raceRoomService.joinByInviteCode(code);
     if (!result.ok) {
-      panel.showRaceError(`COULD NOT JOIN // ${result.detail.toUpperCase()}`);
+      panel.showError(`COULD NOT JOIN // ${result.detail.toUpperCase()}`);
       return;
     }
 
     // Both clients MUST agree on the map before READY/START is meaningful.
     const level = await PresetLevelCache.loadPreset(result.room.trackId);
     if (!level) {
-      panel.showRaceError('CANONICAL MAP UNAVAILABLE FOR THIS ROOM');
+      panel.showError('CANONICAL MAP UNAVAILABLE FOR THIS ROOM');
       await raceRoomService.leaveRoom();
       return;
     }
     const verdict = raceRoomService.verifyLocalMap(level.track);
     if (!verdict.ok) {
-      panel.showRaceError(verdict.detail);
+      panel.showError(verdict.detail);
       await raceRoomService.leaveRoom();
       return;
     }
@@ -2458,7 +2463,7 @@ export class Game {
   private async startRaceSession(): Promise<void> {
     const result = await raceRoomService.startSession();
     if (!result.ok) {
-      this.ui.importScreen.onlinePanel.showRaceError(result.detail.toUpperCase());
+      this.ui.importScreen.racePanel.showError(result.detail.toUpperCase());
       return;
     }
     // The scheduled timestamp drives the countdown on every client.
@@ -2476,12 +2481,12 @@ export class Game {
 
     const level = await PresetLevelCache.loadPreset(room.trackId);
     if (!level) {
-      this.ui.importScreen.onlinePanel.showRaceError('CANONICAL MAP UNAVAILABLE');
+      this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE');
       return;
     }
     const verdict = raceRoomService.verifyLocalMap(level.track);
     if (!verdict.ok) {
-      this.ui.importScreen.onlinePanel.showRaceError(verdict.detail);
+      this.ui.importScreen.racePanel.showError(verdict.detail);
       return;
     }
 
@@ -2513,11 +2518,11 @@ export class Game {
   }
 
   private showRaceResults(rows: readonly RaceResultRow[]): void {
-    const panel = this.ui.importScreen.onlinePanel;
+    const panel = this.ui.importScreen.racePanel;
     panel.renderResults(rows, authService.getUserId());
     panel.showResults();
     this.ui.importScreen.show();
-    this.ui.importScreen.openOnlineTab();
+    this.ui.importScreen.openRaceTab();
   }
 
   private async leaveRaceRoom(): Promise<void> {
@@ -2526,7 +2531,7 @@ export class Game {
     this.ui.raceHud.hide();
     this.raceGhost?.clear();
     await raceRoomService.leaveRoom();
-    this.ui.importScreen.onlinePanel.showRaceSelect();
+    this.ui.importScreen.racePanel.showSelect();
   }
 
   /**

@@ -159,7 +159,7 @@
 
 .import-tabs {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   margin-bottom: 14px;
   border-bottom: 1px solid var(--border-subtle);
   padding-bottom: 6px;
@@ -169,10 +169,10 @@
 
 .import-tab-btn {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.56rem;
   font-weight: 700;
-  letter-spacing: 0.11em;
-  padding: 8px 14px;
+  letter-spacing: 0.04em;
+  padding: 8px 8px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-bottom: 2px solid transparent;
@@ -182,6 +182,9 @@
   text-transform: uppercase;
   margin-bottom: -7px;
   white-space: nowrap;
+  /* Six tabs must stay on ONE row: never shrink below content width, or the
+     labels overlap each other. */
+  flex-shrink: 0;
 }
 
 .import-tab-btn:hover {
@@ -1699,10 +1702,11 @@ option:hover, option:focus, option:checked {
    05 // ONLINE — world leaderboards + friend best-time sessions
    ========================================================================== */
 
-.online-panel {
+.race-panel,
+.leaderboard-panel {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .online-status-bar {
@@ -1770,6 +1774,14 @@ option:hover, option:focus, option:checked {
 
 /* ---- leaderboard ---- */
 
+.leaderboard-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 4px 0 6px;
+}
+
 .online-lb-status {
   font-family: var(--font-mono);
   font-size: 0.74rem;
@@ -1805,7 +1817,7 @@ option:hover, option:focus, option:checked {
 
 /* ---- race ---- */
 
-.online-race-error {
+.race-error {
   font-family: var(--font-mono);
   font-size: 0.74rem;
   color: #ff6b6b;
