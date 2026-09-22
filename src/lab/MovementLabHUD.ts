@@ -104,6 +104,8 @@ export class MovementLabHUD {
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>9</b> OBSTACLE LAB</span>
         <span class="cheat-sep">|</span>
+        <span class="cheat-item"><b>0</b> GATE RUN</span>
+        <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>[ ]</b> SECTION</span>
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>T</b> TRAJECTORY</span>

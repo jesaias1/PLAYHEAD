@@ -165,6 +165,87 @@ export class MovementSfx {
     });
   }
 
+  /**
+   * SIGNAL GATE crossed. Short clean mechanical/signal lock; a cleaner, more
+   * centred pass gets a slightly brighter confirm.
+   */
+  public playGateLock(quality: number): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const vol = this.master() * (0.6 + 0.4 * Math.min(1, Math.max(0, quality)));
+    if (vol <= 0.001) return;
+
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(520, now);
+    osc.frequency.exponentialRampToValueAtTime(1180, now + 0.07);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(900, now);
+    filter.Q.setValueAtTime(3.0, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.13 * vol, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    const click = ctx.createOscillator();
+    const clickGain = ctx.createGain();
+    click.type = 'sine';
+    click.frequency.setValueAtTime(220, now);
+    click.frequency.exponentialRampToValueAtTime(70, now + 0.05);
+    clickGain.gain.setValueAtTime(0.1 * vol, now);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+    click.connect(clickGain);
+    clickGain.connect(ctx.destination);
+    click.start(now);
+    click.stop(now + 0.08);
+  }
+
+  /** Whole SIGNAL GATE chain completed (PERFECT LINE). */
+  public playGateComplete(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const vol = this.master();
+    if (vol <= 0.001) return;
+
+    const now = ctx.currentTime;
+    const freqs = [660, 880, 1320];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const delay = i * 0.07;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + delay);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.35, now + delay + 0.18);
+      gain.gain.setValueAtTime(0.0001, now + delay);
+      gain.gain.exponentialRampToValueAtTime(0.12 * vol, now + delay + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.34);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + delay);
+      osc.stop(now + delay + 0.36);
+    });
+
+    const sub = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(120, now);
+    sub.frequency.exponentialRampToValueAtTime(48, now + 0.28);
+    subGain.gain.setValueAtTime(0.22 * vol, now);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+    sub.connect(subGain);
+    subGain.connect(ctx.destination);
+    sub.start(now);
+    sub.stop(now + 0.34);
+  }
+
   /** Decisive finish impact: signal-lock transient + low mechanical hit + tail. */
   public playFinishImpact(): void {
     const ctx = this.getContext();

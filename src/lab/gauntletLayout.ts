@@ -38,7 +38,7 @@ export const GAUNTLET_SEED = 0x0ba57ac1;
  */
 export const GAUNTLET_DESIGN_SPEED = 50;
 
-const START_Z = 1960;
+const START_Z = 2260;
 const PLATFORM_Y = 0;
 const PLATFORM_HEIGHT = 2;
 const PLATFORM_TOP_Y = PLATFORM_Y + PLATFORM_HEIGHT * 0.5;

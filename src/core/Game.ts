@@ -42,6 +42,7 @@ import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
+import { GateDiagnosticState } from '../ui/DevOverlay';
 import { MovementSfx } from '../audio/MovementSfx';
 
 export class Game {
@@ -410,6 +411,7 @@ export class Game {
               this.cameraController,
               this.ui.root
             );
+            this.wireSignalGatePresentation();
           }
           break;
 
@@ -1025,6 +1027,47 @@ export class Game {
     this.ui.hud.showToast('RESTORED TO CHECKPOINT', 1500);
   }
 
+  private gateDiagnostics(): GateDiagnosticState | undefined {
+    const gates = this.movementLab?.signalGates;
+    if (!gates) return undefined;
+    const last = gates.sequence.lastResult;
+    return {
+      sequenceId: gates.id,
+      progress: gates.sequence.passedCount,
+      total: gates.sequence.gates.length,
+      complete: gates.sequence.complete,
+      incomplete: gates.sequence.incomplete,
+      lastSpeedUnits: last ? last.result.speedUnits : 0,
+      lastCenterError: last ? last.result.centerError : 0,
+      lastAlignment: last ? last.result.alignment : 0
+    };
+  }
+
+  /**
+   * Wires Signal Gate presentation (audio / viewmodel / HUD). Detection and
+   * state live in the gate system; this only decides how a crossing looks.
+   * Passing or missing a gate never changes gameplay.
+   */
+  private wireSignalGatePresentation(): void {
+    const gates = this.movementLab?.signalGates;
+    if (!gates) return;
+    gates.sinks = {
+      crossing: (gateIndex, total, result) => {
+        const quality = Math.max(0, Math.min(1, 0.5 * result.alignment + 0.5 * (1 - result.centerError)));
+        this.movementSfx.playGateLock(quality);
+        this.viewmodelController.triggerMovementAccent('SURF_LOCK', 0.6 + quality * 0.4);
+        this.ui.hud.showToast(`SIGNAL LOCK  ${gateIndex + 1} / ${total}`, 900);
+      },
+      complete: (total) => {
+        this.movementSfx.playGateComplete();
+        this.viewmodelController.triggerMovementAccent('FINISH', 0.8);
+        this.ui.hud.showToast('PERFECT LINE', 1600);
+        this.world.pulseSignal(0.35);
+        void total;
+      }
+    };
+  }
+
   private handleFinishSequence(): void {
     if (this.isFinished) return;
     // The authoritative timer was already frozen at the exact sub-tick contact
@@ -1131,6 +1174,7 @@ export class Game {
         }
         this.movementFeedback.reset();
         this.movementSfx.reset();
+        this.movementLab?.signalGates?.reset();
         this.playerController.isRestoring = false;
         this.isRestoringCheckpoint = false;
         if (this.stateMachine.is(GameState.PAUSED)) {
@@ -1367,6 +1411,7 @@ export class Game {
       }
       this.movementFeedback.reset();
       this.movementSfx.reset();
+      this.movementLab?.signalGates?.reset();
       if (this.stateMachine.is(GameState.PAUSED)) {
         this.resumeGame();
       }
@@ -1947,7 +1992,7 @@ export class Game {
       this.movementSfx.setWindLevel(speedFeel * 0.55);
 
       // Dev Diagnostics update
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics());
 
       // Checkpoint passing check
       if (this.currentTrack) {
@@ -1978,7 +2023,13 @@ export class Game {
     } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
       this.cameraController.update(frameDelta);
       if (this.movementLab) {
-        this.movementLab.update(frameDelta);
+        const gateMusic = this.world.visualController.state;
+        this.movementLab.update(frameDelta, {
+          energy: gateMusic.energy,
+          bass: gateMusic.bass,
+          onsetPulse: gateMusic.onsetPulse,
+          reactivityMultiplier: gateMusic.reactivityMultiplier
+        });
         this.movementLab.setFeedbackEvent(this.movementFeedback.state.lastEvent);
       }
       this.surfVisuals.update(
@@ -1991,7 +2042,7 @@ export class Game {
       const labReduceMotion = SettingsManager.getInstance().settings.reduceMotion;
       this.environment.setSpeedStreak(labSpeedFeel * 0.42, labReduceMotion);
       this.movementSfx.setWindLevel(labSpeedFeel * 0.55);
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics());
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       this.replayPlayer.update(frameDelta);
       const songTime = this.audioEngine.getCurrentTime();

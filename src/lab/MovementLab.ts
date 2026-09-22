@@ -15,6 +15,10 @@ import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 import { AnimatedObstacleItem, GeometryBuilder } from '../world/GeometryBuilder';
 import { MovementLabHUD } from './MovementLabHUD';
 import { GauntletCheckpoint, buildGauntletLayout } from './gauntletLayout';
+import { SignalGateSystem } from '../gates/SignalGateSystem';
+import { GateMusicState, SILENT_GATE_MUSIC } from '../gates/SignalGateRenderer';
+import { SignalGateDefinition } from '../gates/SignalGate';
+import { SettingsManager } from '../core/Settings';
 
 export class MovementLab {
   private scene: THREE.Scene;
@@ -38,6 +42,11 @@ export class MovementLab {
   private gauntletCheckpoints: GauntletCheckpoint[] = [];
   private gauntletStartZ = 0;
   private gauntletCheckpointIndex = -1;
+  private labNodeId = 1000;
+
+  /** Optional Signal Gate mastery line (authored prototype sequence). */
+  public signalGates: SignalGateSystem | null = null;
+  private gateMusic: GateMusicState = SILENT_GATE_MUSIC;
 
   // Respawn position
   private spawnPosition = new THREE.Vector3(0, 1.5, 5.0);
@@ -82,6 +91,9 @@ export class MovementLab {
     // Build the deterministic obstacle gauntlet (obstacle vocabulary testing)
     this.buildObstacleGauntlet();
 
+    // Build the authored Signal Gate mastery line (optional high-speed line)
+    this.buildSignalGateRun();
+
     this.scene.add(this.rootGroup);
 
     // Spawn player
@@ -114,8 +126,6 @@ export class MovementLab {
       emissiveIntensity: 0.5
     });
 
-    let idCounter = 1000;
-
     const addBox = (
       name: string,
       x: number,
@@ -129,53 +139,7 @@ export class MovementLab {
       roll = 0,
       pitch = 0
     ) => {
-      const geom = new THREE.BoxGeometry(width, height, length);
-      const mesh = new THREE.Mesh(geom, material);
-      mesh.name = name;
-      mesh.position.set(x, y, z);
-      mesh.rotation.set(pitch, 0, roll, 'YXZ');
-      this.rootGroup.add(mesh);
-
-      // Edge outline
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geom),
-        new THREE.LineBasicMaterial({
-          color: isSurf ? 0x00f0ff : 0x556677,
-          transparent: true,
-          opacity: 0.6
-        })
-      );
-      edges.position.copy(mesh.position);
-      edges.rotation.copy(mesh.rotation);
-      this.rootGroup.add(edges);
-
-      // Physics Box Collider
-      const node: RouteNode = {
-        id: idCounter++,
-        time: 0,
-        position: { x, y, z },
-        dimensions: { x: width, y: height, z: length },
-        yaw: 0,
-        pitch,
-        roll,
-        type: isSurf ? RouteNodeType.SURF_RAMP : RouteNodeType.RUNWAY,
-        intensity: 0.5,
-        sectionIndex: 0,
-        arcLength: z,
-        isSurf,
-        isBoost: false
-      };
-
-      if (isSurf) {
-        node.surfNormal = {
-          x: -Math.sin(roll),
-          y: Math.cos(roll),
-          z: 0
-        };
-      }
-
-      const col = new BoxCollider(node);
-      this.physics.addCollider(col);
+      this.addLabBox(name, x, y, z, width, height, length, material, isSurf, roll, pitch);
     };
 
     // ==========================================
@@ -352,6 +316,110 @@ export class MovementLab {
   }
 
   /**
+   * Shared lab box builder: mesh + edge outline + authoritative box collider.
+   * Extracted so authored lab sections (gauntlet, Signal Gate run) use exactly
+   * the same construction as the calibration areas.
+   */
+  private addLabBox(
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    width: number,
+    height: number,
+    length: number,
+    material: THREE.Material,
+    isSurf = false,
+    roll = 0,
+    pitch = 0
+  ): void {
+    const geom = new THREE.BoxGeometry(width, height, length);
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.name = name;
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(pitch, 0, roll, 'YXZ');
+    this.rootGroup.add(mesh);
+
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geom),
+      new THREE.LineBasicMaterial({
+        color: isSurf ? 0x00f0ff : 0x556677,
+        transparent: true,
+        opacity: 0.6
+      })
+    );
+    edges.position.copy(mesh.position);
+    edges.rotation.copy(mesh.rotation);
+    this.rootGroup.add(edges);
+
+    const node: RouteNode = {
+      id: this.labNodeId++,
+      time: 0,
+      position: { x, y, z },
+      dimensions: { x: width, y: height, z: length },
+      yaw: 0,
+      pitch,
+      roll,
+      type: isSurf ? RouteNodeType.SURF_RAMP : RouteNodeType.RUNWAY,
+      intensity: 0.5,
+      sectionIndex: 0,
+      arcLength: z,
+      isSurf,
+      isBoost: false
+    };
+
+    if (isSurf) {
+      node.surfNormal = { x: -Math.sin(roll), y: Math.cos(roll), z: 0 };
+    }
+
+    this.physics.addCollider(new BoxCollider(node));
+  }
+
+  /**
+   * AUTHORED SIGNAL GATE RUN — optional high-speed mastery line.
+   *
+   * BIG SURF -> SURF EXIT -> GATE 01 -> AIR STRAFE -> GATE 02 -> REDIRECT ->
+   * GATE 03 -> LARGE LANDING.
+   *
+   * The SAFE line is simply to cross the same gaps without the gates: nothing
+   * about the geometry forces a gate. Missing one costs nothing.
+   */
+  private buildSignalGateRun(): void {
+    const concreteMat = new THREE.MeshStandardMaterial({
+      color: 0x222831,
+      roughness: 0.65,
+      metalness: 0.2
+    });
+    const surfMat = new THREE.MeshStandardMaterial({
+      color: 0x2e3846,
+      roughness: 0.25,
+      metalness: 0.7
+    });
+
+    this.createAreaBanner('SIGNAL GATE RUN // OPTIONAL MASTERY LINE', 0, 5.0, 1894);
+
+    // Approach -> big surf ramp -> three landings -> large catch deck.
+    this.addLabBox('GateRun_Approach', 0, 0, 1905, 16, 2, 26, concreteMat);
+    this.addLabBox('GateRun_BigSurf', -3, 1.0, 1946, 10, 2, 56, surfMat, true, 1.05, -0.06);
+    this.addLabBox('GateRun_PadA', 0, -4, 2012, 20, 2, 40, concreteMat);
+    this.addLabBox('GateRun_PadB', 5, -9, 2068, 20, 2, 40, concreteMat);
+    this.addLabBox('GateRun_Landing', 0, -14, 2130, 30, 2, 52, concreteMat);
+
+    // Generous apertures: the line must be readable, not a needle thread.
+    const definitions: SignalGateDefinition[] = [
+      { id: 'LAB_GATE_01', position: { x: -2.0, y: 0.6, z: 1984 }, yaw: 0, width: 7.0, height: 6.0, sequenceIndex: 0 },
+      { id: 'LAB_GATE_02', position: { x: 3.5, y: -5.0, z: 2040 }, yaw: 0, width: 6.5, height: 6.0, sequenceIndex: 1 },
+      { id: 'LAB_GATE_03', position: { x: -1.5, y: -10.0, z: 2096 }, yaw: -0.30, width: 6.0, height: 5.5, sequenceIndex: 2 }
+    ];
+
+    this.signalGates = new SignalGateSystem('LAB_GATE_CHAIN', definitions, {
+      primary: new THREE.Color(0x00f0ff),
+      secondary: new THREE.Color(0x3a5570)
+    });
+    this.rootGroup.add(this.signalGates.group);
+  }
+
+  /**
    * Deterministic OBSTACLE GAUNTLET.
    *
    * Reuses the production obstacle construction (RouteChallengeGenerator lab
@@ -449,8 +517,21 @@ export class MovementLab {
     this.rootGroup.add(mesh);
   }
 
-  public update(dt: number): void {
+  public update(dt: number, visualState?: GateMusicState): void {
     if (this.isDisposed) return;
+
+    if (visualState) this.gateMusic = visualState;
+
+    // Signal Gates: swept detection on consecutive sampled positions, then
+    // presentation. Reads player state only.
+    if (this.signalGates) {
+      this.signalGates.update(
+        dt,
+        this.player,
+        this.gateMusic,
+        SettingsManager.getInstance().settings.reduceMotion
+      );
+    }
 
     // Deterministic Lab clock feeds the SAME authoritative obstacle motion
     // function as production, for both collision and meshes, so moving
@@ -605,6 +686,9 @@ export class MovementLab {
       } else if (e.code === 'Digit9' && !e.repeat) {
         // OBSTACLE GAUNTLET: jump to the start of the obstacle test course.
         this.teleportToStation(0);
+      } else if (e.code === 'Digit0' && !e.repeat) {
+        // SIGNAL GATE RUN: jump to the approach before the big surf.
+        this.teleportPlayer(new THREE.Vector3(0, 1.5, 1900), Math.PI);
       } else if (e.code === 'BracketRight' && !e.repeat) {
         this.cycleStation(1);
       } else if (e.code === 'BracketLeft' && !e.repeat) {
@@ -639,6 +723,11 @@ export class MovementLab {
 
     // Remove HUD
     this.hud.destroy();
+
+    if (this.signalGates) {
+      this.signalGates.dispose();
+      this.signalGates = null;
+    }
 
     // Clear meshes and geometries
     this.rootGroup.traverse((obj) => {

@@ -15,6 +15,18 @@ import { RouteGenerator } from '../generation/RouteGenerator';
 import { RouteExclusionCorridor } from '../world/RouteExclusionCorridor';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
+/** DEV-only Signal Gate diagnostics. */
+export interface GateDiagnosticState {
+  sequenceId: string;
+  progress: number;
+  total: number;
+  complete: boolean;
+  incomplete: boolean;
+  lastSpeedUnits: number;
+  lastCenterError: number;
+  lastAlignment: number;
+}
+
 export class DevOverlay {
   public element: HTMLElement;
   private isVisible = false;
@@ -121,7 +133,8 @@ export class DevOverlay {
     audio: AudioEngine,
     environment?: Environment,
     fps = 0,
-    feedback?: MovementFeedbackState
+    feedback?: MovementFeedbackState,
+    gates?: GateDiagnosticState
   ): void {
     if (!this.isVisible) return;
 
@@ -172,6 +185,12 @@ export class DevOverlay {
       world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE',
       obstacleDiagnosticsLine(world),
       tempoDiagnosticsLine(),
+      gates
+        ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
+          `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
+          `last speed ${Math.round(gates.lastSpeedUnits)} u/s align ${gates.lastAlignment.toFixed(2)} ` +
+          `centreErr ${gates.lastCenterError.toFixed(2)}`
+        : 'SIGNAL GATES: none',
       feedback
         ? `FEEDBACK: SPEED ${Math.round(feedback.speedUnits)} u/s [${feedback.speedBand}] ` +
           `I=${feedback.speedIntensity.toFixed(2)} | LAST ${feedback.lastEvent} | ` +
