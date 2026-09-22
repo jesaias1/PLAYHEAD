@@ -164,7 +164,7 @@ export class RouteForkGenerator {
     const forks: RouteFork[] = [];
 
     const totalDistance = route[route.length - 1].arcLength;
-    const targetCount = Math.min(MAX_FORKS, Math.max(1, Math.round(totalDistance / 2000)));
+    const targetCount = Math.min(MAX_FORKS, Math.max(1, Math.round(totalDistance / 1100)));
 
     let nextId = 70000;
     const allocateId = () => nextId++;
