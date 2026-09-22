@@ -43,6 +43,13 @@ export class World {
   public track: GeneratedTrack | null = null;
   public analysis: TrackAnalysis | null = null;
 
+  /**
+   * PRESENTATION ONLY. A short-lived multiplier added on top of the
+   * music-driven reactivity when a movement moment fires (landing, surf lock,
+   * finish). Decays back into the music state on its own.
+   */
+  public signalImpulse = 0;
+
   /** Authoritative gameplay protection region for the loaded track. */
   public corridor: RouteExclusionCorridor | null = null;
 
@@ -194,6 +201,11 @@ export class World {
     this.buildCorridorDebug();
   }
 
+  /** PRESENTATION ONLY: brief world signal pulse (decays back to music). */
+  public pulseSignal(strength: number): void {
+    this.signalImpulse = Math.min(1.2, this.signalImpulse + strength);
+  }
+
   public update(
     songTime: number,
     playerPos: THREE.Vector3,
@@ -233,7 +245,13 @@ export class World {
     // Update Song Director (macro dramatic arc, experience phases, spectacle planning)
     const directorState = this.songDirector.update(songTime, progress.arcProgress, dt, vState, progress.nearestNode);
     vState.dramaticIntensity = directorState.dramaticIntensity;
-    this.visualController.reactivityMultiplier = directorState.spectralReactivity;
+
+    // Movement feedback may add a short-lived impulse on top of the music-driven
+    // reactivity, which then naturally decays back into the music state.
+    if (this.signalImpulse > 0) {
+      this.signalImpulse = Math.max(0, this.signalImpulse - dt * 1.9);
+    }
+    this.visualController.reactivityMultiplier = directorState.spectralReactivity + this.signalImpulse;
 
     // Update procedural sky & atmosphere with director modulation
     this.sky.update(vState, playerPos, directorState.starVisibility);
@@ -376,6 +394,7 @@ export class World {
     this.songDirector.dispose();
     this.physics.dispose();
     this.corridor = null;
+    this.signalImpulse = 0;
     this.track = null;
     this.analysis = null;
   }

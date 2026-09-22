@@ -172,6 +172,11 @@ export class PostProcessing {
     this.signalPass.setVignetteIntensity(intensity);
   }
 
+  /** Peripheral speed-streak strength (0 = off). Presentation only. */
+  public setSpeedStreak(intensity: number): void {
+    this.signalPass.setSpeedStreak(intensity);
+  }
+
   public setGrainIntensity(intensity: number): void {
     this.grainPass.setGrainIntensity(intensity);
   }

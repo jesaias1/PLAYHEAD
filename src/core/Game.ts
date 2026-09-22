@@ -41,6 +41,8 @@ import { BUILD_LABEL } from './BuildInfo';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
+import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
+import { MovementSfx } from '../audio/MovementSfx';
 
 export class Game {
   public stateMachine: StateMachine;
@@ -59,6 +61,10 @@ export class Game {
   public ghostManager: GhostManager;
   public ui: UIManager;
   public devOverlay: DevOverlay;
+
+  /** Presentation-only movement feedback (never affects gameplay). */
+  public movementFeedback!: MovementFeedbackController;
+  private movementSfx = MovementSfx.getInstance();
 
   private currentAnalysis: TrackAnalysis | null = null;
   private currentTrack: GeneratedTrack | null = null;
@@ -278,6 +284,31 @@ export class Game {
     this.replayPlayer.onCompleteCallback = () => {
       this.stateMachine.transitionTo(GameState.FINISHED);
     };
+
+    // Movement feedback (PRESENTATION ONLY). Detection/classification lives in
+    // MovementFeedbackController; this wiring decides how each moment is shown.
+    this.movementFeedback = new MovementFeedbackController({
+      nearMiss: (intensity, side) => {
+        this.movementSfx.playNearMiss(intensity, side);
+        this.viewmodelController.triggerMovementAccent('NEAR_MISS', intensity);
+      },
+      landing: (intensity, major) => {
+        this.movementSfx.playLanding(intensity, major);
+        this.viewmodelController.triggerMovementAccent(major ? 'HARD_LANDING' : 'LANDING', intensity);
+        this.world.pulseSignal(major ? 0.4 * intensity : 0.14 * intensity);
+      },
+      surfLock: (quality) => {
+        this.movementSfx.playSurfLock(quality);
+        this.viewmodelController.triggerMovementAccent('SURF_LOCK', quality);
+        this.world.pulseSignal(0.32 * quality);
+        this.ui.hud.showToast('SIGNAL LOCK // CLEAN SURF', 1200);
+      },
+      finish: () => {
+        this.movementSfx.playFinishImpact();
+        this.viewmodelController.triggerMovementAccent('FINISH', 1);
+        this.world.pulseSignal(0.9);
+      }
+    });
   }
 
   private applyLiveSettings(
@@ -337,6 +368,11 @@ export class Game {
   private setupStateMachine(): void {
     this.stateMachine.onTransition((newState, prevState) => {
       this.ui.hideAllScreens();
+
+      // The wind / speed layer only belongs to active play or the Lab.
+      if (newState !== GameState.PLAYING && newState !== GameState.MOVEMENT_LAB) {
+        this.movementSfx.setWindLevel(0);
+      }
 
       switch (newState) {
         case GameState.IMPORT:
@@ -691,6 +727,8 @@ export class Game {
     this.playerController.stats.reset();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
+    this.movementFeedback.reset();
+    this.movementSfx.reset();
     this.runElapsedTime = 0;
     this.isOvertime = false;
     this.ui.hud.setOvertimeStatus(false);
@@ -989,14 +1027,23 @@ export class Game {
 
   private handleFinishSequence(): void {
     if (this.isFinished) return;
+    // The authoritative timer was already frozen at the exact sub-tick contact
+    // timestamp before this runs. Nothing in this presentation sequence writes
+    // runElapsedTime, so completion time is unchanged.
     this.isFinished = true;
     this.playerController.resetKeys();
-    this.audioEngine.fadeOutAndStop(0.25);
 
-    // Tiny beat of silence (~0.38s) before results presentation enters
+    // 0 ms: instant confirmation (signal impact + viewmodel accent + world pulse).
+    this.movementFeedback.notifyFinish();
+    this.movementSfx.reset();
+
+    // ~100-300 ms: music ducks into a short tail.
+    this.audioEngine.fadeOutAndStop(0.45);
+
+    // ~520 ms: Run Report transition begins. Deliberately short.
     window.setTimeout(() => {
       this.stateMachine.transitionTo(GameState.FINISHED);
-    }, 380);
+    }, 520);
   }
 
   private handlePlayerFall(reason: RestoreReason = RestoreReason.OTHER): void {
@@ -1082,6 +1129,8 @@ export class Game {
           // (or the lab spawn when outside the gauntlet).
           this.movementLab.respawnAtTestCheckpoint();
         }
+        this.movementFeedback.reset();
+        this.movementSfx.reset();
         this.playerController.isRestoring = false;
         this.isRestoringCheckpoint = false;
         if (this.stateMachine.is(GameState.PAUSED)) {
@@ -1316,6 +1365,8 @@ export class Game {
       if (this.movementLab) {
         this.movementLab.resetPlayer();
       }
+      this.movementFeedback.reset();
+      this.movementSfx.reset();
       if (this.stateMachine.is(GameState.PAUSED)) {
         this.resumeGame();
       }
@@ -1780,6 +1831,20 @@ export class Game {
       } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         this.playerController.updateFixed(dt);
       }
+
+      // Movement feedback runs on the SAME fixed tick as movement so landings,
+      // surf transitions and near misses are classified against authoritative
+      // state. Presentation only.
+      if (
+        this.stateMachine.is(GameState.PLAYING) ||
+        this.stateMachine.is(GameState.MOVEMENT_LAB)
+      ) {
+        if (!this.isFinished) {
+          this.movementFeedback.update(dt, this.playerController, this.world.physics);
+          this.playerController.cameraPresentationOffsetY = this.movementFeedback.state.cameraOffsetY;
+          this.playerController.syncCamera();
+        }
+      }
     });
 
     // If dev calibration mode is active, freeze world updates and render calibrated viewmodel pose
@@ -1875,8 +1940,14 @@ export class Game {
         settings.reduceMotion
       );
 
+      // Restrained speed sensation: peripheral streaks + air layer. The centre
+      // of the screen stays clean, and reduce-motion disables the streaks.
+      const speedFeel = this.movementFeedback.state.speedIntensity;
+      this.environment.setSpeedStreak(speedFeel * 0.42, settings.reduceMotion);
+      this.movementSfx.setWindLevel(speedFeel * 0.55);
+
       // Dev Diagnostics update
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state);
 
       // Checkpoint passing check
       if (this.currentTrack) {
@@ -1908,13 +1979,19 @@ export class Game {
       this.cameraController.update(frameDelta);
       if (this.movementLab) {
         this.movementLab.update(frameDelta);
+        this.movementLab.setFeedbackEvent(this.movementFeedback.state.lastEvent);
       }
       this.surfVisuals.update(
         this.playerController,
         this.world.visualController.state,
         frameDelta
       );
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps);
+      // Same restrained speed sensation as a real run, so it can be tested.
+      const labSpeedFeel = this.movementFeedback.state.speedIntensity;
+      const labReduceMotion = SettingsManager.getInstance().settings.reduceMotion;
+      this.environment.setSpeedStreak(labSpeedFeel * 0.42, labReduceMotion);
+      this.movementSfx.setWindLevel(labSpeedFeel * 0.55);
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state);
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       this.replayPlayer.update(frameDelta);
       const songTime = this.audioEngine.getCurrentTime();

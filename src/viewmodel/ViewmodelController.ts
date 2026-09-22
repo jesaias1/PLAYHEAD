@@ -113,6 +113,12 @@ export class ViewmodelController {
   private surfBlend = 0;
   private surfSideTilt = 0;
 
+  // Movement-feedback accent (ADDITIVE presentation only; never touches the
+  // base knife/hand calibration or the socket transform).
+  private feedbackAccentY = 0;
+  private feedbackAccentVelY = 0;
+  private feedbackAccentPulse = 0;
+
   // Track Emissive Color
   private accentColor = new THREE.Color(0x00f0ff);
 
@@ -353,6 +359,39 @@ export class ViewmodelController {
   }
 
   /**
+   * ADDITIVE movement-feedback accent. Only offsets the motion group / accent
+   * pulse — the base socket calibration is never modified.
+   */
+  public triggerMovementAccent(
+    kind: 'LANDING' | 'HARD_LANDING' | 'NEAR_MISS' | 'SURF_LOCK' | 'FINISH',
+    intensity = 1
+  ): void {
+    const p = Math.max(0, Math.min(1, intensity));
+    switch (kind) {
+      case 'LANDING':
+        this.feedbackAccentVelY -= 0.06 * p;
+        break;
+      case 'HARD_LANDING':
+        this.feedbackAccentVelY -= 0.14 * p;
+        break;
+      case 'NEAR_MISS':
+        this.feedbackAccentPulse = Math.max(this.feedbackAccentPulse, 0.5 * p);
+        break;
+      case 'SURF_LOCK':
+        this.feedbackAccentPulse = Math.max(this.feedbackAccentPulse, 0.85 * p);
+        break;
+      case 'FINISH':
+        this.feedbackAccentPulse = Math.max(this.feedbackAccentPulse, 1.0 * p);
+        break;
+    }
+  }
+
+  /** Current additive accent pulse (0..1). Presentation only. */
+  public getFeedbackAccentPulse(): number {
+    return this.feedbackAccentPulse;
+  }
+
+  /**
    * Updates viewmodel physics, animations, and movement responses.
    * NOTE: Periodic walking bob is strictly ZERO.
    */
@@ -496,8 +535,23 @@ export class ViewmodelController {
       this.airRotOffset.set(0, 0, 0);
     }
 
-    // Apply combined motion (compression + air offset) to motionGroup
-    this.motionGroup.position.set(0, this.compressionY + this.airOffset.y, this.airOffset.z);
+    // Movement-feedback accent spring (additive, tiny, never touches base pose)
+    const fbAcc = -120.0 * this.feedbackAccentY - 17.0 * this.feedbackAccentVelY;
+    this.feedbackAccentVelY += fbAcc * dt;
+    this.feedbackAccentY += this.feedbackAccentVelY * dt;
+    if (this.feedbackAccentY < -0.02) {
+      this.feedbackAccentY = -0.02;
+      if (this.feedbackAccentVelY < 0) this.feedbackAccentVelY = 0;
+    } else if (this.feedbackAccentY > 0.008) {
+      this.feedbackAccentY = 0.008;
+      if (this.feedbackAccentVelY > 0) this.feedbackAccentVelY = 0;
+    }
+    if (this.feedbackAccentPulse > 0) {
+      this.feedbackAccentPulse = Math.max(0, this.feedbackAccentPulse - dt * 2.2);
+    }
+
+    // Apply combined motion (compression + air offset + feedback accent) to motionGroup
+    this.motionGroup.position.set(0, this.compressionY + this.airOffset.y + this.feedbackAccentY, this.airOffset.z);
     this.motionGroup.rotation.set(this.airRotOffset.x, this.airRotOffset.y, this.airRotOffset.z);
 
     // 7. Surfing Balance Stance

@@ -11,6 +11,7 @@ import { Environment } from '../world/Environment';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
+import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 export class DevOverlay {
   public element: HTMLElement;
@@ -117,7 +118,8 @@ export class DevOverlay {
     world: World,
     audio: AudioEngine,
     environment?: Environment,
-    fps = 0
+    fps = 0,
+    feedback?: MovementFeedbackState
   ): void {
     if (!this.isVisible) return;
 
@@ -166,7 +168,13 @@ export class DevOverlay {
       `BUILDUP: ${vs.buildup.toFixed(2)} | DROP IMPACT: ${vs.dropImpact.toFixed(2)} | NEXT DROP DIST: ${vs.upcomingDropDistance > 9000 ? 'NONE' : vs.upcomingDropDistance.toFixed(1) + 'm'}`,
       `SYNC DELTA: ${vs.syncDelta.toFixed(2)}s | PLAYER PROG: ${(vs.playerProgress * 100).toFixed(1)}% | TIME PROG: ${(vs.progress * 100).toFixed(1)}%`,
       world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE',
-      obstacleDiagnosticsLine(world)
+      obstacleDiagnosticsLine(world),
+      feedback
+        ? `FEEDBACK: SPEED ${Math.round(feedback.speedUnits)} u/s [${feedback.speedBand}] ` +
+          `I=${feedback.speedIntensity.toFixed(2)} | LAST ${feedback.lastEvent} | ` +
+          `LAND I=${feedback.landingIntensity.toFixed(2)}${feedback.landingMajor ? ' (MAJOR)' : ''} | ` +
+          `SURF Q=${feedback.surfQuality.toFixed(2)} | CAM ${feedback.cameraOffsetY.toFixed(3)}`
+        : 'FEEDBACK: n/a'
     ];
 
     this.textElement.innerText = lines.join('\n');

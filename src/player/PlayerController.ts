@@ -64,6 +64,13 @@ export class PlayerController {
   public lastTouchedSurfaceType: 'PLATFORM' | 'SURF' = 'PLATFORM';
 
   /**
+   * PRESENTATION ONLY. A tiny vertical camera dip used by landing feedback.
+   * Never read by physics, collision, movement or void logic — it only offsets
+   * the visual camera position.
+   */
+  public cameraPresentationOffsetY = 0;
+
+  /**
    * AUTHORITATIVE VOID DEATH BOUNDARY (world Y).
    *
    * Normal falling death is fundamentally "position.y crosses below this".
@@ -480,7 +487,7 @@ export class PlayerController {
   public syncCamera(): void {
     this.cameraController.camera.position.set(
       this.position.x,
-      this.position.y + this.config.eyeHeight,
+      this.position.y + this.config.eyeHeight + this.cameraPresentationOffsetY,
       this.position.z
     );
   }

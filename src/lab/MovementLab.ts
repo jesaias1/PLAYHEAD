@@ -519,6 +519,11 @@ export class MovementLab {
     return this.trajEnabled;
   }
 
+  /** DEV: forwards the latest movement-feedback event to the Lab HUD. */
+  public setFeedbackEvent(label: string | null): void {
+    this.hud.setFeedbackEvent(label);
+  }
+
   private clearTrajectory(): void {
     this.trajCount = 0;
     this.trajPointsMesh.geometry.setDrawRange(0, 0);

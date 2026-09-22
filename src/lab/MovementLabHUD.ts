@@ -11,6 +11,7 @@ export class MovementLabHUD {
   public element: HTMLElement;
   private presetElem: HTMLElement;
   private obstacleElem: HTMLElement;
+  private feedbackElem: HTMLElement;
   private speedElem: HTMLElement;
   private stateElem: HTMLElement;
   private velHElem: HTMLElement;
@@ -37,6 +38,10 @@ export class MovementLabHUD {
         <div class="lab-stat-row">
           <span class="lab-stat-label">OBSTACLE:</span>
           <span class="lab-stat-val" id="lab-obstacle">—</span>
+        </div>
+        <div class="lab-stat-row">
+          <span class="lab-stat-label">FEEDBACK:</span>
+          <span class="lab-stat-val" id="lab-feedback">—</span>
         </div>
         <div class="lab-stat-row">
           <span class="lab-stat-label">SPEED:</span>
@@ -109,6 +114,7 @@ export class MovementLabHUD {
 
     this.presetElem = this.element.querySelector('#lab-preset') as HTMLElement;
     this.obstacleElem = this.element.querySelector('#lab-obstacle') as HTMLElement;
+    this.feedbackElem = this.element.querySelector('#lab-feedback') as HTMLElement;
     this.speedElem = this.element.querySelector('#lab-speed') as HTMLElement;
     this.stateElem = this.element.querySelector('#lab-state') as HTMLElement;
     this.velHElem = this.element.querySelector('#lab-vel') as HTMLElement;
@@ -220,6 +226,12 @@ export class MovementLabHUD {
   public setObstacleSection(label: string | null): void {
     this.obstacleElem.textContent = label ?? '—';
     this.obstacleElem.className = label ? 'lab-stat-val highlight' : 'lab-stat-val';
+  }
+
+  /** DEV: most recent movement feedback event (near miss / landing / surf lock). */
+  public setFeedbackEvent(label: string | null): void {
+    this.feedbackElem.textContent = label && label !== '—' ? `FEEDBACK // ${label}` : '—';
+    this.feedbackElem.className = label && label !== '—' ? 'lab-stat-val highlight' : 'lab-stat-val';
   }
 
   public hide(): void {

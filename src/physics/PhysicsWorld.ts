@@ -23,10 +23,24 @@ interface DynamicObstacle {
   phase: number;
 }
 
+/** A registered gameplay obstacle, exposed for presentation-side queries. */
+export interface ObstacleColliderEntry {
+  collider: BoxCollider;
+  id: number;
+  type: string;
+}
+
 export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
   public killPlaneY = -40.0; // Beneath lowest route structure
   public voidEnvelope = new RouteVoidEnvelope();
+
+  /**
+   * Gameplay obstacle colliders, exposed ONLY so presentation systems
+   * (near-miss feedback) can measure proximity. Never used by movement,
+   * collision resolution or the void boundary.
+   */
+  public obstacleColliders: ObstacleColliderEntry[] = [];
 
   /**
    * Moving gameplay obstacles (signal shutters / sweep beams). Their motion is
@@ -86,6 +100,7 @@ export class PhysicsWorld {
   ): void {
     this.colliders = [];
     this.dynamicObstacles = [];
+    this.obstacleColliders = [];
     let lowestY = Infinity;
 
     for (const node of route) {
@@ -153,6 +168,11 @@ export class PhysicsWorld {
   public addObstacleCollider(obstacle: RouteNode): BoxCollider {
     const collider = new BoxCollider(obstacle);
     this.colliders.push(collider);
+    this.obstacleColliders.push({
+      collider,
+      id: obstacle.id,
+      type: obstacle.obstacleType ?? 'UNKNOWN'
+    });
 
     if (obstacle.obstacleMotion) {
       const dir = obstacleLateralDirection(obstacle.yaw);
@@ -174,6 +194,7 @@ export class PhysicsWorld {
   public clear(): void {
     this.colliders = [];
     this.dynamicObstacles = [];
+    this.obstacleColliders = [];
   }
 
   /**
@@ -312,5 +333,6 @@ export class PhysicsWorld {
   public dispose(): void {
     this.colliders = [];
     this.dynamicObstacles = [];
+    this.obstacleColliders = [];
   }
 }

@@ -187,6 +187,15 @@ export class Environment {
     this.targetFov = this.defaultFov + speedRatio * 2.5;
   }
 
+  /**
+   * Peripheral speed-streak strength (0..1). Presentation only; forced off
+   * under reduce-motion.
+   */
+  public setSpeedStreak(intensity: number, reduceMotion = false): void {
+    if (!this.postProcessing) return;
+    this.postProcessing.setSpeedStreak(reduceMotion ? 0 : intensity);
+  }
+
   public update(dt: number): void {
     // Keep directional light following the player along the route
     this.dirLight.position.set(

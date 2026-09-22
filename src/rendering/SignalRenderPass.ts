@@ -24,6 +24,7 @@ export const SignalRenderShader = {
     uVignetteSmoothness: { value: 0.45 },
     uGrainIntensity: { value: 0.026 },
     uScanlineIntensity: { value: 0.022 },
+    uSpeedStreak: { value: 0.0 },
     uEnabled: { value: 1.0 }
   },
   vertexShader: `
@@ -43,6 +44,7 @@ export const SignalRenderShader = {
     uniform float uVignetteSmoothness;
     uniform float uGrainIntensity;
     uniform float uScanlineIntensity;
+    uniform float uSpeedStreak;
     uniform float uEnabled;
 
     varying vec2 vUv;
@@ -103,6 +105,28 @@ export const SignalRenderShader = {
       float vignette = 1.0 - smoothstep(uVignetteSmoothness, uVignetteSmoothness + 0.35, dist) * uVignetteIntensity;
 
       vec3 finalColor = clamp(ditheredColor * vignette, 0.0, 1.0);
+
+      // 5. Peripheral speed streaks (PRESENTATION ONLY)
+      // A cheap radial smear that only appears on existing contrast edges, and
+      // is fully masked out of the screen centre so aiming/air-strafing stay
+      // clean and readable.
+      if (uSpeedStreak > 0.001) {
+        float centerDist = length(center);
+        vec2 dir = center / max(centerDist, 1e-4);
+        float radialMask = smoothstep(0.16, 0.60, centerDist);
+        if (radialMask > 0.001) {
+          float lum = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+          vec3 s1 = texture2D(tDiffuse, steppedUv - dir * 0.012).rgb;
+          vec3 s2 = texture2D(tDiffuse, steppedUv - dir * 0.026).rgb;
+          vec3 s3 = texture2D(tDiffuse, steppedUv - dir * 0.042).rgb;
+          float e1 = abs(dot(s1, vec3(0.299, 0.587, 0.114)) - lum);
+          float e2 = abs(dot(s2, vec3(0.299, 0.587, 0.114)) - lum);
+          float e3 = abs(dot(s3, vec3(0.299, 0.587, 0.114)) - lum);
+          float streak = (e1 * 0.5 + e2 * 0.32 + e3 * 0.2) * uSpeedStreak * radialMask;
+          finalColor = clamp(finalColor + vec3(streak * 0.55), 0.0, 1.0);
+        }
+      }
+
       gl_FragColor = vec4(finalColor, color.a);
     }
   `
@@ -139,5 +163,10 @@ export class SignalRenderPass extends ShaderPass {
 
   public setScanlineIntensity(intensity: number): void {
     this.uniforms.uScanlineIntensity.value = Math.max(0.0, Math.min(0.08, intensity));
+  }
+
+  /** Peripheral speed-streak strength (0 = off). Presentation only. */
+  public setSpeedStreak(intensity: number): void {
+    this.uniforms.uSpeedStreak.value = Math.max(0.0, Math.min(0.6, intensity));
   }
 }
