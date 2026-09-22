@@ -12,6 +12,8 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelArtLibrary } from './PixelArtLibrary';
+import { tagWorldRole } from './WorldRoles';
+import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 
 export type CelestialType = 'MOON' | 'ECLIPSE' | 'EYE_VOID' | 'HALO_DISC';
 
@@ -24,6 +26,9 @@ export class CelestialLandmarks {
 
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack, palette: TrackPalette) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'VISUAL_ONLY', 'CelestialLandmarks');
     this.build(analysis, track, palette);
     scene.add(this.group);
   }
@@ -45,15 +50,36 @@ export class CelestialLandmarks {
       celestialType = (seed % 2 === 0) ? 'MOON' : 'HALO_DISC';
     }
 
-    // Anchor position: placed 420m away in the horizon opposite the route's mid-point
+    // Anchor position: placed 420m away in the horizon opposite the route's mid-point.
+    //
+    // The anchor is VALIDATED against the canonical gameplay envelope and stepped
+    // outward until it is clear. A giant celestial body is environment geometry:
+    // if it intersected the route it would be removed, so it must place itself
+    // safely instead of relying on a fixed offset happening to be far enough.
     const midNode = route[Math.floor(route.length * 0.45)];
     const yaw = midNode.yaw + 0.35;
-    const distance = 460.0;
+    let distance = 460.0;
     const elev = 95.0;
 
-    const cx = midNode.position.x + Math.sin(yaw) * distance;
-    const cz = midNode.position.z + Math.cos(yaw) * distance;
-    const cy = midNode.position.y + elev;
+    const corridor = new RouteExclusionCorridor(
+      RouteExclusionCorridor.collectGameplayNodes(track)
+    );
+
+    let cx = midNode.position.x + Math.sin(yaw) * distance;
+    let cz = midNode.position.z + Math.cos(yaw) * distance;
+    let cy = midNode.position.y + elev;
+
+    for (let step = 0; step < 8; step++) {
+      const probe = new THREE.Box3().setFromCenterAndSize(
+        new THREE.Vector3(cx, cy, cz),
+        new THREE.Vector3(150, 150, 150)
+      );
+      if (!corridor.evaluateVolume(probe, 28.0)) break;
+      distance += 220.0;
+      cx = midNode.position.x + Math.sin(yaw) * distance;
+      cz = midNode.position.z + Math.cos(yaw) * distance;
+      cy = midNode.position.y + elev + step * 20.0;
+    }
 
     // 1. Multi-plane Celestial Body
     const celestialGroup = new THREE.Group();

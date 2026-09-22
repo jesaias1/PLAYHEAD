@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
-import { createPlatformGeometry, getPlatformMaxHalfWidth } from '../generation/PlatformShape';
+import { createPlatformGeometry } from '../generation/PlatformShape';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
@@ -16,6 +16,7 @@ import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { tagWorldRole } from './WorldRoles';
 import { ReactiveChannel } from './PlayheadSystem';
 import { FINISH_GATE_HEIGHT } from '../gameplay/FinishGateDetector';
 
@@ -71,6 +72,8 @@ export class GeometryBuilder {
     const rootGroup = new THREE.Group();
     const decorativeGroup = new THREE.Group();
     decorativeGroup.name = 'BuiltWorldDecorativeGroup';
+    // Environment architecture: must never intersect the gameplay envelope.
+    tagWorldRole(decorativeGroup, 'DECORATION', 'GeometryBuilder.Decorative');
     rootGroup.add(decorativeGroup);
     const reactiveMaterials: THREE.MeshStandardMaterial[] = [];
     const reactiveBeacons: ReactiveBeaconItem[] = [];
@@ -335,6 +338,12 @@ export class GeometryBuilder {
     const surfPlatformGeoms: THREE.BufferGeometry[] = [];
     const finishPlatformGeoms: THREE.BufferGeometry[] = [];
     const pylonGeoms: THREE.BufferGeometry[] = [];
+    const pylonComponents: Array<{
+      name: string;
+      source: string;
+      hostNodeId?: number;
+      box: THREE.Box3;
+    }> = [];
     const platformEuler = new THREE.Euler();
     const platformMatrix = new THREE.Matrix4();
     const pylonEuler = new THREE.Euler();
@@ -357,6 +366,7 @@ export class GeometryBuilder {
         opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.85)
       });
       const edges = new THREE.LineSegments(edgesGeom, lineMat);
+      tagWorldRole(edges, 'VISUAL_ONLY', 'GeometryBuilder.RouteEdgeTrim', false);
       edges.position.set(node.position.x, node.position.y, node.position.z);
       edges.rotation.set(node.pitch, node.yaw, node.roll, 'YXZ');
       rootGroup.add(edges);
@@ -400,59 +410,53 @@ export class GeometryBuilder {
         const pylonHeight = 320.0 + ((i * 31) % 220.0);
         const pylonWidth = Math.min(3.4, node.dimensions.x * 0.45);
         const pylonTopY = node.position.y - node.dimensions.y * 1.5;
-        const pylonBottomY = pylonTopY - pylonHeight;
-        const pylonHalf = Math.hypot(pylonWidth, pylonWidth * 1.2) * 0.5;
+        const pylonCenterY = pylonTopY - pylonHeight * 0.5;
 
-        let blocked = false;
-        for (const other of gameplayNodes) {
-          if (other.id === node.id) continue;
-          const otherHalfY = (other.dimensions.y || 2.0) * 0.5;
-          const pylonCenterY = (pylonTopY + pylonBottomY) * 0.5;
-          if (Math.abs(other.position.y - pylonCenterY) > pylonHeight * 0.5 + otherHalfY + 1.0) {
-            continue;
-          }
-          // Distance from the pillar axis to the other node's oriented centreline.
-          const halfLen = (other.dimensions.z || 0) * 0.5;
-          const fwdX = Math.sin(other.yaw);
-          const fwdZ = Math.cos(other.yaw);
-          const ex = other.position.x - fwdX * halfLen;
-          const ez = other.position.z - fwdZ * halfLen;
-          const sx = fwdX * other.dimensions.z;
-          const sz = fwdZ * other.dimensions.z;
-          const lenSq = sx * sx + sz * sz;
-          let t = lenSq > 1e-4
-            ? ((node.position.x - ex) * sx + (node.position.z - ez) * sz) / lenSq
-            : 0.5;
-          t = Math.max(0, Math.min(1, t));
-          const dist = Math.hypot(node.position.x - (ex + t * sx), node.position.z - (ez + t * sz));
-          if (dist < pylonHalf + getPlatformMaxHalfWidth(other) + 1.5) {
-            blocked = true;
-            break;
-          }
-        }
+        const pylonBox = new THREE.Box3().setFromCenterAndSize(
+          new THREE.Vector3(node.position.x, pylonCenterY, node.position.z),
+          new THREE.Vector3(pylonWidth, pylonHeight, pylonWidth * 1.2)
+        );
 
-        if (!blocked) {
+        if (!corridor.evaluateVolume(pylonBox, 28.0, node.id)) {
           const pylonGeom = new THREE.BoxGeometry(pylonWidth, pylonHeight, pylonWidth * 1.2);
           pylonEuler.set(0, node.yaw, 0, 'YXZ');
           pylonMatrix.makeRotationFromEuler(pylonEuler);
-          pylonMatrix.setPosition(node.position.x, pylonTopY - pylonHeight * 0.5, node.position.z);
+          pylonMatrix.setPosition(node.position.x, pylonCenterY, node.position.z);
           pylonGeom.applyMatrix4(pylonMatrix);
           pylonGeoms.push(pylonGeom);
+          pylonComponents.push({
+            name: `FoundationPylon_${node.id}`,
+            source: 'GeometryBuilder.FoundationPylon',
+            hostNodeId: node.id,
+            box: pylonBox.clone()
+          });
         }
       }
 
       // Checkpoint Arch Gateway
+      //
+      // AUTHORED GAMEPLAY THRESHOLD. The player is meant to pass through this
+      // arch, so the framing itself is registered as GAMEPLAY. Its deep
+      // foundation legs / collars / transverse strut are NOT something the player
+      // interacts with: they were 125m spears hanging off a route node that no
+      // validator ever saw. They are removed entirely, which eliminates the whole
+      // class of "structure passing vertically through the course".
       if (node.type === RouteNodeType.CHECKPOINT) {
         const { group: arch, gateFrame } = createSteppedCheckpointArch(
           node,
           checkpointMaterial,
           gateFrameMaterial
         );
+        tagWorldRole(arch, 'GAMEPLAY', 'GeometryBuilder.CheckpointArch');
         rootGroup.add(arch);
         registerBeacon(gateFrame, 'GATE_FRAME');
       }
 
       // Finish Portal Monument
+      //
+      // Same contract: the signal line and its framing are an authored gameplay
+      // threshold (GAMEPLAY). The 280m descending pylon legs and the transverse
+      // under-road keel are removed.
       if (node.type === RouteNodeType.FINISH) {
         const finishPortal = createFinishMonument(
           node,
@@ -460,6 +464,7 @@ export class GeometryBuilder {
           { plane: finishPlaneMaterial, trim: accentTrimMaterial, header: headerBarMaterial },
           registerBeacon
         );
+        tagWorldRole(finishPortal, 'GAMEPLAY', 'GeometryBuilder.FinishMonument');
         rootGroup.add(finishPortal);
       }
 
@@ -493,7 +498,19 @@ export class GeometryBuilder {
     }
 
     // Merge the batched static route geometry (one draw call per material).
-    const addBatched = (geoms: THREE.BufferGeometry[], material: THREE.Material, name: string): void => {
+    //
+    // Merged batches carry COMPONENT METADATA so a single offending primitive
+    // stays traceable (and removable) inside a large batch. Gameplay batches are
+    // tagged GAMEPLAY; the decorative foundation-pylon batch is tagged
+    // DECORATION and is audited component-by-component by the final world safety
+    // pass using the canonical envelope.
+    const addBatched = (
+      geoms: THREE.BufferGeometry[],
+      material: THREE.Material,
+      name: string,
+      role: 'GAMEPLAY' | 'DECORATION' | 'VISUAL_ONLY' = 'GAMEPLAY',
+      components?: Array<{ name: string; source: string; hostNodeId?: number; box: THREE.Box3 }>
+    ): void => {
       if (geoms.length === 0) return;
       const merged = geoms.length === 1 ? geoms[0] : mergeGeometries(geoms, false);
       if (geoms.length > 1) {
@@ -502,12 +519,22 @@ export class GeometryBuilder {
       if (!merged) return;
       const mesh = new THREE.Mesh(merged, material);
       mesh.name = name;
+      tagWorldRole(mesh, role, `GeometryBuilder.${name}`, false);
+      if (components && components.length > 0) {
+        mesh.userData.mergedComponents = components;
+      }
       rootGroup.add(mesh);
     };
     addBatched(platformGeoms, platformMaterial, 'RoutePlatformsMerged');
     addBatched(surfPlatformGeoms, surfMaterial, 'RouteSurfPlatformsMerged');
     addBatched(finishPlatformGeoms, finishMaterial, 'RouteFinishMerged');
-    addBatched(pylonGeoms, backgroundMonolithMaterial, 'FoundationPylonsMerged');
+    addBatched(
+      pylonGeoms,
+      backgroundMonolithMaterial,
+      'FoundationPylonsMerged',
+      'DECORATION',
+      pylonComponents
+    );
 
     // Deterministic route challenges. Collision consumes these exact same box
     // dimensions in PhysicsWorld; only the thin floor strip is non-colliding
@@ -527,6 +554,9 @@ export class GeometryBuilder {
         mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
         mesh.rotation.set(0, obstacle.yaw, 0, 'YXZ');
         mesh.userData.routeObstacleId = obstacle.id;
+        // Obstacles are authoritative gameplay solids (they collide), so they
+        // are never candidates for world-safety rejection.
+        tagWorldRole(mesh, 'GAMEPLAY', 'GeometryBuilder.RouteObstacle', false);
         rootGroup.add(mesh);
         // Only single-material signal elements can be driven as beacons.
         if (!Array.isArray(mesh.material) && mesh.material === obstacleSignalMaterial) {
@@ -577,6 +607,7 @@ export class GeometryBuilder {
         const mesh = new THREE.Mesh(geom, backgroundMonolithMaterial);
         mesh.position.set(shelf.position.x, shelf.position.y, shelf.position.z);
         mesh.rotation.set(shelf.pitch, shelf.yaw, shelf.roll, 'YXZ');
+        tagWorldRole(mesh, 'GAMEPLAY', 'GeometryBuilder.RecoveryShelf', false);
         rootGroup.add(mesh);
 
         // Subdued dark rim edge
@@ -679,6 +710,7 @@ export class GeometryBuilder {
 
         const mesh = new THREE.Mesh(merged, trimMaterial);
         mesh.name = name;
+        tagWorldRole(mesh, 'GAMEPLAY', 'GeometryBuilder.SignalSpinesMerged', false);
         rootGroup.add(mesh);
       };
 
@@ -694,6 +726,7 @@ export class GeometryBuilder {
         const mesh = new THREE.Mesh(geom, surfMaterial);
         mesh.position.set(ramp.position.x, ramp.position.y, ramp.position.z);
         mesh.rotation.set(ramp.pitch, ramp.yaw, ramp.roll, 'YXZ');
+        tagWorldRole(mesh, 'GAMEPLAY', 'GeometryBuilder.OptionalSideSurf', false);
         rootGroup.add(mesh);
 
 
@@ -761,7 +794,14 @@ function createSteppedCheckpointArch(
   const pillarWidth = 1.6;
   const halfWidth = node.dimensions.x * 0.5;
 
-  // Left & Right Stepped Plinths and Descending Support Legs
+  // NO DESCENDING FOUNDATION.
+  //
+  // This arch previously hung a 125m support leg, a 4m foundation collar and a
+  // transverse under-road beam off every checkpoint node. Because the arch is
+  // built directly onto the route node and was never passed to any decoration
+  // validator, those parts could pass vertically through the course (and through
+  // lower route layers on folding routes). The framing is what the player reads;
+  // the foundations were pure hazard, so they are gone.
   for (const side of [-1, 1]) {
     const px = side * (halfWidth + pillarWidth * 0.4);
     // Base Plinth
@@ -773,27 +813,7 @@ function createSteppedCheckpointArch(
     const stela = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, archHeight, pillarWidth * 1.2), material);
     stela.position.set(px, archHeight * 0.5, 0);
     group.add(stela);
-
-    // Monumental Descending Support Leg (Anchors 125m down into the void)
-    const legDepth = 125.0;
-    const legWidth = pillarWidth * 1.35;
-    const legGeom = new THREE.BoxGeometry(legWidth, legDepth, pillarWidth * 1.5);
-    const leg = new THREE.Mesh(legGeom, material);
-    leg.position.set(px, -legDepth * 0.5, 0);
-    group.add(leg);
-
-    // Foundation collar below road level
-    const collarGeom = new THREE.BoxGeometry(legWidth * 1.3, 4.0, pillarWidth * 1.8);
-    const collar = new THREE.Mesh(collarGeom, material);
-    collar.position.set(px, -2.5, 0);
-    group.add(collar);
   }
-
-  // Transverse Under-Road Monolithic Foundation Beam
-  const strutGeom = new THREE.BoxGeometry(node.dimensions.x + pillarWidth * 3.2, 4.0, pillarWidth * 1.6);
-  const strut = new THREE.Mesh(strutGeom, material);
-  strut.position.set(0, -2.5, 0);
-  group.add(strut);
 
   // Overhead Monolithic Double Lintel
   const lowerLintel = new THREE.Mesh(
@@ -844,7 +864,12 @@ function createFinishMonument(
   const halfWidth = node.dimensions.x * 0.5;
   const pylonWidth = 1.8;
 
-  // 1. Twin Minimalist Brutalist Stelae Framing the Signal Line with Descending Monolith Foundation
+  // 1. Twin Minimalist Brutalist Stelae Framing the Signal Line.
+  //
+  // NO DESCENDING FOUNDATION: the previous 280m pylon legs and the transverse
+  // under-road keel were unvalidated structure hanging off a route node — the
+  // exact "building passing vertically through the course" failure class. The
+  // framing the player reads (stelae, signal line, portal plane, header) stays.
   for (const side of [-1, 1]) {
     const px = side * (halfWidth + pylonWidth * 0.6);
     const pylonGeom = new THREE.BoxGeometry(pylonWidth, planeHeight * 1.2, pylonWidth * 1.6);
@@ -858,20 +883,7 @@ function createFinishMonument(
     edge.position.set(px - side * (pylonWidth * 0.45), planeHeight * 0.6, pylonWidth * 0.7);
     group.add(edge);
     registerBeacon(edge, 'ACCENT_TRIM');
-
-    // Descending Foundation Pylon Leg extending 280m into the void
-    const pylonLegDepth = 280.0;
-    const pylonLegGeom = new THREE.BoxGeometry(pylonWidth * 1.35, pylonLegDepth, pylonWidth * 1.8);
-    const pylonLeg = new THREE.Mesh(pylonLegGeom, material);
-    pylonLeg.position.set(px, -pylonLegDepth * 0.5, 0);
-    group.add(pylonLeg);
   }
-
-  // Transverse Under-Road Foundation Keel
-  const keelGeom = new THREE.BoxGeometry(node.dimensions.x + pylonWidth * 3.2, 5.0, pylonWidth * 2.2);
-  const keel = new THREE.Mesh(keelGeom, material);
-  keel.position.set(0, -3.0, 0);
-  group.add(keel);
 
   // 2. Embedded Ground Signal Line (secondary reactive trim)
   const lineGeom = new THREE.BoxGeometry(node.dimensions.x, 0.08, 0.45);

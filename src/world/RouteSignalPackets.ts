@@ -15,6 +15,7 @@ import { GeneratedTrack, RouteNode } from '../generation/GenerationTypes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { getPlatformMaxHalfWidth } from '../generation/PlatformShape';
+import { tagWorldRole } from './WorldRoles';
 
 interface PathSample {
   arc: number;
@@ -63,6 +64,9 @@ export class RouteSignalPackets {
     poolSize = 32
   ) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'VISUAL_ONLY', 'RouteSignalPackets');
     this.group.name = 'RouteSignalPackets';
     this.poolSize = Math.max(0, Math.floor(poolSize));
 

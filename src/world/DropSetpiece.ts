@@ -15,6 +15,7 @@ import { MusicVisualState } from './MusicVisualController';
 import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { tagWorldRole } from './WorldRoles';
 
 export type DropSetpieceFamily = 'SPLIT_MONOLITH' | 'SPECTRAL_CATHEDRAL' | 'VOID_BRIDGE' | 'SIGNAL_GATE' | 'FRACTURE';
 
@@ -32,6 +33,9 @@ export class DropSetpiece {
 
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'DECORATION', 'DropSetpiece');
 
     const families: DropSetpieceFamily[] = [
       'SPLIT_MONOLITH',

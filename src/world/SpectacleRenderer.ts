@@ -14,6 +14,7 @@ import { SpectacleEvent } from './SpectaclePlanner';
 import { MusicVisualState } from './MusicVisualController';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { PixelArtLibrary } from './PixelArtLibrary';
+import { tagWorldRole } from './WorldRoles';
 
 export class SpectacleRenderer {
   public group: THREE.Group;
@@ -43,6 +44,9 @@ export class SpectacleRenderer {
 
   constructor(scene: THREE.Scene) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'IGNORE_WORLD_SAFETY', 'SpectacleRenderer');
 
     // 1. Shockwave ring (MONOLITH_SPLIT / SIGNATURE)
     const ringGeom = new THREE.RingGeometry(1.2, 3.2, 8);

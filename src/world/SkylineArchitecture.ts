@@ -13,6 +13,7 @@ import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
+import { tagWorldRole } from './WorldRoles';
 
 /**
  * Patches a standard material with a world-Y "signal band" sweep.
@@ -98,6 +99,9 @@ export class SkylineArchitecture {
 
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'DECORATION', 'SkylineArchitecture');
     this.build(analysis, track);
     scene.add(this.group);
   }

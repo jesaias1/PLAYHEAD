@@ -24,6 +24,10 @@ import { RouteSignalPackets } from './RouteSignalPackets';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 import { collectForkSequences } from '../generation/RouteForkGenerator';
+import {
+  WorldGeometrySafetyPass,
+  WorldSafetyReport
+} from './WorldGeometrySafetyPass';
 import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 
 export class World {
@@ -59,6 +63,9 @@ export class World {
 
   /** Authoritative gameplay protection region for the loaded track. */
   public corridor: RouteExclusionCorridor | null = null;
+
+  /** Result of the final world geometry safety pass (build-time). */
+  public worldSafetyReport: WorldSafetyReport | null = null;
 
   private scene: THREE.Scene;
   private builtAssets: BuiltWorldAssets | null = null;
@@ -163,22 +170,55 @@ export class World {
     this.scene.add(this.routePackets.group);
 
     // ==========================================================
-    // FINAL AUTHORITATIVE GAMEPLAY-SAFETY PASS
+    // FINAL AUTHORITATIVE WORLD GEOMETRY SAFETY PASS
     //
-    // This runs AFTER every system that can affect decoration placement
-    // (route generation, route repair, surf insertion, optional surf, recovery
-    // geometry, scaling, rotation, translation, skyline, brutalist landmarks,
-    // spectral architecture, drop setpiece, celestial landmarks).
+    // This is the LAST world-geometry validation step and the single authority
+    // on whether environment geometry may exist where it was placed. It runs
+    // AFTER every builder (route, platforms, surf, obstacles, spines, forks,
+    // skyline, spectral, buildings, foundations, pylons, landmarks, signage,
+    // drop setpieces, celestial, spectacle, route packets) and BEFORE gameplay.
     //
-    // It operates on FINAL WORLD-SPACE GEOMETRY, measuring each individual
-    // mesh's real bounding box rather than any declared proxy radius, so it
-    // cannot be defeated by stale bounds, pre-scale/pre-rotation bounds, or
-    // nested groups. Invalid decoration is REJECTED; gameplay is never moved
-    // or deformed to accommodate decoration. Gameplay wins.
+    // It reuses the SAME canonical gameplay envelope as every early builder
+    // check, and it audits the assembled SCENE per leaf / per instance, so a
+    // group with a safe origin cannot hide an unsafe child, and one bad
+    // InstancedMesh instance does not cost the whole layer.
+    //
+    // Anything unregistered is audited too, so a future builder cannot
+    // `scene.add(hugeBuilding)` and escape this pass.
     // ==========================================================
     const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
     this.corridor = new RouteExclusionCorridor(allCorridorNodes);
 
+    const safetyPass = new WorldGeometrySafetyPass(track, this.corridor);
+    safetyPass.register(this.dropSetpiece.group, 'DropSetpiece', 'DECORATION');
+    safetyPass.register(this.spectralArchitecture.group, 'SpectralArchitecture', 'DECORATION');
+    safetyPass.register(this.skyline.group, 'SkylineArchitecture', 'DECORATION');
+    if (this.celestialLandmarks?.group) {
+      safetyPass.register(this.celestialLandmarks.group, 'CelestialLandmarks', 'VISUAL_ONLY');
+    }
+    if (this.builtAssets?.rootGroup) {
+      // Container: children carry their own roles (gameplay platforms vs
+      // decorative landmarks vs route trim), so registering the container must
+      // not flatten them.
+      safetyPass.register(this.builtAssets.rootGroup, 'GeometryBuilder', 'DECORATION');
+    }
+    if (this.signalLandmarks?.group) {
+      safetyPass.register(this.signalLandmarks.group, 'SignalLandmarks', 'DECORATION');
+    }
+    if (this.routePackets?.group) {
+      safetyPass.register(this.routePackets.group, 'RouteSignalPackets', 'VISUAL_ONLY');
+    }
+    safetyPass.register(this.spectacleRenderer.group, 'SpectacleRenderer', 'IGNORE_WORLD_SAFETY');
+    safetyPass.register(this.sky.mesh, 'ProceduralSky', 'IGNORE_WORLD_SAFETY');
+
+    const safetyReport = safetyPass.run(this.scene);
+    this.worldSafetyReport = safetyReport;
+    if (safetyReport.removed > 0 || safetyReport.unregisteredRenderables > 0) {
+      WorldGeometrySafetyPass.logReport(safetyReport);
+    }
+
+    // FREEZE: after the safety pass the world geometry is final. Nothing capable
+    // of intersecting gameplay may be added without passing the same contract.
     const decorationRoots: THREE.Object3D[] = [
       this.dropSetpiece.group,
       this.spectralArchitecture.group,
@@ -186,15 +226,6 @@ export class World {
     ];
     if (this.celestialLandmarks?.group) decorationRoots.push(this.celestialLandmarks.group);
     if (this.builtAssets?.decorativeGroup) decorationRoots.push(this.builtAssets.decorativeGroup);
-    if (this.signalLandmarks?.group) decorationRoots.push(this.signalLandmarks.group);
-
-    const report = this.corridor.validateDecorations(decorationRoots);
-    if (report.total > 0) {
-      console.log(
-        `[World] Gameplay-safety pass rejected ${report.total} decorative elements ` +
-        `intruding into protected route volumes.`
-      );
-    }
 
     const buildingReport = RouteExclusionCorridor.getLastBuildingReport();
     if (buildingReport.candidatesGenerated > 0) {

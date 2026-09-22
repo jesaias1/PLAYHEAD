@@ -136,6 +136,14 @@ export class RouteExclusionCorridor {
   }
 
   /**
+   * Number of gameplay volumes this corridor protects. Exposed so the world
+   * safety report can state exactly what the audit was measured against.
+   */
+  public get gameplayNodeCount(): number {
+    return this.mainRoute.length + this.independentNodes.length;
+  }
+
+  /**
    * Evaluates if a given bounding volume violates the route exclusion corridor.
    * Checks horizontal and vertical clearance against all route nodes, independent gameplay
    * surfaces (spines, shelves, optional surfs), and jump flight paths.

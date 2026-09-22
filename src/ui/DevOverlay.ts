@@ -213,6 +213,7 @@ export class DevOverlay {
       tempoDiagnosticsLine(),
       forkDiagnosticsLine(world),
       audioVisualDiagnosticsLine(world, this.channelIsolation),
+      worldSafetyDiagnosticsLine(world),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -249,6 +250,24 @@ function tempoDiagnosticsLine(): string {
  * the route/primary/secondary/tertiary response levels, so a tester can see
  * which parts of the music are reaching the world at any moment.
  */
+/**
+ * DEV: final world geometry safety report.
+ *
+ * This is the build-time audit result, not a per-frame metric: it is the last
+ * word on whether any environment geometry intersects the gameplay envelope.
+ * FINAL UNSAFE must be 0.
+ */
+function worldSafetyDiagnosticsLine(world: World): string {
+  const r = world.worldSafetyReport;
+  if (!r) return 'WORLD SAFETY: not run';
+  return (
+    `WORLD SAFETY: volumes ${r.gameplayVolumes} | objects ${r.decorativeObjects} | instances ${r.decorativeInstances}` +
+    `\n  OVERLAP ${r.directOverlap} | VERTICAL ${r.verticalIntrusion} | SURF ${r.surfCorridor} | HEADROOM ${r.headroom} | COMFORT ${r.comfortClearance}` +
+    `\n  REMOVED ${r.removed} | FINAL UNSAFE ${r.finalUnsafe}${r.finalUnsafe > 0 ? '  <-- MUST BE 0' : ''}` +
+    `\n  unregistered ${r.unregisteredRenderables} | audit ${r.durationMs.toFixed(1)} ms`
+  );
+}
+
 function audioVisualDiagnosticsLine(world: World, isolation: ChannelIsolation): string {
   const vs = world.visualController.state;
   const ch = vs.channels;

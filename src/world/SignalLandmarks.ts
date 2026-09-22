@@ -25,6 +25,7 @@ import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { TrackPalette } from '../audio/TrackPalettes';
+import { tagWorldRole } from './WorldRoles';
 
 export type LandmarkArchetype = 'SIGNAL_TOWER' | 'WAVEFORM_MONOLITH' | 'SPECTRAL_COLUMN';
 
@@ -178,6 +179,9 @@ export class SignalLandmarks {
     landmarkScale = 1.0
   ) {
     this.group = new THREE.Group();
+    // World role: declared explicitly so the final world safety pass can
+    // never mistake this geometry for gameplay (or miss it entirely).
+    tagWorldRole(this.group, 'DECORATION', 'SignalLandmarks');
     this.group.name = 'SignalLandmarks';
 
     const route = track.route;
