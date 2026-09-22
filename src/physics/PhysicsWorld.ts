@@ -8,6 +8,7 @@ import { BoxCollider } from './Collider';
 import { SurfState, SurfaceClassification } from '../player/SurfState';
 
 import { RouteVoidEnvelope } from './RouteVoidEnvelope';
+import { obstacleLateralDirection, obstacleLateralOffset } from '../generation/ObstacleMotion';
 
 interface DynamicObstacle {
   collider: BoxCollider;
@@ -127,24 +128,7 @@ export class PhysicsWorld {
     // playable route/surf/recovery geometry.
     if (obstacles) {
       for (const obstacle of obstacles) {
-        const collider = new BoxCollider(obstacle);
-        this.colliders.push(collider);
-
-        if (obstacle.obstacleMotion) {
-          const sin = Math.sin(obstacle.yaw);
-          const cos = Math.cos(obstacle.yaw);
-          this.dynamicObstacles.push({
-            collider,
-            baseX: obstacle.position.x,
-            baseY: obstacle.position.y,
-            baseZ: obstacle.position.z,
-            lateralX: cos,
-            lateralZ: -sin,
-            amplitude: obstacle.obstacleMotion.amplitude,
-            speed: obstacle.obstacleMotion.speed,
-            phase: obstacle.obstacleMotion.phase
-          });
-        }
+        this.addObstacleCollider(obstacle);
       }
     }
 
@@ -159,6 +143,32 @@ export class PhysicsWorld {
 
   public addCollider(col: BoxCollider): void {
     this.colliders.push(col);
+  }
+
+  /**
+   * Adds a production obstacle as a collider, registering deterministic motion
+   * when the obstacle moves. Shared by the world build and the Movement Lab
+   * obstacle gauntlet so both use the exact same collision behaviour.
+   */
+  public addObstacleCollider(obstacle: RouteNode): BoxCollider {
+    const collider = new BoxCollider(obstacle);
+    this.colliders.push(collider);
+
+    if (obstacle.obstacleMotion) {
+      const dir = obstacleLateralDirection(obstacle.yaw);
+      this.dynamicObstacles.push({
+        collider,
+        baseX: obstacle.position.x,
+        baseY: obstacle.position.y,
+        baseZ: obstacle.position.z,
+        lateralX: dir.x,
+        lateralZ: dir.z,
+        amplitude: obstacle.obstacleMotion.amplitude,
+        speed: obstacle.obstacleMotion.speed,
+        phase: obstacle.obstacleMotion.phase
+      });
+    }
+    return collider;
   }
 
   public clear(): void {
@@ -280,7 +290,10 @@ export class PhysicsWorld {
   public updateDynamicObstacles(songTime: number): void {
     if (this.dynamicObstacles.length === 0) return;
     for (const dyn of this.dynamicObstacles) {
-      const offset = dyn.amplitude * Math.sin(songTime * dyn.speed + dyn.phase);
+      const offset = obstacleLateralOffset(
+        { amplitude: dyn.amplitude, speed: dyn.speed, phase: dyn.phase },
+        songTime
+      );
       const collider = dyn.collider;
       collider.center.set(
         dyn.baseX + dyn.lateralX * offset,

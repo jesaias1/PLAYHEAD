@@ -1078,7 +1078,9 @@ export class Game {
     try {
       if (this.previousStateBeforePause === GameState.MOVEMENT_LAB || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         if (this.movementLab) {
-          this.movementLab.resetPlayer();
+          // Tap-R / fall restore returns to the last gauntlet test checkpoint
+          // (or the lab spawn when outside the gauntlet).
+          this.movementLab.respawnAtTestCheckpoint();
         }
         this.playerController.isRestoring = false;
         this.isRestoringCheckpoint = false;

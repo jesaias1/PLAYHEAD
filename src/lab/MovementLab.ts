@@ -9,8 +9,16 @@ import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { BoxCollider } from '../physics/Collider';
 import { PlayerController } from '../player/PlayerController';
 import { CameraController } from '../player/CameraController';
-import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { VisualAccent } from '../audio/AudioFeatures';
+import { obstacleLateralOffset } from '../generation/ObstacleMotion';
+import { AnimatedObstacleItem, GeometryBuilder } from '../world/GeometryBuilder';
 import { MovementLabHUD } from './MovementLabHUD';
+import {
+  GauntletCheckpoint,
+  buildGauntletLayout,
+  gauntletStationTitle
+} from './gauntletLayout';
 
 export class MovementLab {
   private scene: THREE.Scene;
@@ -27,6 +35,13 @@ export class MovementLab {
   private trajCount = 0;
   private trajEnabled = false;
   private readonly MAX_TRAJ_POINTS = 240;
+
+  // Obstacle gauntlet
+  private labTime = 0;
+  private gauntletAnimated: AnimatedObstacleItem[] = [];
+  private gauntletCheckpoints: GauntletCheckpoint[] = [];
+  private gauntletStartZ = 0;
+  private gauntletCheckpointIndex = -1;
 
   // Respawn position
   private spawnPosition = new THREE.Vector3(0, 1.5, 5.0);
@@ -67,6 +82,10 @@ export class MovementLab {
 
     // Build the 7 test areas
     this.buildCourse();
+
+    // Build the deterministic obstacle gauntlet (obstacle vocabulary testing)
+    this.buildObstacleGauntlet();
+
     this.scene.add(this.rootGroup);
 
     // Spawn player
@@ -336,6 +355,65 @@ export class MovementLab {
     addBox('AreaF5_CatchDeck', 0, 1.0, 1845, 26, 2, 45);
   }
 
+  /**
+   * Deterministic OBSTACLE GAUNTLET.
+   *
+   * Reuses the production obstacle construction (RouteChallengeGenerator lab
+   * API), production obstacle rendering (GeometryBuilder), production obstacle
+   * collision (PhysicsWorld.addObstacleCollider) and the single authoritative
+   * motion implementation (obstacleLateralOffset). Nothing here is a fake
+   * visual-only copy, and nothing here touches procedural generation.
+   */
+  private buildObstacleGauntlet(): void {
+    const layout = buildGauntletLayout();
+    this.gauntletCheckpoints = layout.checkpoints;
+    this.gauntletStartZ = layout.startZ;
+
+    const finishNode = layout.route[layout.route.length - 1];
+    const track: GeneratedTrack = {
+      seed: 0x0ba57ac1,
+      route: layout.route,
+      obstacles: layout.obstacles,
+      signalSpines: layout.signalSpines,
+      optionalRamps: [],
+      recoveryShelves: [],
+      checkpoints: [],
+      finish: {
+        routeNodeId: finishNode.id,
+        time: 0,
+        position: { ...finishNode.position },
+        yaw: finishNode.yaw
+      },
+      totalDistance: finishNode.arcLength,
+      targetDuration: 0,
+      repairedJumpsCount: 0
+    };
+
+    const accent: VisualAccent = { name: 'LAB CYAN', hex: '#00f0ff', rgb: [0, 240, 255] };
+    const built = GeometryBuilder.buildWorld(track, accent);
+    this.rootGroup.add(built.rootGroup);
+    this.gauntletAnimated = built.animatedObstacles;
+
+    // Authoritative colliders (platforms, skinny recovery spine, obstacles).
+    for (const node of layout.route) {
+      this.physics.addCollider(new BoxCollider(node));
+    }
+    for (const spine of layout.signalSpines) {
+      this.physics.addCollider(new BoxCollider(spine));
+    }
+    for (const obstacle of layout.obstacles) {
+      this.physics.addObstacleCollider(obstacle);
+    }
+
+    // Compact station signage (one banner per station entry).
+    for (let i = 0; i < layout.stations.length; i++) {
+      const station = layout.stations[i];
+      const host = layout.route[i];
+      const bannerZ = host.position.z - station.length * 0.5 + 2.0;
+      this.createAreaBanner(gauntletStationTitle(station), 0, 5.5, bannerZ);
+    }
+  }
+
   private createAreaBanner(text: string, x: number, y: number, z: number): void {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -363,12 +441,32 @@ export class MovementLab {
     this.rootGroup.add(mesh);
   }
 
-  public update(_dt: number): void {
+  public update(dt: number): void {
     if (this.isDisposed) return;
+
+    // Deterministic Lab clock feeds the SAME authoritative obstacle motion
+    // function as production, for both collision and meshes, so moving
+    // obstacles really move in the Lab too.
+    this.labTime += dt;
+    this.physics.updateDynamicObstacles(this.labTime);
+    if (this.gauntletAnimated.length > 0) {
+      for (const item of this.gauntletAnimated) {
+        const offset = obstacleLateralOffset(
+          { amplitude: item.amplitude, speed: item.speed, phase: item.phase },
+          this.labTime
+        );
+        const x = item.baseX + item.lateralX * offset;
+        const z = item.baseZ + item.lateralZ * offset;
+        item.mesh.position.set(x, item.baseY, z);
+        if (item.outline) item.outline.position.set(x, item.baseY, z);
+      }
+    }
+
+    this.updateGauntletProgress();
 
     // Check kill plane
     if (this.player.position.y < -20) {
-      this.resetPlayer();
+      this.respawnAtTestCheckpoint();
     }
 
     // Update Trajectory Breadcrumbs
@@ -425,14 +523,79 @@ export class MovementLab {
     this.clearTrajectory();
   }
 
+  /**
+   * Restores to the last passed gauntlet test checkpoint (or the lab spawn when
+   * the player is outside the gauntlet). Used by tap-R / fall restore so a
+   * failed obstacle attempt does not send the player back to the very start.
+   * Hold-R still performs the normal full restart (lab spawn).
+   */
+  public respawnAtTestCheckpoint(): void {
+    const cp = this.gauntletCheckpointIndex >= 0
+      ? this.gauntletCheckpoints[this.gauntletCheckpointIndex]
+      : null;
+    if (cp) {
+      this.teleportPlayer(
+        new THREE.Vector3(cp.position.x, cp.position.y, cp.position.z),
+        cp.yaw
+      );
+    } else {
+      this.resetPlayer();
+    }
+  }
+
+  /** DEV quick-jump: teleport to a gauntlet station checkpoint. */
+  public teleportToStation(stationIndex: number): void {
+    if (this.gauntletCheckpoints.length === 0) return;
+    const clamped = Math.max(0, Math.min(this.gauntletCheckpoints.length - 1, stationIndex));
+    const cp = this.gauntletCheckpoints[clamped];
+    if (!cp) return;
+    this.gauntletCheckpointIndex = clamped;
+    this.hud.setObstacleSection(cp.label);
+    this.teleportPlayer(new THREE.Vector3(cp.position.x, cp.position.y, cp.position.z), cp.yaw);
+  }
+
+  private cycleStation(delta: number): void {
+    const base = this.gauntletCheckpointIndex;
+    this.teleportToStation(base + delta);
+  }
+
+  private updateGauntletProgress(): void {
+    if (this.gauntletCheckpoints.length === 0) return;
+    const z = this.player.position.z;
+    if (z < this.gauntletStartZ - 20) {
+      if (this.gauntletCheckpointIndex !== -1) {
+        this.gauntletCheckpointIndex = -1;
+        this.hud.setObstacleSection(null);
+      }
+      return;
+    }
+
+    let index = -1;
+    for (let i = 0; i < this.gauntletCheckpoints.length; i++) {
+      if (z >= this.gauntletCheckpoints[i].position.z - 1.0) index = i;
+    }
+    if (index > this.gauntletCheckpointIndex) {
+      this.gauntletCheckpointIndex = index;
+      this.hud.setObstacleSection(this.gauntletCheckpoints[index].label);
+    }
+  }
+
   private initListeners(): void {
     if (typeof window === 'undefined') return;
 
     this.keyListener = (e: KeyboardEvent) => {
-      if (e.code === 'KeyR' && !e.repeat) {
-        this.resetPlayer();
-      } else if (e.code === 'KeyT' && !e.repeat) {
+      // NOTE: R is intentionally NOT handled here. Tap-R (checkpoint restore)
+      // and hold-R (full restart) are owned by the production PlayerController
+      // path so the Lab uses the normal movement control semantics.
+      if (e.code === 'KeyT' && !e.repeat) {
         this.toggleTrajectory();
+      } else if (e.code === 'Digit9' && !e.repeat) {
+        // OBSTACLE GAUNTLET: jump to the start of the obstacle test course.
+        this.teleportToStation(0);
+      } else if (e.code === 'BracketRight' && !e.repeat) {
+        this.cycleStation(1);
+      } else if (e.code === 'BracketLeft' && !e.repeat) {
+        this.cycleStation(-1);
       } else if (e.code === 'Digit4' && !e.repeat) {
         // Area F1: Easy Single Ramp
         this.teleportPlayer(new THREE.Vector3(0, 1.5, 1050), Math.PI);

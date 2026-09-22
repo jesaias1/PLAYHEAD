@@ -21,6 +21,7 @@ import { SpectacleRenderer } from './SpectacleRenderer';
 import { CelestialLandmarks } from './CelestialLandmarks';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
+import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 
 export class World {
   public physics: PhysicsWorld;
@@ -210,7 +211,10 @@ export class World {
     this.physics.updateDynamicObstacles(songTime);
     if (this.builtAssets && this.builtAssets.animatedObstacles.length > 0) {
       for (const item of this.builtAssets.animatedObstacles) {
-        const offset = item.amplitude * Math.sin(songTime * item.speed + item.phase);
+        const offset = obstacleLateralOffset(
+          { amplitude: item.amplitude, speed: item.speed, phase: item.phase },
+          songTime
+        );
         const x = item.baseX + item.lateralX * offset;
         const z = item.baseZ + item.lateralZ * offset;
         item.mesh.position.set(x, item.baseY, z);

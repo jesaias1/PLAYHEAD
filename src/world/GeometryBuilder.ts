@@ -254,12 +254,6 @@ export class GeometryBuilder {
       map: basaltTex
     });
     const obstacleSignalMaterial = makeBeaconMaterial(0x0a111a, primaryCol.clone(), 0.48, 0.9);
-    const obstacleTelegraphMaterial = new THREE.MeshBasicMaterial({
-      color: primaryCol,
-      transparent: true,
-      opacity: 0.32,
-      depthWrite: false
-    });
 
     // Build Route Meshes
     for (let i = 0; i < track.route.length; i++) {
@@ -404,37 +398,10 @@ export class GeometryBuilder {
           });
         }
 
-        // Only the leading element of a phrase carries a read-strip, so thread
-        // walls do not stack overlapping telegraphs.
-        const telegraphDistance = obstacle.obstacleTelegraphDistance;
-        const source = telegraphDistance
-          ? track.route.find(node => node.id === obstacle.obstacleSourceNodeId)
-          : undefined;
-        if (source && telegraphDistance) {
-          const telegraphLength = telegraphDistance;
-          const telegraphWidth = obstacle.obstacleType === 'SPLIT_GATE'
-            ? Math.max(2.4, source.dimensions.x * 0.28)
-            : Math.min(source.dimensions.x - 1, 6.0);
-          const telegraph = new THREE.Mesh(
-            new THREE.BoxGeometry(telegraphWidth, 0.035, telegraphLength),
-            obstacleTelegraphMaterial
-          );
-          const laneSign = obstacle.obstacleSafeLane === 'LEFT' ? -1
-            : obstacle.obstacleSafeLane === 'RIGHT' ? 1
-              : 0;
-          const localX = laneSign * source.dimensions.x * 0.25;
-          const forwardOffset = -(telegraphLength * 0.5 + 1.0);
-          const sin = Math.sin(source.yaw);
-          const cos = Math.cos(source.yaw);
-          telegraph.position.set(
-            obstacle.position.x + cos * localX + sin * forwardOffset,
-            source.position.y + source.dimensions.y * 0.5 + 0.025,
-            obstacle.position.z - sin * localX + cos * forwardOffset
-          );
-          telegraph.rotation.y = source.yaw;
-          telegraph.name = `RouteObstacleTelegraph:${obstacle.id}`;
-          rootGroup.add(telegraph);
-        }
+        // Obstacles communicate through silhouette, opening and edge
+        // illumination only. The old translucent floor read-strip was removed:
+        // it looked like a walkable platform and violated PLAYHEAD's visual
+        // language. Collision is unaffected (the strip was never a collider).
       }
     }
 

@@ -588,7 +588,17 @@ export class RouteGenerator {
     const recoveryShelves = RouteGenerator.generateRecoveryShelves(repairedNodes, rng);
 
     // 7. Generate Authoritative Signal Spines (procedural recovery layer for post-surf, staircases, and high-speed gaps)
-    const signalSpines = SignalSpineGenerator.generate(repairedNodes, analysis, rng);
+    //
+    // Obstacles are generated BEFORE spines so an obstacle section retains a
+    // (skinner) recovery spine instead of being left with none. Obstacles stay
+    // authoritative gameplay; the adaptive spine layer resolves around them.
+    const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis, {
+      recoveryShelves
+    });
+
+    const signalSpines = SignalSpineGenerator.generate(repairedNodes, analysis, rng, {
+      obstacles
+    });
 
     // 8. FINAL AUTHORITATIVE RAMP CLIPPING VALIDATION
     //
@@ -603,10 +613,6 @@ export class RouteGenerator {
       recoveryShelves,
       signalSpines
     );
-    const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis, {
-      signalSpines,
-      recoveryShelves
-    });
 
     return {
       generationVersion: ROUTE_GENERATION_VERSION,

@@ -24,6 +24,10 @@ import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { RouteNode, RouteNodeType } from './GenerationTypes';
 import { SeededRandom } from './SeededRandom';
+import { PLAYHEAD_MOVEMENT_V1 } from '../player/MovementConfig';
+
+/** Minimum catchable recovery width: one player diameter. */
+const RECOVERY_MIN_WIDTH = PLAYHEAD_MOVEMENT_V1.playerRadius * 2;
 
 export interface SignalSpineGenerationReport {
   eligibleGaps: number;
@@ -32,10 +36,22 @@ export interface SignalSpineGenerationReport {
   microBarConnectors: number;
   highRiskTransfersFound: number;
   highRiskConnectorsGenerated: number;
+  obstacleTransfersFound: number;
+  obstacleConnectorsGenerated: number;
   transfersLeftUnsupported: number;
   totalGenerated: number;
   rejectedCount: number;
   rejectionReasons: Record<string, number>;
+}
+
+/**
+ * Optional generation context. Obstacles are generated before spines so a gap
+ * that sits inside an obstacle section can be treated as elevated risk and
+ * receive a skinner recovery line instead of being left with no recovery at
+ * all. Obstacle presence is never a reason to blanket-disable a spine.
+ */
+export interface SignalSpineContext {
+  obstacles?: RouteNode[];
 }
 
 export class SignalSpineGenerator {
@@ -52,12 +68,28 @@ export class SignalSpineGenerator {
   public static generate(
     route: RouteNode[],
     analysis: TrackAnalysis,
-    rng: SeededRandom
+    rng: SeededRandom,
+    context: SignalSpineContext = {}
   ): RouteNode[] {
     if (route.length < 4) return [];
 
     const spines: RouteNode[] = [];
     let spineId = SignalSpineGenerator.BASE_ID;
+
+    // Obstacle-host platforms. A gap touching one of these is an "obstacle
+    // section": it stays eligible for a (skinner) recovery spine.
+    const obstacleHostIds = new Set<number>();
+    const obstacleLaneByHost = new Map<number, number>();
+    for (const obstacle of context.obstacles ?? []) {
+      if (obstacle.obstacleSourceNodeId === undefined) continue;
+      obstacleHostIds.add(obstacle.obstacleSourceNodeId);
+      const lane = obstacle.obstacleSafeLane === 'LEFT' ? -1
+        : obstacle.obstacleSafeLane === 'RIGHT' ? 1
+          : 0;
+      if (lane !== 0 && !obstacleLaneByHost.has(obstacle.obstacleSourceNodeId)) {
+        obstacleLaneByHost.set(obstacle.obstacleSourceNodeId, lane);
+      }
+    }
 
     // Track which node gaps already have a spine to avoid duplicate stacking
     const coveredGaps = new Set<string>();
@@ -67,8 +99,11 @@ export class SignalSpineGenerator {
     let microBarConnectors = 0;
     let highRiskTransfersFound = 0;
     let highRiskConnectorsGenerated = 0;
+    let obstacleTransfersFound = 0;
+    let obstacleConnectorsGenerated = 0;
     let transfersLeftUnsupported = 0;
     let consecutiveUnsupportedHighRisk = 0;
+    let consecutiveUnsupportedObstacle = 0;
 
     let eligibleGaps = 0;
     let rejectedCount = 0;
@@ -165,9 +200,17 @@ export class SignalSpineGenerator {
         b.ascentVariant !== undefined ||
         Math.abs(b.position.y - a.position.y) > 0.25;
 
+      // Obstacle sections: an obstacle-host platform on either side of the gap.
+      // These transfers stay eligible for a SKINNY recovery spine (never a wide
+      // easy bridge) and may not form long zero-recovery sequences.
+      const isObstacleSection = obstacleHostIds.size > 0 &&
+        (obstacleHostIds.has(a.id) || obstacleHostIds.has(b.id));
+      const obstacleLaneBias = obstacleLaneByHost.get(a.id) ?? obstacleLaneByHost.get(b.id) ?? 0;
+
       let qualify = false;
       let isMicroChain = false;
       let isSmallChain = false;
+      let isObstacleChain = false;
 
       if (isMicroBarChain) {
         // High-Risk Transfer Chain (Micro-platforms, tiny bars, precision landings)
@@ -196,6 +239,25 @@ export class SignalSpineGenerator {
           consecutiveUnsupportedHighRisk = 0;
           highRiskConnectorsGenerated++;
           isMicroChain = true;
+        }
+      } else if (isObstacleSection) {
+        // Elevated risk: the obstacle already demands a read/dodge, so the
+        // surrounding transfer keeps a skinny recovery option. Never allow two
+        // consecutive obstacle transfers with no recovery line.
+        obstacleTransfersFound++;
+        if (consecutiveUnsupportedObstacle >= 1) {
+          qualify = true;
+        } else if (rng.next() < 0.92) {
+          qualify = true;
+        } else {
+          consecutiveUnsupportedObstacle++;
+          transfersLeftUnsupported++;
+          recordRejection('intentional_obstacle_open_leap');
+        }
+        if (qualify) {
+          consecutiveUnsupportedObstacle = 0;
+          obstacleConnectorsGenerated++;
+          isObstacleChain = true;
         }
       } else if (isPostSurfReentry) {
         // Category 1: Post-surf landing platform chains (100% coverage)
@@ -245,18 +307,30 @@ export class SignalSpineGenerator {
         pitch,
         minPlatWidth,
         isMicroChain,
+        isObstacleChain,
+        obstacleLaneBias,
         isSmallChain,
         isPostSurfReentry,
         rng
       );
 
       if (spineNodes && spineNodes.length > 0) {
+        // Coexistence guard: never let a recovery line clip an authoritative
+        // obstacle collider. Obstacles live on platforms and spines span the
+        // gap, so this is a safety net rather than the normal case.
+        if (context.obstacles && SignalSpineGenerator.overlapsAnyObstacle(spineNodes, context.obstacles)) {
+          recordRejection('spine_would_clip_obstacle');
+          continue;
+        }
+
         coveredGaps.add(gapKey);
         for (const spine of spineNodes) {
           spines.push(spine);
         }
         if (isMicroChain) {
           microBarConnectors += spineNodes.length;
+        } else if (isObstacleChain) {
+          // Gap counted at qualification time (obstacleConnectorsGenerated).
         } else if (isSmallChain) {
           smallChainConnectors += spineNodes.length;
         } else {
@@ -272,6 +346,8 @@ export class SignalSpineGenerator {
       microBarConnectors,
       highRiskTransfersFound,
       highRiskConnectorsGenerated,
+      obstacleTransfersFound,
+      obstacleConnectorsGenerated,
       transfersLeftUnsupported,
       totalGenerated: spines.length,
       rejectedCount,
@@ -336,6 +412,8 @@ export class SignalSpineGenerator {
     pitch: number,
     minPlatWidth: number,
     isMicroChain: boolean,
+    isObstacleChain: boolean,
+    obstacleLaneBias: number,
     isSmallChain: boolean,
     isPostSurfReentry: boolean,
     rng: SeededRandom
@@ -344,8 +422,13 @@ export class SignalSpineGenerator {
     const dz = entryTopB.z - exitTopA.z;
     const yaw = Math.atan2(dx, dz);
 
+    // Micro chains and obstacle sections share the SKINNY recovery profile.
+    // Obstacle difficulty and precision-gap difficulty must not stack, but the
+    // recovery line must also never turn the obstacle into a wide easy bridge.
+    const isSkinnyRecovery = isMicroChain || isObstacleChain;
+
     // 1. Adaptive Width according to Movement Phrase:
-    // - micro-bar / precision chain: ~6–12% of local usable width, skinny recovery profile
+    // - micro-bar / obstacle-section recovery: ~6–12% of local usable width
     // - post-surf catch / very punishing transfer: ~20–25% of local platform width
     // - normal small-platform chain: ~12–18%
     // - medium / large transfer recovery line: ~8–12%
@@ -357,6 +440,13 @@ export class SignalSpineGenerator {
       widthRatio = rng.nextFloat(0.06, 0.12);
       minWidthCap = 0.35;
       maxWidthCap = Math.max(0.60, minPlatWidth * 0.14);
+    } else if (isObstacleChain) {
+      // Obstacle-section recovery line: skinny (~6-12% of platform width) but
+      // always at least one player diameter, so a recovery landing is
+      // genuinely catchable without turning the obstacle into a wide bridge.
+      widthRatio = rng.nextFloat(0.06, 0.12);
+      minWidthCap = RECOVERY_MIN_WIDTH;
+      maxWidthCap = Math.max(RECOVERY_MIN_WIDTH, minPlatWidth * 0.14);
     } else if (isPostSurfReentry) {
       widthRatio = rng.nextFloat(0.20, 0.25);
       minWidthCap = 1.20;
@@ -372,7 +462,12 @@ export class SignalSpineGenerator {
     }
 
     const baseWidth = Math.max(minWidthCap, Math.min(maxWidthCap, minPlatWidth * widthRatio));
-    const spineThickness = Math.min(isMicroChain ? 0.30 : 0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.35);
+    const spineThickness = Math.min(isSkinnyRecovery ? 0.30 : 0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.35);
+    // Obstacle sections bias the recovery line toward the obstacle's safe lane
+    // so a player recovering from a dodge is already lined up with the opening.
+    const laneShift = obstacleLaneBias !== 0
+      ? obstacleLaneBias * Math.min(1.0, Math.max(0, (minPlatWidth - baseWidth) * 0.5))
+      : 0;
     const overlap = rng.nextFloat(0.40, 0.80);
     const totalSpan = gap3D + overlap * 2.0;
 
@@ -430,7 +525,7 @@ export class SignalSpineGenerator {
 
     let chosenShape: 'TAPERED' | 'OFFSET' | 'BROKEN' | 'TAPER_TO_REJOIN' | 'DEFAULT';
 
-    if (isMicroChain) {
+    if (isSkinnyRecovery) {
       if (shapeRoll < 0.32 && gap3D >= 2.5) {
         chosenShape = 'TAPERED';
       } else if (shapeRoll < 0.62) {
@@ -482,18 +577,18 @@ export class SignalSpineGenerator {
     // 1. TAPERED SPINE:
     // Wider at platform attachments, narrower in middle, wider near next platform
     if (chosenShape === 'TAPERED') {
-      const entryWidth = isMicroChain
+      const entryWidth = isSkinnyRecovery
         ? Math.min(minPlatWidth * 0.16, baseWidth * 1.3)
         : Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
-      const midWidth = isMicroChain
+      const midWidth = isSkinnyRecovery
         ? Math.max(0.30, baseWidth * 0.75)
         : Math.max(0.65, baseWidth * 0.75);
       const exitWidth = entryWidth;
 
       return [
-        makeSegment(0.0, 0.28, entryWidth, 0, 'TAPERED'),
-        makeSegment(0.27, 0.73, midWidth, 0, 'TAPERED'),
-        makeSegment(0.72, 1.0, exitWidth, 0, 'TAPERED')
+        makeSegment(0.0, 0.28, entryWidth, laneShift, 'TAPERED'),
+        makeSegment(0.27, 0.73, midWidth, laneShift, 'TAPERED'),
+        makeSegment(0.72, 1.0, exitWidth, laneShift, 'TAPERED')
       ];
     }
 
@@ -503,10 +598,10 @@ export class SignalSpineGenerator {
       const turnSign = Math.abs(turnAngle) > 0.02
         ? (turnAngle > 0 ? 1 : -1)
         : (rng.next() < 0.5 ? 1 : -1);
-      const maxShift = isMicroChain
+      const maxShift = isSkinnyRecovery
         ? Math.min(0.6, (minPlatWidth - baseWidth) * 0.25)
         : Math.min(2.4, (minPlatWidth - baseWidth) * 0.35);
-      const shift = turnSign * rng.nextFloat(0.45, 0.85) * maxShift;
+      const shift = turnSign * rng.nextFloat(0.45, 0.85) * maxShift + laneShift;
 
       return [makeSegment(0.0, 1.0, baseWidth, shift, 'OFFSET')];
     }
@@ -514,7 +609,7 @@ export class SignalSpineGenerator {
     // 3. BROKEN SPINE:
     // Short missing section requiring one small controlled hop
     if (chosenShape === 'BROKEN') {
-      const hopLength = isMicroChain
+      const hopLength = isSkinnyRecovery
         ? Math.min(1.2, Math.max(0.6, gapHoriz * 0.20))
         : Math.min(1.8, Math.max(1.2, gapHoriz * 0.25));
       const hopFraction = Math.min(0.35, hopLength / totalSpan);
@@ -531,10 +626,10 @@ export class SignalSpineGenerator {
     // Spine gradually narrows or ends so player must return to main route
     if (chosenShape === 'TAPER_TO_REJOIN') {
       const isExitCatch = rng.next() < 0.5;
-      const rootWidth = isMicroChain
+      const rootWidth = isSkinnyRecovery
         ? Math.min(minPlatWidth * 0.16, baseWidth * 1.25)
         : Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
-      const tipWidth = isMicroChain
+      const tipWidth = isSkinnyRecovery
         ? Math.max(0.30, baseWidth * 0.70)
         : Math.max(0.65, baseWidth * 0.70);
 
@@ -555,6 +650,26 @@ export class SignalSpineGenerator {
 
     // 5. DEFAULT (STRAIGHT / CATWALK / CURVED)
     const variant = isCurved ? 'CURVED' : (baseWidth <= 0.8 ? 'CATWALK' : 'STRAIGHT');
-    return [makeSegment(0.0, 1.0, baseWidth, 0, variant)];
+    return [makeSegment(0.0, 1.0, baseWidth, laneShift, variant)];
+  }
+
+  /**
+   * Conservative cylinder overlap used to guarantee a recovery spine never
+   * clips an authoritative obstacle collider. Over-rejecting is safe.
+   */
+  private static overlapsAnyObstacle(spineNodes: RouteNode[], obstacles: RouteNode[]): boolean {
+    for (const spine of spineNodes) {
+      for (const obstacle of obstacles) {
+        const sx = Math.hypot(spine.dimensions.x, spine.dimensions.z) * 0.5;
+        const ox = Math.hypot(obstacle.dimensions.x, obstacle.dimensions.z) * 0.5;
+        const dx = spine.position.x - obstacle.position.x;
+        const dz = spine.position.z - obstacle.position.z;
+        const reach = sx + ox;
+        if (dx * dx + dz * dz >= reach * reach) continue;
+        const dy = Math.abs(spine.position.y - obstacle.position.y);
+        if (dy < (spine.dimensions.y + obstacle.dimensions.y) * 0.5) return true;
+      }
+    }
+    return false;
   }
 }

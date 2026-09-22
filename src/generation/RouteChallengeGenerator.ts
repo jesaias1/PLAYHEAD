@@ -207,6 +207,85 @@ export class RouteChallengeGenerator {
   }
 
   // -------------------------------------------------------------------------
+  // LAB API — Movement Lab obstacle gauntlet
+  //
+  // These reuse the EXACT production element/phrase factories, so Lab
+  // obstacles are real production obstacles (same RouteNode data model, same
+  // collider, same deterministic motion) placed at an authored location
+  // instead of a procedural one. Nothing here changes procedural generation.
+  // -------------------------------------------------------------------------
+
+  /** Builds a single production obstacle element on an authored Lab host. */
+  public static buildLabObstacle(
+    type: RouteObstacleType,
+    host: RouteNode,
+    rng: SeededRandom,
+    nextId: () => number,
+    phraseKind: ObstaclePhraseKind
+  ): RouteNode | null {
+    const id = nextId();
+    let element: RouteNode | null = null;
+
+    switch (type) {
+      case 'SPLIT_GATE': {
+        const x = host.dimensions.x;
+        const opening = clamp(x * 0.32, MIN_SAFE_LANE, 7.0);
+        const wallWidth = x - opening - EDGE_MARGIN;
+        if (wallWidth < 3.0) return null;
+        const openSide: 'LEFT' | 'RIGHT' = rng.nextBool() ? 'LEFT' : 'RIGHT';
+        element = RouteChallengeGenerator.makeWall(host, wallWidth, openSide, 0, 4.2, 0.95, id);
+        break;
+      }
+      case 'SCAN_BAR':
+        element = RouteChallengeGenerator.makeScanBar(host, 0, id);
+        break;
+      case 'SWEEP_BEAM':
+        element = RouteChallengeGenerator.makeSweepBeam(host, 0, rng, id);
+        break;
+      case 'PHASE_BLOCK':
+        element = RouteChallengeGenerator.makePhaseBlock(host, rng, 0, id);
+        break;
+      case 'SIGNAL_SHUTTER':
+        element = RouteChallengeGenerator.makeShutter(host, rng, id);
+        break;
+    }
+
+    if (!element) return null;
+    RouteChallengeGenerator.decoratePhrase(
+      [element],
+      phraseKind,
+      RouteChallengeGenerator.difficultyForPhrase(phraseKind),
+      'LAB',
+      id
+    );
+    return element;
+  }
+
+  /** Builds a full production phrase on an authored Lab host. */
+  public static buildLabPhrase(
+    kind: ObstaclePhraseKind,
+    host: RouteNode,
+    rng: SeededRandom,
+    nextId: () => number,
+    phraseId: number
+  ): RouteNode[] | null {
+    const size = RouteChallengeGenerator.classifyPlatform(host);
+    if (!size) return null;
+
+    const elements = RouteChallengeGenerator.buildPhrase(kind, host, size, rng, nextId);
+    if (!elements || elements.length === 0) return null;
+
+    RouteChallengeGenerator.decoratePhrase(
+      elements,
+      kind,
+      RouteChallengeGenerator.difficultyForPhrase(kind),
+      'LAB',
+      phraseId
+    );
+    return elements;
+  }
+
+  // -------------------------------------------------------------------------
   // Eligibility & music mapping
   // -------------------------------------------------------------------------
 

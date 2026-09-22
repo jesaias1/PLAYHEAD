@@ -10,6 +10,7 @@ import { formatSpeed, radToDeg } from '../utils/math';
 export class MovementLabHUD {
   public element: HTMLElement;
   private presetElem: HTMLElement;
+  private obstacleElem: HTMLElement;
   private speedElem: HTMLElement;
   private stateElem: HTMLElement;
   private velHElem: HTMLElement;
@@ -32,6 +33,10 @@ export class MovementLabHUD {
         <div class="lab-stat-row">
           <span class="lab-stat-label">PRESET:</span>
           <span class="lab-stat-val highlight" id="lab-preset">[3] PLAYHEAD</span>
+        </div>
+        <div class="lab-stat-row">
+          <span class="lab-stat-label">OBSTACLE:</span>
+          <span class="lab-stat-val" id="lab-obstacle">—</span>
         </div>
         <div class="lab-stat-row">
           <span class="lab-stat-label">SPEED:</span>
@@ -92,6 +97,10 @@ export class MovementLabHUD {
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>4-8</b> SURF LAB</span>
         <span class="cheat-sep">|</span>
+        <span class="cheat-item"><b>9</b> OBSTACLE LAB</span>
+        <span class="cheat-sep">|</span>
+        <span class="cheat-item"><b>[ ]</b> SECTION</span>
+        <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>T</b> TRAJECTORY</span>
         <span class="cheat-sep">|</span>
         <span class="cheat-item"><b>ESC</b> EXIT</span>
@@ -99,6 +108,7 @@ export class MovementLabHUD {
     `;
 
     this.presetElem = this.element.querySelector('#lab-preset') as HTMLElement;
+    this.obstacleElem = this.element.querySelector('#lab-obstacle') as HTMLElement;
     this.speedElem = this.element.querySelector('#lab-speed') as HTMLElement;
     this.stateElem = this.element.querySelector('#lab-state') as HTMLElement;
     this.velHElem = this.element.querySelector('#lab-vel') as HTMLElement;
@@ -204,6 +214,12 @@ export class MovementLabHUD {
 
   public show(): void {
     this.element.style.display = 'flex';
+  }
+
+  /** DEV: shows which obstacle gauntlet station the player is currently in. */
+  public setObstacleSection(label: string | null): void {
+    this.obstacleElem.textContent = label ?? '—';
+    this.obstacleElem.className = label ? 'lab-stat-val highlight' : 'lab-stat-val';
   }
 
   public hide(): void {
