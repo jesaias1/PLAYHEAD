@@ -135,12 +135,7 @@ export class World {
     // nested groups. Invalid decoration is REJECTED; gameplay is never moved
     // or deformed to accommodate decoration. Gameplay wins.
     // ==========================================================
-    const allCorridorNodes = [
-      ...track.route,
-      ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || []),
-      ...(track.signalSpines || [])
-    ];
+    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
     this.corridor = new RouteExclusionCorridor(allCorridorNodes);
 
     const decorationRoots: THREE.Object3D[] = [
@@ -163,8 +158,10 @@ export class World {
     if (buildingReport.candidatesGenerated > 0) {
       console.log(
         `[World] Building Validation: ${buildingReport.candidatesGenerated} candidates generated, ` +
-        `${buildingReport.rejectedByGameplayCollision} rejected by direct collision, ` +
+        `${buildingReport.rejectedByGameplayCollision} rejected by direct overlap, ` +
         `${buildingReport.rejectedByComfortClearance} rejected by comfort clearance, ` +
+        `${buildingReport.rejectedByVerticalIntrusion} rejected by vertical intrusion, ` +
+        `${buildingReport.rejectedBySurfCorridor} rejected by surf corridor, ` +
         `${buildingReport.finalSurvivingBuildings} surviving.`
       );
     }

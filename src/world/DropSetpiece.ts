@@ -96,13 +96,9 @@ export class DropSetpiece {
     this.group.rotation.y = yaw;
 
     // The corridor must include EVERY gameplay node, not just the main route:
-    // optional surf ramps and recovery shelves are legitimate gameplay too.
-    const allCorridorNodes = [
-      ...track.route,
-      ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || []),
-      ...(track.signalSpines || [])
-    ];
+    // optional surf ramps, recovery shelves and obstacle solids are legitimate
+    // gameplay too.
+    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
     const corridor = new RouteExclusionCorridor(allCorridorNodes);
 
     switch (this.family) {

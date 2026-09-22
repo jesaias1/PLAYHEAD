@@ -11,6 +11,8 @@ import { Environment } from '../world/Environment';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
+import { RouteGenerator } from '../generation/RouteGenerator';
+import { RouteExclusionCorridor } from '../world/RouteExclusionCorridor';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 export class DevOverlay {
@@ -169,6 +171,7 @@ export class DevOverlay {
       `SYNC DELTA: ${vs.syncDelta.toFixed(2)}s | PLAYER PROG: ${(vs.playerProgress * 100).toFixed(1)}% | TIME PROG: ${(vs.progress * 100).toFixed(1)}%`,
       world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE',
       obstacleDiagnosticsLine(world),
+      tempoDiagnosticsLine(),
       feedback
         ? `FEEDBACK: SPEED ${Math.round(feedback.speedUnits)} u/s [${feedback.speedBand}] ` +
           `I=${feedback.speedIntensity.toFixed(2)} | LAST ${feedback.lastEvent} | ` +
@@ -179,6 +182,17 @@ export class DevOverlay {
 
     this.textElement.innerText = lines.join('\n');
   }
+}
+
+function tempoDiagnosticsLine(): string {
+  const t = RouteGenerator.lastTempoReport;
+  if (!t) return 'TEMPO: n/a';
+  return (
+    `TEMPO: RAW ${t.rawBpm.toFixed(0)} BPM -> EFFECTIVE ${t.effectiveBpm.toFixed(0)} BPM ` +
+    `[${t.band}] ${t.interpretation} | PRESSURE ${t.pressure.toFixed(2)}` +
+    `\nTEMPO ROUTE: STAGGER ${t.staggerChains} chains / ${t.staggerSteps} steps | ` +
+    `OBSTACLE CADENCE x${t.obstacleSpacingMultiplier.toFixed(2)} | SURF EVENTS ${t.surfEvents}`
+  );
 }
 
 function obstacleDiagnosticsLine(world: World): string {
@@ -196,10 +210,14 @@ function obstacleDiagnosticsLine(world: World): string {
   const rejections = Object.entries(report.rejectionReasons)
     .map(([reason, n]) => `${reason}:${n}`)
     .join(' ');
+  const buildings = RouteExclusionCorridor.getLastBuildingReport();
   return (
     `OBSTACLES: ${report.obstaclesGenerated} in ${report.phrasesGenerated} phrases ` +
     `| ELIGIBLE: ${report.eligibleNodes} | REJECTED: ${report.rejected}` +
     `\nOBSTACLE TYPES: ${types || 'none'} | DIFFICULTY: ${difficulty || 'none'}` +
-    `\nOBSTACLE REJECTIONS: ${rejections || 'none'}`
+    `\nOBSTACLE REJECTIONS: ${rejections || 'none'}` +
+    `\nBUILDINGS: ${buildings.candidatesGenerated} cand | overlap ${buildings.rejectedByGameplayCollision} | ` +
+    `comfort ${buildings.rejectedByComfortClearance} | vertical ${buildings.rejectedByVerticalIntrusion} | ` +
+    `surf ${buildings.rejectedBySurfCorridor} | survive ${buildings.finalSurvivingBuildings}`
   );
 }

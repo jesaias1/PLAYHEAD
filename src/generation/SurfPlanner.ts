@@ -5,6 +5,7 @@
  */
 
 import { TrackAnalysis, AnalysisSection } from '../audio/AudioFeatures';
+import { computeTempoProfile } from './TempoPressure';
 
 export type SurfPhraseType =
   | 'SURF_DROP'
@@ -38,6 +39,11 @@ export class SurfPlanner {
     if (!sections || sections.length === 0) return events;
 
     const totalDuration = analysis.duration;
+    // TEMPO PRESSURE changes surf VOCABULARY and cadence, not raw ramp count
+    // alone: slow tracks get longer graceful glides, fast tracks get shorter,
+    // more frequent redirects and launch-to-rejoin sequences.
+    const tempo = computeTempoProfile(analysis);
+    const pressure = tempo.pressure;
     const candidates: {
       sectionIndex: number;
       section: AnalysisSection;
@@ -53,10 +59,10 @@ export class SurfPlanner {
       // 1. Ineligibility constraints:
       // - First onboarding window (first 18 seconds)
       // - Right before finish (last 12 seconds)
-      // - Sections shorter than 6 seconds
+      // - Very short sections
       if (sec.start < 18.0) continue;
       if (sec.start + sec.duration > totalDuration - 12.0) continue;
-      if (sec.duration < 6.0) continue;
+      if (sec.duration < 5.0) continue;
 
       let score = 0;
       let preferredType: SurfPhraseType = 'SURF_RELEASE';
@@ -81,9 +87,9 @@ export class SurfPlanner {
         score = 0.75;
         preferredType = 'SURF_TRANSFER';
       }
-      // 6. General energetic section
-      else if (sec.intensity >= 0.60) {
-        score = 0.55;
+      // 6. General energetic section (broadened so surf is a recurring pillar)
+      else if (sec.intensity >= 0.45) {
+        score = 0.58;
         preferredType = 'SURF_CHAIN';
       }
 
@@ -102,15 +108,16 @@ export class SurfPlanner {
     // Sort candidates by suitability descending
     candidates.sort((a, b) => b.suitability - a.suitability);
 
-    // Pick top 1-3 candidates with minimum time spacing of 20 seconds between surfs
-    const maxEvents = Math.min(3, Math.max(1, Math.floor(totalDuration / 45.0)));
+    // Surf presence: more events than before, scaled by tempo pressure.
+    const maxEvents = Math.min(6, Math.max(2, Math.round(2 + pressure * 4)));
+    const minSpacing = 18.0 - pressure * 6.0; // 12-18s between surf moments
     const selected: typeof candidates = [];
 
     for (const cand of candidates) {
       if (selected.length >= maxEvents) break;
 
       const tooClose = selected.some(s =>
-        Math.abs(s.section.start - cand.section.start) < 20.0
+        Math.abs(s.section.start - cand.section.start) < minSpacing
       );
 
       if (!tooClose) {
@@ -135,7 +142,10 @@ export class SurfPlanner {
     for (let i = 0; i < selected.length; i++) {
       const item = selected[i];
       const isSignature = i === signatureIdx;
-      const duration = Math.min(item.section.duration * 0.75, isSignature ? 18.0 : 12.0);
+      const type = tempoAdjustedType(item.preferredType, pressure, isSignature);
+      // Slow tracks glide longer; fast tracks are shorter and more frequent.
+      const baseDuration = isSignature ? lerp(20.0, 13.0, pressure) : lerp(15.0, 8.0, pressure);
+      const duration = Math.min(item.section.duration * 0.8, baseDuration);
 
       events.push({
         id: i + 1,
@@ -143,7 +153,7 @@ export class SurfPlanner {
         startTime: item.section.start,
         endTime: item.section.start + duration,
         duration,
-        type: isSignature ? (item.preferredType === 'SURF_DROP' ? 'SURF_DROP' : 'SURF_TRANSFER') : item.preferredType,
+        type,
         intensity: item.section.intensity,
         suitability: item.suitability,
         entrySpeedTarget: 16.0 + item.section.intensity * 6.0,
@@ -153,4 +163,30 @@ export class SurfPlanner {
 
     return events;
   }
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
+}
+
+/**
+ * Tempo reshapes surf vocabulary:
+ * - LOW pressure: long, graceful transfers and releases.
+ * - HIGH pressure: shorter, more aggressive chains / canyons with quicker
+ *   redirects and launch-to-rejoin sequences.
+ */
+function tempoAdjustedType(
+  preferred: SurfPhraseType,
+  pressure: number,
+  isSignature: boolean
+): SurfPhraseType {
+  if (pressure >= 0.62) {
+    if (preferred === 'SURF_DROP' || isSignature) return 'SURF_TRANSFER';
+    return preferred === 'SURF_CANYON' ? 'SURF_CANYON' : 'SURF_CHAIN';
+  }
+  if (pressure <= 0.38) {
+    if (preferred === 'SURF_CHAIN' || preferred === 'SURF_CANYON') return 'SURF_RELEASE';
+    return preferred;
+  }
+  return isSignature && preferred !== 'SURF_DROP' ? 'SURF_TRANSFER' : preferred;
 }

@@ -66,12 +66,7 @@ export class SpectralArchitecture {
     // ==========================================
     // 1. WAVEFORM CANYON (Left & Right Flanks)
     // ==========================================
-    const allCorridorNodes = [
-      ...track.route,
-      ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || []),
-      ...(track.signalSpines || [])
-    ];
+    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
     const corridor = new RouteExclusionCorridor(allCorridorNodes);
 
     let minWorldY = 0;

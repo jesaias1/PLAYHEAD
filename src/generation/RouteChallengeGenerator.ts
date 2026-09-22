@@ -144,6 +144,21 @@ export class RouteChallengeGenerator {
   }
 
   /**
+   * Reduces a desired lateral offset until it fits the available forward
+   * distance at the expected speed, using the SAME air-strafe envelope as wall
+   * threads. Route shaping may therefore never emit impossible lateral jumps.
+   */
+  public static fitLateralOffset(
+    desired: number,
+    forwardDistance: number,
+    speed: number
+  ): number {
+    const budget = Math.max(0, forwardDistance) * 0.85;
+    const maxOffset = Math.pow(budget / 2, 2) * DESIGN_TURN_RATE / (2 * Math.max(1, speed));
+    return Math.max(1.5, Math.min(desired, maxOffset));
+  }
+
+  /**
    * Estimates the approach speed a player is likely to carry into a platform,
    * derived from the authored route pacing and scaled for bhop speed retention.
    * Clamped so obstacle geometry is never tuned for absurd speeds.
@@ -165,7 +180,8 @@ export class RouteChallengeGenerator {
   public static generate(
     route: RouteNode[],
     analysis: TrackAnalysis,
-    context: RouteChallengeContext = {}
+    context: RouteChallengeContext = {},
+    options: { spacingMultiplier?: number } = {}
   ): RouteNode[] {
     RouteChallengeGenerator.lastReport = null;
     if (route.length < 8) return [];
@@ -173,6 +189,10 @@ export class RouteChallengeGenerator {
     const rng = new SeededRandom((analysis.seed ^ 0x4f425354) >>> 0);
     const obstacles: RouteNode[] = [];
     const report = RouteChallengeGenerator.emptyReport();
+    // Tempo pressure may tighten or relax the CADENCE between phrases. Obstacle
+    // geometry itself is never changed.
+    const spacingMultiplier = Math.max(0.6, Math.min(1.5, options.spacingMultiplier ?? 1));
+    const phraseSpacing = MIN_PHRASE_SPACING * spacingMultiplier;
 
     const reserved = RouteChallengeGenerator.collectReservedArcs(route);
 
@@ -196,7 +216,7 @@ export class RouteChallengeGenerator {
 
       const profile = RouteChallengeGenerator.profileForSection(section);
       if (profile.density <= 0) continue;
-      if (node.arcLength - lastPhraseEndArc < MIN_PHRASE_SPACING) continue;
+      if (node.arcLength - lastPhraseEndArc < phraseSpacing) continue;
       if (!rng.nextBool(profile.density)) continue;
 
       // A genuinely broad, long deck can carry the signature threading read

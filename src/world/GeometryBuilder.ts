@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
-import { createPlatformGeometry } from '../generation/PlatformShape';
+import { createPlatformGeometry, getPlatformMaxHalfWidth } from '../generation/PlatformShape';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
@@ -90,14 +90,10 @@ export class GeometryBuilder {
       reactiveBeacons.push({ mesh, channel });
     };
 
-    // Authoritative Route Exclusion Corridor (including any optional skill lines, recovery shelves, and signal spines)
-    const allRouteNodes = [
-      ...track.route,
-      ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || []),
-      ...(track.signalSpines || [])
-    ];
-    const corridor = new RouteExclusionCorridor(allRouteNodes);
+    // Authoritative Route Exclusion Corridor (including optional skill lines,
+    // recovery shelves, signal spines and obstacle solids).
+    const gameplayNodes = RouteExclusionCorridor.collectGameplayNodes(track);
+    const corridor = new RouteExclusionCorridor(gameplayNodes);
 
     // Shared Palette Colors
     const isPalette = 'primary' in paletteOrAccent;
@@ -358,14 +354,56 @@ export class GeometryBuilder {
       rootGroup.add(mesh);
 
       // Descending Monolithic Foundation Pillars plunging into the deep void (320m - 540m)
+      //
+      // ROOT-CAUSE FIX: these used to be added to rootGroup with no validation
+      // at all, so a pillar from a high platform could plunge straight through a
+      // lower route section. A foundation pillar is attached directly beneath
+      // its OWN platform, so the corridor's comfort clearance is the wrong test
+      // (its neighbours are only metres away). It is validated instead by
+      // DIRECT geometry intersection against every other gameplay node.
       if (!node.isSurf && node.type !== RouteNodeType.FINISH && i % 6 === 0) {
         const pylonHeight = 320.0 + ((i * 31) % 220.0);
         const pylonWidth = Math.min(3.4, node.dimensions.x * 0.45);
-        const pylonGeom = new THREE.BoxGeometry(pylonWidth, pylonHeight, pylonWidth * 1.2);
-        const pylonMesh = new THREE.Mesh(pylonGeom, backgroundMonolithMaterial);
-        pylonMesh.position.set(node.position.x, node.position.y - pylonHeight * 0.5 - node.dimensions.y * 1.5, node.position.z);
-        pylonMesh.rotation.set(0, node.yaw, 0);
-        rootGroup.add(pylonMesh);
+        const pylonTopY = node.position.y - node.dimensions.y * 1.5;
+        const pylonBottomY = pylonTopY - pylonHeight;
+        const pylonHalf = Math.hypot(pylonWidth, pylonWidth * 1.2) * 0.5;
+
+        let blocked = false;
+        for (const other of gameplayNodes) {
+          if (other.id === node.id) continue;
+          const otherHalfY = (other.dimensions.y || 2.0) * 0.5;
+          const pylonCenterY = (pylonTopY + pylonBottomY) * 0.5;
+          if (Math.abs(other.position.y - pylonCenterY) > pylonHeight * 0.5 + otherHalfY + 1.0) {
+            continue;
+          }
+          // Distance from the pillar axis to the other node's oriented centreline.
+          const halfLen = (other.dimensions.z || 0) * 0.5;
+          const fwdX = Math.sin(other.yaw);
+          const fwdZ = Math.cos(other.yaw);
+          const ex = other.position.x - fwdX * halfLen;
+          const ez = other.position.z - fwdZ * halfLen;
+          const sx = fwdX * other.dimensions.z;
+          const sz = fwdZ * other.dimensions.z;
+          const lenSq = sx * sx + sz * sz;
+          let t = lenSq > 1e-4
+            ? ((node.position.x - ex) * sx + (node.position.z - ez) * sz) / lenSq
+            : 0.5;
+          t = Math.max(0, Math.min(1, t));
+          const dist = Math.hypot(node.position.x - (ex + t * sx), node.position.z - (ez + t * sz));
+          if (dist < pylonHalf + getPlatformMaxHalfWidth(other) + 1.5) {
+            blocked = true;
+            break;
+          }
+        }
+
+        if (!blocked) {
+          const pylonGeom = new THREE.BoxGeometry(pylonWidth, pylonHeight, pylonWidth * 1.2);
+          const pylonMesh = new THREE.Mesh(pylonGeom, backgroundMonolithMaterial);
+          pylonMesh.position.set(node.position.x, pylonTopY - pylonHeight * 0.5, node.position.z);
+          pylonMesh.rotation.set(0, node.yaw, 0);
+          pylonMesh.name = `FoundationPylon:${node.id}`;
+          rootGroup.add(pylonMesh);
+        }
       }
 
       // Add Emissive Edge Trim on lateral sides

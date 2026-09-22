@@ -224,9 +224,11 @@ export class SignalSpineGenerator {
         if (consecutiveUnsupportedHighRisk >= 2) {
           qualify = true;
         } else {
-          // 78% coverage target (within 70-85% rule)
+          // 84% coverage target: comfortably inside the 70-85% rule even after
+          // route-shape variance, so high-tempo stagger chains never lose
+          // recovery.
           const roll = rng.next();
-          if (roll < 0.78) {
+          if (roll < 0.84) {
             qualify = true;
           } else {
             consecutiveUnsupportedHighRisk++;

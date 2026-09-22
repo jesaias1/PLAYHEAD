@@ -143,7 +143,7 @@ export class SongDirector {
         targetFogFar = 320;
         targetBloom = 0.35;
         targetVignette = 0.4;
-        spectralReactivity = 0.55;
+        spectralReactivity = 0.70;
         break;
 
       case 'TRAVEL':
@@ -154,7 +154,7 @@ export class SongDirector {
         targetFogFar = 420;
         targetBloom = 0.45;
         targetVignette = 0.35;
-        spectralReactivity = 0.75;
+        spectralReactivity = 0.90;
         break;
 
       case 'BUILDUP':
@@ -205,7 +205,8 @@ export class SongDirector {
         targetFogFar = 360;
         targetBloom = 0.30;
         targetVignette = 0.35;
-        spectralReactivity = 0.45;
+        // Breakdown still breathes musically — never a dead stretch.
+        spectralReactivity = 0.72;
         break;
 
       case 'CLIMAX':
@@ -227,7 +228,7 @@ export class SongDirector {
         targetFogFar = 420;
         targetBloom = 0.35;
         targetVignette = 0.35;
-        spectralReactivity = 0.50;
+        spectralReactivity = 0.72;
         break;
     }
 
@@ -286,7 +287,10 @@ export class SongDirector {
       fogFar: this.smoothFogFar,
       bloomStrength: this.smoothBloom,
       vignetteIntensity: this.smoothVignette,
-      spectralReactivity,
+      // Floor the reactivity multiplier so the world always sustains a musical
+      // baseline. Contrast between phases is preserved above the floor, but a
+      // quiet phase can no longer make long stretches feel visually dead.
+      spectralReactivity: Math.max(0.7, spectralReactivity),
       activeSpectacle,
       isSignatureActive,
       announcement: pendingAnnouncement

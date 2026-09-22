@@ -306,7 +306,7 @@ describe('Optional Side Surf Ramps Redesign', () => {
       }
     });
 
-    it('verifies ramps are spaced at least 12 nodes apart to avoid spam', () => {
+    it('verifies ramps are spaced apart along the route to avoid spam', () => {
       for (let seed = 1; seed <= 10; seed++) {
         const analysis = createMockAnalysis(120.0, seed * 1000);
         const track = RouteGenerator.generate(analysis);
@@ -331,7 +331,9 @@ describe('Optional Side Surf Ramps Redesign', () => {
         // Verify spacing between successive ramps
         for (let r = 1; r < rampIndices.length; r++) {
           const indexDiff = rampIndices[r] - rampIndices[r - 1];
-          expect(indexDiff).toBeGreaterThanOrEqual(10); // Spaced far apart along the track
+          // Optional ramps are now a more frequent opportunity (8-node cadence),
+          // so this guards against true clustering rather than the old 12.
+          expect(indexDiff).toBeGreaterThanOrEqual(7); // Spaced apart along the track
         }
       }
     });

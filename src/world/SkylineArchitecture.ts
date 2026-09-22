@@ -100,12 +100,7 @@ export class SkylineArchitecture {
     let sIdx = 0;
     let rIdx = 0;
 
-    const allCorridorNodes = [
-      ...track.route,
-      ...(track.optionalRamps || []),
-      ...(track.recoveryShelves || []),
-      ...(track.signalSpines || [])
-    ];
+    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
     const corridor = new RouteExclusionCorridor(allCorridorNodes);
 
     // Calculate global route minimum Y so every skyscraper extends far below the lowest route elevation
@@ -300,10 +295,35 @@ export class SkylineArchitecture {
   }
 
   public update(visualState: MusicVisualState, dt = 0): void {
-    const baseEmissive = 0.03 + visualState.bass * 0.12 + visualState.dropImpact * 0.35;
-    for (const mat of this.towerMaterials) {
-      mat.emissiveIntensity = Math.min(1.0, baseEmissive * visualState.reactivityMultiplier);
+    const react = visualState.reactivityMultiplier;
+    const energy = visualState.energy;
+    const bass = visualState.bass;
+    const subBass = visualState.subBass;
+    const onset = visualState.onsetPulse;
+    const drop = visualState.dropImpact;
+
+    // REACTIVITY HIERARCHY — the city answers the music with a clear order:
+    //   PRIMARY   nearby monoliths: windows/edges glint on beats, surge on drops
+    //   SECONDARY support stelae:  medium bass-driven signal strips
+    //   TERTIARY  distant ridges:  sustained low shimmer (never dead, never loud)
+    // Every layer keeps a non-zero baseline so the skyline always breathes.
+    const primary =
+      (0.12 + energy * 0.18 + bass * 0.34 + subBass * 0.12 + onset * 0.60 + drop * 1.10) * react;
+    const secondary =
+      (0.07 + energy * 0.12 + bass * 0.22 + onset * 0.34 + drop * 0.70) * react;
+    const tertiary =
+      (0.035 + energy * 0.08 + bass * 0.14 + subBass * 0.06 + drop * 0.34) * react;
+
+    if (this.towerMaterials[0]) {
+      this.towerMaterials[0].emissiveIntensity = Math.min(1.5, primary);
     }
+    if (this.towerMaterials[1]) {
+      this.towerMaterials[1].emissiveIntensity = Math.min(1.1, secondary);
+    }
+    if (this.towerMaterials[2]) {
+      this.towerMaterials[2].emissiveIntensity = Math.min(0.8, tertiary);
+    }
+
     if (this.signageSystem) {
       this.signageSystem.update(visualState, dt);
     }

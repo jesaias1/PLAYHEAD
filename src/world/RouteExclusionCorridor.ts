@@ -26,12 +26,23 @@ export interface BuildingValidationReport {
   candidatesGenerated: number;
   rejectedByGameplayCollision: number;
   rejectedByComfortClearance: number;
+  /** Tall structures whose vertical extent pierced the protected band. */
+  rejectedByVerticalIntrusion: number;
+  /** Structures intruding into a surf launch / travel corridor. */
+  rejectedBySurfCorridor: number;
   finalSurvivingBuildings: number;
 }
+
+export type ViolationKind =
+  | 'GAMEPLAY_OVERLAP'
+  | 'SURF_CORRIDOR'
+  | 'VERTICAL_INTRUSION'
+  | 'COMFORT_CLEARANCE';
 
 export interface VolumeEvaluationResult {
   penetration: number;
   nodeIndex: number;
+  kind: ViolationKind;
   isGameplayCollision: boolean;
   isComfortViolation: boolean;
 }
@@ -56,6 +67,8 @@ export class RouteExclusionCorridor {
     candidatesGenerated: 0,
     rejectedByGameplayCollision: 0,
     rejectedByComfortClearance: 0,
+    rejectedByVerticalIntrusion: 0,
+    rejectedBySurfCorridor: 0,
     finalSurvivingBuildings: 0
   };
 
@@ -68,8 +81,32 @@ export class RouteExclusionCorridor {
       candidatesGenerated: 0,
       rejectedByGameplayCollision: 0,
       rejectedByComfortClearance: 0,
+      rejectedByVerticalIntrusion: 0,
+      rejectedBySurfCorridor: 0,
       finalSurvivingBuildings: 0
     };
+  }
+
+  /**
+   * Canonical list of every gameplay surface that decoration must protect:
+   * main route, optional surf ramps, recovery shelves, signal spines AND the
+   * obstacle solids that sit on the route. Using one helper everywhere means
+   * no builder can silently protect a different envelope than the others.
+   */
+  public static collectGameplayNodes(track: {
+    route: RouteNode[];
+    optionalRamps?: RouteNode[];
+    recoveryShelves?: RouteNode[];
+    signalSpines?: RouteNode[];
+    obstacles?: RouteNode[];
+  }): RouteNode[] {
+    return [
+      ...track.route,
+      ...(track.optionalRamps || []),
+      ...(track.recoveryShelves || []),
+      ...(track.signalSpines || []),
+      ...(track.obstacles || [])
+    ];
   }
 
   private mainRoute: RouteNode[];
@@ -232,11 +269,13 @@ export class RouteExclusionCorridor {
   /**
    * Measures one world-space volume against the protected corridor.
    * Tests the complete final vertical extent of the structure against all
-   * gameplay platforms, Signal Spines, recovery shelves, and jump flight arcs.
+   * gameplay platforms, obstacle solids, Signal Spines, recovery shelves, and
+   * jump flight arcs, and against surf launch corridors.
    */
   public evaluateVolume(
     box: THREE.Box3,
-    extraSurfMargin = 28.0
+    extraSurfMargin = 28.0,
+    excludeNodeId?: number
   ): VolumeEvaluationResult | null {
     if (this.mainRoute.length === 0 && this.independentNodes.length === 0) return null;
 
@@ -256,9 +295,28 @@ export class RouteExclusionCorridor {
     let worst: VolumeEvaluationResult | null = null;
     const allNodes = [...this.mainRoute, ...this.independentNodes];
 
+    const consider = (
+      kind: ViolationKind,
+      penetration: number,
+      nodeIndex: number
+    ): void => {
+      const candidate: VolumeEvaluationResult = {
+        penetration,
+        nodeIndex,
+        kind,
+        isGameplayCollision: kind === 'GAMEPLAY_OVERLAP',
+        isComfortViolation: kind !== 'GAMEPLAY_OVERLAP'
+      };
+      if (isWorseViolation(candidate, worst)) worst = candidate;
+    };
+
     // 1. Evaluate against all individual platform geometries
     for (let i = 0; i < allNodes.length; i++) {
       const node = allNodes[i];
+      // A structure may be exempted from ITS OWN source node (e.g. a foundation
+      // pillar hanging directly beneath the platform it belongs to) while still
+      // being rejected for intersecting any other gameplay geometry.
+      if (excludeNodeId !== undefined && node.id === excludeNodeId) continue;
       const isSurf = !!node.isSurf;
       const isStepUp = node.type === RouteNodeType.STEP_UP ||
         node.ascentVariant !== undefined ||
@@ -267,18 +325,18 @@ export class RouteExclusionCorridor {
 
       let safetyMargin: number;
       if (isSurf) {
-        safetyMargin = Math.max(38.0, 18.0 + extraSurfMargin) + 0.85 * radius;
+        safetyMargin = Math.max(50.0, 26.0 + extraSurfMargin) + 0.85 * radius;
       } else if (isStepUp) {
-        safetyMargin = 32.0 + 0.7 * radius;
+        safetyMargin = 42.0 + 0.7 * radius;
       } else {
-        safetyMargin = 26.0 + 0.65 * radius;
+        safetyMargin = 36.0 + 0.65 * radius;
       }
 
       if (isColossal) {
-        const bgMargin = isSurf ? (55.0 + extraSurfMargin) : 46.0;
-        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * radius, 40.0 + 0.5 * footprint);
+        const bgMargin = isSurf ? (70.0 + extraSurfMargin) : 60.0;
+        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * radius, 52.0 + 0.5 * footprint);
       } else if (isMedium) {
-        safetyMargin = Math.max(safetyMargin, 22.0 + 0.4 * footprint);
+        safetyMargin = Math.max(safetyMargin, 30.0 + 0.4 * footprint);
       }
 
       const requiredDist = trackHalfBreadth + radius + safetyMargin;
@@ -291,6 +349,9 @@ export class RouteExclusionCorridor {
 
       const verticalOverlap = !(box.max.y < comfortMinY || box.min.y > comfortMaxY);
       const rawVerticalOverlap = !(box.max.y < rawMinY || box.min.y > rawMaxY);
+      // A structure that spans the WHOLE protected band is piercing through the
+      // route's airspace rather than merely standing beside it.
+      const spansBand = box.min.y < comfortMinY && box.max.y > comfortMaxY;
 
       if (verticalOverlap) {
         const halfLen = (node.dimensions.z || 0) * 0.5;
@@ -317,19 +378,14 @@ export class RouteExclusionCorridor {
         const dz = center.z - closestNodeZ;
         const dist = Math.hypot(dx, dz);
 
-        const isRawHit = rawVerticalOverlap && dist < rawRequiredDist;
-        const isComfortHit = dist < requiredDist;
-
-        if (isRawHit) {
-          const penetration = rawRequiredDist - dist;
-          if (!worst || !worst.isGameplayCollision || penetration > worst.penetration) {
-            worst = { penetration, nodeIndex: i, isGameplayCollision: true, isComfortViolation: false };
-          }
-        } else if (isComfortHit) {
-          const penetration = requiredDist - dist;
-          if (!worst || (!worst.isGameplayCollision && penetration > worst.penetration)) {
-            worst = { penetration, nodeIndex: i, isGameplayCollision: false, isComfortViolation: true };
-          }
+        if (rawVerticalOverlap && dist < rawRequiredDist) {
+          consider('GAMEPLAY_OVERLAP', rawRequiredDist - dist, i);
+        } else if (dist < requiredDist) {
+          consider(
+            spansBand ? 'VERTICAL_INTRUSION' : 'COMFORT_CLEARANCE',
+            requiredDist - dist,
+            i
+          );
         }
       }
 
@@ -345,23 +401,18 @@ export class RouteExclusionCorridor {
         const toObjZ = center.z - exitZ;
         const projFwd = toObjX * fwdX + toObjZ * fwdZ;
 
-        if (projFwd > 0 && projFwd < 140.0) {
-          const coneRatio = projFwd / 140.0;
-          const coneRadius = 24.0 + coneRatio * 36.0 + radius + (isColossal ? 20.0 : 0) + extraSurfMargin * 0.5;
+        if (projFwd > 0 && projFwd < 150.0) {
+          const coneRatio = projFwd / 150.0;
+          const coneRadius = 32.0 + coneRatio * 44.0 + radius + (isColossal ? 24.0 : 0) + extraSurfMargin * 0.5;
           const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
 
-          const coneMinY = node.position.y - 35.0 - (isColossal ? 20.0 : 0);
-          const coneMaxY = node.position.y + 70.0 + (isColossal ? 20.0 : 0);
+          const coneMinY = node.position.y - 40.0 - (isColossal ? 20.0 : 0);
+          const coneMaxY = node.position.y + 75.0 + (isColossal ? 20.0 : 0);
           if (!(box.max.y < coneMinY || box.min.y > coneMaxY)) {
             const latDist = Math.sqrt(latDistSq);
             const penetration = coneRadius - latDist;
-            if (penetration > 0 && (!worst || penetration > worst.penetration)) {
-              worst = {
-                penetration,
-                nodeIndex: i,
-                isGameplayCollision: penetration > 10.0,
-                isComfortViolation: true
-              };
+            if (penetration > 0) {
+              consider('SURF_CORRIDOR', penetration, i);
             }
           }
         }
@@ -372,23 +423,29 @@ export class RouteExclusionCorridor {
     for (let i = 0; i < this.mainRoute.length - 1; i++) {
       const node = this.mainRoute[i];
       const nextNode = this.mainRoute[i + 1];
+      if (
+        excludeNodeId !== undefined &&
+        (node.id === excludeNodeId || nextNode.id === excludeNodeId)
+      ) {
+        continue;
+      }
       const isSurfSection = !!node.isSurf || !!nextNode.isSurf;
       const isStepUpSection = node.type === RouteNodeType.STEP_UP || nextNode.type === RouteNodeType.STEP_UP;
 
       let segMargin: number;
       if (isSurfSection) {
-        segMargin = Math.max(40.0, 18.0 + extraSurfMargin) + 0.85 * radius;
+        segMargin = Math.max(52.0, 26.0 + extraSurfMargin) + 0.85 * radius;
       } else if (isStepUpSection) {
-        segMargin = 32.0 + 0.7 * radius;
+        segMargin = 42.0 + 0.7 * radius;
       } else {
-        segMargin = 30.0 + 0.7 * radius;
+        segMargin = 40.0 + 0.7 * radius;
       }
 
       if (isColossal) {
-        const bgMargin = isSurfSection ? (55.0 + extraSurfMargin) : 46.0;
-        segMargin = Math.max(segMargin, bgMargin + 0.6 * radius, 40.0 + 0.5 * footprint);
+        const bgMargin = isSurfSection ? (70.0 + extraSurfMargin) : 60.0;
+        segMargin = Math.max(segMargin, bgMargin + 0.6 * radius, 52.0 + 0.5 * footprint);
       } else if (isMedium) {
-        segMargin = Math.max(segMargin, 22.0 + 0.4 * footprint);
+        segMargin = Math.max(segMargin, 30.0 + 0.4 * footprint);
       }
 
       const segHalfBreadth = Math.max(getPlatformMaxHalfWidth(node), getPlatformMaxHalfWidth(nextNode));
@@ -422,6 +479,7 @@ export class RouteExclusionCorridor {
       const jumpComfortMaxY = flightY + vertAbove;
       const jumpRawMinY = flightY - JUMP_CORRIDOR_BELOW;
       const jumpRawMaxY = flightY + JUMP_CORRIDOR_ABOVE;
+      const flightSpansBand = box.min.y < jumpComfortMinY && box.max.y > jumpComfortMaxY;
 
       const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
       const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
@@ -436,19 +494,14 @@ export class RouteExclusionCorridor {
         const cdz = center.z - closestZ;
         const dist = Math.hypot(cdx, cdz);
 
-        const isRawHit = flightRawVerticalOverlap && dist < rawFlightRequiredDist;
-        const isComfortHit = dist < segRequiredDist;
-
-        if (isRawHit) {
-          const penetration = rawFlightRequiredDist - dist;
-          if (!worst || !worst.isGameplayCollision || penetration > worst.penetration) {
-            worst = { penetration, nodeIndex: i, isGameplayCollision: true, isComfortViolation: false };
-          }
-        } else if (isComfortHit) {
-          const penetration = segRequiredDist - dist;
-          if (!worst || (!worst.isGameplayCollision && penetration > worst.penetration)) {
-            worst = { penetration, nodeIndex: i, isGameplayCollision: false, isComfortViolation: true };
-          }
+        if (flightRawVerticalOverlap && dist < rawFlightRequiredDist) {
+          consider('GAMEPLAY_OVERLAP', rawFlightRequiredDist - dist, i);
+        } else if (dist < segRequiredDist) {
+          consider(
+            flightSpansBand ? 'VERTICAL_INTRUSION' : 'COMFORT_CLEARANCE',
+            segRequiredDist - dist,
+            i
+          );
         }
       }
     }
@@ -460,20 +513,54 @@ export class RouteExclusionCorridor {
    * Fast boolean query checking if a 3D bounding box violates the corridor.
    * Records candidate diagnostic statistics into lastBuildingReport.
    */
-  public isBoxInsideCorridor(box: THREE.Box3, extraSurfMargin = 28.0): boolean {
+  public isBoxInsideCorridor(
+    box: THREE.Box3,
+    extraSurfMargin = 28.0,
+    excludeNodeId?: number
+  ): boolean {
     RouteExclusionCorridor.lastBuildingReport.candidatesGenerated++;
-    const hit = this.evaluateVolume(box, extraSurfMargin);
+    const hit = this.evaluateVolume(box, extraSurfMargin, excludeNodeId);
     if (hit) {
-      if (hit.isGameplayCollision) {
-        RouteExclusionCorridor.lastBuildingReport.rejectedByGameplayCollision++;
-      } else {
-        RouteExclusionCorridor.lastBuildingReport.rejectedByComfortClearance++;
+      switch (hit.kind) {
+        case 'GAMEPLAY_OVERLAP':
+          RouteExclusionCorridor.lastBuildingReport.rejectedByGameplayCollision++;
+          break;
+        case 'SURF_CORRIDOR':
+          RouteExclusionCorridor.lastBuildingReport.rejectedBySurfCorridor++;
+          break;
+        case 'VERTICAL_INTRUSION':
+          RouteExclusionCorridor.lastBuildingReport.rejectedByVerticalIntrusion++;
+          break;
+        default:
+          RouteExclusionCorridor.lastBuildingReport.rejectedByComfortClearance++;
+          break;
       }
       return true;
     }
     RouteExclusionCorridor.lastBuildingReport.finalSurvivingBuildings++;
     return false;
   }
+}
+
+/** Violation severity: a real overlap outranks a corridor intrusion. */
+function violationPriority(kind: ViolationKind): number {
+  switch (kind) {
+    case 'GAMEPLAY_OVERLAP': return 4;
+    case 'SURF_CORRIDOR': return 3;
+    case 'VERTICAL_INTRUSION': return 2;
+    default: return 1;
+  }
+}
+
+function isWorseViolation(
+  candidate: VolumeEvaluationResult,
+  current: VolumeEvaluationResult | null
+): boolean {
+  if (!current) return true;
+  const pc = violationPriority(candidate.kind);
+  const pn = violationPriority(current.kind);
+  if (pc !== pn) return pc > pn;
+  return candidate.penetration > current.penetration;
 }
 
 /** Recursively collects decorative mesh leaves (bounded depth). */

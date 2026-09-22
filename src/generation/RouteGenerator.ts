@@ -15,14 +15,42 @@ import { getPlatformLateralEnvelope, getPlatformMaxHalfWidth } from './PlatformS
 import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowGeometry';
 import { RouteChallengeGenerator } from './RouteChallengeGenerator';
 import { SignalSpineGenerator } from './SignalSpineGenerator';
+import {
+  TempoProfile,
+  computeTempoProfile,
+  computeTempoPressure,
+  tempoRouteEffects
+} from './TempoPressure';
 
 export const ROUTE_GENERATION_VERSION = 4;
 
+/** Deterministic tempo/route telemetry for the most recent generation. */
+export interface RouteTempoReport {
+  rawBpm: number;
+  effectiveBpm: number;
+  interpretation: string;
+  band: string;
+  pressure: number;
+  staggerChains: number;
+  staggerSteps: number;
+  obstacleSpacingMultiplier: number;
+  surfEvents: number;
+}
+
 export class RouteGenerator {
+  public static lastTempoReport: RouteTempoReport | null = null;
+
   public static generate(analysis: TrackAnalysis): GeneratedTrack {
     const rng = new SeededRandom(analysis.seed);
     const nodes: RouteNode[] = [];
     const checkpoints: CheckpointDefinition[] = [];
+
+    // TEMPO PRESSURE: the music's tempo sets the route's movement-decision
+    // cadence. It never changes movement physics or platform safety limits.
+    const tempoProfile: TempoProfile = computeTempoProfile(analysis);
+    const tempoEffects = tempoRouteEffects(tempoProfile);
+    let staggerChains = 0;
+    let staggerSteps = 0;
 
     // Plan structured, musically-aligned surf events
     const surfEvents = SurfPlanner.plan(analysis);
@@ -39,6 +67,13 @@ export class RouteGenerator {
     // Velocity-aware platform sizing: track estimated arrival speed for next platform
     let estimatedSpeed = refSpeed;
     let consecutiveNarrow = 0; // Count consecutive narrow platforms for forced recovery
+
+    // Staggered strafe-chain state (tempo-driven lateral flow).
+    let staggerStepsRemaining = 0;
+    let staggerSide: 1 | -1 = 1;
+    let staggerOffset = 4.0;
+    let staggerBaseline: Vector3Like = { x: 0, y: 0, z: 0 };
+    let staggerBaselineYaw = 0;
 
     // 1. Initial Start Platform (Safe orientation, broad runway)
     const startLength = 32.0;
@@ -111,6 +146,16 @@ export class RouteGenerator {
       // Generate movement phrases according to section theme
       const sectionTargetDistance = section.duration * refSpeed;
       let sectionCurrentDistance = 0;
+
+      // Section-scoped tempo pressure: BPM sets the overall movement language,
+      // the section shapes the moment-to-moment expression.
+      const sectionTempoPressure = computeTempoPressure(analysis, section.theme);
+      const staggerChanceBase = Math.max(0, Math.min(1, 0.10 + sectionTempoPressure * 0.62));
+      // Precision sections still express flow, but less often: they keep their
+      // own identity rather than becoming a stagger chain.
+      const staggerChance = section.theme === 'PRECISION'
+        ? staggerChanceBase * 0.55
+        : staggerChanceBase;
 
       while (sectionCurrentDistance < sectionTargetDistance && (!isLastSection || sectionCurrentDistance < sectionTargetDistance - 40)) {
         // Curve yaw gently
@@ -341,6 +386,78 @@ export class RouteGenerator {
           nodeId = phrase.nextNodeId;
           estimatedSpeed = Math.max(estimatedSpeed, 20.0);
           consecutiveNarrow = 0;
+
+        } else if (
+          staggerStepsRemaining > 0 ||
+          ((theme === 'FLOW' || theme === 'SPEED' || theme === 'PRECISION' || theme === 'SURF') &&
+            rng.next() < staggerChance)
+        ) {
+          // ---- TEMPO-DRIVEN STAGGERED STRAFE CHAIN ----
+          // Alternating left/right platforms shaped like a strafe rhythm.
+          // Checked BEFORE the boost / ascent / standard branches so SPEED and
+          // FLOW sections can express tempo as lateral flow. The lateral offset
+          // is fitted to the speed-aware movement envelope and platforms are
+          // never shrunk for tempo, so higher pressure means a faster DECISION
+          // cadence rather than a harsher course.
+          if (staggerStepsRemaining <= 0) {
+            staggerBaseline = { ...currentPos };
+            staggerBaselineYaw = currentYaw;
+            staggerSide = rng.nextBool() ? 1 : -1;
+            staggerStepsRemaining = 3 + tempoEffects.staggerSteps; // 3..5 platforms
+            staggerChains++;
+          }
+
+          const gap = rng.nextFloat(4.5, 6.5);
+          const platLen = rng.nextFloat(20.0, 28.0);
+          const platWidth = rng.nextFloat(12.0, 16.0);
+
+          const forwardDistance = platLen + gap;
+          const desiredOffset = tempoEffects.staggerOffset + rng.nextFloat(0, 1.2);
+          staggerOffset = RouteChallengeGenerator.fitLateralOffset(
+            desiredOffset,
+            forwardDistance,
+            estimatedSpeed
+          );
+
+          const perpX = Math.cos(staggerBaselineYaw);
+          const perpZ = -Math.sin(staggerBaselineYaw);
+
+          // Advance the baseline forward, then offset this platform to the side.
+          staggerBaseline = getOffsetPosition(staggerBaseline, staggerBaselineYaw, gap + platLen * 0.5);
+          const centerX = staggerBaseline.x + perpX * staggerSide * staggerOffset;
+          const centerZ = staggerBaseline.z + perpZ * staggerSide * staggerOffset;
+
+          cumulativeDistance += gap + platLen * 0.5;
+          sectionCurrentDistance += gap + platLen * 0.5;
+
+          const staggerNode: RouteNode = {
+            id: nodeId++,
+            time: section.start + (sectionTargetDistance > 0 ? (sectionCurrentDistance / sectionTargetDistance) * section.duration : 0),
+            position: { x: centerX, y: staggerBaseline.y, z: centerZ },
+            dimensions: { x: platWidth, y: 2.0, z: platLen },
+            yaw: staggerBaselineYaw,
+            pitch: 0,
+            roll: 0,
+            type: RouteNodeType.RUNWAY,
+            intensity: section.intensity,
+            sectionIndex: sIdx,
+            arcLength: cumulativeDistance,
+            isSurf: false,
+            isBoost: false
+          };
+          nodes.push(staggerNode);
+
+          staggerBaseline = getOffsetPosition(staggerBaseline, staggerBaselineYaw, platLen * 0.5);
+          cumulativeDistance += platLen * 0.5;
+          sectionCurrentDistance += platLen * 0.5;
+          currentPos = { ...staggerBaseline };
+          currentYaw = staggerBaselineYaw;
+
+          estimatedSpeed = estimatedSpeed * 0.8 + refSpeed * 0.2;
+          consecutiveNarrow = 0;
+          staggerSteps++;
+          staggerStepsRemaining--;
+          staggerSide = staggerSide === 1 ? -1 : 1;
 
         } else if (theme === 'SPEED' || (section.intensity > 0.75 && phraseRoll < 0.45)) {
           // Boost Runway
@@ -594,11 +711,23 @@ export class RouteGenerator {
     // authoritative gameplay; the adaptive spine layer resolves around them.
     const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis, {
       recoveryShelves
-    });
+    }, { spacingMultiplier: tempoEffects.obstacleCadence });
 
     const signalSpines = SignalSpineGenerator.generate(repairedNodes, analysis, rng, {
       obstacles
     });
+
+    RouteGenerator.lastTempoReport = {
+      rawBpm: tempoProfile.rawBpm,
+      effectiveBpm: tempoProfile.effectiveBpm,
+      interpretation: tempoProfile.interpretation,
+      band: tempoProfile.band,
+      pressure: tempoProfile.pressure,
+      staggerChains,
+      staggerSteps,
+      obstacleSpacingMultiplier: tempoEffects.obstacleCadence,
+      surfEvents: surfEvents.length
+    };
 
     // 8. FINAL AUTHORITATIVE RAMP CLIPPING VALIDATION
     //
@@ -725,7 +854,7 @@ export class RouteGenerator {
     const optionalRamps: RouteNode[] = [];
     if (nodes.length < 12) return optionalRamps;
 
-    const maxRamps = Math.min(5, Math.max(3, Math.floor(nodes.length / 16)));
+    const maxRamps = Math.min(9, Math.max(4, Math.floor(nodes.length / 11)));
     let lastRampIndex = -999;
 
     // ------------------------------------------------------------------
@@ -761,11 +890,10 @@ export class RouteGenerator {
     const maxSpan = Math.min(96.0, Math.max(68.0, typicalSpan * 1.12));
 
     for (let i = 3; i < nodes.length - 5; i++) {
-      // Spacing keeps ramps well apart (contract requires >= 10 nodes apart).
-      // Kept at 11 rather than 12 so a short course still has enough discrete
-      // slots to reach the 3-ramp minimum when some candidates are rejected
-      // for clipping.
-      if (i - lastRampIndex < 11) continue;
+      // Spacing keeps ramps well apart. Tightened from 11 to 8 nodes so the
+      // optional side-surf layer is a recurring opportunity rather than a
+      // once-a-level curiosity, while remaining clearly optional.
+      if (i - lastRampIndex < 8) continue;
       if (optionalRamps.length >= maxRamps) break;
 
       const startPlatform = nodes[i];
@@ -787,7 +915,9 @@ export class RouteGenerator {
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < 20.0 || dist > maxSpan) continue;
 
-      // Target tricky small-platform sequences, rhythm-hop sequences, or step-up ascents
+      // Prefer tricky small-platform sequences, rhythm-hop sequences, or
+      // step-up ascents. Optional ramps are a bonus line, so a controlled
+      // fraction of otherwise-unqualified spans still receives one.
       const isNarrow = (startPlatform.dimensions.x <= narrowWidth) ||
         (midPlatform.dimensions.x <= narrowWidth);
       const isStepUp = startPlatform.type === RouteNodeType.STEP_UP ||
@@ -799,7 +929,7 @@ export class RouteGenerator {
                           startPlatform.type === RouteNodeType.NARROW_FLOW ||
                           (startPlatform.dimensions.z <= 28.0 && midPlatform.dimensions.z <= 28.0);
 
-      if (!isNarrow && !isStepUp && !isRhythmHop) continue;
+      if (!isNarrow && !isStepUp && !isRhythmHop && rng.next() > 0.35) continue;
 
       const dirX = dx / dist;
       const dirZ = dz / dist;
