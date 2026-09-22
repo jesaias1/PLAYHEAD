@@ -16,20 +16,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // -----------------------------------------------------------------------------
 // ACCEPTED CANONICAL MAPS
 //
-// Populate this from the same registry the client ships
-// (`src/online/OfficialMapRegistry.ts`) AFTER the official presets are
-// regenerated. While it is empty, every submission is rejected — which is the
-// correct behaviour: publishing scores from maps that are not provably
-// identical across clients would be publishing scores from different maps.
+// GENERATED from the same computation as src/online/OfficialMapRegistry.ts.
+// Regenerate with:
+//   npm run precompute-presets
+//   WRITE_REGISTRY=1 npx vitest run tests/CanonicalOfficialMaps.test.ts
 // -----------------------------------------------------------------------------
-interface AcceptedMap {
-  trackId: string;
-  mapVersion: number;
-  mapFingerprint: string;
-  movementVersion: string;
-}
-
-const ACCEPTED_MAPS: AcceptedMap[] = [];
+import { ACCEPTED_MAPS } from './accepted-maps.ts';
 
 const MIN_PLAUSIBLE_TIME_US = 8_000_000;        // 8 s
 const MAX_PLAUSIBLE_TIME_US = 30 * 60_000_000;  // 30 min

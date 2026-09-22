@@ -176,10 +176,20 @@ describe('Map identity — canonical competitive identity', () => {
     if (!badMovement.ok) expect(badMovement.reason).toBe('MOVEMENT_VERSION_MISMATCH');
   });
 
-  it('ships with competitive submission DISABLED and an empty registry', () => {
-    // Guards against someone flipping the flag without regenerating presets.
-    expect(REGISTRY_READY).toBe(false);
-    expect(OFFICIAL_MAP_REGISTRY.length).toBe(0);
+  it('ships an ENABLED registry covering every official catalog track', () => {
+    expect(REGISTRY_READY).toBe(true);
+    expect(OFFICIAL_MAP_REGISTRY.length).toBeGreaterThanOrEqual(10);
+    // Every entry must carry the full canonical identity.
+    for (const entry of OFFICIAL_MAP_REGISTRY) {
+      expect(entry.mapVersion).toBeGreaterThan(0);
+      expect(entry.mapFingerprint).toMatch(/^mfp_v\d+_[0-9A-F]{16}_[0-9a-f]+$/);
+      expect(entry.movementVersion).toBe(MOVEMENT_VERSION);
+      expect(entry.analysisFingerprint).toMatch(/^anfp_v\d+_[0-9A-F]{16}$/);
+      expect(entry.seed).toBeGreaterThan(0);
+    }
+    // No duplicate track ids.
+    const ids = OFFICIAL_MAP_REGISTRY.map((e) => e.trackId);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
@@ -422,11 +432,11 @@ describe('Leaderboard — submission gating and anti-cheat V1', () => {
     return new LeaderboardService(onlineClient, auth);
   }
 
-  it('keeps competitive submission disabled while the registry is not ready', () => {
+  it('reports the registry as ready, and gates the remaining checks in order', () => {
     const svc = service();
+    // The registry is canonical now, so the gate advances to connectivity.
     const canSubmit = svc.canSubmitCompetitively();
-    expect(canSubmit.ok).toBe(false);
-    expect(canSubmit.detail).toContain('CANONICAL MAP IDENTITY PENDING');
+    expect(canSubmit.detail).toBe('offline');
   });
 
   it('rejects DEV runs, invalid times and identity mismatches', () => {
@@ -445,7 +455,7 @@ describe('Leaderboard — submission gating and anti-cheat V1', () => {
     expect(offline && !offline.ok && offline.reason).toBe('OFFLINE');
   });
 
-  it('rejects a DEV run even when everything else is valid', () => {
+  it('rejects a DEV run before anything else, even with a valid canonical map', () => {
     const svc = service();
     (svc as unknown as { onlineClient: { getClient: () => unknown } }).onlineClient.getClient = () => ({});
     const outcome = svc.preflight({
@@ -456,7 +466,58 @@ describe('Leaderboard — submission gating and anti-cheat V1', () => {
       resetCount: 0,
       devMode: true
     });
-    expect(outcome && !outcome.ok && outcome.reason).toBe('REGISTRY_NOT_READY');
+    // DEV is checked before identity/time, so DEV runs can never be submitted.
+    expect(outcome && !outcome.ok && outcome.reason).toBe('DEV_RUN');
+  });
+
+  it('accepts a clean official run once the registry is ready and we are online', () => {
+    const svc = service();
+    (svc as unknown as { onlineClient: { getClient: () => unknown } }).onlineClient.getClient = () => ({});
+    // A run whose identity matches the shipped canonical registry passes
+    // preflight; the server still has the final word.
+    const entry = OFFICIAL_MAP_REGISTRY[0];
+    const canonicalIdentity = {
+      trackId: entry.trackId,
+      mapVersion: entry.mapVersion,
+      mapFingerprint: entry.mapFingerprint,
+      movementVersion: entry.movementVersion,
+      generatorVersion: entry.generatorVersion,
+      analysisVersion: entry.analysisVersion,
+      analysisFingerprint: entry.analysisFingerprint
+    };
+    const outcome = svc.preflight({
+      identity: canonicalIdentity,
+      timeUs: 60_000_000,
+      rank: 'GOLD',
+      checkpointCount: 4,
+      resetCount: 0,
+      devMode: false
+    });
+    expect(outcome).toBeNull();
+  });
+
+  it('rejects a run whose map fingerprint does not match the canonical registry', () => {
+    const svc = service();
+    (svc as unknown as { onlineClient: { getClient: () => unknown } }).onlineClient.getClient = () => ({});
+    const entry = OFFICIAL_MAP_REGISTRY[0];
+    const tampered = {
+      trackId: entry.trackId,
+      mapVersion: entry.mapVersion,
+      mapFingerprint: 'mfp_v1_0000000000000000_dead',
+      movementVersion: entry.movementVersion,
+      generatorVersion: entry.generatorVersion,
+      analysisVersion: entry.analysisVersion,
+      analysisFingerprint: entry.analysisFingerprint
+    };
+    const outcome = svc.preflight({
+      identity: tampered,
+      timeUs: 60_000_000,
+      rank: 'GOLD',
+      checkpointCount: 4,
+      resetCount: 0,
+      devMode: false
+    });
+    expect(outcome && !outcome.ok && outcome.reason).toBe('IDENTITY_MISMATCH');
   });
 
   it('never fabricates a WORLD ranking when the backend is unavailable', async () => {

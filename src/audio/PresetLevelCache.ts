@@ -30,6 +30,70 @@ export class PresetLevelCache {
     return this.cache.get(trackId);
   }
 
+  /** Clears the in-memory preset cache (used when simulating a cold session). */
+  public static clear(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * CANONICAL LEVEL RESOLUTION (pure).
+   *
+   * This is the ONE function that turns a shipped preset JSON into the exact
+   * track a player will run. Both the browser (`loadPreset`) and the canonical
+   * registry generator call it, so the map fingerprint can never drift between
+   * what the registry claims and what a client actually builds.
+   */
+  public static buildLevelData(json: Record<string, unknown>): PrecomputedLevelData {
+    const analysis = json.analysis as TrackAnalysis | undefined;
+    // Restore Float32Array for waveform
+    if (analysis && Array.isArray(analysis.waveform)) {
+      analysis.waveform = new Float32Array(analysis.waveform as unknown as number[]);
+    }
+
+    let track = json.track as GeneratedTrack;
+
+    // Route packages are versioned so official cached levels cannot silently
+    // retain obsolete giant ascents or omit gameplay challenges.
+    //
+    // COMPETITIVE MAP IDENTITY: when the cached package is stale we use the
+    // SINGLE canonical generation pipeline and nothing else. Obstacles, spines
+    // and forks therefore come from exactly the same code path that produces the
+    // map fingerprint, so two clients cannot end up playing different maps for
+    // the same official track.
+    const hasStaleRoute = !track?.route || track.generationVersion !== ROUTE_GENERATION_VERSION;
+    if (hasStaleRoute && analysis) {
+      track = RouteGenerator.generate(analysis);
+    }
+
+    // Safety nets only (a fully regenerated track already has all of these).
+    // They must never re-derive gameplay with different options, because that
+    // would change the map out from under the fingerprint.
+    if (!track.optionalRamps || track.optionalRamps.length === 0) {
+      const rng = new SeededRandom(analysis?.seed || 12345);
+      track.optionalRamps = RouteGenerator.generateOptionalSideSurfs(track.route, rng);
+    }
+
+    if ((!track.obstacles || track.obstacles.length === 0) && analysis) {
+      track.obstacles = RouteChallengeGenerator.generate(track.route, analysis, {
+        recoveryShelves: track.recoveryShelves
+      });
+    }
+
+    if ((!track.signalSpines || track.signalSpines.length === 0) && analysis) {
+      const rng = new SeededRandom(analysis?.seed || 12345);
+      track.signalSpines = SignalSpineGenerator.generate(track.route, analysis, rng, {
+        obstacles: track.obstacles
+      });
+    }
+
+    return {
+      trackId: (json.trackId as string) || '',
+      analysis: analysis as TrackAnalysis,
+      track,
+      spectacleEvents: (json.spectacleEvents as PrecomputedLevelData['spectacleEvents']) || undefined
+    };
+  }
+
   public static async loadPreset(trackId: string): Promise<PrecomputedLevelData | null> {
     if (this.cache.has(trackId)) {
       return this.cache.get(trackId)!;
@@ -42,53 +106,7 @@ export class PresetLevelCache {
       }
 
       const json = await response.json();
-      // Restore Float32Array for waveform
-      if (json.analysis && Array.isArray(json.analysis.waveform)) {
-        json.analysis.waveform = new Float32Array(json.analysis.waveform);
-      }
-
-      let track: GeneratedTrack = json.track;
-      // Route packages are versioned so official cached levels cannot silently
-      // retain obsolete giant ascents or omit gameplay challenges.
-      //
-      // COMPETITIVE MAP IDENTITY: when the cached package is stale we use the
-      // SINGLE canonical generation pipeline and nothing else. Obstacles,
-      // spines and forks therefore come from exactly the same code path that
-      // produces the map fingerprint, so two clients cannot end up playing
-      // different maps for the same official track.
-      const hasStaleRoute = !track?.route || track.generationVersion !== ROUTE_GENERATION_VERSION;
-      if (hasStaleRoute && json.analysis) {
-        track = RouteGenerator.generate(json.analysis);
-      }
-
-      // Safety nets only (a fully regenerated track already has all of these).
-      // They must never re-derive gameplay with different options, because that
-      // would change the map out from under the fingerprint.
-      if (!track.optionalRamps || track.optionalRamps.length === 0) {
-        const rng = new SeededRandom(json.analysis?.seed || 12345);
-        track.optionalRamps = RouteGenerator.generateOptionalSideSurfs(track.route, rng);
-      }
-
-      if ((!track.obstacles || track.obstacles.length === 0) && json.analysis) {
-        track.obstacles = RouteChallengeGenerator.generate(track.route, json.analysis, {
-          recoveryShelves: track.recoveryShelves
-        });
-      }
-
-      if ((!track.signalSpines || track.signalSpines.length === 0) && json.analysis) {
-        const rng = new SeededRandom(json.analysis?.seed || 12345);
-        track.signalSpines = SignalSpineGenerator.generate(track.route, json.analysis, rng, {
-          obstacles: track.obstacles
-        });
-      }
-
-      const data: PrecomputedLevelData = {
-        trackId: json.trackId || trackId,
-        analysis: json.analysis,
-        track,
-        spectacleEvents: json.spectacleEvents || json.spectaclePlan
-      };
-
+      const data = PresetLevelCache.buildLevelData(json);
       this.cache.set(trackId, data);
       return data;
     } catch {

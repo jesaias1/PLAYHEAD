@@ -418,7 +418,7 @@ function assembleAndAudit(track: TrackAnalysis, generated: GeneratedTrack): Asse
 
 describe('World geometry safety — GRAVITY LINE regression', () => {
   it('reports zero unsafe decoration on the human-reported level', () => {
-    const { analysis, track } = loadPreset('track_4_gravity_line');
+    const { analysis, track } = loadPreset('track_5_gravity_line');
     const { report } = assembleAndAudit(analysis, track);
 
     expect(report.finalUnsafe).toBe(0);
@@ -429,7 +429,7 @@ describe('World geometry safety — GRAVITY LINE regression', () => {
   it('rejects the checkpoint-arch / finish-monument foundation category found in reproduction', () => {
     // The historical offender: a monument foundation hanging off a route node.
     // Re-introduce that exact shape and confirm the pass rejects it.
-    const { analysis, track } = loadPreset('track_4_gravity_line');
+    const { analysis, track } = loadPreset('track_5_gravity_line');
     const checkpoint = track.route.find((n) => n.type === RouteNodeType.CHECKPOINT);
     expect(checkpoint, 'GRAVITY LINE must have a checkpoint').toBeTruthy();
 

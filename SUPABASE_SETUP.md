@@ -117,60 +117,46 @@ error — if the configured key looks like a privileged credential
 
 ---
 
-## 8. ENABLE COMPETITIVE SUBMISSION (currently disabled on purpose)
+## 8. CANONICAL OFFICIAL MAPS (DONE — maintenance only)
 
-**Public leaderboard submission is disabled right now. This is deliberate.**
+Public leaderboard submission is **ENABLED**. Every official Signal Pack track
+now has one canonical, versioned, deterministic map:
 
-`src/online/OfficialMapRegistry.ts` ships with `REGISTRY_READY = false` and an
-empty registry, and `supabase/functions/submit-run/index.ts` ships with an empty
-`ACCEPTED_MAPS`. Both refuse submissions.
+- `public/music/presets/*.json` are keyed by the **live catalog ids** and each
+  carries a baked `analysis` plus a fully resolved `track` with
+  `generationVersion` set, so `PresetLevelCache` uses the shipped map verbatim
+  and official tracks **never** fall back to runtime FFT analysis for route
+  generation.
+- `src/online/OfficialMapRegistry.ts` and
+  `supabase/functions/submit-run/accepted-maps.ts` are **generated** from the
+  same computation (`PresetLevelCache.buildLevelData`), so client and server can
+  never disagree about which maps are canonical.
+- `REGISTRY_READY = true`, 14 entries.
 
-### Why
+Verified by `tests/CanonicalOfficialMaps.test.ts`:
+100/100 identical fingerprints for KZ ASCENT and GRAVITY LINE, stable across the
+whole catalog, independent of quality tier, identical for fresh sessions, and
+FINAL UNSAFE DECORATION = 0 for every track.
 
-A global board is only meaningful if every player runs the **same map**. The
-fingerprint machinery is implemented and deterministic, but the *official
-analysis source* is not yet canonical:
+### Regenerating (only needed if the generator or analysis changes)
 
-- `public/music/presets/*.json` currently ship with a **stale numbering** that
-  does not match the live Signal Pack catalog ids (the catalog asks for
-  `track_5_gravity_line.json`; the file on disk is `track_4_gravity_line.json`).
-- `PresetLevelCache.loadPreset()` therefore 404s, and `Game` falls back to a
-  full **runtime FFT analysis** of the decoded audio.
-- That analysis feeds `RouteGenerator.generate()`. Decoding and FFT are float
-  pipelines, so the route — and therefore the map — can differ between
-  browsers/decoders for the same official track.
+```bash
+npm run dev                       # dev server must be running
+npm run precompute-presets        # rebuild canonical presets (do not edit files while it runs)
+WRITE_REGISTRY=1 npx vitest run tests/CanonicalOfficialMaps.test.ts
+npx vitest run tests/CanonicalOfficialMaps.test.ts   # verify the drift guard
+supabase functions deploy submit-run
+```
 
-Publishing scores from maps that are not provably identical would be publishing
-competitive scores from **different maps**. So it is off.
+`CANONICAL_FULL=1` runs the full 100-repeat determinism sweep per mandatory
+track; the default run is a fast regression subset.
 
-### How to enable it (three steps)
+### Note on payload size
 
-1. **Regenerate the canonical presets.** With the dev server running:
-
-   ```bash
-   npm run dev
-   npm run precompute-presets
-   ```
-
-   This writes presets keyed by the current catalog ids, each carrying a
-   canonical `analysis` and a fully generated `track` (forks, spines, obstacles,
-   `generationVersion`). Do not edit files while it runs — Vite HMR will
-   navigate the page and abort the run.
-
-2. **Build the registry** from those presets with the same pipeline the client
-   uses, then paste the resulting entries into
-   `src/online/OfficialMapRegistry.ts` and set `REGISTRY_READY = true`.
-
-3. **Mirror the registry into the Edge Function** (`ACCEPTED_MAPS` in
-   `supabase/functions/submit-run/index.ts`) and redeploy:
-
-   ```bash
-   supabase functions deploy submit-run
-   ```
-
-Until all three are done, runs are kept locally and the player is told
-`CANONICAL MAP IDENTITY PENDING`. Everything else — local play, local PBs,
-progression, cloud sync, and friend sessions — works regardless.
+The canonical presets total ~69 MB because the baked analysis frames are
+pretty-printed JSON. Minifying them would roughly halve that and would NOT
+change any fingerprint (the parsed analysis is identical), so it is a safe
+follow-up optimisation — not a correctness issue.
 
 ---
 

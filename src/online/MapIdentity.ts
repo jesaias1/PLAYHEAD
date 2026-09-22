@@ -22,6 +22,7 @@
  * Nothing here changes generation. It only measures it.
  */
 
+import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack, RouteNode } from '../generation/GenerationTypes';
 import { ROUTE_GENERATION_VERSION } from '../generation/RouteGenerator';
 import { PLAYHEAD_MOVEMENT_V1 } from '../player/MovementConfig';
@@ -29,6 +30,71 @@ import { murmurHash3, seedToHex } from '../utils/hash';
 
 /** Bumped when the fingerprint algorithm itself changes. */
 export const MAP_FINGERPRINT_ALGORITHM = 1;
+
+/** Bumped when the canonical analysis pipeline changes. */
+export const ANALYSIS_ALGORITHM_VERSION = 1;
+
+export interface AnalysisIdentity {
+  /** Seed baked into the canonical analysis. */
+  seed: number;
+  /** Duration in seconds, quantised. */
+  duration: number;
+  frameCount: number;
+  onsetCount: number;
+  sectionCount: number;
+  bpm: number;
+  /** Content hash of the baked analysis. */
+  analysisFingerprint: string;
+}
+
+/**
+ * Canonical analysis fingerprint.
+ *
+ * The analysis is BAKED into the official preset at precompute time and shipped
+ * as JSON, so every player reads the same bytes. This hash makes that
+ * verifiable: if a preset is ever regenerated with a different decoder or FFT,
+ * the analysis fingerprint changes, the map fingerprint changes, and the run is
+ * no longer competitive against the old board — which is exactly right.
+ */
+export function computeAnalysisFingerprint(analysis: TrackAnalysis): string {
+  const parts: string[] = [
+    `aa:${ANALYSIS_ALGORITHM_VERSION}`,
+    `seed:${analysis.seed >>> 0}`,
+    `dur:${analysis.duration.toFixed(4)}`,
+    `bpm:${analysis.bpm.toFixed(3)}`,
+    `frames:${analysis.frames.length}`,
+    `onsets:${analysis.onsets.length}`,
+    `sections:${analysis.sections.length}`
+  ];
+  // Sparse but content-sensitive sampling: every Nth frame keeps this cheap for
+  // a 90s track while still changing if the analysis genuinely differs.
+  const frameStep = Math.max(1, Math.floor(analysis.frames.length / 512));
+  for (let i = 0; i < analysis.frames.length; i += frameStep) {
+    const f = analysis.frames[i];
+    parts.push(`${q(f.time)},${q(f.rms)},${q(f.bass)},${q(f.mid)},${q(f.high)},${q(f.flux)}`);
+  }
+  for (const o of analysis.onsets) {
+    parts.push(`o:${q(o.time)},${q(o.strength)}`);
+  }
+  for (const s of analysis.sections) {
+    parts.push(`s:${s.index},${q(s.start)},${q(s.end)},${s.theme}`);
+  }
+  const h1 = murmurHash3(parts.join('\n'), 0x414e4c31);
+  const h2 = murmurHash3(parts.join('\n'), 0x414e4c32);
+  return `anfp_v${ANALYSIS_ALGORITHM_VERSION}_${seedToHex(h1)}${seedToHex(h2)}`;
+}
+
+export function computeAnalysisIdentity(analysis: TrackAnalysis): AnalysisIdentity {
+  return {
+    seed: analysis.seed >>> 0,
+    duration: analysis.duration,
+    frameCount: analysis.frames.length,
+    onsetCount: analysis.onsets.length,
+    sectionCount: analysis.sections.length,
+    bpm: analysis.bpm,
+    analysisFingerprint: computeAnalysisFingerprint(analysis)
+  };
+}
 
 /**
  * Movement identity. Derived from the frozen PLAYHEAD_MOVEMENT_V1 values, so a
@@ -66,6 +132,9 @@ export interface MapIdentity {
   mapFingerprint: string;
   movementVersion: string;
   generatorVersion: string;
+  /** Canonical analysis identity the map was generated from. */
+  analysisVersion: number;
+  analysisFingerprint: string;
 }
 
 /** Quantise a coordinate to 0.1 mm so cross-engine float noise cannot matter. */
@@ -103,12 +172,13 @@ function pushNode(parts: string[], node: RouteNode, tag: string): void {
  * Builds the canonical identity string for a FINAL track. Order is the
  * generation order, which is itself deterministic.
  */
-export function buildMapIdentityString(track: GeneratedTrack): string {
+export function buildMapIdentityString(track: GeneratedTrack, analysis?: TrackAnalysis): string {
   const parts: string[] = [
     `alg:${MAP_FINGERPRINT_ALGORITHM}`,
     `mapVersion:${ROUTE_GENERATION_VERSION}`,
     `movement:${MOVEMENT_VERSION}`,
     `generator:${GENERATOR_VERSION}`,
+    `analysis:${analysis ? computeAnalysisFingerprint(analysis) : 'unbound'}`,
     `seed:${track.seed >>> 0}`,
     `total:${q(track.totalDistance)}`,
     `target:${q(track.targetDuration)}`,
@@ -135,8 +205,8 @@ export function buildMapIdentityString(track: GeneratedTrack): string {
 }
 
 /** Short, stable, human-shareable fingerprint of the canonical map content. */
-export function computeMapFingerprint(track: GeneratedTrack): string {
-  const canonical = buildMapIdentityString(track);
+export function computeMapFingerprint(track: GeneratedTrack, analysis?: TrackAnalysis): string {
+  const canonical = buildMapIdentityString(track, analysis);
   // Two independent 32-bit hashes -> a 64-bit-ish fingerprint.
   const h1 = murmurHash3(canonical, 0x50484d31);
   const h2 = murmurHash3(canonical, 0x50484d32);
@@ -144,13 +214,20 @@ export function computeMapFingerprint(track: GeneratedTrack): string {
   return `mfp_v${MAP_FINGERPRINT_ALGORITHM}_${seedToHex(h1)}${seedToHex(h2)}_${bytes.toString(16)}`;
 }
 
-export function computeMapIdentity(trackId: string, track: GeneratedTrack): MapIdentity {
+export function computeMapIdentity(
+  trackId: string,
+  track: GeneratedTrack,
+  analysis?: TrackAnalysis
+): MapIdentity {
+  const analysisIdentity = analysis ? computeAnalysisIdentity(analysis) : null;
   return {
     trackId,
     mapVersion: ROUTE_GENERATION_VERSION,
     mapFingerprint: computeMapFingerprint(track),
     movementVersion: MOVEMENT_VERSION,
-    generatorVersion: GENERATOR_VERSION
+    generatorVersion: GENERATOR_VERSION,
+    analysisVersion: ANALYSIS_ALGORITHM_VERSION,
+    analysisFingerprint: analysisIdentity?.analysisFingerprint ?? 'anfp_unbound'
   };
 }
 
@@ -161,6 +238,8 @@ export interface RegistryEntry {
   mapFingerprint: string;
   movementVersion: string;
   generatorVersion: string;
+  analysisVersion: number;
+  analysisFingerprint: string;
 }
 
 export type IdentityVerdict =

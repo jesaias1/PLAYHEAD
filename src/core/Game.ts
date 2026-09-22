@@ -61,6 +61,17 @@ export class Game {
   public replayRecorder: ReplayRecorder;
   public replayPlayer: ReplayPlayer;
   public ghostManager: GhostManager;
+
+  /**
+   * True when the loaded official track came from a CANONICAL baked preset.
+   *
+   * Official competitive maps must never be produced by runtime audio analysis:
+   * decoding and FFT are float pipelines that can differ between browsers, which
+   * would give two players different maps for the same song. If the preset is
+   * missing we still let the player play (offline-first), but the run is marked
+   * non-canonical and can never be submitted to a public leaderboard.
+   */
+  public currentTrackCanonical = false;
   public ui: UIManager;
   public devOverlay: DevOverlay;
 
@@ -641,9 +652,25 @@ export class Game {
 
         this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.97);
         this.ui.analysisScreen.displayAnalysis(precomputed.analysis);
+        this.currentTrackCanonical = true;
         this.stateMachine.transitionTo(GameState.READY);
         return;
       }
+
+      // CANONICAL MAP GUARD.
+      //
+      // Reaching here for an OFFICIAL track means the baked preset was missing,
+      // so the route would be generated from a runtime FFT analysis of the
+      // decoded audio. That is not a canonical competitive map. We still let the
+      // run happen (offline-first), but it is explicitly marked non-canonical so
+      // it can never be submitted to a public leaderboard.
+      this.currentTrackCanonical = false;
+      console.warn(
+        `[ONLINE] Canonical preset missing for official track "${trackEntry.id}". ` +
+        'Falling back to runtime analysis: this run is NOT eligible for public ' +
+        'leaderboard submission. Run `npm run precompute-presets` to restore the ' +
+        'canonical map.'
+      );
 
       // Fallback: standard full analysis pipeline
       await this.processBuffer(buffer, trackEntry.title);
