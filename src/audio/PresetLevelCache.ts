@@ -50,34 +50,36 @@ export class PresetLevelCache {
       let track: GeneratedTrack = json.track;
       // Route packages are versioned so official cached levels cannot silently
       // retain obsolete giant ascents or omit gameplay challenges.
+      //
+      // COMPETITIVE MAP IDENTITY: when the cached package is stale we use the
+      // SINGLE canonical generation pipeline and nothing else. Obstacles,
+      // spines and forks therefore come from exactly the same code path that
+      // produces the map fingerprint, so two clients cannot end up playing
+      // different maps for the same official track.
       const hasStaleRoute = !track?.route || track.generationVersion !== ROUTE_GENERATION_VERSION;
       if (hasStaleRoute && json.analysis) {
         track = RouteGenerator.generate(json.analysis);
       }
 
-      // Ensure optional side-surf skill ramps + signal spines exist even in cached presets.
+      // Safety nets only (a fully regenerated track already has all of these).
+      // They must never re-derive gameplay with different options, because that
+      // would change the map out from under the fingerprint.
       if (!track.optionalRamps || track.optionalRamps.length === 0) {
         const rng = new SeededRandom(json.analysis?.seed || 12345);
         track.optionalRamps = RouteGenerator.generateOptionalSideSurfs(track.route, rng);
       }
 
-      // Obstacle Pass 2 layouts are regenerated from the route + analysis so a
-      // cached preset can never retain an obsolete, sparse obstacle layout.
-      // Obstacles are rebuilt BEFORE spines so obstacle sections keep a skinny
-      // recovery spine.
-      if (json.analysis) {
+      if ((!track.obstacles || track.obstacles.length === 0) && json.analysis) {
         track.obstacles = RouteChallengeGenerator.generate(track.route, json.analysis, {
           recoveryShelves: track.recoveryShelves
         });
       }
 
-      if (!track.signalSpines || track.signalSpines.length === 0) {
-        if (json.analysis) {
-          const rng = new SeededRandom(json.analysis?.seed || 12345);
-          track.signalSpines = SignalSpineGenerator.generate(track.route, json.analysis, rng, {
-            obstacles: track.obstacles
-          });
-        }
+      if ((!track.signalSpines || track.signalSpines.length === 0) && json.analysis) {
+        const rng = new SeededRandom(json.analysis?.seed || 12345);
+        track.signalSpines = SignalSpineGenerator.generate(track.route, json.analysis, rng, {
+          obstacles: track.obstacles
+        });
       }
 
       const data: PrecomputedLevelData = {

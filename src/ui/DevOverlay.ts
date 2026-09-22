@@ -15,6 +15,8 @@ import { RouteGenerator } from '../generation/RouteGenerator';
 import { RouteExclusionCorridor } from '../world/RouteExclusionCorridor';
 import { RouteForkGenerator } from '../generation/RouteForkGenerator';
 import type { ChannelIsolation } from '../world/MusicVisualController';
+import { onlineBootstrap } from '../online/OnlineBootstrap';
+import { leaderboardService } from '../online/LeaderboardService';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -214,6 +216,7 @@ export class DevOverlay {
       forkDiagnosticsLine(world),
       audioVisualDiagnosticsLine(world, this.channelIsolation),
       worldSafetyDiagnosticsLine(world),
+      onlineDiagnosticsLine(),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -257,8 +260,27 @@ function tempoDiagnosticsLine(): string {
  * word on whether any environment geometry intersects the gameplay envelope.
  * FINAL UNSAFE must be 0.
  */
-function worldSafetyDiagnosticsLine(world: World): string {
-  const r = world.worldSafetyReport;
+/**
+ * DEV: online / cloud progression status.
+ *
+ * Reports the real state, including the fact that competitive submission is
+ * intentionally disabled until canonical map identity is available.
+ */
+function onlineDiagnosticsLine(): string {
+  const status = onlineBootstrap.getStatus();
+  const client = onlineBootstrap.getClient();
+  const canSubmit = leaderboardService.canSubmitCompetitively();
+  return (
+    `ONLINE: ${client.getStatusLabel()} | ${status.state}` +
+    `\n  ${status.detail}` +
+    `\n  queue ${status.pendingOperations} | last sync ${
+      status.lastSyncAt > 0 ? new Date(status.lastSyncAt).toISOString().slice(11, 19) : 'never'
+    }` +
+    `\n  SUBMIT ${canSubmit.ok ? 'ENABLED' : 'DISABLED'} // ${canSubmit.detail}`
+  );
+}
+
+function worldSafetyDiagnosticsLine(world: World): string {  const r = world.worldSafetyReport;
   if (!r) return 'WORLD SAFETY: not run';
   return (
     `WORLD SAFETY: volumes ${r.gameplayVolumes} | objects ${r.decorativeObjects} | instances ${r.decorativeInstances}` +

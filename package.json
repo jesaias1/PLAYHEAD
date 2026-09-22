@@ -12,6 +12,7 @@
     "precompute-presets": "node scripts/precompute_presets.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.0",
     "three": "^0.174.0"
   },
   "devDependencies": {

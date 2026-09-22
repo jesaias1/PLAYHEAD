@@ -1244,6 +1244,85 @@ export class KarambitSkinSystem {
     return [...this.progression.awardedRankKeys];
   }
 
+  /**
+   * CLOUD HYDRATION.
+   *
+   * Applies a merged cloud progression onto the local device cache. This is the
+   * ONLY external write path into progression, and it is deliberately additive:
+   *
+   * - `awardedRankKeys` is UNIONED (never removed), so the anti-re-award ledger
+   *   can only grow. Losing an entry would let a rank threshold pay out twice.
+   * - `rewardOwnedSkinIds` is UNIONED, so no unlock is ever lost and no
+   *   duplicate can be created (the sanitizer de-duplicates).
+   * - `pendingDropRanks` is SET from the server-derived value (awarded - spent),
+   *   which is what makes drop state event-aware rather than a max() guess.
+   * - `equippedSkinId` is applied only when it is a known, unlocked skin;
+   *   otherwise it falls back safely to SIGNAL_CYAN.
+   *
+   * DEV preview state and calibration are never touched here.
+   */
+  public applyCloudProgression(cloud: {
+    awardedRankKeys?: readonly string[];
+    rewardOwnedSkinIds?: readonly string[];
+    pendingDropRanks?: readonly RunRank[];
+    equippedSkinId?: string;
+  }): void {
+    let changed = false;
+
+    if (cloud.awardedRankKeys) {
+      const existing = new Set(this.progression.awardedRankKeys);
+      for (const key of cloud.awardedRankKeys) {
+        if (typeof key !== 'string' || key.length === 0) continue;
+        if (existing.has(key)) continue;
+        existing.add(key);
+        this.progression.awardedRankKeys.push(key);
+        changed = true;
+      }
+    }
+
+    if (cloud.rewardOwnedSkinIds) {
+      const existing = new Set(this.progression.rewardOwnedSkinIds);
+      for (const id of cloud.rewardOwnedSkinIds) {
+        if (typeof id !== 'string' || id.length === 0) continue;
+        if (existing.has(id)) continue;
+        existing.add(id);
+        this.progression.rewardOwnedSkinIds.push(id);
+        changed = true;
+      }
+    }
+
+    if (cloud.pendingDropRanks) {
+      const valid = cloud.pendingDropRanks.filter(
+        (r): r is RunRank => r === 'BRONZE' || r === 'SILVER' || r === 'GOLD' || r === 'DIAMOND'
+      );
+      const same =
+        valid.length === this.progression.pendingDropRanks.length &&
+        valid.every((r, i) => r === this.progression.pendingDropRanks[i]);
+      if (!same) {
+        this.progression.pendingDropRanks = valid.slice(0, 1000);
+        changed = true;
+      }
+    }
+
+    if (cloud.equippedSkinId) {
+      const skin = this.getSkin(cloud.equippedSkinId);
+      const known = this.getSkins().some((s) => s.id === skin.id);
+      if (known && this.isSkinUnlocked(skin.id) && skin.id !== this.equippedSkinId) {
+        this.equippedSkinId = skin.id;
+        changed = true;
+      } else if (!known && this.equippedSkinId !== 'SIGNAL_CYAN') {
+        // Cloud referenced an unavailable/removed knife: fall back safely.
+        this.equippedSkinId = 'SIGNAL_CYAN';
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.saveState();
+      this.notifyListeners();
+    }
+  }
+
   public getAwardedDiamondLevelIds(): string[] {
     return this.progression.awardedRankKeys
       .filter(key => key.endsWith(':DIAMOND'))

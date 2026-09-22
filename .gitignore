@@ -2,3 +2,12 @@ node_modules/
 dist/
 *.log
 
+# Local environment. The browser bundle may contain ONLY the publishable key.
+# Never commit service_role / secret keys.
+.env
+.env.local
+.env.*.local
+
+# Local measurement / scratch artifacts
+.perf/
+scratch/

@@ -83,6 +83,29 @@ export class CustomAudioRewardService {
     return this.claimedFingerprints.has(fingerprint);
   }
 
+  /** Read-only view of claimed fingerprints, for cloud reconciliation. */
+  public getClaimedFingerprints(): string[] {
+    return [...this.claimedFingerprints];
+  }
+
+  /**
+   * Unions cloud-known fingerprints into the local set.
+   *
+   * Additive only: a cloud claim can never be removed locally, and a local claim
+   * is never removed by a cloud sync, so a re-upload of the same audio can never
+   * award a second drop on either side.
+   */
+  public mergeCloudClaims(fingerprints: readonly string[]): void {
+    let changed = false;
+    for (const fp of fingerprints) {
+      if (typeof fp !== 'string' || fp.length === 0) continue;
+      if (this.claimedFingerprints.has(fp)) continue;
+      this.claimedFingerprints.add(fp);
+      changed = true;
+    }
+    if (changed) this.saveState();
+  }
+
   public checkEligibility(
     duration: number,
     fingerprint: string

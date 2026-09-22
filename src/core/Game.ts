@@ -22,6 +22,7 @@ import type { RunRank } from '../player/PlayerStats';
 import { ReplayRecorder } from '../replay/ReplayRecorder';
 import { ReplayPlayer } from '../replay/ReplayPlayer';
 import { GhostManager } from '../replay/GhostManager';
+import { onlineBootstrap } from '../online/OnlineBootstrap';
 import { UIManager } from '../ui/UIManager';
 import { DevOverlay } from '../ui/DevOverlay';
 import { calculateLookYaw } from '../utils/math';
@@ -152,6 +153,13 @@ export class Game {
 
     // 6. Dev Diagnostics Overlay
     this.devOverlay = new DevOverlay();
+
+    // 6b. Online (Supabase) bootstrap — fire-and-forget.
+    //
+    // Deliberately non-blocking and failure-tolerant: if Supabase is not
+    // configured or unreachable, PLAYHEAD launches and plays exactly as before
+    // with local progression. Nothing here can delay or break the game.
+    onlineBootstrap.start();
 
     // 7. Dev Viewmodel Calibration Tool (F4)
     this.viewmodelCalibrator = new ViewmodelCalibrator(
