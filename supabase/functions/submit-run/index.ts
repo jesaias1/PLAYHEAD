@@ -95,7 +95,6 @@ Deno.serve(async (req: Request) => {
     ? null : Number(body.replay_version);
   const replayHash = typeof body.replay_hash === 'string' ? body.replay_hash : null;
   const replayPath = typeof body.replay_path === 'string' ? body.replay_path : null;
-
   // --- validation -----------------------------------------------------------
 
   if (dev) {
@@ -148,6 +147,39 @@ Deno.serve(async (req: Request) => {
     return reject('WRONG_MOVEMENT_VERSION', `expected ${accepted.movementVersion}`);
   }
 
+  // --- optional replay attachment -------------------------------------------
+  // A replay is never required: a run without one still ranks. When one IS
+  // supplied we verify it belongs to the caller and actually exists, so a
+  // leaderboard row can never point at another player's object.
+  let acceptedReplayPath: string | null = null;
+  let acceptedReplayHash: string | null = null;
+  let acceptedReplayVersion: number | null = null;
+
+  if (replayPath) {
+    const ownerPrefix = `${userId}/`;
+    if (!replayPath.startsWith(ownerPrefix)) {
+      return reject('INVALID_REPLAY_PATH', 'replay path must be under your own folder');
+    }
+    if (!replayHash) {
+      return reject('MISSING_METADATA', 'replay_hash required when replay_path is supplied');
+    }
+    if (!Number.isInteger(replayVersion) || (replayVersion as number) <= 0) {
+      return reject('MISSING_METADATA', 'replay_version required when replay_path is supplied');
+    }
+
+    // Existence check: signing the object proves it is really there.
+    const { data: probe, error: probeError } = await admin.storage
+      .from('run-replays')
+      .createSignedUrl(replayPath, 30);
+    if (probeError || !probe?.signedUrl) {
+      return reject('REPLAY_NOT_FOUND', 'the referenced replay object does not exist');
+    }
+
+    acceptedReplayPath = replayPath;
+    acceptedReplayHash = replayHash;
+    acceptedReplayVersion = replayVersion as number;
+  }
+
   // --- duplicate request replay guard --------------------------------------
   // Same user + track + identity + exact time within a short window = a replay
   // of the same submission, not a new run.
@@ -193,9 +225,9 @@ Deno.serve(async (req: Request) => {
       movement_version: movementVersion,
       generator_version: generatorVersion,
       build_version: buildVersion,
-      replay_version: replayVersion,
-      replay_hash: replayHash,
-      replay_path: replayPath,
+      replay_version: acceptedReplayVersion,
+      replay_hash: acceptedReplayHash,
+      replay_path: acceptedReplayPath,
       checkpoint_count: checkpointCount,
       reset_count: resetCount,
       verification_state: 'accepted'

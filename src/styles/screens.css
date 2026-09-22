@@ -1888,3 +1888,18 @@ option:hover, option:focus, option:checked {
 .online-result-time { text-align: right; color: var(--accent-color); }
 .online-result-meta { text-align: right; color: #6d7885; font-size: 0.7rem; letter-spacing: 0.08em; }
 .online-result-attempts { font-size: 0.68rem; color: #6d7885; margin-top: 10px; letter-spacing: 0.06em; }
+
+/* WATCH RUN action inside the world leaderboard table. */
+.online-lb-row { grid-template-columns: 42px 1fr 110px 78px; }
+.online-lb-watch { text-align: right; }
+.online-lb-watch-btn {
+  background: none;
+  border: 1px solid var(--accent-color);
+  color: var(--accent-color);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.online-lb-watch-btn:hover { background: var(--accent-dim); }

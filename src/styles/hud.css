@@ -393,3 +393,36 @@
   font-size: 0.72rem;
   letter-spacing: 0.1em;
 }
+
+/* ==========================================================================
+   POV REPLAY OVERLAY — minimal first-person replay controls
+   ========================================================================== */
+
+.replay-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  width: min(760px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.55);
+  font-family: var(--font-mono);
+  z-index: 6;
+}
+
+.replay-head { display: flex; align-items: baseline; gap: 14px; }
+.replay-title { font-size: 0.68rem; letter-spacing: 0.16em; color: #6d7885; }
+.replay-player { font-size: 0.82rem; color: #d7e3ef; flex: 1; }
+.replay-finish { font-size: 0.82rem; color: var(--accent-color); }
+
+.replay-timeline { display: flex; flex-direction: column; gap: 4px; }
+.replay-timeline-track { height: 3px; background: rgba(255, 255, 255, 0.1); }
+.replay-timeline-fill { height: 100%; background: var(--accent-color); width: 0%; }
+.replay-timeline-text { font-size: 0.68rem; letter-spacing: 0.08em; color: #7b8794; }
+
+.replay-actions { display: flex; align-items: center; gap: 10px; }
+.replay-hint { margin-left: auto; font-size: 0.62rem; letter-spacing: 0.12em; color: #566170; }

@@ -35,6 +35,10 @@ import { authService } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
 import { RemoteGhostRenderer } from '../online/RemoteGhostRenderer';
 import { formatRaceTime } from '../ui/RaceHud';
+import { PovReplayRecorder } from '../replay/pov/PovReplayRecorder';
+import { PovReplayPlayer } from '../replay/pov/PovReplayPlayer';
+import { PovReplay, PovReplayEventType, PovReplayIdentity, encodePovReplay } from '../replay/pov/PovReplayFormat';
+import { replayStorageService } from '../online/ReplayStorageService';
 import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { UIManager } from '../ui/UIManager';
 import { DevOverlay } from '../ui/DevOverlay';
@@ -106,6 +110,18 @@ export class Game {
   /** Invite code captured from ?room= before the player reaches the menu. */
   private pendingInviteCode: string | null = null;
   private onlineInitialized = false;
+
+  // ==========================================================================
+  // POV REPLAY V1 state.
+  //
+  // The recorder stores a compact 30 Hz sample stream; the player reconstructs
+  // the camera from recorded samples only (no re-simulation, so no drift).
+  // ==========================================================================
+  private povRecorder = new PovReplayRecorder();
+  public povPlayer = new PovReplayPlayer();
+  /** 'NONE' | 'POV' (player-facing) | 'LEGACY' (DEV-only box/chase replay). */
+  private replayMode: 'NONE' | 'POV' | 'LEGACY' = 'NONE';
+  private lastFinalizedReplay: PovReplay | null = null;
   public ui: UIManager;
   public devOverlay: DevOverlay;
 
@@ -321,7 +337,12 @@ export class Game {
 
     // Results Screen
     this.ui.resultsScreen.setCallbacks({
-      onReplay: () => this.stateMachine.transitionTo(GameState.REPLAY),
+      onReplay: () => {
+        // Player-facing replay is TRUE FIRST-PERSON POV of the run just played.
+        void this.watchLocalReplay().then((r) => {
+          if (!r.ok) console.warn('[REPLAY]', r.detail);
+        });
+      },
       onAgain: () => this.restartTrack(),
       onNewTrack: () => this.returnToImport()
     });
@@ -506,6 +527,7 @@ export class Game {
             this.isFinished = false;
             this.audioEngine.play(this.currentCheckpoint ? this.currentCheckpoint.time : 0);
             this.replayRecorder.start();
+            this.startPovRecording();
             this.ghostManager.start();
           }
           break;
@@ -521,6 +543,7 @@ export class Game {
         case GameState.FINISHED:
           this.cameraController.unlock();
           this.replayRecorder.stop();
+          this.finishPovRecording();
           this.ui.hud.hide();
           if (this.currentAnalysis && this.currentTrack) {
             const results = this.playerController.stats.computeResults(
@@ -637,8 +660,28 @@ export class Game {
         case GameState.REPLAY:
           this.ui.hideAllScreens();
           this.cameraController.unlock();
-          this.audioEngine.play(0);
-          this.replayPlayer.start(this.replayRecorder);
+          if (this.replayMode === 'POV') {
+            // First-person replay: audio is seeked to the recorded song time by
+            // updatePovReplay, so it must not be restarted from 0 here.
+            this.audioEngine.play(this.povPlayer.getStartSongTimeMs() / 1000);
+            this.povPlayer.play();
+            this.ui.replayOverlay.setCallbacks({
+              onTogglePause: () => {
+                if (this.povPlayer.isPaused) this.povPlayer.resume();
+                else this.povPlayer.pause();
+              },
+              onRestart: () => this.povPlayer.restart(),
+              onExit: () => this.exitPovReplay()
+            });
+            this.ui.replayOverlay.setTitle('WORLD // WATCH RUN');
+            this.ui.replayOverlay.show();
+          } else {
+            // DEV ONLY legacy path.
+            this.audioEngine.play(0);
+            this.replayPlayer.start(this.replayRecorder);
+            this.ui.replayOverlay.setTitle('DEV // LEGACY REPLAY');
+            this.ui.replayOverlay.show();
+          }
           break;
       }
     });
@@ -1946,6 +1989,8 @@ export class Game {
 
           if (!crossedFinishThisTick) {
             this.runElapsedTime += dt;
+            // POV replay sample (30 Hz internally; allocation-free).
+            this.recordPovFrame(dt);
             this.replayRecorder.record(
               this.runElapsedTime,
               dt,
@@ -2134,15 +2179,14 @@ export class Game {
       this.movementSfx.setWindLevel(labSpeedFeel * 0.55);
       this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics());
     } else if (this.stateMachine.is(GameState.REPLAY)) {
-      this.replayPlayer.update(frameDelta);
-      const songTime = this.audioEngine.getCurrentTime();
-      this.world.update(
-        songTime,
-        this.environment.camera.position,
-        0,
-        frameDelta,
-        this.environment
-      );
+      if (this.replayMode === 'POV') {
+        // True first-person replay: the camera, audio and music-reactive world
+        // are all reconstructed from the recorded samples.
+        this.updatePovReplay(frameDelta);
+      } else {
+        // DEV ONLY: legacy box/chase replay, never the player-facing experience.
+        this.updateLegacyReplay(frameDelta);
+      }
     }
 
     // Render-frame delta for diagnostics context (safe here: tick() has returned).
@@ -2296,6 +2340,7 @@ export class Game {
     leaderboardPanel.setCallbacks({
       onSelectTrack: (trackId) => void this.refreshLeaderboard(trackId),
       onPlaySignal: (trackId) => void this.loadPresetTrack(trackId),
+      onWatchRun: (runId) => void this.watchLeaderboardRun(runId),
       onRetryConnection: () => {
         onlineBootstrap.retry();
         void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
@@ -2622,6 +2667,202 @@ export class Game {
     this.raceGhost?.update(frameDelta);
   }
 
+  // ==========================================================================
+  // POV REPLAY V1 — recording, playback and leaderboard WATCH
+  //
+  // Recording stores a compact 30 Hz sample stream plus an event list. Playback
+  // reconstructs the camera from RECORDED samples only, so it cannot drift.
+  // The legacy box/chase replay remains available in DEV tools only.
+  // ==========================================================================
+
+  /** Canonical identity of the currently loaded map, or null if not official. */
+  public currentMapIdentity(): PovReplayIdentity | null {
+    if (!this.currentTrack || !this.currentAnalysis || !this.currentOfficialTrackId) return null;
+    if (!this.currentTrackCanonical) return null;
+    const identity = computeMapIdentity(
+      this.currentOfficialTrackId,
+      this.currentTrack,
+      this.currentAnalysis
+    );
+    return {
+      trackId: identity.trackId,
+      mapVersion: identity.mapVersion,
+      mapFingerprint: identity.mapFingerprint,
+      movementVersion: identity.movementVersion
+    };
+  }
+
+  private startPovRecording(): void {
+    const identity = this.currentMapIdentity();
+    if (!identity) {
+      // Custom audio and non-canonical maps are not competitively replayable.
+      this.povRecorder.clear();
+      return;
+    }
+    const skinId = KarambitSkinSystem.getInstance().getEquippedSkinId();
+    const fov = this.environment.camera.fov;
+    const startSongTimeMs = this.audioEngine.getCurrentTime() * 1000;
+    this.povRecorder.start(identity, skinId, fov, startSongTimeMs);
+  }
+
+  /** Finalises the replay on run completion and attaches it to the run. */
+  private finishPovRecording(): void {
+    if (!this.povRecorder.isRecording()) return;
+    this.povRecorder.setFinishTimeUs(this.runElapsedTime * 1_000_000);
+    this.povRecorder.pushEvent('FINISH');
+    this.povRecorder.stop();
+
+    const replay = this.povRecorder.finalize();
+    this.povRecorder.clear();
+    this.lastFinalizedReplay = replay;
+
+    if (replay) {
+      // Local cache first: WATCH works instantly and offline.
+      replayStorageService.rememberLocally(replay);
+      // Upload is fire-and-forget and never blocks or fails the run.
+      void replayStorageService.uploadReplay(replay);
+    }
+  }
+
+  /** Records one simulation frame into the POV replay (cheap, allocation-free). */
+  private recordPovFrame(dt: number): void {
+    if (!this.povRecorder.isRecording()) return;
+    this.povRecorder.record(dt, {
+      songTimeMs: this.runElapsedTime * 1000,
+      pos: this.playerController.position,
+      vel: this.playerController.velocity,
+      yaw: this.cameraController.yaw,
+      pitch: this.cameraController.pitch,
+      grounded: this.playerController.isGrounded,
+      surfing: this.playerController.isSurfing,
+      surfSide: this.playerController.surfState.surfSide === 'LEFT' ? -1 : 1
+    });
+  }
+
+  /** Records a presentation event into the replay stream. */
+  public recordReplayEvent(type: PovReplayEventType, data?: number): void {
+    this.povRecorder.pushEvent(type, data);
+  }
+
+  /**
+   * Opens a true first-person replay of a leaderboard run.
+   * Refuses to play if the canonical map identity does not match.
+   */
+  public async watchLeaderboardRun(runId: string): Promise<{ ok: boolean; detail: string }> {
+    const entry = this.ui.importScreen.leaderboardPanel.getEntryByRunId(runId);
+    const trackId = entry?.trackId ?? this.ui.importScreen.leaderboardPanel.getSelectedTrack();
+    const finishTimeUs = entry?.timeUs;
+
+    const level = await PresetLevelCache.loadPreset(trackId);
+    if (!level) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
+    const identity = computeMapIdentity(trackId, level.track, level.analysis);
+    const expected: PovReplayIdentity = {
+      trackId,
+      mapVersion: identity.mapVersion,
+      mapFingerprint: identity.mapFingerprint,
+      movementVersion: identity.movementVersion
+    };
+
+    // Local replay first (own run, instant and offline-capable).
+    const localPayload = finishTimeUs ? replayStorageService.getLocal(trackId, finishTimeUs) : null;
+    const payload = localPayload ?? (await replayStorageService.fetchReplayForRun(runId)).payload;
+
+    if (!payload) return { ok: false, detail: 'REPLAY UNAVAILABLE FOR THIS RUN' };
+    return this.enterPovReplay(payload, expected, trackId, finishTimeUs);
+  }
+
+  /** Plays the most recent locally recorded run (Results screen). */
+  public async watchLocalReplay(): Promise<{ ok: boolean; detail: string }> {
+    const identity = this.currentMapIdentity();
+    if (!identity || !this.lastFinalizedReplay) {
+      return { ok: false, detail: 'NO LOCAL REPLAY RECORDED' };
+    }
+    const payload = encodePovReplay(this.lastFinalizedReplay);
+    return this.enterPovReplay(
+      payload,
+      identity,
+      identity.trackId,
+      this.lastFinalizedReplay.finishTimeUs
+    );
+  }
+
+  public hasLocalReplay(): boolean {
+    return this.lastFinalizedReplay !== null && this.currentMapIdentity() !== null;
+  }
+
+  private async enterPovReplay(
+    payload: string,
+    expected: PovReplayIdentity,
+    trackId: string,
+    finishTimeUs?: number
+  ): Promise<{ ok: boolean; detail: string }> {
+    const loaded = this.povPlayer.load(payload, { identity: expected, finishTimeUs });
+    if (!loaded.ok) return { ok: false, detail: `REPLAY REJECTED // ${loaded.reason}` };
+
+    const level = await PresetLevelCache.loadPreset(trackId);
+    if (!level) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
+
+    this.replayMode = 'POV';
+    this.povPlayer.restart();
+    this.stateMachine.transitionTo(GameState.REPLAY);
+    return { ok: true, detail: 'PLAYING' };
+  }
+
+  /** ESC / EXIT: leaves replay cleanly and restores pointer lock behaviour. */
+  public exitPovReplay(): void {
+    this.replayMode = 'NONE';
+    this.povPlayer.unload();
+    this.ui.replayOverlay.hide();
+    this.stateMachine.transitionTo(GameState.IMPORT);
+  }
+
+  /** Per-frame POV replay presentation. */
+  private updatePovReplay(frameDelta: number): void {
+    const frame = this.povPlayer.update(frameDelta);
+
+    // Camera: recorded position + frozen eye height, recorded yaw/pitch and FOV.
+    this.environment.camera.position.copy(frame.position);
+    this.environment.camera.rotation.set(frame.pitch, frame.yaw, 0, 'YXZ');
+    if (Math.abs(this.environment.camera.fov - frame.fov) > 0.01) {
+      this.environment.camera.fov = frame.fov;
+      this.environment.camera.updateProjectionMatrix();
+    }
+
+    // Audio + music-reactive world follow the recorded song time.
+    const songTime = frame.songTimeMs / 1000;
+    this.audioEngine.seek(songTime);
+    this.world.update(songTime, frame.position, frame.yaw, frameDelta, this.environment);
+
+    // Viewmodel: the runner's cosmetic (safe fallback if it no longer exists).
+    this.viewmodelController.update(
+      frameDelta,
+      this.playerController,
+      this.cameraController,
+      0,
+      0
+    );
+    const skinId = this.povPlayer.getSkinId();
+    if (skinId && skinId !== KarambitSkinSystem.getInstance().getEquippedSkinId()) {
+      // equipSkin() denies unknown ids and falls back safely, so an old replay
+      // referencing a removed cosmetic cannot break playback.
+      KarambitSkinSystem.getInstance().equipSkin(skinId);
+    }
+
+    this.ui.replayOverlay.update({
+      player: '',
+      finishTimeUs: this.povPlayer.getFinishTimeUs(),
+      currentMs: this.povPlayer.getCurrentMs(),
+      durationMs: this.povPlayer.getDurationMs(),
+      paused: this.povPlayer.isPaused
+    });
+  }
+
+  /** DEV ONLY: the legacy box/chase replay. Never the player-facing experience. */
+  private updateLegacyReplay(frameDelta: number): void {
+    this.replayPlayer.update(frameDelta);
+    const songTime = this.audioEngine.getCurrentTime();
+    this.world.update(songTime, this.environment.camera.position, 0, frameDelta, this.environment);
+  }
   /** Called from restartTrack() so a full restart reports a new attempt. */
   private onRaceAttemptRestart(): void {
     if (!this.raceActive) return;

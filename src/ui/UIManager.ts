@@ -13,6 +13,7 @@ import { ArmoryModal } from './ArmoryModal';
 import { MovementLabSongModal } from './MovementLabSongModal';
 import { SignalDecodeModal } from './SignalDecodeModal';
 import { RaceHud } from './RaceHud';
+import { ReplayOverlay } from './ReplayOverlay';
 import { VisualAccent } from '../audio/AudioFeatures';
 
 export class UIManager {
@@ -28,6 +29,8 @@ export class UIManager {
   public decodeModal: SignalDecodeModal;
   /** Shared best-time session overlay (hidden outside a race). */
   public raceHud: RaceHud;
+  /** Minimal first-person replay controls (POV Replay V1). */
+  public replayOverlay: ReplayOverlay;
 
   public root: HTMLElement;
 
@@ -45,6 +48,7 @@ export class UIManager {
     this.movementLabSongModal = new MovementLabSongModal();
     this.decodeModal = new SignalDecodeModal();
     this.raceHud = new RaceHud();
+    this.replayOverlay = new ReplayOverlay();
 
     this.armoryModal.setDecodeModal(this.decodeModal);
     this.importScreen.setDecodeModal(this.decodeModal);
@@ -61,6 +65,7 @@ export class UIManager {
     this.root.appendChild(this.movementLabSongModal.element);
     this.root.appendChild(this.decodeModal.element);
     this.root.appendChild(this.raceHud.element);
+    this.root.appendChild(this.replayOverlay.element);
   }
 
   public applyAccent(accent: VisualAccent): void {

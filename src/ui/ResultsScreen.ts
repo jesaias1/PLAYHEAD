@@ -135,7 +135,7 @@ export class ResultsScreen {
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
           <button class="btn-preview hidden" id="btn-res-leaderboard">[ ADD TO LEADERBOARD ]</button>
-          <button class="btn-preview" id="btn-res-replay" title="DEV/LEGACY third-person preview. First-person POV replay is the next milestone.">[ REPLAY // DEV LEGACY ]</button>
+          <button class="btn-preview" id="btn-res-replay" title="Watch your run back in first person.">[ WATCH REPLAY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
         </div>
       </div>
@@ -419,6 +419,14 @@ export class ResultsScreen {
   }
 
   private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
+
+  /**
+   * Shows the replay action only when a first-person replay actually exists.
+   * A WATCH button is never offered for a run with no replay.
+   */
+  public setReplayAvailable(available: boolean): void {
+    this.replayBtn.classList.toggle('hidden', !available);
+  }
 
   public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
     this.decodeModal = modal;

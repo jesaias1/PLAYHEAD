@@ -27,6 +27,8 @@ import {
 
 export interface LeaderboardEntry {
   rankPosition: number;
+  /** Canonical track this run belongs to. */
+  trackId: string;
   displayName: string;
   timeUs: number;
   rank: string;
@@ -36,6 +38,8 @@ export interface LeaderboardEntry {
   createdAt: string;
   replayVersion: number | null;
   replayPath: string | null;
+  /** Integrity hash recorded for the replay bytes. */
+  replayHash: string | null;
 }
 
 export interface LeaderboardView {
@@ -102,7 +106,7 @@ export class LeaderboardService {
     try {
       const { data, error } = await client
         .from('leaderboard_runs')
-        .select('id, user_id, display_name, time_us, rank, verification_state, created_at, replay_version, replay_path')
+        .select('id, user_id, display_name, time_us, rank, verification_state, created_at, replay_version, replay_path, replay_hash')
         .eq('track_id', trackId)
         .eq('map_version', identity.mapVersion)
         .eq('map_fingerprint', identity.mapFingerprint)
@@ -114,6 +118,7 @@ export class LeaderboardService {
 
       const entries: LeaderboardEntry[] = (data ?? []).map((row, index) => ({
         rankPosition: index + 1,
+        trackId,
         displayName: (row.display_name as string) ?? 'PLAYER',
         timeUs: Number(row.time_us),
         rank: (row.rank as string) ?? 'UNRANKED',
@@ -122,7 +127,8 @@ export class LeaderboardService {
         verificationState: (row.verification_state as string) ?? 'accepted',
         createdAt: (row.created_at as string) ?? '',
         replayVersion: (row.replay_version as number | null) ?? null,
-        replayPath: (row.replay_path as string | null) ?? null
+        replayPath: (row.replay_path as string | null) ?? null,
+        replayHash: (row.replay_hash as string | null) ?? null
       }));
 
       const userId = this.auth.getUserId();

@@ -23,6 +23,7 @@ export interface LeaderboardCatalogEntry {
 export interface LeaderboardPanelCallbacks {
   onSelectTrack: (trackId: string) => void;
   onPlaySignal: (trackId: string) => void;
+  onWatchRun: (runId: string) => void;
   onRetryConnection: () => void;
 }
 
@@ -32,6 +33,8 @@ export class LeaderboardPanel {
   private callbacks: LeaderboardPanelCallbacks | null = null;
 
   private selectElem: HTMLSelectElement;
+  /** Entries of the currently rendered board, so WATCH can resolve a run id. */
+  private currentEntries: LeaderboardView['entries'] = [];
   private statusElem: HTMLElement;
   private tableElem: HTMLElement;
   private youElem: HTMLElement;
@@ -88,6 +91,11 @@ export class LeaderboardPanel {
     return this.selectElem.value;
   }
 
+  /** Resolves a leaderboard entry by run id (used by WATCH RUN). */
+  public getEntryByRunId(runId: string): LeaderboardView['entries'][number] | undefined {
+    return this.currentEntries.find((e) => e.runId === runId);
+  }
+
   public setLoading(trackTitle: string): void {
     this.statusElem.textContent = `LOADING // ${trackTitle}`;
     this.tableElem.innerHTML = '';
@@ -103,6 +111,7 @@ export class LeaderboardPanel {
     }
 
     this.statusElem.textContent = `WORLD // ${trackTitle.toUpperCase()}`;
+    this.currentEntries = view.entries;
 
     if (view.entries.length === 0) {
       this.tableElem.innerHTML =
@@ -113,18 +122,34 @@ export class LeaderboardPanel {
         `<span class="online-lb-rank">#</span>` +
         `<span class="online-lb-name">PLAYER</span>` +
         `<span class="online-lb-time">TIME</span>` +
+        `<span class="online-lb-watch"></span>` +
         `</div>`;
       const rows = view.entries
-        .map(
-          (e) =>
+        .map((e) => {
+          // A WATCH action is offered only when the run actually has a replay.
+          // Entries without one simply show nothing here; ranking is unaffected.
+          const watch = e.replayVersion !== null
+            ? `<button class="online-lb-watch-btn" type="button" data-run-id="${this.escape(e.runId)}">WATCH</button>`
+            : '';
+          return (
             `<div class="online-lb-row">` +
             `<span class="online-lb-rank">${e.rankPosition}</span>` +
             `<span class="online-lb-name">${this.escape(e.displayName)}</span>` +
             `<span class="online-lb-time">${formatRaceTime(e.timeUs)}</span>` +
+            `<span class="online-lb-watch">${watch}</span>` +
             `</div>`
-        )
+          );
+        })
         .join('');
       this.tableElem.innerHTML = head + rows;
+
+      // Delegate WATCH clicks (rows are re-rendered on every board refresh).
+      this.tableElem.querySelectorAll<HTMLButtonElement>('.online-lb-watch-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const runId = btn.dataset.runId;
+          if (runId) this.callbacks?.onWatchRun(runId);
+        });
+      });
     }
 
     if (view.you) {
