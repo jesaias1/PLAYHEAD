@@ -12,7 +12,6 @@
 
 import type { LeaderboardView } from '../online/LeaderboardService';
 import { formatRaceTime } from './RaceHud';
-import { OnlineStatusBar } from './OnlineStatusBar';
 
 export interface LeaderboardCatalogEntry {
   id: string;
@@ -31,7 +30,6 @@ export class LeaderboardPanel {
   public element: HTMLElement;
 
   private callbacks: LeaderboardPanelCallbacks | null = null;
-  private statusBar: OnlineStatusBar;
 
   private selectElem: HTMLSelectElement;
   private statusElem: HTMLElement;
@@ -40,7 +38,7 @@ export class LeaderboardPanel {
 
   constructor() {
     this.element = document.createElement('div');
-    this.element.className = 'showcase-container showcase-panel leaderboard-panel';
+    this.element.className = 'showcase-container showcase-panel leaderboard-panel hidden';
     this.element.id = 'panel-leaderboard';
     this.element.setAttribute('role', 'tabpanel');
     this.element.setAttribute('aria-labelledby', 'tab-btn-leaderboard');
@@ -57,9 +55,6 @@ export class LeaderboardPanel {
       <div class="online-lb-table" id="lb-table"></div>
       <div class="online-lb-you" id="lb-you"></div>
     `;
-
-    this.statusBar = new OnlineStatusBar(() => this.callbacks?.onRetryConnection());
-    this.element.insertBefore(this.statusBar.element, this.element.firstChild);
 
     this.selectElem = this.element.querySelector('#lb-track-select') as HTMLSelectElement;
     this.statusElem = this.element.querySelector('#lb-status') as HTMLElement;
@@ -91,10 +86,6 @@ export class LeaderboardPanel {
 
   public getSelectedTrack(): string {
     return this.selectElem.value;
-  }
-
-  public setStatus(tag: string, detail: string): void {
-    this.statusBar.setStatus(tag, detail);
   }
 
   public setLoading(trackTitle: string): void {

@@ -15,6 +15,7 @@ import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { formatTime } from '../utils/math';
 import { RacePanel } from './RacePanel';
 import { LeaderboardPanel } from './LeaderboardPanel';
+import { OnlineStatusBar } from './OnlineStatusBar';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -31,6 +32,18 @@ export class ImportScreen {
   public racePanel: RacePanel = new RacePanel();
   /** 06 // WORLD LEADERBOARD � competitive rankings only. */
   public leaderboardPanel: LeaderboardPanel = new LeaderboardPanel();
+
+  /**
+   * The SINGLE global connection indicator. Mounted once in the menu footer,
+   * never inside a feature panel, so no page duplicates online status.
+   */
+  public onlineStatusBar: OnlineStatusBar = new OnlineStatusBar(() => this.onRetryOnlineSync?.());
+  public onRetryOnlineSync?: () => void;
+
+  /** Updates the single global connection indicator. */
+  public setOnlineStatus(tag: string, detail: string): void {
+    this.onlineStatusBar.setStatus(tag, detail);
+  }
 
   /** Called when the leaderboard tab is opened (used to refresh the board). */
   public onLeaderboardTabOpened?: () => void;
@@ -261,8 +274,7 @@ export class ImportScreen {
 
         <div class="privacy-notice terminal-footer-status">
           [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
-        </div>
-      </div>
+        </div>      </div>
     `;
 
     // Tab buttons
@@ -327,6 +339,19 @@ export class ImportScreen {
     this.buildLabSelect();
     this.updateShowcaseCard(this.selectedTrack);
     this.initEvents();
+
+    // The ONE global connection indicator lives in the footer, not inside any
+    // feature panel, so it never duplicates online controls on unrelated pages.
+    const footer = this.element.querySelector('.terminal-footer-status') as HTMLElement;
+    if (footer) {
+      footer.appendChild(document.createTextNode(' · '));
+      footer.appendChild(this.onlineStatusBar.element);
+    }
+
+    // Normalise tab/panel visibility on load. The panels rely on this rather
+    // than on markup order, so a non-default panel can never render below the
+    // default tab.
+    this.switchModule(0);
   }
 
   private buildLabSelect(): void {

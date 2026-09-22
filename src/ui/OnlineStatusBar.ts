@@ -1,41 +1,38 @@
 /**
- * ONLINE STATUS BAR — the slim connection indicator shared by the two online
- * tabs (05 RACE WITH FRIENDS, 06 WORLD LEADERBOARD).
+ * ONLINE STATUS — the ONE subtle global connection indicator.
  *
- * Shows the real state only: OFFLINE / CONNECTING / ONLINE / LOCAL // SYNC
- * PENDING. It never claims a connection the client does not have.
+ * Lives in the main menu footer, not inside any feature panel, so it never
+ * duplicates online controls on unrelated pages and never grows into a large
+ * sync panel. It reports the real state only: OFFLINE / CONNECTING / ONLINE /
+ * LOCAL // SYNC PENDING.
  */
 
 export class OnlineStatusBar {
   public element: HTMLElement;
 
   private tagElem: HTMLElement;
-  private detailElem: HTMLElement;
   private retryBtn: HTMLButtonElement;
 
   constructor(onRetry: () => void) {
-    this.element = document.createElement('div');
-    this.element.className = 'online-status-bar';
-    this.element.innerHTML = `
-      <span class="online-status-tag" id="online-status-tag">[OFFLINE]</span>
-      <span class="online-status-detail" id="online-status-detail">not connected</span>
-      <button class="terminal-btn-subtle online-retry" type="button">RETRY SYNC</button>
-    `;
-    this.tagElem = this.element.querySelector('#online-status-tag') as HTMLElement;
-    this.detailElem = this.element.querySelector('#online-status-detail') as HTMLElement;
-    this.retryBtn = this.element.querySelector('.online-retry') as HTMLButtonElement;
-    this.retryBtn.addEventListener('click', onRetry);
+    this.element = document.createElement('span');
+    this.element.className = 'online-status-inline';
+    this.element.innerHTML =
+      `<span class="online-status-tag">[OFFLINE]</span>` +
+      `<button class="online-status-retry" type="button" title="Retry cloud sync">RETRY</button>`;
 
-    // Unique ids are not required; clear them so the DOM stays valid when two
-    // status bars are mounted at once.
-    this.tagElem.removeAttribute('id');
-    this.detailElem.removeAttribute('id');
+    this.tagElem = this.element.querySelector('.online-status-tag') as HTMLElement;
+    this.retryBtn = this.element.querySelector('.online-status-retry') as HTMLButtonElement;
+    this.retryBtn.addEventListener('click', onRetry);
   }
 
   public setStatus(tag: string, detail: string): void {
     this.tagElem.textContent = tag;
-    this.detailElem.textContent = detail;
+    // The detail is available on hover rather than printed inline: this is a
+    // restrained global indicator, not a diagnostics panel.
+    this.element.title = detail;
     const offline = tag.includes('OFFLINE') || tag.includes('PENDING');
     this.tagElem.classList.toggle('online-status-offline', offline);
+    // Only offer retry when there is something to retry.
+    this.retryBtn.classList.toggle('hidden', !offline);
   }
 }

@@ -14,7 +14,6 @@
 
 import { RacePlayer, RaceRoom, RaceResultRow } from '../online/RaceRoomService';
 import { formatRaceTime } from './RaceHud';
-import { OnlineStatusBar } from './OnlineStatusBar';
 
 export interface RaceCatalogEntry {
   id: string;
@@ -36,7 +35,6 @@ export class RacePanel {
   public element: HTMLElement;
 
   private callbacks: RacePanelCallbacks | null = null;
-  private statusBar: OnlineStatusBar;
 
   private selectElem: HTMLSelectElement;
   private joinInput: HTMLInputElement;
@@ -62,7 +60,7 @@ export class RacePanel {
 
   constructor() {
     this.element = document.createElement('div');
-    this.element.className = 'showcase-container showcase-panel race-panel';
+    this.element.className = 'showcase-container showcase-panel race-panel hidden';
     this.element.id = 'panel-race';
     this.element.setAttribute('role', 'tabpanel');
     this.element.setAttribute('aria-labelledby', 'tab-btn-race');
@@ -123,9 +121,6 @@ export class RacePanel {
         </div>
       </div>
     `;
-
-    this.statusBar = new OnlineStatusBar(() => this.callbacks?.onRetryConnection());
-    this.element.insertBefore(this.statusBar.element, this.element.firstChild);
 
     this.selectElem = this.element.querySelector('#race-track-select') as HTMLSelectElement;
     this.joinInput = this.element.querySelector('#race-join-input') as HTMLInputElement;
@@ -210,10 +205,6 @@ export class RacePanel {
 
   public getSelectedTrack(): string {
     return this.selectElem.value;
-  }
-
-  public setStatus(tag: string, detail: string): void {
-    this.statusBar.setStatus(tag, detail);
   }
 
   public showSelect(): void {

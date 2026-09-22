@@ -1709,21 +1709,31 @@ option:hover, option:focus, option:checked {
   gap: 14px;
 }
 
-.online-status-bar {
-  display: flex;
+/* The ONE global connection indicator: a restrained inline footer status. */
+.online-status-inline {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.35);
+  gap: 6px;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   letter-spacing: 0.08em;
 }
 
 .online-status-tag { color: var(--accent-color); }
 .online-status-tag.online-status-offline { color: #ffb020; }
-.online-status-detail { color: #7b8794; flex: 1; }
+
+.online-status-retry {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #7b8794;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+.online-status-retry:hover { color: var(--text-primary); border-color: rgba(255, 255, 255, 0.3); }
+.online-status-retry.hidden { display: none; }
 
 .online-section {
   border: 1px solid rgba(255, 255, 255, 0.08);

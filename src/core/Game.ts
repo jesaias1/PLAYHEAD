@@ -2307,12 +2307,11 @@ export class Game {
       void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
     };
 
-    // Online status → both status bars.
+    // Online status → the ONE global indicator in the menu footer.
     onlineBootstrap.subscribe((status) => {
       const tag = onlineBootstrap.getClient().getStatusLabel();
       const detail = `${status.state} // ${status.detail}`;
-      racePanel.setStatus(tag, detail);
-      leaderboardPanel.setStatus(tag, detail);
+      this.ui.importScreen.setOnlineStatus(tag, detail);
     });
     this.refreshOnlineStatus();
 
@@ -2338,9 +2337,10 @@ export class Game {
       onError: (detail) => this.ui.importScreen.racePanel.showError(detail)
     });
 
+    this.ui.importScreen.onRetryOnlineSync = () => onlineBootstrap.retry();
+
     // Invite URL: ?room=CODE opens 05 // RACE WITH FRIENDS and joins automatically.
-    const invite = RaceRoomService.readInviteCodeFromUrl();
-    if (invite) {
+    const invite = RaceRoomService.readInviteCodeFromUrl();    if (invite) {
       this.pendingInviteCode = invite;
       this.ui.importScreen.openRaceTab();
       void this.consumePendingInvite();
@@ -2351,8 +2351,7 @@ export class Game {
     const status = onlineBootstrap.getStatus();
     const tag = onlineBootstrap.getClient().getStatusLabel();
     const detail = `${status.state} // ${status.detail}`;
-    this.ui.importScreen.racePanel.setStatus(tag, detail);
-    this.ui.importScreen.leaderboardPanel.setStatus(tag, detail);
+    this.ui.importScreen.setOnlineStatus(tag, detail);
   }
 
   /**
