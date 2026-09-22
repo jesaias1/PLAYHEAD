@@ -71,6 +71,7 @@ export class Game {
   private isFinished = false;
   private isOvertime = false;
   private finishGateDetector = new FinishGateDetector();
+  private isQuickRestarting = false;
 
   private isFirstContactCourse = false;
   private shownOnboardingCues = new Set<string>();
@@ -405,9 +406,9 @@ export class Game {
           this.ui.armoryModal.hide();
           this.ui.hud.show();
           this.cameraController.lock();
-          if (prevState === GameState.PAUSED) {
+          if (prevState === GameState.PAUSED && !this.isQuickRestarting) {
             this.audioEngine.resume();
-          } else {
+          } else if (!this.isQuickRestarting) {
             this.isFinished = false;
             this.audioEngine.play(this.currentCheckpoint ? this.currentCheckpoint.time : 0);
             this.replayRecorder.start();
@@ -1318,8 +1319,35 @@ export class Game {
       }
       return;
     }
+
+    this.isQuickRestarting = true;
     this.audioEngine.stop();
-    this.stateMachine.transitionTo(GameState.COUNTDOWN);
+    this.prepareTrackForRun();
+
+    this.ui.hideAllScreens();
+    this.ui.countdownScreen.cancel();
+    this.ui.pauseScreen.hide();
+    this.ui.settingsModal.hide();
+    this.ui.armoryModal.hide();
+    this.ui.resultsScreen.hide();
+    this.ui.hud.show();
+    this.ui.hud.setRestartHoldProgress(null);
+
+    this.isFinished = false;
+    this.audioEngine.play(0);
+    this.replayRecorder.start();
+    this.ghostManager.start();
+    this.cameraController.lock();
+
+    // Brief input lockout (~0.1s / 100ms) to ensure keys held during reset don't immediately produce unwanted initial inputs
+    this.playerController.lockInput(0.1);
+
+    if (this.stateMachine.is(GameState.PLAYING)) {
+      this.isQuickRestarting = false;
+    } else {
+      this.stateMachine.transitionTo(GameState.PLAYING);
+      this.isQuickRestarting = false;
+    }
   }
 
   private returnToImport(): void {
@@ -1691,18 +1719,62 @@ export class Game {
       }
 
       if (this.stateMachine.is(GameState.PLAYING)) {
-        this.playerController.updateFixed(dt);
+        if (!this.isFinished) {
+          const tickStartTime = this.runElapsedTime;
+          this.playerController.updateFixed(dt);
 
-        // Record replay frame
-        this.runElapsedTime += dt;
-        this.replayRecorder.record(
-          this.runElapsedTime,
-          dt,
-          this.playerController.position,
-          this.cameraController.yaw,
-          this.cameraController.pitch,
-          this.playerController.getSpeedUnits()
-        );
+          // Authoritative Finish Gate check: continuous swept crossing per 120Hz tick
+          let crossedFinishThisTick = false;
+          if (this.currentTrack) {
+            const finish = this.currentTrack.finish;
+            const finishNode = this.currentTrack.route.find(node => node.id === finish.routeNodeId);
+            if (finishNode) {
+              const crossing = this.finishGateDetector.sampleDetailed(
+                this.playerController.position,
+                {
+                  position: finish.position,
+                  yaw: finish.yaw,
+                  width: finishNode.dimensions.x,
+                  height: FINISH_GATE_HEIGHT
+                },
+                this.playerController.config.playerHeight,
+                this.playerController.config.playerRadius
+              );
+
+              if (crossing && crossing.hit) {
+                crossedFinishThisTick = true;
+                const t = Math.max(0, Math.min(1, crossing.t));
+                this.runElapsedTime = tickStartTime + t * dt;
+
+                // Terminal replay frame at the exact sub-tick finish timestamp & contact position
+                this.replayRecorder.record(
+                  this.runElapsedTime,
+                  t * dt,
+                  crossing.contactPosition,
+                  this.cameraController.yaw,
+                  this.cameraController.pitch,
+                  this.playerController.getSpeedUnits()
+                );
+
+                this.handleFinishSequence();
+              }
+            }
+          }
+
+          if (!crossedFinishThisTick) {
+            this.runElapsedTime += dt;
+            this.replayRecorder.record(
+              this.runElapsedTime,
+              dt,
+              this.playerController.position,
+              this.cameraController.yaw,
+              this.cameraController.pitch,
+              this.playerController.getSpeedUnits()
+            );
+          }
+        } else {
+          this.playerController.updateFixed(dt);
+        }
       } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         this.playerController.updateFixed(dt);
       }
@@ -1828,27 +1900,6 @@ export class Game {
               }
             }
           }
-        }
-
-        // Finish Gate check (distinct PLAYHEAD end plane / signal line)
-        const finish = this.currentTrack.finish;
-        const finishNode = this.currentTrack.route.find(node => node.id === finish.routeNodeId);
-        if (
-          !this.isFinished &&
-          finishNode &&
-          this.finishGateDetector.sample(
-            this.playerController.position,
-            {
-              position: finish.position,
-              yaw: finish.yaw,
-              width: finishNode.dimensions.x,
-              height: FINISH_GATE_HEIGHT
-            },
-            this.playerController.config.playerHeight,
-            this.playerController.config.playerRadius
-          )
-        ) {
-          this.handleFinishSequence();
         }
       }
     } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {

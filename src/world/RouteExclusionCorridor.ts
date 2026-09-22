@@ -22,6 +22,20 @@ export interface DecorationValidationReport {
   total: number;
 }
 
+export interface BuildingValidationReport {
+  candidatesGenerated: number;
+  rejectedByGameplayCollision: number;
+  rejectedByComfortClearance: number;
+  finalSurvivingBuildings: number;
+}
+
+export interface VolumeEvaluationResult {
+  penetration: number;
+  nodeIndex: number;
+  isGameplayCollision: boolean;
+  isComfortViolation: boolean;
+}
+
 /**
  * Height of the protected vertical band above a route node.
  *
@@ -35,27 +49,53 @@ export const JUMP_CORRIDOR_ABOVE = 55.0;
 export const JUMP_CORRIDOR_BELOW = 25.0;
 
 export class RouteExclusionCorridor {
-  /**
-   * Height of the protected vertical band above a route node.
-   *
-   * This is the player's usable airspace: a generous jump/launch apex plus
-   * headroom. Architecture may pass overhead ABOVE this band, but nothing may
-   * occupy it near the flight path.
-   */
   public static readonly JUMP_CORRIDOR_ABOVE = JUMP_CORRIDOR_ABOVE;
-
-  /** Depth of protected airspace below a route node. */
   public static readonly JUMP_CORRIDOR_BELOW = JUMP_CORRIDOR_BELOW;
 
-  private route: RouteNode[];
+  private static lastBuildingReport: BuildingValidationReport = {
+    candidatesGenerated: 0,
+    rejectedByGameplayCollision: 0,
+    rejectedByComfortClearance: 0,
+    finalSurvivingBuildings: 0
+  };
 
-  constructor(route: RouteNode[]) {
-    this.route = route;
+  public static getLastBuildingReport(): BuildingValidationReport {
+    return RouteExclusionCorridor.lastBuildingReport;
+  }
+
+  public static resetBuildingReport(): void {
+    RouteExclusionCorridor.lastBuildingReport = {
+      candidatesGenerated: 0,
+      rejectedByGameplayCollision: 0,
+      rejectedByComfortClearance: 0,
+      finalSurvivingBuildings: 0
+    };
+  }
+
+  private mainRoute: RouteNode[];
+  private independentNodes: RouteNode[];
+
+  constructor(route: RouteNode[], secondaryNodes?: RouteNode[]) {
+    if (secondaryNodes) {
+      this.mainRoute = route;
+      this.independentNodes = secondaryNodes;
+    } else {
+      this.mainRoute = [];
+      this.independentNodes = [];
+      for (const n of route) {
+        if (n.isOptional || n.isSignalSpine) {
+          this.independentNodes.push(n);
+        } else {
+          this.mainRoute.push(n);
+        }
+      }
+    }
   }
 
   /**
    * Evaluates if a given bounding volume violates the route exclusion corridor.
-   * Checks horizontal and vertical clearance against all route nodes and jump flight paths.
+   * Checks horizontal and vertical clearance against all route nodes, independent gameplay
+   * surfaces (spines, shelves, optional surfs), and jump flight paths.
    */
   public isPointInsideCorridor(
     pos: THREE.Vector3,
@@ -64,158 +104,11 @@ export class RouteExclusionCorridor {
     maxY: number,
     extraSurfMargin = 20.0
   ): boolean {
-    if (this.route.length === 0) return false;
-
-    // Check individual nodes
-    for (let i = 0; i < this.route.length; i++) {
-      const node = this.route[i];
-      const isSurf = !!node.isSurf;
-      const isStepUp = node.type === RouteNodeType.STEP_UP ||
-        (i < this.route.length - 1 && this.route[i + 1].type === RouteNodeType.STEP_UP);
-      const trackHalfBreadth = getPlatformMaxHalfWidth(node);
-
-      let safetyMargin: number;
-      if (isSurf) {
-        safetyMargin = Math.max(38.0, 18.0 + extraSurfMargin) + 0.85 * objectRadius;
-      } else if (isStepUp) {
-        safetyMargin = 32.0 + 0.7 * objectRadius;
-      } else {
-        safetyMargin = 26.0 + 0.65 * objectRadius;
-      }
-
-      // Background architecture clearance for large monumental structures / skyscrapers
-      if (objectRadius >= 12.0 || (maxY - minY) >= 60.0) {
-        const bgMargin = isSurf ? (55.0 + extraSurfMargin) : 46.0;
-        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * objectRadius);
-      }
-      const requiredDist = trackHalfBreadth + objectRadius + safetyMargin;
-
-      // Vertical clearance envelope: usable player airspace around the route
-      const routeMinY = node.position.y - JUMP_CORRIDOR_BELOW;
-      const routeMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
-
-      const verticalOverlap = !(maxY < routeMinY || minY > routeMaxY);
-      if (verticalOverlap) {
-        // Continuous oriented platform segment clearance from entry anchor to exit anchor
-        const halfLen = (node.dimensions.z || 0) * 0.5;
-        const fwdX = Math.sin(node.yaw);
-        const fwdZ = Math.cos(node.yaw);
-        const entryX = node.position.x - fwdX * halfLen;
-        const entryZ = node.position.z - fwdZ * halfLen;
-        const exitX = node.position.x + fwdX * halfLen;
-        const exitZ = node.position.z + fwdZ * halfLen;
-
-        const segDx = exitX - entryX;
-        const segDz = exitZ - entryZ;
-        const segLenSq = segDx * segDx + segDz * segDz;
-
-        let tNode = 0.5;
-        if (segLenSq > 0.0001) {
-          tNode = ((pos.x - entryX) * segDx + (pos.z - entryZ) * segDz) / segLenSq;
-          tNode = Math.max(0, Math.min(1, tNode));
-        }
-        const closestNodeX = entryX + tNode * segDx;
-        const closestNodeZ = entryZ + tNode * segDz;
-
-        const dx = pos.x - closestNodeX;
-        const dz = pos.z - closestNodeZ;
-        const distSq = dx * dx + dz * dz;
-        if (distSq < requiredDist * requiredDist) {
-          return true; // Collision with node corridor
-        }
-      }
-
-      // Check surf exit launch cone (protects entire airborne trajectory flying off the ramp up to 130m)
-      if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
-        const fwdX = Math.sin(node.yaw);
-        const fwdZ = Math.cos(node.yaw);
-        const halfLen = (node.dimensions.z || 0) * 0.5;
-        const exitX = node.position.x + fwdX * halfLen;
-        const exitZ = node.position.z + fwdZ * halfLen;
-
-        const toObjX = pos.x - exitX;
-        const toObjZ = pos.z - exitZ;
-        const projFwd = toObjX * fwdX + toObjZ * fwdZ;
-
-        if (projFwd > 0 && projFwd < 130.0) {
-          const coneRatio = projFwd / 130.0;
-          const coneRadius = 24.0 + coneRatio * 32.0 + objectRadius + (extraSurfMargin ? extraSurfMargin * 0.5 : 0);
-          const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
-
-          const coneMinY = node.position.y - 30.0;
-          const coneMaxY = node.position.y + 65.0;
-          if (!(maxY < coneMinY || minY > coneMaxY)) {
-            if (latDistSq < coneRadius * coneRadius) {
-              return true; // Collision with surf exit launch cone
-            }
-          }
-        }
-      }
-
-      // Check flight trajectory segment to next node
-      if (i < this.route.length - 1) {
-        const nextNode = this.route[i + 1];
-        const isSurfSection = isSurf || !!nextNode.isSurf;
-        const isStepUpSection = node.type === RouteNodeType.STEP_UP || nextNode.type === RouteNodeType.STEP_UP;
-
-        let segMargin: number;
-        if (isSurfSection) {
-          segMargin = Math.max(40.0, 18.0 + extraSurfMargin) + 0.85 * objectRadius;
-        } else if (isStepUpSection) {
-          segMargin = 32.0 + 0.7 * objectRadius;
-        } else {
-          segMargin = 30.0 + 0.7 * objectRadius;
-        }
-        const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
-
-        const ax = node.position.x;
-        const az = node.position.z;
-        const bx = nextNode.position.x;
-        const bz = nextNode.position.z;
-
-        const abx = bx - ax;
-        const abz = bz - az;
-        const segLenSq = abx * abx + abz * abz;
-
-        let t = 0;
-        if (segLenSq > 0.0001) {
-          t = ((pos.x - ax) * abx + (pos.z - az) * abz) / segLenSq;
-          t = Math.max(0, Math.min(1, t));
-        }
-
-        const closestX = ax + t * abx;
-        const closestZ = az + t * abz;
-        const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
-
-        // 3D Parabolic jump arc apex calculation over airborne gaps
-        const segDist = Math.sqrt(segLenSq);
-        const gapDist = Math.max(0, segDist - ((node.dimensions.z || 0) * 0.5 + (nextNode.dimensions.z || 0) * 0.5));
-        const apexHeight = gapDist > 4.0 ? Math.max(2.5, Math.min(8.5, gapDist * 0.32)) : 0;
-        const arcOffset = 4.0 * t * (1.0 - t) * apexHeight;
-        const flightY = interpY + arcOffset;
-
-        // Jump trajectory vertical clearance
-        const jumpMinY = flightY - JUMP_CORRIDOR_BELOW;
-        const jumpMaxY = flightY + JUMP_CORRIDOR_ABOVE;
-
-        // Lateral air-strafe drift expansion over airborne gaps
-        const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
-        const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
-        const segRequiredDist = segHalfBreadth + objectRadius + segMargin + lateralDrift;
-
-        const segVerticalOverlap = !(maxY < jumpMinY || minY > jumpMaxY);
-        if (segVerticalOverlap) {
-          const cdx = pos.x - closestX;
-          const cdz = pos.z - closestZ;
-          const cDistSq = cdx * cdx + cdz * cdz;
-          if (cDistSq < segRequiredDist * segRequiredDist) {
-            return true; // Collision with jump flight corridor
-          }
-        }
-      }
-    }
-
-    return false;
+    const box = new THREE.Box3(
+      new THREE.Vector3(pos.x - objectRadius, minY, pos.z - objectRadius),
+      new THREE.Vector3(pos.x + objectRadius, maxY, pos.z + objectRadius)
+    );
+    return this.evaluateVolume(box, extraSurfMargin) !== null;
   }
 
   /**
@@ -259,16 +152,6 @@ export class RouteExclusionCorridor {
   /**
    * Final authoritative validation pass checking decorative meshes against
    * protected gameplay volumes.
-   *
-   * AUTHORITATIVE RULE: this operates on FINAL WORLD-SPACE GEOMETRY. It walks
-   * the hierarchy recursively and measures each individual mesh's real world
-   * AABB, so it cannot be defeated by:
-   *   - a proxy radius that is smaller than the final rotated/scaled geometry
-   *   - nested groups (e.g. a frame's meshes inside a sub-group)
-   *   - bounds captured before scaling or rotation
-   *
-   * Only genuinely decorative leaves are rejected. Gameplay geometry is never
-   * moved or deformed to accommodate decoration.
    */
   public validateDecorationAgainstGameplay(group: THREE.Group, extraSurfMargin = 28.0): number {
     return this.validateDecorations([group], extraSurfMargin).total;
@@ -348,23 +231,38 @@ export class RouteExclusionCorridor {
 
   /**
    * Measures one world-space volume against the protected corridor.
-   * Returns the penetration depth (metres inside the protected volume) and the
-   * offending node, or null when the volume is clear.
+   * Tests the complete final vertical extent of the structure against all
+   * gameplay platforms, Signal Spines, recovery shelves, and jump flight arcs.
    */
-  public evaluateVolume(box: THREE.Box3, extraSurfMargin = 28.0): { penetration: number; nodeIndex: number } | null {
+  public evaluateVolume(
+    box: THREE.Box3,
+    extraSurfMargin = 28.0
+  ): VolumeEvaluationResult | null {
+    if (this.mainRoute.length === 0 && this.independentNodes.length === 0) return null;
+
     const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(
-      (box.max.x - box.min.x) * 0.5,
-      (box.max.z - box.min.z) * 0.5
-    );
+    const footprintX = box.max.x - box.min.x;
+    const footprintZ = box.max.z - box.min.z;
+    const footprint = Math.max(footprintX, footprintZ);
+    const height = box.max.y - box.min.y;
+    const radius = Math.max(footprintX, footprintZ) * 0.5;
 
-    let worst: { penetration: number; nodeIndex: number } | null = null;
+    const isColossal = radius >= 12.0 || height >= 60.0;
+    const isMedium = !isColossal && (radius >= 6.0 || height >= 25.0);
 
-    for (let i = 0; i < this.route.length; i++) {
-      const node = this.route[i];
+    const vertAbove = JUMP_CORRIDOR_ABOVE + (isColossal ? 20.0 : (isMedium ? 10.0 : 0.0));
+    const vertBelow = JUMP_CORRIDOR_BELOW + (isColossal ? 25.0 : (isMedium ? 15.0 : 0.0));
+
+    let worst: VolumeEvaluationResult | null = null;
+    const allNodes = [...this.mainRoute, ...this.independentNodes];
+
+    // 1. Evaluate against all individual platform geometries
+    for (let i = 0; i < allNodes.length; i++) {
+      const node = allNodes[i];
       const isSurf = !!node.isSurf;
       const isStepUp = node.type === RouteNodeType.STEP_UP ||
-        (i < this.route.length - 1 && this.route[i + 1].type === RouteNodeType.STEP_UP);
+        node.ascentVariant !== undefined ||
+        (i < this.mainRoute.length - 1 && this.mainRoute[i + 1]?.type === RouteNodeType.STEP_UP);
       const trackHalfBreadth = getPlatformMaxHalfWidth(node);
 
       let safetyMargin: number;
@@ -375,18 +273,26 @@ export class RouteExclusionCorridor {
       } else {
         safetyMargin = 26.0 + 0.65 * radius;
       }
-      // Background architecture clearance for large monumental structures / skyscrapers
-      if (radius >= 12.0 || (box.max.y - box.min.y) >= 60.0) {
+
+      if (isColossal) {
         const bgMargin = isSurf ? (55.0 + extraSurfMargin) : 46.0;
-        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * radius);
+        safetyMargin = Math.max(safetyMargin, bgMargin + 0.6 * radius, 40.0 + 0.5 * footprint);
+      } else if (isMedium) {
+        safetyMargin = Math.max(safetyMargin, 22.0 + 0.4 * footprint);
       }
+
       const requiredDist = trackHalfBreadth + radius + safetyMargin;
+      const rawRequiredDist = trackHalfBreadth + radius + 2.0;
 
-      const routeMinY = node.position.y - JUMP_CORRIDOR_BELOW;
-      const routeMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
+      const comfortMinY = node.position.y - vertBelow;
+      const comfortMaxY = node.position.y + vertAbove;
+      const rawMinY = node.position.y - JUMP_CORRIDOR_BELOW;
+      const rawMaxY = node.position.y + JUMP_CORRIDOR_ABOVE;
 
-      if (!(box.max.y < routeMinY || box.min.y > routeMaxY)) {
-        // Continuous oriented platform segment clearance from entry anchor to exit anchor
+      const verticalOverlap = !(box.max.y < comfortMinY || box.min.y > comfortMaxY);
+      const rawVerticalOverlap = !(box.max.y < rawMinY || box.min.y > rawMaxY);
+
+      if (verticalOverlap) {
         const halfLen = (node.dimensions.z || 0) * 0.5;
         const fwdX = Math.sin(node.yaw);
         const fwdZ = Math.cos(node.yaw);
@@ -409,15 +315,26 @@ export class RouteExclusionCorridor {
 
         const dx = center.x - closestNodeX;
         const dz = center.z - closestNodeZ;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        const penetration = requiredDist - dist;
-        if (penetration > 0 && (!worst || penetration > worst.penetration)) {
-          worst = { penetration, nodeIndex: i };
+        const dist = Math.hypot(dx, dz);
+
+        const isRawHit = rawVerticalOverlap && dist < rawRequiredDist;
+        const isComfortHit = dist < requiredDist;
+
+        if (isRawHit) {
+          const penetration = rawRequiredDist - dist;
+          if (!worst || !worst.isGameplayCollision || penetration > worst.penetration) {
+            worst = { penetration, nodeIndex: i, isGameplayCollision: true, isComfortViolation: false };
+          }
+        } else if (isComfortHit) {
+          const penetration = requiredDist - dist;
+          if (!worst || (!worst.isGameplayCollision && penetration > worst.penetration)) {
+            worst = { penetration, nodeIndex: i, isGameplayCollision: false, isComfortViolation: true };
+          }
         }
       }
 
-      // Check surf exit launch cone (protects entire airborne trajectory flying off the ramp up to 130m)
-      if (isSurf && (i === this.route.length - 1 || !this.route[i + 1].isSurf)) {
+      // Surf exit launch cone (airborne trajectory flying off the ramp up to 140m)
+      if (isSurf && (i === this.mainRoute.length - 1 || !this.mainRoute[i + 1]?.isSurf)) {
         const fwdX = Math.sin(node.yaw);
         const fwdZ = Math.cos(node.yaw);
         const halfLen = (node.dimensions.z || 0) * 0.5;
@@ -428,77 +345,109 @@ export class RouteExclusionCorridor {
         const toObjZ = center.z - exitZ;
         const projFwd = toObjX * fwdX + toObjZ * fwdZ;
 
-        if (projFwd > 0 && projFwd < 130.0) {
-          const coneRatio = projFwd / 130.0;
-          const coneRadius = 24.0 + coneRatio * 32.0 + radius + extraSurfMargin * 0.5;
+        if (projFwd > 0 && projFwd < 140.0) {
+          const coneRatio = projFwd / 140.0;
+          const coneRadius = 24.0 + coneRatio * 36.0 + radius + (isColossal ? 20.0 : 0) + extraSurfMargin * 0.5;
           const latDistSq = (toObjX - fwdX * projFwd) ** 2 + (toObjZ - fwdZ * projFwd) ** 2;
 
-          const coneMinY = node.position.y - 30.0;
-          const coneMaxY = node.position.y + 65.0;
+          const coneMinY = node.position.y - 35.0 - (isColossal ? 20.0 : 0);
+          const coneMaxY = node.position.y + 70.0 + (isColossal ? 20.0 : 0);
           if (!(box.max.y < coneMinY || box.min.y > coneMaxY)) {
             const latDist = Math.sqrt(latDistSq);
             const penetration = coneRadius - latDist;
             if (penetration > 0 && (!worst || penetration > worst.penetration)) {
-              worst = { penetration, nodeIndex: i };
+              worst = {
+                penetration,
+                nodeIndex: i,
+                isGameplayCollision: penetration > 10.0,
+                isComfortViolation: true
+              };
             }
           }
         }
       }
+    }
 
-      // Flight trajectory segment to next node
-      if (i < this.route.length - 1) {
-        const nextNode = this.route[i + 1];
-        const isSurfSection = isSurf || !!nextNode.isSurf;
-        const isStepUpSection = node.type === RouteNodeType.STEP_UP || nextNode.type === RouteNodeType.STEP_UP;
+    // 2. Evaluate jump flight trajectories between consecutive nodes in the main route
+    for (let i = 0; i < this.mainRoute.length - 1; i++) {
+      const node = this.mainRoute[i];
+      const nextNode = this.mainRoute[i + 1];
+      const isSurfSection = !!node.isSurf || !!nextNode.isSurf;
+      const isStepUpSection = node.type === RouteNodeType.STEP_UP || nextNode.type === RouteNodeType.STEP_UP;
 
-        let segMargin: number;
-        if (isSurfSection) {
-          segMargin = Math.max(40.0, 18.0 + extraSurfMargin) + 0.85 * radius;
-        } else if (isStepUpSection) {
-          segMargin = 32.0 + 0.7 * radius;
-        } else {
-          segMargin = 30.0 + 0.7 * radius;
-        }
-        const segHalfBreadth = Math.max(trackHalfBreadth, getPlatformMaxHalfWidth(nextNode));
+      let segMargin: number;
+      if (isSurfSection) {
+        segMargin = Math.max(40.0, 18.0 + extraSurfMargin) + 0.85 * radius;
+      } else if (isStepUpSection) {
+        segMargin = 32.0 + 0.7 * radius;
+      } else {
+        segMargin = 30.0 + 0.7 * radius;
+      }
 
-        const ax = node.position.x;
-        const az = node.position.z;
-        const abx = nextNode.position.x - ax;
-        const abz = nextNode.position.z - az;
-        const segLenSq = abx * abx + abz * abz;
+      if (isColossal) {
+        const bgMargin = isSurfSection ? (55.0 + extraSurfMargin) : 46.0;
+        segMargin = Math.max(segMargin, bgMargin + 0.6 * radius, 40.0 + 0.5 * footprint);
+      } else if (isMedium) {
+        segMargin = Math.max(segMargin, 22.0 + 0.4 * footprint);
+      }
 
-        let t = 0;
-        if (segLenSq > 0.0001) {
-          t = ((center.x - ax) * abx + (center.z - az) * abz) / segLenSq;
-          t = Math.max(0, Math.min(1, t));
-        }
+      const segHalfBreadth = Math.max(getPlatformMaxHalfWidth(node), getPlatformMaxHalfWidth(nextNode));
 
-        const closestX = ax + t * abx;
-        const closestZ = az + t * abz;
-        const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
+      const ax = node.position.x;
+      const az = node.position.z;
+      const bx = nextNode.position.x;
+      const bz = nextNode.position.z;
 
-        // 3D Parabolic jump arc apex calculation over airborne gaps
-        const segDist = Math.sqrt(segLenSq);
-        const gapDist = Math.max(0, segDist - ((node.dimensions.z || 0) * 0.5 + (nextNode.dimensions.z || 0) * 0.5));
-        const apexHeight = gapDist > 4.0 ? Math.max(2.5, Math.min(8.5, gapDist * 0.32)) : 0;
-        const arcOffset = 4.0 * t * (1.0 - t) * apexHeight;
-        const flightY = interpY + arcOffset;
+      const abx = bx - ax;
+      const abz = bz - az;
+      const segLenSq = abx * abx + abz * abz;
 
-        const jumpMinY = flightY - JUMP_CORRIDOR_BELOW;
-        const jumpMaxY = flightY + JUMP_CORRIDOR_ABOVE;
+      let t = 0;
+      if (segLenSq > 0.0001) {
+        t = ((center.x - ax) * abx + (center.z - az) * abz) / segLenSq;
+        t = Math.max(0, Math.min(1, t));
+      }
 
-        // Lateral air-strafe drift expansion over airborne gaps
-        const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
-        const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
-        const segRequiredDist = segHalfBreadth + radius + segMargin + lateralDrift;
+      const closestX = ax + t * abx;
+      const closestZ = az + t * abz;
+      const interpY = node.position.y + t * (nextNode.position.y - node.position.y);
 
-        if (!(box.max.y < jumpMinY || box.min.y > jumpMaxY)) {
-          const cdx = center.x - closestX;
-          const cdz = center.z - closestZ;
-          const dist = Math.sqrt(cdx * cdx + cdz * cdz);
+      const segDist = Math.sqrt(segLenSq);
+      const gapDist = Math.max(0, segDist - ((node.dimensions.z || 0) * 0.5 + (nextNode.dimensions.z || 0) * 0.5));
+      const apexHeight = gapDist > 4.0 ? Math.max(2.5, Math.min(8.5, gapDist * 0.32)) : 0;
+      const arcOffset = 4.0 * t * (1.0 - t) * apexHeight;
+      const flightY = interpY + arcOffset;
+
+      const jumpComfortMinY = flightY - vertBelow;
+      const jumpComfortMaxY = flightY + vertAbove;
+      const jumpRawMinY = flightY - JUMP_CORRIDOR_BELOW;
+      const jumpRawMaxY = flightY + JUMP_CORRIDOR_ABOVE;
+
+      const maxDrift = gapDist > 4.0 ? (isSurfSection ? 3.5 : 2.5) : 0.0;
+      const lateralDrift = 4.0 * t * (1.0 - t) * maxDrift;
+      const segRequiredDist = segHalfBreadth + radius + segMargin + lateralDrift;
+      const rawFlightRequiredDist = segHalfBreadth + radius + 2.0;
+
+      const flightVerticalOverlap = !(box.max.y < jumpComfortMinY || box.min.y > jumpComfortMaxY);
+      const flightRawVerticalOverlap = !(box.max.y < jumpRawMinY || box.min.y > jumpRawMaxY);
+
+      if (flightVerticalOverlap) {
+        const cdx = center.x - closestX;
+        const cdz = center.z - closestZ;
+        const dist = Math.hypot(cdx, cdz);
+
+        const isRawHit = flightRawVerticalOverlap && dist < rawFlightRequiredDist;
+        const isComfortHit = dist < segRequiredDist;
+
+        if (isRawHit) {
+          const penetration = rawFlightRequiredDist - dist;
+          if (!worst || !worst.isGameplayCollision || penetration > worst.penetration) {
+            worst = { penetration, nodeIndex: i, isGameplayCollision: true, isComfortViolation: false };
+          }
+        } else if (isComfortHit) {
           const penetration = segRequiredDist - dist;
-          if (penetration > 0 && (!worst || penetration > worst.penetration)) {
-            worst = { penetration, nodeIndex: i };
+          if (!worst || (!worst.isGameplayCollision && penetration > worst.penetration)) {
+            worst = { penetration, nodeIndex: i, isGameplayCollision: false, isComfortViolation: true };
           }
         }
       }
@@ -509,9 +458,21 @@ export class RouteExclusionCorridor {
 
   /**
    * Fast boolean query checking if a 3D bounding box violates the corridor.
+   * Records candidate diagnostic statistics into lastBuildingReport.
    */
   public isBoxInsideCorridor(box: THREE.Box3, extraSurfMargin = 28.0): boolean {
-    return this.evaluateVolume(box, extraSurfMargin) !== null;
+    RouteExclusionCorridor.lastBuildingReport.candidatesGenerated++;
+    const hit = this.evaluateVolume(box, extraSurfMargin);
+    if (hit) {
+      if (hit.isGameplayCollision) {
+        RouteExclusionCorridor.lastBuildingReport.rejectedByGameplayCollision++;
+      } else {
+        RouteExclusionCorridor.lastBuildingReport.rejectedByComfortClearance++;
+      }
+      return true;
+    }
+    RouteExclusionCorridor.lastBuildingReport.finalSurvivingBuildings++;
+    return false;
   }
 }
 

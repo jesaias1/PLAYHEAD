@@ -150,6 +150,17 @@ export class World {
         `intruding into protected route volumes.`
       );
     }
+
+    const buildingReport = RouteExclusionCorridor.getLastBuildingReport();
+    if (buildingReport.candidatesGenerated > 0) {
+      console.log(
+        `[World] Building Validation: ${buildingReport.candidatesGenerated} candidates generated, ` +
+        `${buildingReport.rejectedByGameplayCollision} rejected by direct collision, ` +
+        `${buildingReport.rejectedByComfortClearance} rejected by comfort clearance, ` +
+        `${buildingReport.finalSurvivingBuildings} surviving.`
+      );
+    }
+
     // Refresh authored transforms so distance culling never resurrects rejected buildings
     this.skyline.refreshAuthoredTransformsAfterValidation();
 

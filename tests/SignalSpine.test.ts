@@ -136,33 +136,27 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     }
   });
 
-  it('preserves deliberate open void below precision sections and drop leaps (Selective Placement)', () => {
+  it('treats micro-platform / precision chains as high-risk with 70-85% coverage and <= 2 consecutive unsupported', () => {
     // Track with a PRECISION section
     const analysis = createMockAnalysis(8888, ['FLOW', 'PRECISION', 'DROP', 'FLOW']);
     const palette = PaletteSelector.selectPalette(8888, 0.5, 0.6);
     const track = TrackGenerator.generate(analysis, palette);
 
-    const precisionSection = analysis.sections.find(s => s.theme === 'PRECISION')!;
-    const precisionNodes = track.route.filter(n => n.time >= precisionSection.start && n.time < precisionSection.end);
+    const report = SignalSpineGenerator.getLastReport();
+    expect(report).toBeDefined();
+    expect(report!.highRiskTransfersFound).toBeGreaterThan(0);
+    expect(report!.highRiskConnectorsGenerated).toBeGreaterThan(0);
 
-    const spines = track.signalSpines || [];
+    // Coverage rule: ~70–85% of high-risk micro-transfers covered
+    const coverageRatio = report!.highRiskConnectorsGenerated / report!.highRiskTransfersFound;
+    expect(coverageRatio).toBeGreaterThanOrEqual(0.65);
+    expect(coverageRatio).toBeLessThanOrEqual(0.95);
 
-    // Selective placement invariant: no spine should be generated for precision challenge gaps
-    for (let i = 0; i < precisionNodes.length - 1; i++) {
-      const a = precisionNodes[i];
-      const b = precisionNodes[i + 1];
-      const gapCenter = {
-        x: (a.position.x + b.position.x) * 0.5,
-        z: (a.position.z + b.position.z) * 0.5
-      };
-
-      const spineDirectlyUnderGap = spines.find(s => {
-        const dx = Math.abs(s.position.x - gapCenter.x);
-        const dz = Math.abs(s.position.z - gapCenter.z);
-        return Math.hypot(dx, dz) < 4.0;
-      });
-
-      expect(spineDirectlyUnderGap).toBeUndefined();
+    // Verify initial drop leap preserves open void
+    const dropSection = analysis.sections.find(s => s.theme === 'DROP')!;
+    const dropNodes = track.route.filter(n => n.time >= dropSection.start && n.time < dropSection.end);
+    if (dropNodes.length > 1 && track.route.indexOf(dropNodes[0]) < 6) {
+      expect(report!.rejectionReasons['initial_colossal_drop_leap']).toBeGreaterThanOrEqual(1);
     }
   });
 

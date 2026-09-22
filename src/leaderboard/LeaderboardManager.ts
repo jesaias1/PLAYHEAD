@@ -133,7 +133,7 @@ export class LeaderboardManager {
     let isNewPB = false;
     let isNewLocalFirst = false;
 
-    const completionTime = Math.round(results.completionTime * 1000) / 1000;
+    const completionTime = results.completionTime;
     const score = Math.round(results.score);
     const now = Date.now();
 
@@ -201,8 +201,8 @@ export class LeaderboardManager {
       trackTitle,
       routeVersion: ROUTE_GENERATION_VERSION,
       seed,
-      completionTime: Math.round(results.completionTime * 1000) / 1000,
-      targetTime: Math.round(results.targetTime * 1000) / 1000,
+      completionTime: results.completionTime,
+      targetTime: results.targetTime,
       rank: results.rank,
       score: Math.round(results.score),
       fallsCount: results.fallsCount,

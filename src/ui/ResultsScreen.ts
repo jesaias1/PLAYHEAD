@@ -69,7 +69,7 @@ export class ResultsScreen {
         </div>
 
         <div class="results-grid" id="res-grid">
-          <div class="stat-card">
+          <div class="stat-card stat-card-completion">
             <div class="stat-label">[TIME] COMPLETION</div>
             <div class="stat-value" id="res-time">00:00.000</div>
           </div>
@@ -214,11 +214,20 @@ export class ResultsScreen {
     const recSummary = officialInfo?.trackId
       ? LeaderboardManager.getInstance().getRecordSummary(officialInfo.trackId)
       : null;
-    this.pbValElem.textContent = recSummary?.pbTime !== null && recSummary?.pbTime !== undefined
-      ? formatTime(recSummary.pbTime)
+
+    const pbTime = isNewPersonalBest
+      ? results.completionTime
+      : (recSummary?.pbTime ?? null);
+
+    const localFirstTime = (officialInfo?.isNewLocalFirst && !overtimeInfo?.isOvertime)
+      ? results.completionTime
+      : (recSummary?.localFirstTime ?? null);
+
+    this.pbValElem.textContent = pbTime !== null && pbTime !== undefined
+      ? formatTime(pbTime)
       : '—';
-    this.localFirstElem.textContent = recSummary?.localFirstTime !== null && recSummary?.localFirstTime !== undefined
-      ? formatTime(recSummary.localFirstTime)
+    this.localFirstElem.textContent = localFirstTime !== null && localFirstTime !== undefined
+      ? formatTime(localFirstTime)
       : '—';
 
     if (officialInfo?.isNewLocalFirst && !overtimeInfo?.isOvertime) {

@@ -29,6 +29,10 @@ export interface SignalSpineGenerationReport {
   eligibleGaps: number;
   smallChainConnectors: number;
   mediumLargeConnectors: number;
+  microBarConnectors: number;
+  highRiskTransfersFound: number;
+  highRiskConnectorsGenerated: number;
+  transfersLeftUnsupported: number;
   totalGenerated: number;
   rejectedCount: number;
   rejectionReasons: Record<string, number>;
@@ -60,6 +64,12 @@ export class SignalSpineGenerator {
 
     let smallChainConnectors = 0;
     let mediumLargeConnectors = 0;
+    let microBarConnectors = 0;
+    let highRiskTransfersFound = 0;
+    let highRiskConnectorsGenerated = 0;
+    let transfersLeftUnsupported = 0;
+    let consecutiveUnsupportedHighRisk = 0;
+
     let eligibleGaps = 0;
     let rejectedCount = 0;
     const rejectionReasons: Record<string, number> = {};
@@ -97,13 +107,8 @@ export class SignalSpineGenerator {
       const gapKey = `${a.id}->${b.id}`;
       if (coveredGaps.has(gapKey)) continue;
 
-      // Selective Placements: Preserve deliberate open void for precision setpieces
       const section = analysis.sections?.[a.sectionIndex];
       const theme = section?.theme;
-      if (theme === 'PRECISION') {
-        recordRejection('precision_theme_open_void');
-        continue;
-      }
       if (theme === 'DROP' && i < 6) {
         recordRejection('initial_colossal_drop_leap');
         continue;
@@ -142,7 +147,12 @@ export class SignalSpineGenerator {
       // Platform size classification
       const minPlatWidth = Math.min(a.dimensions.x, b.dimensions.x);
       const minPlatLen = Math.min(a.dimensions.z, b.dimensions.z);
-      const isSmall = minPlatWidth <= 8.0 || minPlatLen <= 18.0;
+
+      // Micro-platform / bar chain classification:
+      // Sequences of tiny bars, narrow beams, micro-platforms (width <= 6.5m or length <= 14m),
+      // or explicit PRECISION theme sections.
+      const isMicroBarChain = minPlatWidth <= 6.5 || minPlatLen <= 14.0 || theme === 'PRECISION';
+      const isSmall = !isMicroBarChain && (minPlatWidth <= 8.5 || minPlatLen <= 18.0);
 
       // Gameplay sequence classifications
       const isPostSurfReentry = postSurfEligibleGaps.has(gapKey);
@@ -156,9 +166,38 @@ export class SignalSpineGenerator {
         Math.abs(b.position.y - a.position.y) > 0.25;
 
       let qualify = false;
+      let isMicroChain = false;
       let isSmallChain = false;
 
-      if (isPostSurfReentry) {
+      if (isMicroBarChain) {
+        // High-Risk Transfer Chain (Micro-platforms, tiny bars, precision landings)
+        highRiskTransfersFound++;
+
+        // COVERAGE RULE:
+        // Provide Signal Spine on a majority of these transfers (~70-85%), with occasional
+        // intentional open jumps so danger remains real.
+        // Never allow 3+ consecutive micro-bar leaps with zero recovery option.
+        // Max consecutive unsupported high-risk transfers must be <= 2.
+        if (consecutiveUnsupportedHighRisk >= 2) {
+          qualify = true;
+        } else {
+          // 78% coverage target (within 70-85% rule)
+          const roll = rng.next();
+          if (roll < 0.78) {
+            qualify = true;
+          } else {
+            consecutiveUnsupportedHighRisk++;
+            transfersLeftUnsupported++;
+            recordRejection('intentional_high_risk_open_leap');
+          }
+        }
+
+        if (qualify) {
+          consecutiveUnsupportedHighRisk = 0;
+          highRiskConnectorsGenerated++;
+          isMicroChain = true;
+        }
+      } else if (isPostSurfReentry) {
         // Category 1: Post-surf landing platform chains (100% coverage)
         qualify = true;
         isSmallChain = isSmall;
@@ -176,7 +215,6 @@ export class SignalSpineGenerator {
         }
       } else {
         // Category 4: Medium & Larger Platform Transfers (Broadened Qualifying Rule)
-        // For medium (8m-16m) and larger (16m+) platforms: qualify when gap presents meaningful risk
         if (gapHoriz >= 2.2) {
           // Select ~55% of medium/large transfers so they are common but not universal
           const qualifyRoll = rng.next();
@@ -206,6 +244,7 @@ export class SignalSpineGenerator {
         gap3D,
         pitch,
         minPlatWidth,
+        isMicroChain,
         isSmallChain,
         isPostSurfReentry,
         rng
@@ -216,7 +255,9 @@ export class SignalSpineGenerator {
         for (const spine of spineNodes) {
           spines.push(spine);
         }
-        if (isSmallChain) {
+        if (isMicroChain) {
+          microBarConnectors += spineNodes.length;
+        } else if (isSmallChain) {
           smallChainConnectors += spineNodes.length;
         } else {
           mediumLargeConnectors += spineNodes.length;
@@ -228,6 +269,10 @@ export class SignalSpineGenerator {
       eligibleGaps,
       smallChainConnectors,
       mediumLargeConnectors,
+      microBarConnectors,
+      highRiskTransfersFound,
+      highRiskConnectorsGenerated,
+      transfersLeftUnsupported,
       totalGenerated: spines.length,
       rejectedCount,
       rejectionReasons
@@ -290,6 +335,7 @@ export class SignalSpineGenerator {
     gap3D: number,
     pitch: number,
     minPlatWidth: number,
+    isMicroChain: boolean,
     isSmallChain: boolean,
     isPostSurfReentry: boolean,
     rng: SeededRandom
@@ -299,14 +345,19 @@ export class SignalSpineGenerator {
     const yaw = Math.atan2(dx, dz);
 
     // 1. Adaptive Width according to Movement Phrase:
+    // - micro-bar / precision chain: ~6–12% of local usable width, skinny recovery profile
     // - post-surf catch / very punishing transfer: ~20–25% of local platform width
     // - normal small-platform chain: ~12–18%
-    // - precision / high-skill recovery line: ~8–12%
+    // - medium / large transfer recovery line: ~8–12%
     let widthRatio: number;
     let minWidthCap: number;
     let maxWidthCap: number;
 
-    if (isPostSurfReentry) {
+    if (isMicroChain) {
+      widthRatio = rng.nextFloat(0.06, 0.12);
+      minWidthCap = 0.35;
+      maxWidthCap = Math.max(0.60, minPlatWidth * 0.14);
+    } else if (isPostSurfReentry) {
       widthRatio = rng.nextFloat(0.20, 0.25);
       minWidthCap = 1.20;
       maxWidthCap = 2.40;
@@ -321,7 +372,7 @@ export class SignalSpineGenerator {
     }
 
     const baseWidth = Math.max(minWidthCap, Math.min(maxWidthCap, minPlatWidth * widthRatio));
-    const spineThickness = Math.min(0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.40);
+    const spineThickness = Math.min(isMicroChain ? 0.30 : 0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.35);
     const overlap = rng.nextFloat(0.40, 0.80);
     const totalSpan = gap3D + overlap * 2.0;
 
@@ -379,7 +430,19 @@ export class SignalSpineGenerator {
 
     let chosenShape: 'TAPERED' | 'OFFSET' | 'BROKEN' | 'TAPER_TO_REJOIN' | 'DEFAULT';
 
-    if (isPostSurfReentry) {
+    if (isMicroChain) {
+      if (shapeRoll < 0.32 && gap3D >= 2.5) {
+        chosenShape = 'TAPERED';
+      } else if (shapeRoll < 0.62) {
+        chosenShape = 'OFFSET';
+      } else if (shapeRoll < 0.80 && gapHoriz >= 3.5) {
+        chosenShape = 'BROKEN';
+      } else if (shapeRoll < 0.92 && gap3D >= 2.8) {
+        chosenShape = 'TAPER_TO_REJOIN';
+      } else {
+        chosenShape = 'DEFAULT';
+      }
+    } else if (isPostSurfReentry) {
       if (shapeRoll < 0.45 && gap3D >= 3.0) {
         chosenShape = 'TAPERED';
       } else if (shapeRoll < 0.75) {
@@ -419,9 +482,13 @@ export class SignalSpineGenerator {
     // 1. TAPERED SPINE:
     // Wider at platform attachments, narrower in middle, wider near next platform
     if (chosenShape === 'TAPERED') {
-      const entryWidth = Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
-      const midWidth = Math.max(0.65, baseWidth * 0.75);
-      const exitWidth = Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
+      const entryWidth = isMicroChain
+        ? Math.min(minPlatWidth * 0.16, baseWidth * 1.3)
+        : Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
+      const midWidth = isMicroChain
+        ? Math.max(0.30, baseWidth * 0.75)
+        : Math.max(0.65, baseWidth * 0.75);
+      const exitWidth = entryWidth;
 
       return [
         makeSegment(0.0, 0.28, entryWidth, 0, 'TAPERED'),
@@ -436,7 +503,9 @@ export class SignalSpineGenerator {
       const turnSign = Math.abs(turnAngle) > 0.02
         ? (turnAngle > 0 ? 1 : -1)
         : (rng.next() < 0.5 ? 1 : -1);
-      const maxShift = Math.min(2.4, (minPlatWidth - baseWidth) * 0.35);
+      const maxShift = isMicroChain
+        ? Math.min(0.6, (minPlatWidth - baseWidth) * 0.25)
+        : Math.min(2.4, (minPlatWidth - baseWidth) * 0.35);
       const shift = turnSign * rng.nextFloat(0.45, 0.85) * maxShift;
 
       return [makeSegment(0.0, 1.0, baseWidth, shift, 'OFFSET')];
@@ -445,7 +514,9 @@ export class SignalSpineGenerator {
     // 3. BROKEN SPINE:
     // Short missing section requiring one small controlled hop
     if (chosenShape === 'BROKEN') {
-      const hopLength = Math.min(1.8, Math.max(1.2, gapHoriz * 0.25));
+      const hopLength = isMicroChain
+        ? Math.min(1.2, Math.max(0.6, gapHoriz * 0.20))
+        : Math.min(1.8, Math.max(1.2, gapHoriz * 0.25));
       const hopFraction = Math.min(0.35, hopLength / totalSpan);
       const seg1End = (1.0 - hopFraction) * 0.5;
       const seg2Start = seg1End + hopFraction;
@@ -460,18 +531,21 @@ export class SignalSpineGenerator {
     // Spine gradually narrows or ends so player must return to main route
     if (chosenShape === 'TAPER_TO_REJOIN') {
       const isExitCatch = rng.next() < 0.5;
+      const rootWidth = isMicroChain
+        ? Math.min(minPlatWidth * 0.16, baseWidth * 1.25)
+        : Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
+      const tipWidth = isMicroChain
+        ? Math.max(0.30, baseWidth * 0.70)
+        : Math.max(0.65, baseWidth * 0.70);
+
       if (isExitCatch) {
         // Starts at Platform A, extends ~68% into gap and narrows at tip
-        const rootWidth = Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
-        const tipWidth = Math.max(0.65, baseWidth * 0.70);
         return [
           makeSegment(0.0, 0.36, rootWidth, 0, 'TAPER_TO_REJOIN'),
           makeSegment(0.35, 0.70, tipWidth, 0, 'TAPER_TO_REJOIN')
         ];
       } else {
         // Entry catch tongue extending backwards from Platform B by ~68%
-        const tipWidth = Math.max(0.65, baseWidth * 0.70);
-        const rootWidth = Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
         return [
           makeSegment(0.30, 0.65, tipWidth, 0, 'TAPER_TO_REJOIN'),
           makeSegment(0.64, 1.0, rootWidth, 0, 'TAPER_TO_REJOIN')
@@ -480,7 +554,7 @@ export class SignalSpineGenerator {
     }
 
     // 5. DEFAULT (STRAIGHT / CATWALK / CURVED)
-    const variant = isCurved ? 'CURVED' : (baseWidth <= 1.3 ? 'CATWALK' : 'STRAIGHT');
+    const variant = isCurved ? 'CURVED' : (baseWidth <= 0.8 ? 'CATWALK' : 'STRAIGHT');
     return [makeSegment(0.0, 1.0, baseWidth, 0, variant)];
   }
 }

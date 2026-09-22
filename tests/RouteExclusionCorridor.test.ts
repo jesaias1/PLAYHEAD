@@ -222,4 +222,54 @@ describe('RouteExclusionCorridor', () => {
     );
     expect(corridor.isBoxInsideCorridor(distantSkyscraperBox)).toBe(false);
   });
+
+  it('rejects deep structures starting far below the route and extending upward toward gameplay (Full 3D Vertical Extent)', () => {
+    // Deep monolith plunged -400m into the abyss, with its roof reaching y = -15m (15m below platform at y = 0)
+    // Directly underneath platform (x = 0, z = 0)
+    const deepUnderPlatformBox = new THREE.Box3(
+      new THREE.Vector3(-10, -400, -10),
+      new THREE.Vector3(10, -15, 10)
+    );
+    const hit = corridor.evaluateVolume(deepUnderPlatformBox);
+    expect(hit).not.toBeNull();
+    expect(corridor.isBoxInsideCorridor(deepUnderPlatformBox)).toBe(true);
+
+    // Deep structure whose roof terminates safely 60m below the lowest gameplay envelope (y = -70m) is allowed
+    const safeDeepBox = new THREE.Box3(
+      new THREE.Vector3(-10, -500, -10),
+      new THREE.Vector3(10, -70, 10)
+    );
+    expect(corridor.isBoxInsideCorridor(safeDeepBox)).toBe(false);
+  });
+
+  it('distinguishes gameplay collision from comfort clearance rejection and tracks diagnostic counts', () => {
+    RouteExclusionCorridor.resetBuildingReport();
+
+    // 1. Direct gameplay collision: Box directly penetrates platform volume
+    const collisionBox = new THREE.Box3(
+      new THREE.Vector3(-5, -2, -5),
+      new THREE.Vector3(5, 5, 5)
+    );
+    expect(corridor.isBoxInsideCorridor(collisionBox)).toBe(true);
+
+    // 2. Comfort clearance violation: Box is outside raw platform (at 45m lateral distance) but within colossal comfort margin
+    const comfortBox = new THREE.Box3(
+      new THREE.Vector3(40, -100, -10),
+      new THREE.Vector3(70, 100, 10)
+    );
+    expect(corridor.isBoxInsideCorridor(comfortBox)).toBe(true);
+
+    // 3. Clean surviving candidate: Distant tower at 200m lateral offset
+    const safeBox = new THREE.Box3(
+      new THREE.Vector3(190, -100, -10),
+      new THREE.Vector3(220, 100, 10)
+    );
+    expect(corridor.isBoxInsideCorridor(safeBox)).toBe(false);
+
+    const report = RouteExclusionCorridor.getLastBuildingReport();
+    expect(report.candidatesGenerated).toBe(3);
+    expect(report.rejectedByGameplayCollision).toBe(1);
+    expect(report.rejectedByComfortClearance).toBe(1);
+    expect(report.finalSurvivingBuildings).toBe(1);
+  });
 });

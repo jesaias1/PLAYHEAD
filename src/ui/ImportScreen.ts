@@ -197,7 +197,7 @@ export class ImportScreen {
         <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
           <div class="terminal-panel-header" style="display: flex; justify-content: space-between; align-items: center;">
             <span>[ARMORY] KARAMBIT COSMETIC CONTROL</span>
-            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
+            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="display: none; font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
               DEV PREVIEW: OFF
             </button>
           </div>
@@ -338,13 +338,15 @@ export class ImportScreen {
       const duration = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
       item.innerHTML = `
-        <div class="strip-item-header">
-          <span class="strip-item-num">[${displayIndex}] // ${isTutorial ? 'CALIBRATION // TUTORIAL' : t.difficultyLabel}</span>
-          ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
+        <div class="strip-item-inner">
+          <div class="strip-item-header">
+            <span class="strip-item-num">[${displayIndex}] // ${isTutorial ? 'CALIBRATION // TUTORIAL' : t.difficultyLabel}</span>
+            ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
+          </div>
+          <div class="strip-item-title">${t.title}</div>
+          <div class="strip-signal-bars" aria-hidden="true"></div>
+          <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
         </div>
-        <div class="strip-item-title">${t.title}</div>
-        <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
-        <div class="strip-signal-bars" aria-hidden="true"></div>
       `;
 
       const bars = item.querySelector('.strip-signal-bars') as HTMLElement;
@@ -663,6 +665,17 @@ export class ImportScreen {
     this.armoryDevToggleBtn.addEventListener('click', () => {
       this.skinSystem.toggleDevPreview();
       this.renderArmory();
+    });
+
+    if (new URLSearchParams(window.location.search).get('debug') === '1') {
+      this.armoryDevToggleBtn.style.display = 'inline-block';
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'F3') {
+        const isHidden = this.armoryDevToggleBtn.style.display === 'none' || !this.armoryDevToggleBtn.style.display;
+        this.armoryDevToggleBtn.style.display = isHidden ? 'inline-block' : 'none';
+      }
     });
 
     this.decoderButton.addEventListener('click', () => {

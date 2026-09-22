@@ -51,12 +51,15 @@ export class PlayerController {
   private jumpPressedLastTick = false;
   private prevYaw = 0;
 
+  public static readonly HOLD_RESTART_SECONDS = 0.6;
+
   public onFallCallback?: (reason: RestoreReason) => void;
   public onRestoreCallback?: () => void;
   public onFullRestartCallback?: () => void;
   public onHoldProgressCallback?: (progress: number | null) => void;
   private rKeyDownTime: number | null = null;
   private rFullRestartTriggered = false;
+  private inputLockoutTimer = 0;
 
   public lastTouchedSurfaceType: 'PLATFORM' | 'SURF' = 'PLATFORM';
 
@@ -147,12 +150,26 @@ export class PlayerController {
     return horizSpeed * this.config.speedUnitScale;
   }
 
+  public lockInput(durationSec = 0.1): void {
+    this.inputLockoutTimer = Math.max(this.inputLockoutTimer, durationSec);
+    this.resetKeys();
+  }
+
   public updateFixed(dt: number): void {
+    if (this.inputLockoutTimer > 0) {
+      this.inputLockoutTimer = Math.max(0, this.inputLockoutTimer - dt);
+      this.keys.forward = false;
+      this.keys.backward = false;
+      this.keys.left = false;
+      this.keys.right = false;
+      this.keys.jump = false;
+    }
+
     if (this.rKeyDownTime !== null && !this.rFullRestartTriggered) {
       const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
-      const progress = Math.min(1.0, elapsedSec / 1.0);
+      const progress = Math.min(1.0, elapsedSec / PlayerController.HOLD_RESTART_SECONDS);
       this.onHoldProgressCallback?.(progress);
-      if (elapsedSec >= 1.0) {
+      if (elapsedSec >= PlayerController.HOLD_RESTART_SECONDS) {
         this.rFullRestartTriggered = true;
         this.rKeyDownTime = null;
         this.onHoldProgressCallback?.(null);
@@ -509,6 +526,10 @@ export class PlayerController {
       // Prevent space scrolling
       if (e.code === 'Space') e.preventDefault();
 
+      if (this.inputLockoutTimer > 0) {
+        return;
+      }
+
       if (e.code === 'KeyW') this.keys.forward = true;
       if (e.code === 'KeyS') this.keys.backward = true;
       if (e.code === 'KeyA') this.keys.left = true;
@@ -538,7 +559,7 @@ export class PlayerController {
           const elapsedSec = (performance.now() - this.rKeyDownTime) / 1000;
           this.rKeyDownTime = null;
           this.onHoldProgressCallback?.(null);
-          if (elapsedSec < 1.0) {
+          if (elapsedSec < PlayerController.HOLD_RESTART_SECONDS) {
             this.stats.recordRestart();
             this.onRestoreCallback?.();
           }

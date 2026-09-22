@@ -150,8 +150,8 @@ export class SkylineArchitecture {
 
         // Authoritative full 3D rotated bounding-box validation
         const mLocalBox = new THREE.Box3(
-          new THREE.Vector3(-12.0, -pHeight * 0.5, -12.0),
-          new THREE.Vector3(12.0, pHeight * 0.5, 12.0)
+          new THREE.Vector3(-12.0, -0.5, -12.0),
+          new THREE.Vector3(12.0, 0.5, 12.0)
         );
         const mCandidateBox = mLocalBox.applyMatrix4(dummy.matrix);
 
@@ -203,8 +203,8 @@ export class SkylineArchitecture {
           dummy.updateMatrix();
 
           const sLocalBox = new THREE.Box3(
-            new THREE.Vector3(-5.0, -sHeight * 0.5, -6.0),
-            new THREE.Vector3(5.0, sHeight * 0.5, 6.0)
+            new THREE.Vector3(-5.0, -0.5, -6.0),
+            new THREE.Vector3(5.0, 0.5, 6.0)
           );
           const sCandidateBox = sLocalBox.applyMatrix4(dummy.matrix);
 
@@ -248,8 +248,8 @@ export class SkylineArchitecture {
           dummy.updateMatrix();
 
           const rLocalBox = new THREE.Box3(
-            new THREE.Vector3(-35.0, -rHeight * 0.5, -9.0),
-            new THREE.Vector3(35.0, rHeight * 0.5, 9.0)
+            new THREE.Vector3(-35.0, -0.5, -9.0),
+            new THREE.Vector3(35.0, 0.5, 9.0)
           );
           const rCandidateBox = rLocalBox.applyMatrix4(dummy.matrix);
 

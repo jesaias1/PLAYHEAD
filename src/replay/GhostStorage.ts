@@ -131,7 +131,7 @@ export class GhostStorage {
         version: 1,
         seed,
         trackTitle,
-        completionTime: round2(completionTime),
+        completionTime: completionTime,
         score: Math.round(score),
         date: Date.now(),
         frames: this.compressFrames(rawFrames),
