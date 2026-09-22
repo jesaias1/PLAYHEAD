@@ -19,6 +19,8 @@ import { Environment } from './Environment';
 import { SongDirector } from './SongDirector';
 import { SpectacleRenderer } from './SpectacleRenderer';
 import { CelestialLandmarks } from './CelestialLandmarks';
+import { SignalLandmarks } from './SignalLandmarks';
+import { RouteSignalPackets } from './RouteSignalPackets';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 import { collectForkSequences } from '../generation/RouteForkGenerator';
@@ -36,6 +38,10 @@ export class World {
   public celestialLandmarks: CelestialLandmarks | null = null;
   public spectralArchitecture: SpectralArchitecture | null = null;
   public dropSetpiece: DropSetpiece | null = null;
+  /** World-scale audio landmarks (presentation only, no collision). */
+  public signalLandmarks: SignalLandmarks | null = null;
+  /** Travelling route signal packets (presentation only, one draw call). */
+  public routePackets: RouteSignalPackets | null = null;
   public debugChainMesh: THREE.LineSegments | null = null;
 
   /** DEV-only debug visualization of the protected gameplay region. */
@@ -133,6 +139,29 @@ export class World {
     // 6. Build Major Drop Setpiece
     this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
 
+    // 7. Build world-scale AUDIO LANDMARKS + the travelling route signal.
+    //
+    // These are the pieces that make the song physically legible from the
+    // player's forward view: large reactive structures placed AHEAD of the
+    // route, and a signal packet stream running along the route edges. Both are
+    // presentation only — no collision, no gameplay reads — and both are
+    // batched into a handful of draw calls.
+    const preset = environment?.activePreset;
+    this.signalLandmarks = new SignalLandmarks(
+      analysis,
+      track,
+      this.visualController.state.palette,
+      preset?.reactiveLandmarkScale ?? 1.0
+    );
+    this.scene.add(this.signalLandmarks.group);
+
+    this.routePackets = new RouteSignalPackets(
+      track,
+      this.visualController.state.palette,
+      preset?.routeSignalPackets ?? 32
+    );
+    this.scene.add(this.routePackets.group);
+
     // ==========================================================
     // FINAL AUTHORITATIVE GAMEPLAY-SAFETY PASS
     //
@@ -157,6 +186,7 @@ export class World {
     ];
     if (this.celestialLandmarks?.group) decorationRoots.push(this.celestialLandmarks.group);
     if (this.builtAssets?.decorativeGroup) decorationRoots.push(this.builtAssets.decorativeGroup);
+    if (this.signalLandmarks?.group) decorationRoots.push(this.signalLandmarks.group);
 
     const report = this.corridor.validateDecorations(decorationRoots);
     if (report.total > 0) {
@@ -273,10 +303,25 @@ export class World {
 
     // Update skyline architecture
     if (this.skyline) {
-      this.skyline.update(vState);
+      this.skyline.update(vState, dt, reduceMotion);
       // Purely decorative: safe to thin by distance. Gameplay surfaces are
       // never touched by this path.
       this.skyline.applyDistanceCulling(playerPos, lodDistance);
+    }
+
+    // Update world-scale audio landmarks (forward-visible musical presence)
+    if (this.signalLandmarks) {
+      this.signalLandmarks.update(
+        vState,
+        this.visualController.getLiveBands(),
+        this.visualController.getLiveWaveform(),
+        reduceMotion
+      );
+    }
+
+    // Update the travelling route signal (the song moving through the level)
+    if (this.routePackets) {
+      this.routePackets.update(vState, progress.arcProgress, dt, reduceMotion);
     }
 
     // Update celestial landmarks (moon, eclipse, halos, relics)
@@ -381,6 +426,18 @@ export class World {
     if (this.dropSetpiece) {
       this.dropSetpiece.dispose();
       this.dropSetpiece = null;
+    }
+
+    if (this.signalLandmarks) {
+      this.scene.remove(this.signalLandmarks.group);
+      this.signalLandmarks.dispose();
+      this.signalLandmarks = null;
+    }
+
+    if (this.routePackets) {
+      this.scene.remove(this.routePackets.group);
+      this.routePackets.dispose();
+      this.routePackets = null;
     }
 
     if (this.debugChainMesh) {

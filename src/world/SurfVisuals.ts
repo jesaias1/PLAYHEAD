@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { PlayerController } from '../player/PlayerController';
-import { MusicVisualState } from './MusicVisualController';
+import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { SettingsManager } from '../core/Settings';
 
 export class SurfVisuals {
@@ -93,12 +93,18 @@ export class SurfVisuals {
     const speed = player.getSpeedUnits();
     const reduceMotion = SettingsManager.getInstance().settings.reduceMotion;
     const rMult = visualState.reactivityMultiplier;
+    const ch = resolveChannels(visualState);
 
     // 1. Audio-Reactive Surf Material Modulation
-    const bassGlow = (visualState.subBass * 0.45 + visualState.bass * 0.3 + visualState.dropImpact * 0.8) * rMult;
-    const highShimmer = visualState.high * 0.35 * rMult;
-    const speedBoost = Math.min(1.5, Math.max(1.0, speed / 560.0));
-    const surfIntensity = (0.08 + bassGlow + highShimmer) * speedBoost;
+    //
+    // Surf now speaks the same music language as the rest of the world: the
+    // heavy low end is the structural mass, the sharp highs are the shimmer, and
+    // the near drop window is the surge. Velocity stretches the response so a
+    // fast surf through a drop reads as spectacular without touching physics.
+    const bassGlow = (ch.bassMass * 0.7 + visualState.subBass * 0.2 + ch.dropPrimary * 0.9) * rMult;
+    const highShimmer = ch.highGlint * 0.5 * rMult;
+    const speedBoost = Math.min(1.8, Math.max(1.0, speed / 480.0));
+    const surfIntensity = (0.06 + bassGlow + highShimmer) * speedBoost;
 
     this.surfMaterial.emissiveIntensity = surfIntensity;
     this.surfMaterial.emissive.copy(visualState.palette.primary).lerp(visualState.palette.highlight, visualState.highlightMix);

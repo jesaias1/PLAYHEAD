@@ -605,8 +605,20 @@ export class GeometryBuilder {
     if (track.signalSpines && track.signalSpines.length > 0) {
       const solidSpineGeoms: THREE.BufferGeometry[] = [];
       const surfSpineGeoms: THREE.BufferGeometry[] = [];
+      const solidSpineColors: number[][] = [];
+      const surfSpineColors: number[][] = [];
       const spineEuler = new THREE.Euler();
       const spineMatrix = new THREE.Matrix4();
+
+      // VISUAL FRAGMENTATION WITHOUT HOLES.
+      //
+      // The walkable core of a covered Signal Spine is continuous by hard rule,
+      // so the "fragmented signal" read is produced here instead: each covered
+      // gap gets a 4-step luminance ladder applied to its segments as vertex
+      // colours. Collision is untouched; only the trim alternates.
+      const TRIM_LADDER = [1.0, 0.72, 0.5, 0.84];
+      let lastGapKey = '';
+      let gapIndex = -1;
 
       for (const spine of track.signalSpines) {
         const geom = new THREE.BoxGeometry(spine.dimensions.x, spine.dimensions.y, spine.dimensions.z);
@@ -614,23 +626,64 @@ export class GeometryBuilder {
         spineMatrix.makeRotationFromEuler(spineEuler);
         spineMatrix.setPosition(spine.position.x, spine.position.y, spine.position.z);
         geom.applyMatrix4(spineMatrix);
-        (spine.isSurf ? surfSpineGeoms : solidSpineGeoms).push(geom);
+
+        const host = spine.signalSpineHostGap;
+        const gapKey = host ? `${host.aId}->${host.bId}` : spine.signalSpineVariant || 'spine';
+        if (gapKey !== lastGapKey) {
+          lastGapKey = gapKey;
+          gapIndex++;
+        }
+        const trim = TRIM_LADDER[gapIndex % TRIM_LADDER.length];
+
+        const count = geom.attributes.position.count;
+        const colors: number[] = [];
+        for (let v = 0; v < count; v++) colors.push(trim, trim, trim);
+
+        if (spine.isSurf) {
+          surfSpineGeoms.push(geom);
+          surfSpineColors.push(colors);
+        } else {
+          solidSpineGeoms.push(geom);
+          solidSpineColors.push(colors);
+        }
       }
 
-      const addMergedSpines = (geoms: THREE.BufferGeometry[], material: THREE.Material, name: string): void => {
+      const addMergedSpines = (
+        geoms: THREE.BufferGeometry[],
+        colors: number[][],
+        material: THREE.Material,
+        name: string
+      ): void => {
         if (geoms.length === 0) return;
         const merged = geoms.length === 1 ? geoms[0] : mergeGeometries(geoms, false);
         if (geoms.length > 1) {
           for (const g of geoms) g.dispose();
         }
         if (!merged) return;
-        const mesh = new THREE.Mesh(merged, material);
+
+        // Attach the alternating trim as a vertex colour attribute. The merged
+        // attribute order matches the input order, so each colour block lines up
+        // with the segment it belongs to.
+        const total = merged.attributes.position.count;
+        const packed = new Float32Array(total * 3);
+        let cursor = 0;
+        for (let i = 0; i < colors.length; i++) {
+          const block = colors[i];
+          packed.set(block, cursor);
+          cursor += block.length;
+        }
+        merged.setAttribute('color', new THREE.BufferAttribute(packed, 3));
+
+        const trimMaterial = (material as THREE.MeshStandardMaterial).clone();
+        trimMaterial.vertexColors = true;
+
+        const mesh = new THREE.Mesh(merged, trimMaterial);
         mesh.name = name;
         rootGroup.add(mesh);
       };
 
-      addMergedSpines(solidSpineGeoms, spineTopMaterial, 'SignalSpinesMerged');
-      addMergedSpines(surfSpineGeoms, surfMaterial, 'SignalSpinesSurfMerged');
+      addMergedSpines(solidSpineGeoms, solidSpineColors, spineTopMaterial, 'SignalSpinesMerged');
+      addMergedSpines(surfSpineGeoms, surfSpineColors, surfMaterial, 'SignalSpinesSurfMerged');
     }
 
     // Build Optional Side-Surf Skill Ramps

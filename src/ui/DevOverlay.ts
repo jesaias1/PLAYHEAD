@@ -14,6 +14,7 @@ import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
 import { RouteGenerator } from '../generation/RouteGenerator';
 import { RouteExclusionCorridor } from '../world/RouteExclusionCorridor';
 import { RouteForkGenerator } from '../generation/RouteForkGenerator';
+import type { ChannelIsolation } from '../world/MusicVisualController';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -104,14 +105,28 @@ export class DevOverlay {
       this.show();
     }
 
-    // Toggle with F3 key
+    // Toggle with F3 key; 1/2/3/4 isolate audio-visual channels (DEV only).
     window.addEventListener('keydown', (e) => {
       if (e.code === 'F3') {
         e.preventDefault();
         this.toggle();
+        return;
+      }
+      if (!this.isVisible) return;
+      const mode =
+        e.code === 'Digit1' ? 'BASS' :
+        e.code === 'Digit2' ? 'MID' :
+        e.code === 'Digit3' ? 'HIGH' :
+        e.code === 'Digit4' ? 'FULL' : null;
+      if (mode) {
+        e.preventDefault();
+        this.channelIsolation = mode as ChannelIsolation;
       }
     });
   }
+
+  /** DEV-only: current audio-visual channel isolation mode. */
+  public channelIsolation: ChannelIsolation = 'FULL';
 
   public toggle(): void {
     if (this.isVisible) this.hide();
@@ -140,6 +155,7 @@ export class DevOverlay {
     if (!this.isVisible) return;
 
     world.setDebugChainVisible(this.isVisible);
+    world.visualController.setChannelIsolation(this.channelIsolation);
 
     const pos = player.position;
     const vel = player.velocity;
@@ -196,6 +212,7 @@ export class DevOverlay {
       obstacleDiagnosticsLine(world),
       tempoDiagnosticsLine(),
       forkDiagnosticsLine(world),
+      audioVisualDiagnosticsLine(world, this.channelIsolation),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -225,8 +242,45 @@ function tempoDiagnosticsLine(): string {
   );
 }
 
-function forkDiagnosticsLine(world: World): string {
-  const forks = world.track?.forks ?? [];
+/**
+ * DEV: compact audio-visual choreography readout.
+ *
+ * Shows the derived channel values the world is actually being driven by, plus
+ * the route/primary/secondary/tertiary response levels, so a tester can see
+ * which parts of the music are reaching the world at any moment.
+ */
+function audioVisualDiagnosticsLine(world: World, isolation: ChannelIsolation): string {
+  const vs = world.visualController.state;
+  const ch = vs.channels;
+  const f = (n: number): string => n.toFixed(2);
+
+  const route = Math.min(1.5, world.signalImpulse + ch.transient * 0.6 + ch.bassMass * 0.4);
+  const primary = Math.min(1.5, ch.dropPrimary * 1.15 + ch.transient * 0.58 + ch.bassMass * 0.44);
+  const secondary = Math.min(1.5, ch.dropSecondary * 0.72 + ch.bassMass * 0.26);
+  const tertiary = Math.min(1.5, ch.dropTertiary * 0.40 + ch.bassMass * 0.14);
+
+  const landmarks = world.signalLandmarks;
+  const packets = world.routePackets;
+
+  return (
+    `AUDIO VISUAL [${isolation}]` +
+    `\n  BASS       ${f(ch.bassMass)}` +
+    `\n  MID        ${f(ch.midFlow)}` +
+    `\n  HIGH       ${f(ch.highGlint)}` +
+    `\n  ONSET      ${f(ch.transient)}` +
+    `\n  ENERGY     ${f(vs.energy)}` +
+    `\n  DROP       ${f(ch.dropPrimary)} / ${f(ch.dropSecondary)} / ${f(ch.dropTertiary)}` +
+    `\n  SECTION    ${vs.sectionTheme} (energy ${f(ch.sectionEnergy)})` +
+    `\n  PRESENCE   ${f(ch.presence)}` +
+    `\n  ROUTE      ${f(route)}  packets ${packets ? packets.getActiveCount() : 0}` +
+    `\n  PRIMARY    ${f(primary)}` +
+    `\n  SECONDARY  ${f(secondary)}` +
+    `\n  TERTIARY   ${f(tertiary)}` +
+    `\n  LANDMARKS  ${landmarks ? landmarks.getVisibleCount() : 0} instances / ${landmarks ? landmarks.getDrawCallCount() : 0} draws`
+  );
+}
+
+function forkDiagnosticsLine(world: World): string {  const forks = world.track?.forks ?? [];
   if (forks.length === 0) return 'FORKS: none';
 
   const report = RouteForkGenerator.getLastReport();

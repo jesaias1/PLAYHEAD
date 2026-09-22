@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
-import { MusicVisualState } from './MusicVisualController';
+import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 
 export class SpectralArchitecture {
@@ -287,35 +287,52 @@ export class SpectralArchitecture {
 
   public update(visualState: MusicVisualState): void {
     const reactMult = visualState.reactivityMultiplier;
+    const ch = resolveChannels(visualState);
+    const t = visualState.time;
 
-    // 1. Waveform Canyon: low-frequency Y dilation & bass-routed excitation
+    // 1. Waveform Canyon: heavy structural bass mass.
+    // The twin walls dilate on bass mass (slow, heavy) and the emissive is a
+    // bass-routed colour so the low end has an unmistakable architectural
+    // identity rather than a generic brightness lift.
     if (this.canyonWallsLeft && this.canyonWallsRight) {
-      const dilationY = 1.0 + visualState.subBass * 0.18 * reactMult;
+      const dilationY = 1.0 + ch.bassMass * 0.26 * reactMult;
       this.canyonWallsLeft.scale.y = dilationY;
       this.canyonWallsRight.scale.y = dilationY;
     }
-    const canyonEmissive = (0.02 + visualState.subBass * 0.4 + visualState.dropImpact * 0.7) * reactMult;
+    const canyonEmissive =
+      (0.015 + ch.bassMass * 0.55 + ch.dropPrimary * 0.8) * reactMult;
     this.canyonMaterial.emissiveIntensity = canyonEmissive;
     this.canyonMaterial.emissive.copy(visualState.bassColor);
 
-    // 2. Overhead Canopy Fins: shimmer with high frequencies & mid energy
-    const canopyEmissive = (0.04 + visualState.high * 0.5 + visualState.flux * 0.35) * reactMult;
+    // 2. Overhead Canopy Fins: fast high-frequency glints.
+    const canopyEmissive = (0.02 + ch.highGlint * 0.72 + visualState.flux * 0.25) * reactMult;
     this.canopyMaterial.emissiveIntensity = canopyEmissive;
     this.canopyMaterial.emissive.copy(visualState.highColor);
 
-    // 3. Onset Gates: Bottom-to-top onset gate ignition
-    // Columns ignite with primary/bass, lintel ignites with sharp highlight
-    const colEmissive = (0.02 + visualState.onsetPulse * 1.5 + visualState.dropImpact * 1.8) * reactMult;
+    // 3. Onset Gates: punctual transient accents, then the near drop window.
+    // Transients are scheduled across the frame/lintel pair by the music-driven
+    // channel slot so a beat does not light both identically.
+    const slot = ch.slot;
+    const colAccent = ch.transient * (slot % 2 === 0 ? 1.0 : 0.45);
+    const lintelAccent = ch.transient * (slot % 2 === 1 ? 1.0 : 0.45);
+
+    const colEmissive = (0.015 + colAccent * 1.5 + ch.dropPrimary * 1.8) * reactMult;
     for (let i = 0; i < this.frameMaterials.length; i++) {
       this.frameMaterials[i].emissiveIntensity = colEmissive;
       this.frameMaterials[i].emissive.copy(visualState.palette.primary);
     }
 
-    const lintelEmissive = (0.04 + visualState.onsetPulse * 2.4 + visualState.dropImpact * 2.8) * reactMult;
+    const lintelEmissive = (0.03 + lintelAccent * 2.4 + ch.dropPrimary * 2.8) * reactMult;
     for (let i = 0; i < this.lintelMaterials.length; i++) {
       this.lintelMaterials[i].emissiveIntensity = lintelEmissive;
       this.lintelMaterials[i].emissive.copy(visualState.palette.highlight);
     }
+
+    // 4. Mid-frequency flow: the canyon walls' vertical signal trim breathes
+    // with the mids, which keeps the "computational" layer moving slowly even
+    // when no transient is firing.
+    this.canyonMaterial.emissiveIntensity += ch.midFlow * 0.18 * reactMult;
+    void t;
   }
 
   public dispose(): void {

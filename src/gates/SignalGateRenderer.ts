@@ -49,6 +49,9 @@ export class SignalGateRenderer {
   private rippleMaterial: THREE.MeshBasicMaterial;
   private rippleTime = -1;
 
+  /** Short-lived transient accent, kept separate from the readable idle term. */
+  private accent = 0;
+
   // DEV-only helpers: aperture bounds + intended direction.
   private debugGroup: THREE.Group;
   private debugMaterials: THREE.Material[] = [];
@@ -199,10 +202,19 @@ export class SignalGateRenderer {
 
   public update(gates: SignalGateRuntime[], dt: number, visualState: GateMusicState, reduceMotion: boolean): void {
     const react = visualState.reactivityMultiplier;
+
     // Restrained music-driven baseline: the aperture must stay readable, but a
     // mastery target has to be legible from the approach.
-    const idle =
-      (0.85 + visualState.energy * 0.25 + visualState.bass * 0.40 + visualState.onsetPulse * 0.70) * react;
+    //
+    // The sustained idle term deliberately carries only a SMALL onset weight —
+    // a constant beat pulse on the frame would fight the gate's readability.
+    // Transients instead drive a separate short-lived accent that decays away,
+    // so the gate belongs to the same world as the rest of the city without
+    // ever flickering over the aperture.
+    const idle = (0.85 + visualState.energy * 0.25 + visualState.bass * 0.40) * react;
+    this.accent = Math.max(0, this.accent - dt * 4.5);
+    this.accent = Math.max(this.accent, visualState.onsetPulse);
+    const accent = this.accent * 0.85;
 
     for (let i = 0; i < this.visuals.length && i < gates.length; i++) {
       const gate = gates[i];
@@ -229,13 +241,14 @@ export class SignalGateRenderer {
 
       if (gate.state === 'PASSED') {
         const fade = 1 - gate.collapse;
-        visual.trimMaterial.emissiveIntensity = idle + gate.flash * 3.2;
+        // Player action overrides music momentarily on success.
+        visual.trimMaterial.emissiveIntensity = idle + accent + gate.flash * 3.2;
         visual.trimMaterial.opacity = fade;
         visual.bodyMaterial.opacity = fade;
         const s = reduceMotion ? 1 : 1 - gate.collapse * 0.75;
         visual.group.scale.set(s, s, s);
       } else {
-        visual.trimMaterial.emissiveIntensity = idle + gate.flash * 2.0;
+        visual.trimMaterial.emissiveIntensity = idle + accent + gate.flash * 2.0;
         visual.trimMaterial.opacity = 1;
         visual.bodyMaterial.opacity = 1;
         visual.group.scale.set(1, 1, 1);

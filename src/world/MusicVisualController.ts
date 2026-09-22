@@ -9,11 +9,89 @@ import { AnalysisSection, TrackAnalysis } from '../audio/AudioFeatures';
 import { TrackPalette, PaletteSelector } from '../audio/TrackPalettes';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 
+/**
+ * DERIVED MUSIC CHANNELS — the visual music language.
+ *
+ * These are NOT a second analyser. Every value is derived from the single
+ * authoritative `MusicVisualState` signals above (which come from the one
+ * AudioAnalyzer). They exist because driving every visual from one generic
+ * "reactivity = energy" scalar is exactly why the world read as "lights getting
+ * slightly brighter" rather than "the world is performing the song".
+ *
+ * Each channel owns its own attack/decay envelope so different parts of the
+ * music move differently through the world:
+ *
+ *   bassMass      heavy, structural, long decay   -> architectural mass
+ *   midFlow       medium, computational           -> signage / waveform / route
+ *   highGlint     fast, sharp, short              -> glints / small accents
+ *   transient     punctual onset hits             -> immediate short hits
+ *   dropPrimary   major event, 0-80 ms            -> route + nearby PRIMARY
+ *   dropSecondary major event, 150-350 ms         -> secondary skyline
+ *   dropTertiary  major event, 250-600 ms         -> distant crowns / hero stars
+ *   sectionEnergy slow section-level state         -> long-term behaviour
+ *   presence      how musically alive the world is -> minimum-presence rule
+ *   scanPhase     slow sweeping phase              -> city scan bands
+ *   slot          deterministic rotating index     -> polyrhythmic scheduling
+ */
+export interface MusicChannels {
+  bassMass: number;
+  midFlow: number;
+  highGlint: number;
+  transient: number;
+  dropPrimary: number;
+  dropSecondary: number;
+  dropTertiary: number;
+  sectionEnergy: number;
+  presence: number;
+  scanPhase: number;
+  slot: number;
+}
+
+/** DEV-only channel isolation modes (F3 toggles 1/2/3/4). */
+export type ChannelIsolation = 'FULL' | 'BASS' | 'MID' | 'HIGH';
+
+/**
+ * Resolves the derived channels for a state object.
+ *
+ * Falls back to a conservative derivation from the legacy scalar fields, so any
+ * caller written against the pre-channel state shape keeps working unchanged.
+ * The fallback is a compatibility shim, not a second signal path: the real
+ * values always come from MusicVisualController.
+ */
+export function resolveChannels(state: Partial<MusicVisualState>): MusicChannels {
+  if (state.channels) return state.channels;
+
+  const energy = state.energy ?? 0;
+  const subBass = state.subBass ?? 0;
+  const bass = state.bass ?? 0;
+  const mid = state.mid ?? 0;
+  const high = state.high ?? 0;
+  const flux = state.flux ?? 0;
+  const onset = state.onsetPulse ?? 0;
+  const drop = state.dropImpact ?? 0;
+
+  return {
+    bassMass: Math.min(1, subBass * 0.82 + bass * 0.62),
+    midFlow: Math.min(1, mid * 0.88),
+    highGlint: Math.min(1, high * 0.82 + flux * 0.72),
+    transient: onset,
+    dropPrimary: drop,
+    dropSecondary: drop,
+    dropTertiary: drop,
+    sectionEnergy: state.sectionIntensity ?? 0.4,
+    presence: Math.max(energy, bass, onset, drop),
+    scanPhase: state.time ?? 0,
+    slot: 0
+  };
+}
+
 export interface MusicVisualState {
   time: number;
   progress: number;
   playerProgress: number;
   syncDelta: number;
+
+  channels: MusicChannels;
 
   energy: number;
   subBass: number;
@@ -78,6 +156,55 @@ export class MusicVisualController {
   private smoothBuildup = 0;
   private dropImpactEnvelope = 0;
 
+  // Derived visual music channels (see MusicChannels). Each has its own
+  // attack/decay so bass mass, mid flow and high glints move differently.
+  private smoothBassMass = 0;
+  private smoothMidFlow = 0;
+  private smoothHighGlint = 0;
+  private smoothSectionEnergy = 0.3;
+
+  /**
+   * Slow rolling band references for TRACK-AWARE CONTRAST.
+   *
+   * The analyser already normalises each track to its own 95th percentile, so a
+   * quiet master is not dead. But a heavily limited master sits near 1.0 almost
+   * everywhere, which pins the relative channels at maximum and destroys the
+   * visual dynamic range. These rolling references let each relative channel
+   * expand around the track's own recent average: a drop then reads as clearly
+   * bigger than the passage before it, on ANY master.
+   *
+   * This is a shaping stage inside the existing controller — not a second
+   * analyser and not a second normalisation of the audio itself.
+   */
+  private rollingBass = 0.35;
+  private rollingMid = 0.3;
+  private rollingHigh = 0.25;
+
+  /** How much of the absolute level survives contrast shaping (0..1). */
+  private static readonly ABSOLUTE_WEIGHT = 0.35;
+  /** Contrast expansion gain around the rolling reference. */
+  private static readonly CONTRAST_GAIN = 2.0;
+  /** Rolling reference time constant in seconds. */
+  private static readonly ROLL_TAU = 5.0;
+
+  /**
+   * Drop delay line: a short (time, value) history so the same major musical
+   * event can reach near, mid and far parts of the city at different times
+   * without inventing a second detector.
+   */
+  private dropHistory: Array<{ t: number; v: number }> = [];
+
+  /** Deterministic rotating channel index, advanced on real onset edges. */
+  private channelSlot = 0;
+  private onsetEdgeArmed = true;
+
+  /** Live band snapshot + scrolling waveform window for landmark shaders. */
+  public liveBands: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0];
+  private liveWaveform = new Float32Array(32);
+
+  /** DEV-only isolation of a single visual channel family. */
+  public channelIsolation: ChannelIsolation = 'FULL';
+
   // Section Color Mix Envelopes
   private smoothPrimaryMix = 0.5;
   private smoothSecondaryMix = 0.2;
@@ -93,6 +220,19 @@ export class MusicVisualController {
       progress: 0,
       playerProgress: 0,
       syncDelta: 0,
+      channels: {
+        bassMass: 0,
+        midFlow: 0,
+        highGlint: 0,
+        transient: 0,
+        dropPrimary: 0,
+        dropSecondary: 0,
+        dropTertiary: 0,
+        sectionEnergy: 0.3,
+        presence: 0,
+        scanPhase: 0,
+        slot: 0
+      },
       energy: 0,
       subBass: 0,
       bass: 0,
@@ -141,6 +281,36 @@ export class MusicVisualController {
 
     this.state.palette = palette;
     this.resetEnvelopes();
+    this.seedRollingReferences(analysis);
+  }
+
+  /**
+   * Seeds the rolling contrast references from the track's own opening seconds,
+   * so the first passage is already shaped correctly instead of starting from
+   * an arbitrary warm-up value.
+   */
+  private seedRollingReferences(analysis: TrackAnalysis): void {
+    const frames = analysis.frames;
+    if (frames.length === 0) {
+      this.rollingBass = 0.35;
+      this.rollingMid = 0.3;
+      this.rollingHigh = 0.25;
+      return;
+    }
+    const frameDur = frames.length > 1 ? Math.max(0.005, frames[1].time - frames[0].time) : 0.02;
+    const window = Math.min(frames.length, Math.max(1, Math.floor(3.0 / frameDur)));
+    let bassSum = 0;
+    let midSum = 0;
+    let highSum = 0;
+    for (let i = 0; i < window; i++) {
+      const f = frames[i];
+      bassSum += Math.min(1, f.bass * 0.62 + f.bass * 0.46);
+      midSum += Math.min(1, f.mid * 0.72 + f.lowMid * 0.38);
+      highSum += Math.min(1, f.high * 0.62 + f.flux * 0.55);
+    }
+    this.rollingBass = bassSum / window;
+    this.rollingMid = midSum / window;
+    this.rollingHigh = highSum / window;
   }
 
   public setPalette(palette: TrackPalette): void {
@@ -159,6 +329,13 @@ export class MusicVisualController {
     this.smoothOnsetPulse = 0;
     this.smoothBuildup = 0;
     this.dropImpactEnvelope = 0;
+    this.smoothBassMass = 0;
+    this.smoothMidFlow = 0;
+    this.smoothHighGlint = 0;
+    this.smoothSectionEnergy = 0.3;
+    this.dropHistory.length = 0;
+    this.channelSlot = 0;
+    this.onsetEdgeArmed = true;
   }
 
   public update(songTime: number, playerRouteProgress: number, dt: number, playerSpeed = 0): void {
@@ -375,6 +552,122 @@ export class MusicVisualController {
 
     const syncDelta = (playerNormalizedProgress - timelineProgress) * duration;
 
+    // 5b. DERIVED VISUAL MUSIC CHANNELS
+    //
+    // Each channel gets its own attack/decay so the world can separate the
+    // parts of the music instead of moving as one brightness scalar. Targets
+    // come from the already-percentile-normalised analyser bands, so a quiet
+    // master still produces a live world and a loud master does not pin
+    // everything at maximum.
+    const bassMassTarget = MusicVisualController.shapeRelative(
+      Math.min(1, this.smoothSubBass * 0.62 + this.smoothBass * 0.46),
+      this.rollingBass
+    );
+    const midFlowTarget = MusicVisualController.shapeRelative(
+      Math.min(1, this.smoothMid * 0.72 + this.smoothLowMid * 0.38),
+      this.rollingMid
+    );
+    const highGlintTarget = MusicVisualController.shapeRelative(
+      Math.min(1, this.smoothHigh * 0.62 + this.smoothFlux * 0.55),
+      this.rollingHigh
+    );
+
+    // Advance the rolling references from the raw (unshaped) targets.
+    const rollRate = Math.min(1, dt / MusicVisualController.ROLL_TAU);
+    this.rollingBass += (
+      Math.min(1, this.smoothSubBass * 0.62 + this.smoothBass * 0.46) - this.rollingBass
+    ) * rollRate;
+    this.rollingMid += (
+      Math.min(1, this.smoothMid * 0.72 + this.smoothLowMid * 0.38) - this.rollingMid
+    ) * rollRate;
+    this.rollingHigh += (
+      Math.min(1, this.smoothHigh * 0.62 + this.smoothFlux * 0.55) - this.rollingHigh
+    ) * rollRate;
+
+    this.smoothBassMass = this.applyEnvelope(this.smoothBassMass, bassMassTarget, 0.045, 0.62, dt);
+    this.smoothMidFlow = this.applyEnvelope(this.smoothMidFlow, midFlowTarget, 0.10, 0.42, dt);
+    this.smoothHighGlint = this.applyEnvelope(this.smoothHighGlint, highGlintTarget, 0.012, 0.13, dt);
+
+    // Section energy: slow attack / slow release so it reads as a long-term
+    // world state (BREATH dims, BUILD climbs, DROP surges) rather than a beat.
+    const themeWeight = MusicVisualController.themeEnergyWeight(currentSection.theme);
+    const sectionTarget = Math.min(
+      1,
+      themeWeight * 0.72 + currentSection.intensity * 0.34 + sectionProgress * 0.10
+    );
+    this.smoothSectionEnergy = this.applyEnvelope(
+      this.smoothSectionEnergy,
+      sectionTarget,
+      2.4,
+      3.2,
+      dt
+    );
+
+    // Drop delay line: keep a short history so the SAME event can propagate
+    // outwards (near -> mid -> far) with real timing, not a fake echo.
+    this.dropHistory.push({ t: timeClamped, v: this.dropImpactEnvelope });
+    while (this.dropHistory.length > 2 && timeClamped - this.dropHistory[0].t > 0.9) {
+      this.dropHistory.shift();
+    }
+    const delayedDrop = (delay: number): number => {
+      const target = timeClamped - delay;
+      let best = 0;
+      for (let i = this.dropHistory.length - 1; i >= 0; i--) {
+        if (this.dropHistory[i].t <= target) {
+          best = this.dropHistory[i].v;
+          break;
+        }
+      }
+      return best;
+    };
+
+    // Deterministic rotating channel slot: advanced only on real onset edges so
+    // the polyrhythmic scheduling is derived from the music, not a timer.
+    if (this.smoothOnsetPulse > 0.35 && this.onsetEdgeArmed) {
+      this.channelSlot = (this.channelSlot + 1) % 6;
+      this.onsetEdgeArmed = false;
+    } else if (this.smoothOnsetPulse < 0.18) {
+      this.onsetEdgeArmed = true;
+    }
+
+    // City scan phase: a slow sweep whose speed follows musical activity, not
+    // raw BPM, so slow and fast tracks both feel natural.
+    const scanRate = 0.22 + this.smoothSectionEnergy * 0.5 + this.smoothBassMass * 0.3;
+    const scanPhase = (this.state.channels.scanPhase + dt * scanRate) % 1000;
+
+    const transientChannel = Math.min(1, this.smoothOnsetPulse);
+
+    // Presence is deliberately ABSOLUTE (not contrast-shaped): it answers "how
+    // loud is the song right now", which is what the minimum-presence rule and
+    // the quiet-vs-drop dynamic range are about.
+    const presence = Math.max(
+      this.smoothEnergy,
+      this.smoothBass,
+      this.smoothMid * 0.95,
+      this.smoothHigh * 0.9,
+      transientChannel,
+      this.dropImpactEnvelope,
+      this.smoothSectionEnergy * 0.85
+    );
+
+    // Live band snapshot for landmark shaders (single authoritative source).
+    this.liveBands[0] = this.smoothSubBass;
+    this.liveBands[1] = this.smoothBass;
+    this.liveBands[2] = this.smoothLowMid;
+    this.liveBands[3] = this.smoothMid;
+    this.liveBands[4] = this.smoothHigh;
+    this.liveBands[5] = this.smoothFlux;
+
+    // Scrolling live waveform window (centred on the current playhead).
+    const waveLen = this.analysis.waveform.length;
+    const waveProgress = duration > 0 ? timeClamped / duration : 0;
+    const centreIdx = Math.floor(waveProgress * (waveLen - 1));
+    for (let i = 0; i < this.liveWaveform.length; i++) {
+      const idx = centreIdx + i - Math.floor(this.liveWaveform.length * 0.5);
+      const wrapped = ((idx % waveLen) + waveLen) % waveLen;
+      this.liveWaveform[i] = this.analysis.waveform[wrapped] || 0;
+    }
+
     // 6. Commit to State
     this.state.time = timeClamped;
     this.state.progress = timelineProgress;
@@ -409,7 +702,86 @@ export class MusicVisualController {
     this.state.highlightMix = this.smoothHighlightMix;
     this.state.reactivityMultiplier = this.reactivityMultiplier;
 
+    // Derived channels, with DEV isolation applied last so the isolation
+    // toggles can never affect the underlying analysis or any other system.
+    const iso = this.channelIsolation;
+    const ch = this.state.channels;
+    ch.bassMass = iso === 'FULL' || iso === 'BASS' ? this.smoothBassMass : 0;
+    ch.midFlow = iso === 'FULL' || iso === 'MID' ? this.smoothMidFlow : 0;
+    ch.highGlint = iso === 'FULL' || iso === 'HIGH' ? this.smoothHighGlint : 0;
+    ch.transient = iso === 'FULL' ? transientChannel : 0;
+    ch.dropPrimary = iso === 'FULL' ? this.dropImpactEnvelope : 0;
+    ch.dropSecondary = iso === 'FULL' ? delayedDrop(0.10) : 0;
+    ch.dropTertiary = iso === 'FULL' ? delayedDrop(0.24) : 0;
+    ch.sectionEnergy = iso === 'FULL' ? this.smoothSectionEnergy : this.smoothSectionEnergy * 0.5;
+    ch.presence = presence;
+    ch.scanPhase = scanPhase;
+    ch.slot = this.channelSlot;
+
     this.lastTime = songTime;
+  }
+
+  /** Live band snapshot (sub, bass, lowMid, mid, high, flux) for shaders. */
+  public getLiveBands(): readonly number[] {
+    return this.liveBands;
+  }
+
+  /** Live scrolling waveform window for world-scale waveform landmarks. */
+  public getLiveWaveform(): Float32Array {
+    return this.liveWaveform;
+  }
+
+  /** DEV-only: isolate one visual channel family (1/2/3/4 in the F3 overlay). */
+  public setChannelIsolation(mode: ChannelIsolation): void {
+    this.channelIsolation = mode;
+  }
+
+  /**
+   * Track-aware contrast shaping for a RELATIVE channel.
+   *
+   * Blends the absolute level (so a quiet track is visibly dimmer than a loud
+   * one) with a contrast expansion around the track's own rolling reference (so
+   * a drop is clearly bigger than the passage before it, even on a heavily
+   * limited master).
+   */
+  private static shapeRelative(value: number, reference: number): number {
+    const expanded = Math.max(
+      0,
+      Math.min(1, 0.5 + (value - reference) * MusicVisualController.CONTRAST_GAIN)
+    );
+    return Math.max(
+      0,
+      Math.min(1, MusicVisualController.ABSOLUTE_WEIGHT * value + (1 - MusicVisualController.ABSOLUTE_WEIGHT) * expanded)
+    );
+  }
+
+  /**
+   * Section-level energy weight. This is a presentation-only mapping from the
+   * authoritative section theme to how "awake" the world should be; it never
+   * feeds back into route generation or gameplay.
+   */
+  private static themeEnergyWeight(theme: string): number {
+    switch (theme) {
+      case 'DROP':
+        return 0.98;
+      case 'SPEED':
+        return 0.74;
+      case 'SURF':
+        return 0.78;
+      case 'BUILDUP':
+        return 0.66;
+      case 'PRECISION':
+        return 0.52;
+      case 'ASCENT':
+        return 0.5;
+      case 'DESCENT':
+        return 0.44;
+      case 'BREATH':
+        return 0.14;
+      case 'FLOW':
+      default:
+        return 0.48;
+    }
   }
 
   public setReactivityMultiplier(mult: number): void {

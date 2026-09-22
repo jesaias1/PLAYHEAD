@@ -288,9 +288,10 @@ export class SongDirector {
       bloomStrength: this.smoothBloom,
       vignetteIntensity: this.smoothVignette,
       // Floor the reactivity multiplier so the world always sustains a musical
-      // baseline. Contrast between phases is preserved above the floor, but a
-      // quiet phase can no longer make long stretches feel visually dead.
-      spectralReactivity: Math.max(0.7, spectralReactivity),
+      // baseline. The floor is deliberately LOW: "always alive" must not mean
+      // "always at 80%", because a drop then has nowhere to go. Quiet sections
+      // sit clearly dimmer than dense ones, and the drop range is preserved.
+      spectralReactivity: Math.max(0.6, spectralReactivity),
       activeSpectacle,
       isSignatureActive,
       announcement: pendingAnnouncement

@@ -146,7 +146,8 @@ describe('Quality presets — gameplay protection', () => {
     const allowed = new Set([
       'renderScale', 'dprCap', 'signalPixelSize', 'signalDither', 'signalQuantize',
       'vignetteScale', 'bloomScale', 'grainScale', 'signalPassEnabled',
-      'decorationLodDistance', 'viewmodelSamples'
+      'decorationLodDistance', 'viewmodelSamples',
+      'reactiveLandmarkScale', 'routeSignalPackets'
     ]);
     for (const preset of Object.values(QUALITY_PRESETS)) {
       for (const key of Object.keys(preset)) {

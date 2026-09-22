@@ -42,7 +42,33 @@ export interface SignalSpineGenerationReport {
   totalGenerated: number;
   rejectedCount: number;
   rejectionReasons: Record<string, number>;
+  /** Gap keys ("aId->bId") that received continuous recovery coverage. */
+  coveredGapKeys: string[];
 }
+
+export interface SpineContinuityViolation {
+  gapKey: string;
+  reason:
+    | 'missing_start_connection'
+    | 'missing_end_connection'
+    | 'hole_inside_spine'
+    | 'below_player_safe_width';
+  detail: string;
+}
+
+export interface SpineContinuityReport {
+  coveredGaps: number;
+  segmentsChecked: number;
+  violations: SpineContinuityViolation[];
+  isValid: boolean;
+}
+
+/**
+ * Distance tolerance for "connected". Spine segments deliberately overlap each
+ * other and the host platforms by design, so the true connection margin is far
+ * larger than this. Anything beyond it is a real hole.
+ */
+const CONTINUITY_TOLERANCE = 0.25;
 
 /**
  * Optional generation context. Obstacles are generated before spines so a gap
@@ -304,7 +330,6 @@ export class SignalSpineGenerator {
         b,
         exitTopA,
         entryTopB,
-        gapHoriz,
         gap3D,
         pitch,
         minPlatWidth,
@@ -353,10 +378,134 @@ export class SignalSpineGenerator {
       transfersLeftUnsupported,
       totalGenerated: spines.length,
       rejectedCount,
-      rejectionReasons
+      rejectionReasons,
+      coveredGapKeys: Array.from(coveredGaps)
     };
 
     return spines;
+  }
+
+  /**
+   * SIGNAL SPINE CONTINUITY VALIDATION.
+   *
+   * For every gap that received recovery coverage, the union of its spine
+   * segments must form one continuous surface from platform A's top to platform
+   * B's top, at no less than one player diameter of width.
+   *
+   * This is the checkable form of the hard rule: NO HOLES in a covered spine.
+   * Gaps with NO spine at all are intentional and are simply not part of this
+   * report (that is how "intentionally unsupported hero section" stays legal).
+   */
+  public static validateContinuity(
+    route: RouteNode[],
+    spines: RouteNode[]
+  ): SpineContinuityReport {
+    const byId = new Map<number, RouteNode>();
+    for (const node of route) byId.set(node.id, node);
+
+    // Group recovery segments by the gap they cover.
+    const groups = new Map<string, RouteNode[]>();
+    for (const spine of spines) {
+      const host = spine.signalSpineHostGap;
+      if (!host) continue;
+      const key = `${host.aId}->${host.bId}`;
+      const list = groups.get(key);
+      if (list) list.push(spine);
+      else groups.set(key, [spine]);
+    }
+
+    const violations: SpineContinuityViolation[] = [];
+    let segmentsChecked = 0;
+
+    for (const [key, segments] of groups) {
+      const host = segments[0].signalSpineHostGap!;
+      const a = byId.get(host.aId);
+      const b = byId.get(host.bId);
+      if (!a || !b) {
+        violations.push({
+          gapKey: key,
+          reason: 'missing_end_connection',
+          detail: 'host platform not found in route'
+        });
+        continue;
+      }
+
+      const exitTopA = SignalSpineGenerator.getNodeExitTop(a);
+      const entryTopB = SignalSpineGenerator.getNodeEntryTop(b);
+      const dx = entryTopB.x - exitTopA.x;
+      const dy = entryTopB.y - exitTopA.y;
+      const dz = entryTopB.z - exitTopA.z;
+      const gap3D = Math.hypot(dx, dy, dz);
+      if (gap3D < 1e-3) continue;
+
+      const ux = dx / gap3D;
+      const uy = dy / gap3D;
+      const uz = dz / gap3D;
+
+      // Project each segment's top surface onto the gap axis.
+      const intervals: Array<{ start: number; end: number; width: number }> = [];
+      for (const seg of segments) {
+        segmentsChecked++;
+        const topCenterY = seg.position.y + seg.dimensions.y * 0.5;
+        const relX = seg.position.x - exitTopA.x;
+        const relY = topCenterY - exitTopA.y;
+        const relZ = seg.position.z - exitTopA.z;
+        const centerU = relX * ux + relY * uy + relZ * uz;
+        const halfLen = seg.dimensions.z * 0.5;
+        intervals.push({
+          start: centerU - halfLen,
+          end: centerU + halfLen,
+          width: seg.dimensions.x
+        });
+
+        if (seg.dimensions.x < RECOVERY_MIN_WIDTH - 1e-6) {
+          violations.push({
+            gapKey: key,
+            reason: 'below_player_safe_width',
+            detail: `segment width ${seg.dimensions.x.toFixed(3)}m < ${RECOVERY_MIN_WIDTH.toFixed(2)}m`
+          });
+        }
+      }
+
+      intervals.sort((p, q) => p.start - q.start);
+
+      if (intervals[0].start > CONTINUITY_TOLERANCE) {
+        violations.push({
+          gapKey: key,
+          reason: 'missing_start_connection',
+          detail: `first segment starts ${intervals[0].start.toFixed(3)}m past the platform edge`
+        });
+      }
+
+      const last = intervals[intervals.length - 1];
+      if (last.end < gap3D - CONTINUITY_TOLERANCE) {
+        violations.push({
+          gapKey: key,
+          reason: 'missing_end_connection',
+          detail: `last segment ends ${(gap3D - last.end).toFixed(3)}m short of the next platform`
+        });
+      }
+
+      let reach = intervals[0].end;
+      for (let i = 1; i < intervals.length; i++) {
+        const hole = intervals[i].start - reach;
+        if (hole > CONTINUITY_TOLERANCE) {
+          violations.push({
+            gapKey: key,
+            reason: 'hole_inside_spine',
+            detail: `${hole.toFixed(3)}m uncovered between segments ${i - 1} and ${i}`
+          });
+        }
+        reach = Math.max(reach, intervals[i].end);
+      }
+    }
+
+    return {
+      coveredGaps: groups.size,
+      segmentsChecked,
+      violations,
+      isValid: violations.length === 0
+    };
   }
 
   /**
@@ -397,11 +546,23 @@ export class SignalSpineGenerator {
    * Creates narrow, top-surface bridging spine segments with controlled width & shape variation.
    * Ensures zero under-slung geometry: top surface sits cleanly at the playable elevation.
    *
+   * HARD CONTINUITY RULE:
+   * A gap that receives Signal Spine coverage receives a CONTINUOUS traversable
+   * surface from platform A's top to platform B's top. Shapes may still taper,
+   * move laterally, step, and change width — but every shape spans the full gap
+   * and every segment is at least one player diameter wide. There are no holes,
+   * no "broken" middle sections and no partial tongues, because the player must
+   * never fall because the recovery path itself contained a gap.
+   *
+   * Visual fragmentation is preserved separately (material/emissive treatment),
+   * never by removing collision.
+   *
    * Shapes:
-   * 1. TAPERED: wider at platform attachments, narrower through middle, wider again near next platform.
-   * 2. OFFSET: slightly left or right rather than always centered.
-   * 3. BROKEN: occasional short missing section requiring one small controlled hop.
-   * 4. TAPER-TO-REJOIN: spine gradually narrows or ends so player must return to main route.
+   * 1. TAPERED: wider at platform attachments, narrower through the middle.
+   * 2. OFFSET:  shifted left or right rather than always centred.
+   * 3. STEPPED: overlapping segments with alternating lateral offsets — reads as
+   *             a fragmented signal trim while remaining one continuous surface.
+   * 4. DEFAULT: straight / curved catwalk.
    */
   private static createVariedTopSurfaceSpine(
     nextId: () => number,
@@ -409,7 +570,6 @@ export class SignalSpineGenerator {
     b: RouteNode,
     exitTopA: THREE.Vector3,
     entryTopB: THREE.Vector3,
-    gapHoriz: number,
     gap3D: number,
     pitch: number,
     minPlatWidth: number,
@@ -463,7 +623,10 @@ export class SignalSpineGenerator {
       maxWidthCap = 1.40;
     }
 
-    const baseWidth = Math.max(minWidthCap, Math.min(maxWidthCap, minPlatWidth * widthRatio));
+    const baseWidth = Math.max(
+      RECOVERY_MIN_WIDTH,
+      Math.max(minWidthCap, Math.min(maxWidthCap, minPlatWidth * widthRatio))
+    );
     const spineThickness = Math.min(isSkinnyRecovery ? 0.30 : 0.40, Math.min(a.dimensions.y, b.dimensions.y) * 0.35);
     // Obstacle sections bias the recovery line toward the obstacle's safe lane
     // so a player recovering from a dodge is already lined up with the opening.
@@ -484,7 +647,7 @@ export class SignalSpineGenerator {
       uEnd: number,
       segWidth: number,
       latShift: number,
-      variant: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'BROKEN' | 'TAPER_TO_REJOIN'
+      variant: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'STEPPED'
     ): RouteNode => {
       const segLen = Math.max(0.2, (uEnd - uStart) * totalSpan);
       const uMid = (uStart + uEnd) * 0.5;
@@ -500,11 +663,15 @@ export class SignalSpineGenerator {
       );
       const spinePos = new THREE.Vector3().subVectors(topMid, topOffset);
 
+      // HARD RULE: every generated segment is at least one player diameter wide,
+      // so the continuous recovery surface is always genuinely catchable.
+      const safeWidth = Math.max(RECOVERY_MIN_WIDTH, segWidth);
+
       return {
         id: nextId(),
         time: a.time,
         position: { x: spinePos.x, y: spinePos.y, z: spinePos.z },
-        dimensions: { x: segWidth, y: spineThickness, z: segLen },
+        dimensions: { x: safeWidth, y: spineThickness, z: segLen },
         yaw,
         pitch,
         roll: 0,
@@ -516,141 +683,79 @@ export class SignalSpineGenerator {
         isBoost: false,
         isOptional: true,
         isSignalSpine: true,
-        signalSpineVariant: variant
+        signalSpineVariant: variant,
+        signalSpineHostGap: { aId: a.id, bId: b.id }
       };
     };
 
-    // Shape Selection
+    // Shape Selection — every shape spans the FULL gap continuously.
     const turnAngle = b.yaw - a.yaw;
     const isCurved = Math.abs(turnAngle) > 0.05;
     const shapeRoll = rng.next();
 
-    let chosenShape: 'TAPERED' | 'OFFSET' | 'BROKEN' | 'TAPER_TO_REJOIN' | 'DEFAULT';
+    let chosenShape: 'TAPERED' | 'OFFSET' | 'STEPPED' | 'DEFAULT';
 
-    if (isSkinnyRecovery) {
-      if (shapeRoll < 0.32 && gap3D >= 2.5) {
-        chosenShape = 'TAPERED';
-      } else if (shapeRoll < 0.62) {
-        chosenShape = 'OFFSET';
-      } else if (shapeRoll < 0.80 && gapHoriz >= 3.5) {
-        chosenShape = 'BROKEN';
-      } else if (shapeRoll < 0.92 && gap3D >= 2.8) {
-        chosenShape = 'TAPER_TO_REJOIN';
-      } else {
-        chosenShape = 'DEFAULT';
-      }
-    } else if (isPostSurfReentry) {
-      if (shapeRoll < 0.45 && gap3D >= 3.0) {
-        chosenShape = 'TAPERED';
-      } else if (shapeRoll < 0.75) {
-        chosenShape = 'OFFSET';
-      } else if (shapeRoll < 0.90 && gap3D >= 3.5) {
-        chosenShape = 'TAPER_TO_REJOIN';
-      } else {
-        chosenShape = 'DEFAULT';
-      }
-    } else if (isSmallChain) {
-      if (shapeRoll < 0.35 && gap3D >= 3.0) {
-        chosenShape = 'TAPERED';
-      } else if (shapeRoll < 0.60) {
-        chosenShape = 'OFFSET';
-      } else if (shapeRoll < 0.80 && gapHoriz >= 4.2) {
-        chosenShape = 'BROKEN';
-      } else if (shapeRoll < 0.92 && gap3D >= 3.5) {
-        chosenShape = 'TAPER_TO_REJOIN';
-      } else {
-        chosenShape = 'DEFAULT';
-      }
+    if (shapeRoll < 0.34 && gap3D >= 2.5) {
+      chosenShape = 'TAPERED';
+    } else if (shapeRoll < 0.62) {
+      chosenShape = 'OFFSET';
+    } else if (shapeRoll < 0.82 && gap3D >= 3.0) {
+      chosenShape = 'STEPPED';
     } else {
-      // Medium & Larger transfers
-      if (shapeRoll < 0.32 && gap3D >= 3.5) {
-        chosenShape = 'TAPERED';
-      } else if (shapeRoll < 0.58) {
-        chosenShape = 'OFFSET';
-      } else if (shapeRoll < 0.80 && gapHoriz >= 4.5) {
-        chosenShape = 'BROKEN';
-      } else if (shapeRoll < 0.92 && gap3D >= 3.5) {
-        chosenShape = 'TAPER_TO_REJOIN';
-      } else {
-        chosenShape = 'DEFAULT';
-      }
+      chosenShape = 'DEFAULT';
     }
 
     // 1. TAPERED SPINE:
-    // Wider at platform attachments, narrower in middle, wider near next platform
+    // Wider at platform attachments, narrower through the middle. Spans the full
+    // gap (0.0 -> 1.0) so both ends connect directly to their platforms.
     if (chosenShape === 'TAPERED') {
       const entryWidth = isSkinnyRecovery
         ? Math.min(minPlatWidth * 0.16, baseWidth * 1.3)
         : Math.min(2.6, Math.min(minPlatWidth * 0.30, baseWidth * 1.35));
       const midWidth = isSkinnyRecovery
-        ? Math.max(0.30, baseWidth * 0.75)
-        : Math.max(0.65, baseWidth * 0.75);
-      const exitWidth = entryWidth;
+        ? Math.max(RECOVERY_MIN_WIDTH, baseWidth * 0.78)
+        : Math.max(RECOVERY_MIN_WIDTH, baseWidth * 0.78);
 
       return [
         makeSegment(0.0, 0.28, entryWidth, laneShift, 'TAPERED'),
         makeSegment(0.27, 0.73, midWidth, laneShift, 'TAPERED'),
-        makeSegment(0.72, 1.0, exitWidth, laneShift, 'TAPERED')
+        makeSegment(0.72, 1.0, entryWidth, laneShift, 'TAPERED')
       ];
     }
 
     // 2. OFFSET SPINE:
-    // Slightly left or right of center rather than always centered
+    // Slightly left or right of centre rather than always centred.
     if (chosenShape === 'OFFSET') {
       const turnSign = Math.abs(turnAngle) > 0.02
         ? (turnAngle > 0 ? 1 : -1)
         : (rng.next() < 0.5 ? 1 : -1);
       const maxShift = isSkinnyRecovery
-        ? Math.min(0.6, (minPlatWidth - baseWidth) * 0.25)
-        : Math.min(2.4, (minPlatWidth - baseWidth) * 0.35);
+        ? Math.min(0.6, Math.max(0, (minPlatWidth - baseWidth) * 0.25))
+        : Math.min(2.4, Math.max(0, (minPlatWidth - baseWidth) * 0.35));
       const shift = turnSign * rng.nextFloat(0.45, 0.85) * maxShift + laneShift;
 
       return [makeSegment(0.0, 1.0, baseWidth, shift, 'OFFSET')];
     }
 
-    // 3. BROKEN SPINE:
-    // Short missing section requiring one small controlled hop
-    if (chosenShape === 'BROKEN') {
-      const hopLength = isSkinnyRecovery
-        ? Math.min(1.2, Math.max(0.6, gapHoriz * 0.20))
-        : Math.min(1.8, Math.max(1.2, gapHoriz * 0.25));
-      const hopFraction = Math.min(0.35, hopLength / totalSpan);
-      const seg1End = (1.0 - hopFraction) * 0.5;
-      const seg2Start = seg1End + hopFraction;
+    // 3. STEPPED SPINE:
+    // Overlapping segments with alternating lateral offsets. This is the visual
+    // "fragmented signal trim" read — but the segments OVERLAP in span space, so
+    // the walkable core is one continuous surface with no hole anywhere.
+    if (chosenShape === 'STEPPED') {
+      const lateralRange = Math.min(0.9, Math.max(0, (minPlatWidth - baseWidth) * 0.24));
+      const stepSign = Math.abs(turnAngle) > 0.02 ? (turnAngle > 0 ? 1 : -1) : 1;
+      const lateralA = laneShift;
+      const lateralB = laneShift + stepSign * lateralRange;
+      const lateralC = laneShift;
 
       return [
-        makeSegment(0.0, seg1End, baseWidth, 0, 'BROKEN'),
-        makeSegment(seg2Start, 1.0, baseWidth, 0, 'BROKEN')
+        makeSegment(0.0, 0.38, baseWidth, lateralA, 'STEPPED'),
+        makeSegment(0.35, 0.70, baseWidth, lateralB, 'STEPPED'),
+        makeSegment(0.67, 1.0, baseWidth, lateralC, 'STEPPED')
       ];
     }
 
-    // 4. TAPER-TO-REJOIN:
-    // Spine gradually narrows or ends so player must return to main route
-    if (chosenShape === 'TAPER_TO_REJOIN') {
-      const isExitCatch = rng.next() < 0.5;
-      const rootWidth = isSkinnyRecovery
-        ? Math.min(minPlatWidth * 0.16, baseWidth * 1.25)
-        : Math.min(2.6, Math.min(minPlatWidth * 0.28, baseWidth * 1.25));
-      const tipWidth = isSkinnyRecovery
-        ? Math.max(0.30, baseWidth * 0.70)
-        : Math.max(0.65, baseWidth * 0.70);
-
-      if (isExitCatch) {
-        // Starts at Platform A, extends ~68% into gap and narrows at tip
-        return [
-          makeSegment(0.0, 0.36, rootWidth, 0, 'TAPER_TO_REJOIN'),
-          makeSegment(0.35, 0.70, tipWidth, 0, 'TAPER_TO_REJOIN')
-        ];
-      } else {
-        // Entry catch tongue extending backwards from Platform B by ~68%
-        return [
-          makeSegment(0.30, 0.65, tipWidth, 0, 'TAPER_TO_REJOIN'),
-          makeSegment(0.64, 1.0, rootWidth, 0, 'TAPER_TO_REJOIN')
-        ];
-      }
-    }
-
-    // 5. DEFAULT (STRAIGHT / CATWALK / CURVED)
+    // 4. DEFAULT (STRAIGHT / CURVED / CATWALK) — one continuous span.
     const variant = isCurved ? 'CURVED' : (baseWidth <= 0.8 ? 'CATWALK' : 'STRAIGHT');
     return [makeSegment(0.0, 1.0, baseWidth, laneShift, variant)];
   }

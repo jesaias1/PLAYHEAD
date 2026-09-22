@@ -49,6 +49,14 @@ export interface QualityPreset {
   decorationLodDistance: number;
   /** MSAA sample count for the viewmodel overlay target (1 = off). */
   viewmodelSamples: number;
+  /**
+   * Scales the QUANTITY of audio-reactive landmarks (0..1). The core idea —
+   * bass mass, route pulses, primary city response and the major drop response —
+   * is never removed; only how many hero landmarks and tertiary glints exist.
+   */
+  reactiveLandmarkScale: number;
+  /** Pool size for the travelling route signal packets (one draw call total). */
+  routeSignalPackets: number;
 }
 
 export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset> = {
@@ -63,7 +71,11 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     grainScale: 0.6,
     signalPassEnabled: true,
     decorationLodDistance: 900,
-    viewmodelSamples: 1
+    viewmodelSamples: 1,
+    // Fewer hero landmarks and a smaller packet pool, but every core reactive
+    // behaviour (bass mass, route pulse, primary city, drop) is retained.
+    reactiveLandmarkScale: 0.35,
+    routeSignalPackets: 12
   },
   MEDIUM: {
     renderScale: 0.85,
@@ -76,7 +88,9 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     grainScale: 0.8,
     signalPassEnabled: true,
     decorationLodDistance: 1500,
-    viewmodelSamples: 2
+    viewmodelSamples: 2,
+    reactiveLandmarkScale: 0.65,
+    routeSignalPackets: 20
   },
   HIGH: {
     // Reference look — matches the pre-existing behaviour.
@@ -90,7 +104,9 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     grainScale: 1.0,
     signalPassEnabled: true,
     decorationLodDistance: 0,
-    viewmodelSamples: 4
+    viewmodelSamples: 4,
+    reactiveLandmarkScale: 1.0,
+    routeSignalPackets: 32
   },
   ULTRA: {
     renderScale: 1.0,
@@ -103,7 +119,9 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     grainScale: 1.0,
     signalPassEnabled: true,
     decorationLodDistance: 0,
-    viewmodelSamples: 4
+    viewmodelSamples: 4,
+    reactiveLandmarkScale: 1.0,
+    routeSignalPackets: 40
   }
 };
 

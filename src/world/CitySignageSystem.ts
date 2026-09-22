@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack, RouteNode } from '../generation/GenerationTypes';
-import { MusicVisualState } from './MusicVisualController';
+import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { cleanTrackTitle } from '../audio/CleanTitle';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
@@ -163,6 +163,16 @@ export class CitySignageSystem {
   private heroMat: THREE.MeshBasicMaterial;
   private stagedWaveMats: THREE.MeshBasicMaterial[] = [];
 
+  // Authored base colours. The reactive update SCALES these instead of
+  // flattening the material to grey, so the palette's colour hierarchy
+  // survives the luminance response.
+  private ambientBase = new THREE.Color();
+  private bassBase = new THREE.Color();
+  private midBase = new THREE.Color();
+  private highBase = new THREE.Color();
+  private heroBase = new THREE.Color();
+  private stagedBase: THREE.Color[] = [];
+
   // Reusable shared geometries to maximize GPU instancing/batching
   private sharedGeometries: THREE.PlaneGeometry[] = [];
 
@@ -173,11 +183,6 @@ export class CitySignageSystem {
   // Distance culling registration
   private cullingEntries: CullingEntry[] = [];
   private cullingActive = false;
-
-  // Spatial drop wave propagation tracking
-  private lastDropTime = -999;
-  private lastDropStrength = 0;
-  private dropActiveLastFrame = false;
 
   constructor(
     analysis: TrackAnalysis,
@@ -227,6 +232,14 @@ export class CitySignageSystem {
         })
       );
     }
+
+    // Capture the authored hues so the reactive pass can scale them.
+    this.ambientBase.copy(this.ambientMat.color);
+    this.bassBase.copy(this.bassMat.color);
+    this.midBase.copy(this.midMat.color);
+    this.highBase.copy(this.highMat.color);
+    this.heroBase.copy(this.heroMat.color);
+    this.stagedBase = this.stagedWaveMats.map((m) => m.color.clone());
 
     // 2. Build Sign Geometries & Curate Placements on Towers
     this.buildSignage(analysis, track, corridor, monoliths, stelae);
@@ -626,65 +639,78 @@ export class CitySignageSystem {
 
   /**
    * Central Audio-Reactive Update Loop
-   * Drives hierarchical reactive channels:
-   * - Ambient: slow breathing with energy & sub-bass
-   * - Bass: large neon tubes and sign bodies
-   * - Mids: spectrogram meters & waveform motion
-   * - Highs: edge lights, tickers, micro-shimmer
-   * - Hero: transient punch on onsets and explosive ignition on drops
-   * - Spatial Drop Wave: sequential outward ripple across distant towers
+   *
+   * Every group owns a DIFFERENT musical channel and a different phase, so the
+   * city separates the parts of the music instead of blinking as one object:
+   *
+   *   windows / ribs   -> slow section energy (they wake up through a build)
+   *   neon sign bodies -> bass mass (heavy, structural, long decay)
+   *   spectro matrices -> mid flow (computational, medium)
+   *   tickers / edges  -> high glints (fast, sharp, short)
+   *   hero landmarks   -> transients + the near drop window
+   *   4 staged sectors -> the staggered drop propagation (near -> far)
+   *
+   * Colour is preserved by scaling the AUTHORED hue rather than flattening to
+   * grey, so the palette stays legible while the luminance moves.
    */
   public update(visualState: MusicVisualState, _dt = 0): void {
     const mult = visualState.reactivityMultiplier;
+    const ch = resolveChannels(visualState);
+    const t = visualState.time;
 
-    // 1. Ambient Channel (window slits & architectural ribs)
-    const ambLum = (0.16 + visualState.energy * 0.18 + visualState.subBass * 0.12) * mult;
-    this.ambientMat.color.setScalar(ambLum);
+    // Grouped pattern phases: deterministic, music-driven time, distinct per
+    // group so no two groups pulse identically.
+    const pattern = (rate: number, phase: number): number =>
+      0.86 + 0.14 * Math.sin(t * rate + phase);
 
-    // 2. Bass Channel (neon signage bodies & Japanese Kanji)
+    // 1. Ambient / window channel — slow section state. Windows "wake up"
+    // progressively through a build rather than switching on.
+    const wake = Math.min(1, ch.sectionEnergy * 0.7 + visualState.buildup * 0.5);
+    const ambLum =
+      (0.07 + wake * 0.34 + ch.midFlow * 0.10) * mult * pattern(0.35, 0.0);
+    this.ambientMat.color.copy(this.ambientBase).multiplyScalar(ambLum);
+
+    // 2. Bass channel — heavy architectural neon bodies.
     const bassLum =
-      (0.32 + visualState.bass * 0.82 + (visualState.subBass > 0.65 ? 0.35 : 0.0)) * mult;
-    this.bassMat.color.setScalar(bassLum);
+      (0.16 + ch.bassMass * 0.92 + (ch.bassMass > 0.7 ? 0.28 : 0.0)) *
+      mult *
+      pattern(0.9, 1.1);
+    this.bassMat.color.copy(this.bassBase).multiplyScalar(bassLum);
 
-    // 3. Mid Channel (spectrogram LED matrices)
-    const midLum = (0.35 + visualState.mid * 0.88 + visualState.lowMid * 0.32) * mult;
-    this.midMat.color.setScalar(midLum);
+    // 3. Mid channel — spectrogram LED matrices.
+    const midLum = (0.18 + ch.midFlow * 0.95 + visualState.lowMid * 0.22) * mult * pattern(1.7, 2.3);
+    this.midMat.color.copy(this.midBase).multiplyScalar(midLum);
 
-    // 4. High Channel (fine glyph borders, status tickers & edge lights)
-    const shimmer = Math.sin(visualState.time * 28.0) * 0.08 * visualState.high;
-    const highLum = (0.26 + visualState.high * 0.88 + visualState.flux * 0.35 + shimmer) * mult;
-    this.highMat.color.setScalar(highLum);
+    // 4. High channel — fine glyph borders, status tickers, edge lights.
+    const shimmer = Math.sin(t * 28.0) * 0.10 * ch.highGlint;
+    const highLum = (0.14 + ch.highGlint * 1.05 + shimmer) * mult * pattern(3.1, 0.6);
+    this.highMat.color.copy(this.highBase).multiplyScalar(Math.max(0, highLum));
 
-    // 5. Hero Landmark Channel (onset punch & colossal drop ignition)
-    const isBreakdown = visualState.sectionTheme === 'BREATH' || visualState.energy < 0.22;
+    // 5. Hero landmark channel — transient punch, then the near drop window.
+    const isBreakdown = visualState.sectionTheme === 'BREATH' || ch.sectionEnergy < 0.2;
     let heroLum: number;
     if (isBreakdown) {
-      // Graceful dimming during breakdowns to maximize dynamic contrast
-      heroLum = (0.2 + visualState.energy * 0.25) * mult;
+      heroLum = (0.08 + ch.sectionEnergy * 0.30) * mult;
     } else {
-      const onsetPunch = visualState.onsetPulse * 0.75;
-      const dropBoost = visualState.dropImpact * 1.85;
-      heroLum = (0.45 + visualState.bass * 0.45 + onsetPunch + dropBoost) * mult;
+      heroLum =
+        (0.22 + ch.bassMass * 0.42 + ch.transient * 0.85 + ch.dropPrimary * 1.9) * mult;
     }
-    this.heroMat.color.setScalar(heroLum);
+    this.heroMat.color.copy(this.heroBase).multiplyScalar(heroLum);
 
-    // 6. Spatial Drop Wave Propagation
-    // Detect rising edge of drop impact
-    if (visualState.dropImpact > 0.3 && !this.dropActiveLastFrame) {
-      this.lastDropTime = visualState.time;
-      this.lastDropStrength = visualState.dropImpact;
-    }
-    this.dropActiveLastFrame = visualState.dropImpact > 0.3;
-
+    // 6. Staged drop propagation across four distance sectors.
+    // These now use the real staggered drop channels (near 0-80 ms, mid
+    // 150-350 ms, far 250-600 ms) instead of a synthetic timer, so the wave is
+    // locked to the actual musical event.
+    const stageChannels = [
+      ch.dropPrimary,
+      ch.dropSecondary,
+      ch.dropTertiary,
+      ch.dropTertiary * 0.6 + ch.midFlow * 0.35
+    ];
     for (let s = 0; s < 4; s++) {
-      const stageDelay = s * 0.085; // ~85ms per stage, sweeping across 340ms
-      const dtWave = visualState.time - this.lastDropTime - stageDelay;
-      let wavePulse = 0;
-      if (dtWave >= 0 && dtWave < 0.22) {
-        wavePulse = Math.sin((dtWave / 0.22) * Math.PI) * this.lastDropStrength * 1.5;
-      }
-      const stageLum = (0.34 + visualState.bass * 0.76 + wavePulse) * mult;
-      this.stagedWaveMats[s].color.setScalar(stageLum);
+      const stageLum =
+        (0.14 + ch.bassMass * 0.62 + stageChannels[s] * 1.35) * mult * pattern(0.7 + s * 0.13, s * 1.7);
+      this.stagedWaveMats[s].color.copy(this.stagedBase[s]).multiplyScalar(stageLum);
     }
   }
 

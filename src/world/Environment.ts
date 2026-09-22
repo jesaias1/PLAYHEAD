@@ -266,7 +266,17 @@ export class Environment {
   }
 
   public updateAtmosphere(
-    visualState: { sectionTheme: string; dropImpact: number; buildup: number; energy: number; palette: { fogColor: THREE.Color } },
+    visualState: {
+      sectionTheme: string;
+      dropImpact: number;
+      buildup: number;
+      energy: number;
+      palette: { fogColor: THREE.Color };
+      /** Optional: heavy low-end identity for the horizon/fog luminance. */
+      subBass?: number;
+      bass?: number;
+      activeHorizonColor?: THREE.Color;
+    },
     dt: number,
     directorState?: { fogNear: number; fogFar: number; bloomStrength: number; vignetteIntensity: number }
   ): void {
@@ -291,6 +301,16 @@ export class Environment {
       this.scene.fog.far += (targetFar - this.scene.fog.far) * lerpSpeed;
       this.scene.fog.near += (targetNear - this.scene.fog.near) * lerpSpeed;
       this.scene.fog.color.lerp(visualState.palette.fogColor, lerpSpeed);
+
+      // Bass-driven atmospheric luminance.
+      // The distant air itself gains a little low-end weight, so the low end is
+      // felt at world scale (horizon) rather than only on nearby props. Kept
+      // small so the sky never washes out.
+      const bass = visualState.subBass ?? 0;
+      if (bass > 0.01 && visualState.activeHorizonColor) {
+        const weight = Math.min(0.35, bass * 0.30 * Math.max(0, Math.min(1.6, 1)));
+        this.scene.fog.color.lerp(visualState.activeHorizonColor, weight * lerpSpeed);
+      }
     }
 
     if (directorState && this.postProcessing) {

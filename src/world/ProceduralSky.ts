@@ -36,6 +36,7 @@ uniform float uBuildup;
 uniform float uSectionIntensity;
 uniform float uReactivity;
 uniform float uStarVisibility;
+uniform float uSignalField;
 
 varying vec3 vWorldPosition;
 varying vec2 vUv;
@@ -153,7 +154,9 @@ void main() {
 
   // 2. Sub-Bass Horizon Glow with Ordered Dither
   float horizonFactor = 1.0 - smoothstep(0.0, 0.18 + uDropImpact * 0.12, abs(elevation));
-  float bassPressure = (uSubBass * 0.9 + uBass * 0.4 + uSectionIntensity * 0.25) * uReactivity;
+  // Bass weight is the dominant term: the low end should feel structural and
+  // broad rather than a thin flicker at the horizon line.
+  float bassPressure = (uSubBass * 1.05 + uBass * 0.55 + uSectionIntensity * 0.22) * uReactivity;
 
   // Screen-space dither coordinate for atmospheric fog fade
   float dither = (bayer4x4(gl_FragCoord.xy) - 0.5) * 0.08;
@@ -166,11 +169,18 @@ void main() {
   float hazeFactor = hazeBand * smoothstep(0.30, 0.0, abs(elevation)) * (0.12 + uLowMid * 0.3 * uReactivity);
   vec3 haze = uHazeColor * hazeFactor;
 
+  // 3b. Sustained signal field.
+  // A very slow, very broad luminance lift across the lower sky so the song is
+  // still physically present when no reactive structure is in the player's
+  // view. Deliberately restrained: the sky must never become a nightclub.
+  float fieldBand = smoothstep(0.62, 0.0, abs(elevation));
+  vec3 signalField = uHazeColor * fieldBand * uSignalField * 0.11 * uReactivity;
+
   // 4. Clustered Multi-Tier Starfield
   vec3 stars = renderStarfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility, uSecondaryColor, uHighlightColor);
 
   // 5. Compose Final Atmospheric Color
-  vec3 finalColor = baseVoid + horizonGlow + haze + stars;
+  vec3 finalColor = baseVoid + horizonGlow + haze + signalField + stars;
 
   gl_FragColor = vec4(finalColor, 1.0);
 }
@@ -201,7 +211,8 @@ export class ProceduralSky {
         uBuildup: { value: 0.0 },
         uSectionIntensity: { value: 0.5 },
         uReactivity: { value: 1.0 },
-        uStarVisibility: { value: 0.5 }
+        uStarVisibility: { value: 0.5 },
+        uSignalField: { value: 0.0 }
       },
       side: THREE.BackSide,
       depthWrite: false
@@ -234,6 +245,12 @@ export class ProceduralSky {
     u.uBuildup.value = visualState.buildup;
     u.uSectionIntensity.value = visualState.sectionIntensity;
     u.uReactivity.value = visualState.reactivityMultiplier;
+    u.uSignalField.value = Math.min(
+      1.2,
+      visualState.channels.sectionEnergy * 0.55 +
+        visualState.channels.bassMass * 0.4 +
+        visualState.channels.dropPrimary * 0.5
+    );
 
     let baseStarVis = 0.45;
     if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {

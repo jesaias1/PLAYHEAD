@@ -9,10 +9,68 @@
 import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
-import { MusicVisualState } from './MusicVisualController';
+import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
+
+/**
+ * Patches a standard material with a world-Y "signal band" sweep.
+ *
+ * All skyline tiers share the same sweep phase so the city reads as one giant
+ * machine processing sound, while each tier owns its own gain/sharpness so the
+ * tiers do not all light up together.
+ */
+function patchSignalBands(
+  material: THREE.MeshStandardMaterial,
+  uniforms: Record<string, THREE.IUniform>
+): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSignalPhase = uniforms.uSignalPhase;
+    shader.uniforms.uSignalGain = uniforms.uSignalGain;
+    shader.uniforms.uSignalSegCount = uniforms.uSignalSegCount;
+    shader.uniforms.uSignalSegSharp = uniforms.uSignalSegSharp;
+    shader.uniforms.uSignalBandScale = uniforms.uSignalBandScale;
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying float vSignalWorldY;'
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  vSignalWorldY = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).y;
+#else
+  vSignalWorldY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;
+#endif`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying float vSignalWorldY;
+uniform float uSignalPhase;
+uniform float uSignalGain;
+uniform float uSignalSegCount;
+uniform float uSignalSegSharp;
+uniform float uSignalBandScale;`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+{
+  float signalCoord = vSignalWorldY * uSignalBandScale;
+  float signalSeg = fract( signalCoord * uSignalSegCount - uSignalPhase );
+  float signalPulse = pow( 1.0 - abs( signalSeg * 2.0 - 1.0 ), uSignalSegSharp );
+  totalEmissiveRadiance += diffuseColor.rgb * signalPulse * uSignalGain;
+}`
+      );
+  };
+  material.needsUpdate = true;
+}
 
 export class SkylineArchitecture {
   public group: THREE.Group;
@@ -22,6 +80,13 @@ export class SkylineArchitecture {
 
   private towerMaterials: THREE.MeshStandardMaterial[] = [];
   public signageSystem: CitySignageSystem | null = null;
+
+  // --- Audio-reactive signal bands -----------------------------------------
+  // One shared sweep phase (so the whole city scans as a single machine) plus
+  // per-tier gains, patched into the three tower materials. This costs three
+  // uniform writes per frame and zero extra draw calls.
+  private scanPhaseUniform: THREE.IUniform = { value: 0 };
+  private tierSignalUniforms: Array<Record<string, THREE.IUniform>> = [];
 
   // Authored per-instance transforms, retained so distance culling can restore
   // them exactly (never regenerating geometry or changing silhouettes).
@@ -77,6 +142,28 @@ export class SkylineArchitecture {
       emissiveIntensity: 0.01
     });
     this.towerMaterials.push(ridgeMat);
+
+    // 1b. Patch the three tiers with the shared signal-band sweep. Tier 0
+    // (primary monoliths) gets the sharpest, brightest bands; the distant
+    // ridge tier gets broad, faint ones.
+    const bandConfigs = [
+      { gain: 0.0, segCount: 22.0, segSharp: 3.4, bandScale: 0.055 },
+      { gain: 0.0, segCount: 15.0, segSharp: 2.6, bandScale: 0.040 },
+      { gain: 0.0, segCount: 9.0, segSharp: 1.9, bandScale: 0.028 }
+    ];
+    this.tierSignalUniforms = bandConfigs.map((cfg) => {
+      const uniforms: Record<string, THREE.IUniform> = {
+        uSignalPhase: this.scanPhaseUniform,
+        uSignalGain: { value: cfg.gain },
+        uSignalSegCount: { value: cfg.segCount },
+        uSignalSegSharp: { value: cfg.segSharp },
+        uSignalBandScale: { value: cfg.bandScale }
+      };
+      return uniforms;
+    });
+    for (let t = 0; t < this.towerMaterials.length && t < this.tierSignalUniforms.length; t++) {
+      patchSignalBands(this.towerMaterials[t], this.tierSignalUniforms[t]);
+    }
 
     // 2. Geometries
     // Primary Colossal Monolith
@@ -294,25 +381,34 @@ export class SkylineArchitecture {
     this.group.add(this.signageSystem.group);
   }
 
-  public update(visualState: MusicVisualState, dt = 0): void {
+  public update(visualState: MusicVisualState, dt = 0, reduceMotion = false): void {
     const react = visualState.reactivityMultiplier;
     const energy = visualState.energy;
-    const bass = visualState.bass;
-    const subBass = visualState.subBass;
-    const onset = visualState.onsetPulse;
-    const drop = visualState.dropImpact;
+    const ch = resolveChannels(visualState);
+    const slot = ch.slot;
 
-    // REACTIVITY HIERARCHY — the city answers the music with a clear order:
-    //   PRIMARY   nearby monoliths: windows/edges glint on beats, surge on drops
-    //   SECONDARY support stelae:  medium bass-driven signal strips
-    //   TERTIARY  distant ridges:  sustained low shimmer (never dead, never loud)
-    // Every layer keeps a non-zero baseline so the skyline always breathes.
+    // REACTIVITY HIERARCHY — the city answers the music with a clear order AND
+    // a clear delay:
+    //   PRIMARY   nearby monoliths:  first to answer (0-80 ms drop window)
+    //   SECONDARY support stelae:    answers next (150-350 ms)
+    //   TERTIARY  distant ridges:    answers last (250-600 ms)
+    //
+    // The transient answer is scheduled across the tiers by the music-driven
+    // channel slot, so a beat does not light every layer at once. That layered
+    // distribution is what makes the city read as separate parts of the music
+    // rather than one brightness scalar.
+    const primaryOnset = ch.transient * (slot % 3 === 0 ? 1.0 : 0.3);
+    const secondaryOnset = ch.transient * (slot % 3 === 1 ? 1.0 : 0.26);
+    const tertiaryOnset = ch.transient * (slot % 3 === 2 ? 1.0 : 0.18);
+
+    // Every layer keeps a non-zero baseline so the skyline always breathes,
+    // but the baselines stay LOW so a drop has headroom to be obviously bigger.
     const primary =
-      (0.12 + energy * 0.18 + bass * 0.34 + subBass * 0.12 + onset * 0.60 + drop * 1.10) * react;
+      (0.10 + energy * 0.14 + ch.bassMass * 0.44 + primaryOnset * 0.58 + ch.dropPrimary * 1.15) * react;
     const secondary =
-      (0.07 + energy * 0.12 + bass * 0.22 + onset * 0.34 + drop * 0.70) * react;
+      (0.06 + energy * 0.10 + ch.bassMass * 0.26 + secondaryOnset * 0.34 + ch.dropSecondary * 0.72) * react;
     const tertiary =
-      (0.035 + energy * 0.08 + bass * 0.14 + subBass * 0.06 + drop * 0.34) * react;
+      (0.03 + energy * 0.06 + ch.bassMass * 0.14 + tertiaryOnset * 0.22 + ch.dropTertiary * 0.40) * react;
 
     if (this.towerMaterials[0]) {
       this.towerMaterials[0].emissiveIntensity = Math.min(1.5, primary);
@@ -322,6 +418,19 @@ export class SkylineArchitecture {
     }
     if (this.towerMaterials[2]) {
       this.towerMaterials[2].emissiveIntensity = Math.min(0.8, tertiary);
+    }
+
+    // Signal band sweep: one shared phase, per-tier gain. Reduced motion slows
+    // the sweep right down but keeps the luminance response.
+    const motionScale = reduceMotion ? 0.3 : 1.0;
+    this.scanPhaseUniform.value = ch.scanPhase * motionScale;
+    if (this.tierSignalUniforms.length >= 3) {
+      this.tierSignalUniforms[0].uSignalGain.value =
+        Math.min(0.9, (0.06 + ch.bassMass * 0.5 + primaryOnset * 0.6 + ch.dropPrimary * 0.9) * react);
+      this.tierSignalUniforms[1].uSignalGain.value =
+        Math.min(0.6, (0.03 + ch.bassMass * 0.3 + secondaryOnset * 0.4 + ch.dropSecondary * 0.6) * react);
+      this.tierSignalUniforms[2].uSignalGain.value =
+        Math.min(0.35, (0.02 + ch.bassMass * 0.16 + tertiaryOnset * 0.24 + ch.dropTertiary * 0.4) * react);
     }
 
     if (this.signageSystem) {

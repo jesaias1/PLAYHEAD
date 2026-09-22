@@ -148,7 +148,13 @@ export interface RouteNode {
   ascentPostLandingRunway?: number;
   isRecoveryShelf?: boolean;
   isSignalSpine?: boolean;
-  signalSpineVariant?: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'BROKEN' | 'TAPER_TO_REJOIN';
+  signalSpineVariant?: 'STRAIGHT' | 'OFFSET' | 'CURVED' | 'DIP' | 'CATWALK' | 'SHALLOW_SURF' | 'TAPERED' | 'STEPPED' | 'BROKEN' | 'TAPER_TO_REJOIN';
+  /**
+   * The route gap this recovery segment belongs to. Every segment of a covered
+   * gap carries the same host pair, which is what makes "the covered segment is
+   * continuous" a checkable invariant rather than a hope.
+   */
+  signalSpineHostGap?: { aId: number; bId: number };
   obstacleType?: RouteObstacleType;
   obstacleGroupId?: number;
   obstacleSafeLane?: 'LEFT' | 'RIGHT' | 'BOTH' | 'JUMP';

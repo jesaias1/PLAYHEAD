@@ -87,7 +87,7 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(variants.size).toBeGreaterThanOrEqual(2);
   });
 
-  it('generates authored shapes (TAPERED, OFFSET, BROKEN, TAPER_TO_REJOIN) with phrase-adaptive widths', () => {
+  it('generates authored shapes (TAPERED, OFFSET, STEPPED) with phrase-adaptive widths', () => {
     const analysis = createMockAnalysis(9999, ['FLOW', 'SURF', 'BUILDUP', 'DROP', 'FLOW']);
     const track = RouteGenerator.generate(analysis);
     const spines = track.signalSpines || [];
@@ -95,15 +95,16 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(spines.length).toBeGreaterThan(10);
 
     const variants = new Set(spines.map(s => s.signalSpineVariant));
-    // Must contain multi-segment tapered, offset, or broken shapes
-    const hasAdvancedShape = ['TAPERED', 'OFFSET', 'BROKEN', 'TAPER_TO_REJOIN'].some(v => variants.has(v as any));
+    // Must contain multi-segment tapered or stepped shapes
+    const hasAdvancedShape = ['TAPERED', 'OFFSET', 'STEPPED'].some(v => variants.has(v as any));
     expect(hasAdvancedShape).toBe(true);
 
     // Verify phrase-adaptive widths:
-    // No spine should be an oversized runway (> 2.8m) or razor thin (< 0.65m)
+    // No spine should be an oversized runway (> 2.8m) or thinner than one
+    // player diameter (the continuous recovery surface must stay catchable).
     for (const spine of spines) {
       expect(spine.dimensions.x).toBeLessThanOrEqual(2.8);
-      expect(spine.dimensions.x).toBeGreaterThanOrEqual(0.65);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.0);
     }
   });
 
@@ -168,9 +169,10 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
     expect(spines.length).toBeGreaterThan(0);
 
     for (const spine of spines) {
-      // 1. Spines must be physically narrow (0.65m to 2.8m width, never full width or easy highway)
+      // 1. Spines must be narrow (1.0m to 2.8m width, never full width or easy
+      // highway) but never thinner than one player diameter.
       expect(spine.dimensions.x).toBeLessThanOrEqual(2.8);
-      expect(spine.dimensions.x).toBeGreaterThanOrEqual(0.65);
+      expect(spine.dimensions.x).toBeGreaterThanOrEqual(1.0);
 
       // 2. Thickness must be low profile (<= 0.5m)
       expect(spine.dimensions.y).toBeLessThanOrEqual(0.5);
@@ -178,9 +180,13 @@ describe('Signal Spine & Recovery Traversal Layer', () => {
       // 3. Must be flagged as isSignalSpine with an authored variant
       expect(spine.isSignalSpine).toBe(true);
       expect(spine.signalSpineVariant).toBeDefined();
-      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'CATWALK', 'TAPERED', 'BROKEN', 'TAPER_TO_REJOIN']).toContain(
+      expect(['STRAIGHT', 'OFFSET', 'CURVED', 'CATWALK', 'TAPERED', 'STEPPED']).toContain(
         spine.signalSpineVariant
       );
+
+      // 4. Every recovery segment records the gap it covers, so continuity is
+      // an explicit, checkable invariant rather than an implicit hope.
+      expect(spine.signalSpineHostGap).toBeDefined();
     }
   });
 
