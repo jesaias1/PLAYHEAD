@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OBB } from 'three/examples/jsm/math/OBB.js';
 import { TrackAnalysis } from '../audio/AudioFeatures';
-import { AscentVariant, CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
+import { AscentVariant, CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteFork, RouteNode, RouteNodeType, Vector3Like } from './GenerationTypes';
 import { RouteValidator } from './RouteValidator';
 import { SeededRandom } from './SeededRandom';
 import { SurfPlanner } from './SurfPlanner';
@@ -15,6 +15,7 @@ import { getPlatformLateralEnvelope, getPlatformMaxHalfWidth } from './PlatformS
 import { deriveAscentLandingEnvelope, getAscentTurnRadians } from './AscentFlowGeometry';
 import { RouteChallengeGenerator } from './RouteChallengeGenerator';
 import { SignalSpineGenerator } from './SignalSpineGenerator';
+import { RouteForkGenerator } from './RouteForkGenerator';
 import {
   TempoProfile,
   computeTempoProfile,
@@ -22,7 +23,7 @@ import {
   tempoRouteEffects
 } from './TempoPressure';
 
-export const ROUTE_GENERATION_VERSION = 4;
+export const ROUTE_GENERATION_VERSION = 5;
 
 /** Deterministic tempo/route telemetry for the most recent generation. */
 export interface RouteTempoReport {
@@ -743,6 +744,22 @@ export class RouteGenerator {
       signalSpines
     );
 
+    // 9. ROUTE FORKS — controlled SAFE vs FLOW/MASTERY movement choices.
+    //
+    // Forks are a deterministic post-pass over the fully-validated main route.
+    // The main route (the SAFE line) is never modified, so it stays exactly as
+    // validated; branch geometry is validated against every other piece of
+    // gameplay in FINAL world space (the same OBB test used for ramps) and any
+    // fork that would clip gameplay geometry is rejected outright.
+    const forks = RouteGenerator.rejectClippingForks(
+      RouteForkGenerator.generate(repairedNodes, analysis, tempoProfile.pressure),
+      repairedNodes,
+      optionalRamps,
+      recoveryShelves,
+      obstacles,
+      signalSpines
+    );
+
     return {
       generationVersion: ROUTE_GENERATION_VERSION,
       seed: analysis.seed,
@@ -751,6 +768,7 @@ export class RouteGenerator {
       recoveryShelves,
       signalSpines,
       obstacles,
+      forks,
       checkpoints,
       finish,
       totalDistance: cumulativeDistance,
@@ -841,6 +859,73 @@ export class RouteGenerator {
     const rejected = ramps.length - accepted.length;
     if (rejected > 0) {
       console.log(`[RouteGenerator] Rejected ${rejected} optional surf ramp(s) clipping gameplay geometry.`);
+    }
+
+    return accepted;
+  }
+
+  /**
+   * Rejects route forks whose mastery-branch geometry genuinely intersects any
+   * other gameplay surface in final world space (main route, mandatory/optional
+   * surf, recovery shelves, obstacles, signal spines, and other accepted
+   * branches). Uses the same authoritative OBB test as ramp rejection.
+   */
+  public static rejectClippingForks(
+    forks: RouteFork[],
+    route: RouteNode[],
+    optionalRamps: RouteNode[] = [],
+    recoveryShelves: RouteNode[] = [],
+    obstacles: RouteNode[] = [],
+    signalSpines: RouteNode[] = []
+  ): RouteFork[] {
+    if (forks.length === 0) return forks;
+
+    const otherBoxes = [
+      ...route,
+      ...optionalRamps,
+      ...recoveryShelves,
+      ...obstacles,
+      ...signalSpines
+    ].map((n) => RouteGenerator.nodeOBB(n));
+
+    const accepted: RouteFork[] = [];
+    const acceptedBoxes: OBB[] = [];
+    let rejected = 0;
+
+    for (const fork of forks) {
+      const branchBoxes = fork.masteryNodes.map((n) => RouteGenerator.nodeOBB(n));
+
+      let clips = false;
+      for (const box of branchBoxes) {
+        for (const other of otherBoxes) {
+          if (other.intersectsOBB(box)) {
+            clips = true;
+            break;
+          }
+        }
+        if (clips) break;
+        for (const prev of acceptedBoxes) {
+          if (prev.intersectsOBB(box)) {
+            clips = true;
+            break;
+          }
+        }
+        if (clips) break;
+      }
+
+      if (clips) {
+        rejected++;
+        continue;
+      }
+
+      accepted.push(fork);
+      for (const box of branchBoxes) acceptedBoxes.push(box);
+    }
+
+    if (rejected > 0) {
+      console.log(
+        `[RouteGenerator] Rejected ${rejected} route fork(s) clipping gameplay geometry.`
+      );
     }
 
     return accepted;

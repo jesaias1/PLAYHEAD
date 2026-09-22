@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { RouteNode, RouteNodeType } from '../generation/GenerationTypes';
+import { RouteFork, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { getPlatformMaxHalfWidth } from '../generation/PlatformShape';
 
 export interface ObjectBoundingVolume {
@@ -99,13 +99,19 @@ export class RouteExclusionCorridor {
     recoveryShelves?: RouteNode[];
     signalSpines?: RouteNode[];
     obstacles?: RouteNode[];
+    forks?: RouteFork[];
   }): RouteNode[] {
+    const forkNodes: RouteNode[] = [];
+    for (const fork of track.forks || []) {
+      for (const node of fork.masteryNodes) forkNodes.push(node);
+    }
     return [
       ...track.route,
       ...(track.optionalRamps || []),
       ...(track.recoveryShelves || []),
       ...(track.signalSpines || []),
-      ...(track.obstacles || [])
+      ...(track.obstacles || []),
+      ...forkNodes
     ];
   }
 

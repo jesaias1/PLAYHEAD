@@ -38,16 +38,27 @@ export class RouteVoidEnvelope {
     route: RouteNode[],
     optionalRamps?: RouteNode[],
     recoveryShelves?: RouteNode[],
-    signalSpines?: RouteNode[]
+    signalSpines?: RouteNode[],
+    forkSequences?: RouteNode[][]
   ): void {
     this.volumes = [];
     this.lowestGeometryY = Infinity;
+
+    const forkNodes: RouteNode[] = [];
+    if (forkSequences) {
+      for (const sequence of forkSequences) {
+        for (const node of sequence) {
+          if (node.forkBranchType) forkNodes.push(node);
+        }
+      }
+    }
 
     const allNodes: RouteNode[] = [
       ...route,
       ...(optionalRamps || []),
       ...(recoveryShelves || []),
-      ...(signalSpines || [])
+      ...(signalSpines || []),
+      ...forkNodes
     ];
 
     // 1. Process all physical platform/ramp nodes
@@ -105,9 +116,21 @@ export class RouteVoidEnvelope {
     }
 
     // 2. Process airborne flight paths between consecutive route nodes
-    for (let i = 0; i < route.length - 1; i++) {
-      const curr = route[i];
-      const next = route[i + 1];
+    this.addFlightPaths(route);
+
+    // 3. Fork branches get the same flight-path protection, so a mastery line
+    // never produces an unfair multi-second fall.
+    if (forkSequences) {
+      for (const sequence of forkSequences) {
+        this.addFlightPaths(sequence);
+      }
+    }
+  }
+
+  private addFlightPaths(nodes: RouteNode[]): void {
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const curr = nodes[i];
+      const next = nodes[i + 1];
 
       const halfLenCurr = (curr.dimensions.z || 0) * 0.5;
       const fwdXCurr = Math.sin(curr.yaw);

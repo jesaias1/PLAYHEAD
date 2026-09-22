@@ -13,6 +13,7 @@ import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
 import { RouteGenerator } from '../generation/RouteGenerator';
 import { RouteExclusionCorridor } from '../world/RouteExclusionCorridor';
+import { RouteForkGenerator } from '../generation/RouteForkGenerator';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -194,6 +195,7 @@ export class DevOverlay {
       world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE',
       obstacleDiagnosticsLine(world),
       tempoDiagnosticsLine(),
+      forkDiagnosticsLine(world),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -220,6 +222,47 @@ function tempoDiagnosticsLine(): string {
     `[${t.band}] ${t.interpretation} | PRESSURE ${t.pressure.toFixed(2)}` +
     `\nTEMPO ROUTE: STAGGER ${t.staggerChains} chains / ${t.staggerSteps} steps | ` +
     `OBSTACLE CADENCE x${t.obstacleSpacingMultiplier.toFixed(2)} | SURF EVENTS ${t.surfEvents}`
+  );
+}
+
+function forkDiagnosticsLine(world: World): string {
+  const forks = world.track?.forks ?? [];
+  if (forks.length === 0) return 'FORKS: none';
+
+  const report = RouteForkGenerator.getLastReport();
+  const head =
+    `FORKS: ${forks.length}` +
+    (report
+      ? ` | attempts ${report.attempts} accepted ${report.accepted} | ` +
+        `rejected geom ${report.rejectedGeometry} solv ${report.rejectedSolvability} ` +
+        `arch ${report.rejectedArchitecture} rejoin ${report.rejectedRejoin}`
+      : '');
+  const types = forks.map((f) => f.type).join(' ');
+
+  // Nearest fork to the player's current route progress.
+  const route = world.track?.route ?? [];
+  const total = world.track?.totalDistance || 1;
+  const playerArc = world.visualController.state.playerProgress * total;
+  let nearest = forks[0];
+  let best = Infinity;
+  for (const fork of forks) {
+    const mid = (fork.entryArcLength + fork.rejoinArcLength) * 0.5;
+    const d = Math.abs(mid - playerArc);
+    if (d < best) {
+      best = d;
+      nearest = fork;
+    }
+  }
+  const safeNodes = route.filter(
+    (n) => n.arcLength >= nearest.entryArcLength && n.arcLength <= nearest.rejoinArcLength
+  ).length;
+
+  return (
+    head +
+    `\nFORK TYPES: ${types || 'none'}` +
+    `\nFORK NEAREST: ${nearest.type} | safe nodes ${safeNodes} | mastery nodes ${nearest.masteryNodes.length}` +
+    `\nFORK DISTANCE: safe ${nearest.safeDistance.toFixed(0)}m | mastery ${nearest.masteryDistance.toFixed(0)}m` +
+    `\nFORK VALIDATED: ${nearest.validated ? 'YES' : 'NO'}`
   );
 }
 

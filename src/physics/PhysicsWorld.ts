@@ -96,7 +96,8 @@ export class PhysicsWorld {
     optionalRamps?: RouteNode[],
     recoveryShelves?: RouteNode[],
     obstacles?: RouteNode[],
-    signalSpines?: RouteNode[]
+    signalSpines?: RouteNode[],
+    forkSequences?: RouteNode[][]
   ): void {
     this.colliders = [];
     this.dynamicObstacles = [];
@@ -138,6 +139,22 @@ export class PhysicsWorld {
       }
     }
 
+    // Route-fork mastery branches are authoritative gameplay geometry: they
+    // collide and they participate in the void envelope exactly like the main
+    // route, so no branch can create an infinite fall. Entry/rejoin nodes are
+    // main-route nodes and are already collided above.
+    if (forkSequences) {
+      for (const sequence of forkSequences) {
+        for (const node of sequence) {
+          if (!node.forkBranchType) continue;
+          const col = new BoxCollider(node);
+          this.colliders.push(col);
+          const bottomY = node.position.y - node.dimensions.y * 0.5;
+          if (bottomY < lowestY) lowestY = bottomY;
+        }
+      }
+    }
+
     // Obstacles are intentional above-route solids. They collide normally but
     // never lower the authoritative void boundary, which is derived only from
     // playable route/surf/recovery geometry.
@@ -153,7 +170,7 @@ export class PhysicsWorld {
       : -40.0;
 
     // Build authoritative route-aware void death envelope beneath legitimate gameplay phrases
-    this.voidEnvelope.build(route, optionalRamps, recoveryShelves, signalSpines);
+    this.voidEnvelope.build(route, optionalRamps, recoveryShelves, signalSpines, forkSequences);
   }
 
   public addCollider(col: BoxCollider): void {

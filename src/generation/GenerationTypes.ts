@@ -59,6 +59,31 @@ export type RouteObstacleType =
   | 'PHASE_BLOCK'
   | 'SWEEP_BEAM';
 
+/**
+ * ROUTE FORKS — controlled SAFE vs FLOW/MASTERY movement choices.
+ * A fork is a post-pass over the validated main route: the main route is the
+ * SAFE line and is never modified; the MASTERY branch is extra parallel
+ * geometry that diverges and rejoins.
+ */
+export type ForkType =
+  | 'SAFE_VS_STRAFE'
+  | 'SAFE_VS_SURF'
+  | 'SAFE_VS_HIGH'
+  | 'DIRECT_VS_TECHNICAL';
+
+export interface RouteFork {
+  id: number;
+  type: ForkType;
+  entryNodeId: number;
+  rejoinNodeId: number;
+  entryArcLength: number;
+  rejoinArcLength: number;
+  safeDistance: number;
+  masteryDistance: number;
+  masteryNodes: RouteNode[];
+  validated: boolean;
+}
+
 /** Coherent multi-element movement phrases built from the obstacle vocabulary. */
 export type ObstaclePhraseKind =
   | 'GATE_COMMIT'
@@ -143,6 +168,8 @@ export interface RouteNode {
   obstacleMotion?: ObstacleMotion;
   /** Section theme at generation time (DEV diagnostics only). */
   obstacleMusicTheme?: string;
+  /** Set on nodes that belong to a fork's mastery branch. */
+  forkBranchType?: ForkType;
 }
 
 export interface CheckpointDefinition {
@@ -169,6 +196,8 @@ export interface GeneratedTrack {
   recoveryShelves?: RouteNode[];
   signalSpines?: RouteNode[];
   obstacles?: RouteNode[];
+  /** Optional SAFE vs MASTERY route forks (mastery branch geometry). */
+  forks?: RouteFork[];
   checkpoints: CheckpointDefinition[];
   finish: FinishDefinition;
   totalDistance: number;

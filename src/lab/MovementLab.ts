@@ -94,6 +94,9 @@ export class MovementLab {
     // Build the authored Signal Gate mastery line (optional high-speed line)
     this.buildSignalGateRun();
 
+    // Build the authored ROUTE CHOICE zone (SAFE line vs MASTERY line A/B test)
+    this.buildRouteChoiceZone();
+
     this.scene.add(this.rootGroup);
 
     // Spawn player
@@ -420,6 +423,63 @@ export class MovementLab {
   }
 
   /**
+   * AUTHORED ROUTE CHOICE — SAFE LINE vs MASTERY LINE [KEY N].
+   *
+   * A single readable A/B fork for human testing:
+   *
+   *   ENTRY (wide deck)
+   *     SAFE    -> wide, forgiving platform chain straight ahead
+   *     MASTERY -> side surf -> staggered transfer -> narrow line
+   *   REJOIN  -> large catch deck (both lines land here)
+   *
+   * Both lines are independently traversable and converge on the same deck, so
+   * a tester can run the zone twice and compare. Signal Gates are deliberately
+   * NOT placed here: the prototype is not approved for production and a fork
+   * must never require them.
+   */
+  private buildRouteChoiceZone(): void {
+    const safeMat = new THREE.MeshStandardMaterial({
+      color: 0x222831,
+      roughness: 0.65,
+      metalness: 0.2
+    });
+    const masteryMat = new THREE.MeshStandardMaterial({
+      color: 0x1c3b46,
+      roughness: 0.35,
+      metalness: 0.6
+    });
+    const surfMat = new THREE.MeshStandardMaterial({
+      color: 0x2e3846,
+      roughness: 0.25,
+      metalness: 0.7
+    });
+    const deckMat = new THREE.MeshStandardMaterial({
+      color: 0x2a3138,
+      roughness: 0.6,
+      metalness: 0.25
+    });
+
+    this.createAreaBanner('ROUTE CHOICE // SAFE vs MASTERY [KEY N]', 0, 6.0, 2145);
+
+    // ENTRY: the decision platform. Both lines are reachable from its edges.
+    this.addLabBox('Fork_Entry', 0, -14, 2172, 24, 2, 26, deckMat);
+    this.createAreaBanner('SAFE //', -6, -9.5, 2192);
+    this.createAreaBanner('VECTOR //', 18, -9.5, 2192);
+
+    // SAFE line: wide, forgiving, straight ahead. Fewer decisions.
+    this.addLabBox('Fork_SafeA', 0, -14, 2202, 24, 2, 26, safeMat);
+    this.addLabBox('Fork_SafeB', 0, -14, 2232, 26, 2, 30, safeMat);
+
+    // MASTERY line: side surf entry -> staggered transfer -> narrow cut.
+    this.addLabBox('Fork_MasterySurf', 19.5, -13.2, 2200, 11, 2, 34, surfMat, true, 0.5, -0.05);
+    this.addLabBox('Fork_MasteryStaggerA', 22, -14, 2224, 12, 2, 22, masteryMat);
+    this.addLabBox('Fork_MasteryStaggerB', 16, -14, 2244, 12, 2, 20, masteryMat);
+
+    // REJOIN: large catch deck. Both lines converge here.
+    this.addLabBox('Fork_Rejoin', 0, -14, 2246, 40, 2, 26, deckMat);
+  }
+
+  /**
    * Deterministic OBSTACLE GAUNTLET.
    *
    * Reuses the production obstacle construction (RouteChallengeGenerator lab
@@ -708,6 +768,9 @@ export class MovementLab {
       } else if (e.code === 'Digit8' && !e.repeat) {
         // Area F5: Surf Exit & Launch
         this.teleportPlayer(new THREE.Vector3(0, 1.5, 1730), Math.PI);
+      } else if (e.code === 'KeyN' && !e.repeat) {
+        // ROUTE CHOICE: jump to the SAFE vs MASTERY fork entry.
+        this.teleportPlayer(new THREE.Vector3(0, -12.5, 2162), Math.PI);
       }
     };
     window.addEventListener('keydown', this.keyListener);

@@ -340,10 +340,11 @@ export class GeometryBuilder {
     const pylonEuler = new THREE.Euler();
     const pylonMatrix = new THREE.Matrix4();
 
-    // Build Route Meshes
-    for (let i = 0; i < track.route.length; i++) {
-      const node = track.route[i];
-
+    // Adds one gameplay platform to the batched static pipeline: its edge trim
+    // line plus its baked geometry, classified by material. Shared by the main
+    // route and by route-fork mastery branches so a fork costs geometry, never
+    // one draw call per platform.
+    const addPlatformNode = (node: RouteNode): void => {
       // Rendering and collision consume the same authoritative footprint.
       const geom = createPlatformGeometry(node);
 
@@ -380,6 +381,12 @@ export class GeometryBuilder {
       } else {
         platformGeoms.push(geom);
       }
+    };
+
+    // Build Route Meshes
+    for (let i = 0; i < track.route.length; i++) {
+      const node = track.route[i];
+      addPlatformNode(node);
 
       // Descending Monolithic Foundation Pillars plunging into the deep void (320m - 540m)
       //
@@ -467,6 +474,21 @@ export class GeometryBuilder {
       if (node.isSurf && i % 2 === 0) {
         const canyon = createSurfFlank(node, backgroundMonolithMaterial, corridor);
         if (canyon) decorativeGroup.add(canyon);
+      }
+    }
+
+    // Route-fork mastery branches render through the SAME batched pipeline
+    // (platforms merged per material, edge trim shared with the music pulse), so
+    // adding forks does not regress draw calls.
+    if (track.forks) {
+      for (const fork of track.forks) {
+        for (const node of fork.masteryNodes) {
+          addPlatformNode(node);
+          if (node.isSurf) {
+            const canyon = createSurfFlank(node, backgroundMonolithMaterial, corridor);
+            if (canyon) decorativeGroup.add(canyon);
+          }
+        }
       }
     }
 

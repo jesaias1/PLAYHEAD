@@ -21,6 +21,7 @@ import { SpectacleRenderer } from './SpectacleRenderer';
 import { CelestialLandmarks } from './CelestialLandmarks';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
+import { collectForkSequences } from '../generation/RouteForkGenerator';
 import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 
 export class World {
@@ -80,7 +81,18 @@ export class World {
     }
 
     // 2. Build Physics Colliders (frozen authoritative physics)
-    this.physics.buildFromRoute(track.route, track.optionalRamps, track.recoveryShelves, track.obstacles, track.signalSpines);
+    // Route-fork mastery branches are authoritative gameplay geometry and are
+    // passed as full traversal sequences so they collide and receive void
+    // protection exactly like the main route.
+    const forkSequences = collectForkSequences(track.route, track.forks);
+    this.physics.buildFromRoute(
+      track.route,
+      track.optionalRamps,
+      track.recoveryShelves,
+      track.obstacles,
+      track.signalSpines,
+      forkSequences
+    );
 
     // 3. Build Procedural Route & Monolith Meshes
     this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette);
