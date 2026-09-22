@@ -33,6 +33,24 @@ export interface ReactiveBeaconItem {
   channel: ReactiveChannel;
 }
 
+/**
+ * A moving gameplay obstacle whose mesh must track its deterministic collider
+ * position every frame. Base is the oscillation centre; lateral is the unit
+ * local-+X direction in world space.
+ */
+export interface AnimatedObstacleItem {
+  mesh: THREE.Mesh;
+  outline: THREE.LineSegments | null;
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  lateralX: number;
+  lateralZ: number;
+  amplitude: number;
+  speed: number;
+  phase: number;
+}
+
 export interface BuiltWorldAssets {
   rootGroup: THREE.Group;
   decorativeGroup: THREE.Group;
@@ -40,6 +58,7 @@ export interface BuiltWorldAssets {
   reactiveBeacons: ReactiveBeaconItem[];
   edgeLines: THREE.LineSegments[];
   routeEdgeItems: RouteEdgeItem[];
+  animatedObstacles: AnimatedObstacleItem[];
   dispose: () => void;
 }
 
@@ -56,6 +75,7 @@ export class GeometryBuilder {
     const reactiveBeacons: ReactiveBeaconItem[] = [];
     const edgeLines: THREE.LineSegments[] = [];
     const routeEdgeItems: RouteEdgeItem[] = [];
+    const animatedObstacles: AnimatedObstacleItem[] = [];
 
     /**
      * Beacons share one material instance per channel, so only the first mesh
@@ -341,16 +361,18 @@ export class GeometryBuilder {
           obstacle.dimensions.y,
           obstacle.dimensions.z
         );
-        const bodyMaterial = obstacle.obstacleType === 'SCAN_BAR'
-          ? obstacleSignalMaterial
-          : obstacleBodyMaterial;
+        // Jumpable signal beams glow; structural blockers stay dark basalt so
+        // the route reads as architecture rather than an obstacle course.
+        const isSignalElement =
+          obstacle.obstacleType === 'SCAN_BAR' || obstacle.obstacleType === 'SWEEP_BEAM';
+        const bodyMaterial = isSignalElement ? obstacleSignalMaterial : obstacleBodyMaterial;
         const mesh = new THREE.Mesh(geom, bodyMaterial);
         mesh.name = `RouteObstacle:${obstacle.obstacleType}:${obstacle.id}`;
         mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
         mesh.rotation.set(0, obstacle.yaw, 0, 'YXZ');
         mesh.userData.routeObstacleId = obstacle.id;
         rootGroup.add(mesh);
-        if (obstacle.obstacleType === 'SCAN_BAR') registerBeacon(mesh, 'ACCENT_TRIM');
+        if (isSignalElement) registerBeacon(mesh, 'ACCENT_TRIM');
 
         const outline = new THREE.LineSegments(
           new THREE.EdgesGeometry(geom),
@@ -363,9 +385,33 @@ export class GeometryBuilder {
         edgeLines.push(outline);
         routeEdgeItems.push({ mesh: outline, nodeArcLength: obstacle.arcLength, nodeTime: obstacle.time });
 
-        const source = track.route.find(node => node.id === obstacle.obstacleSourceNodeId);
-        if (source) {
-          const telegraphLength = obstacle.obstacleTelegraphDistance ?? 15;
+        // Moving obstacles register their mesh so it tracks the deterministic
+        // collider motion each frame (song-time driven, never audio jitter).
+        if (obstacle.obstacleMotion) {
+          const sinYaw = Math.sin(obstacle.yaw);
+          const cosYaw = Math.cos(obstacle.yaw);
+          animatedObstacles.push({
+            mesh,
+            outline,
+            baseX: obstacle.position.x,
+            baseY: obstacle.position.y,
+            baseZ: obstacle.position.z,
+            lateralX: cosYaw,
+            lateralZ: -sinYaw,
+            amplitude: obstacle.obstacleMotion.amplitude,
+            speed: obstacle.obstacleMotion.speed,
+            phase: obstacle.obstacleMotion.phase
+          });
+        }
+
+        // Only the leading element of a phrase carries a read-strip, so thread
+        // walls do not stack overlapping telegraphs.
+        const telegraphDistance = obstacle.obstacleTelegraphDistance;
+        const source = telegraphDistance
+          ? track.route.find(node => node.id === obstacle.obstacleSourceNodeId)
+          : undefined;
+        if (source && telegraphDistance) {
+          const telegraphLength = telegraphDistance;
           const telegraphWidth = obstacle.obstacleType === 'SPLIT_GATE'
             ? Math.max(2.4, source.dimensions.x * 0.28)
             : Math.min(source.dimensions.x - 1, 6.0);
@@ -488,7 +534,16 @@ export class GeometryBuilder {
       });
     };
 
-    return { rootGroup, decorativeGroup, reactiveMaterials, reactiveBeacons, edgeLines, routeEdgeItems, dispose };
+    return {
+      rootGroup,
+      decorativeGroup,
+      reactiveMaterials,
+      reactiveBeacons,
+      edgeLines,
+      routeEdgeItems,
+      animatedObstacles,
+      dispose
+    };
   }
 }
 

@@ -9,10 +9,31 @@ import { SurfState, SurfaceClassification } from '../player/SurfState';
 
 import { RouteVoidEnvelope } from './RouteVoidEnvelope';
 
+interface DynamicObstacle {
+  collider: BoxCollider;
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  /** Unit lateral (local +X) direction in world space. */
+  lateralX: number;
+  lateralZ: number;
+  amplitude: number;
+  speed: number;
+  phase: number;
+}
+
 export class PhysicsWorld {
   public colliders: BoxCollider[] = [];
   public killPlaneY = -40.0; // Beneath lowest route structure
   public voidEnvelope = new RouteVoidEnvelope();
+
+  /**
+   * Moving gameplay obstacles (signal shutters / sweep beams). Their motion is
+   * a pure function of song time, so the same track always presents the same
+   * geometry. Kept separate from the static collider list so per-frame cost is
+   * limited to the handful of obstacles that actually move.
+   */
+  private dynamicObstacles: DynamicObstacle[] = [];
 
   /**
    * Vertical clearance below the LOWEST legitimate gameplay geometry.
@@ -63,6 +84,7 @@ export class PhysicsWorld {
     signalSpines?: RouteNode[]
   ): void {
     this.colliders = [];
+    this.dynamicObstacles = [];
     let lowestY = Infinity;
 
     for (const node of route) {
@@ -105,7 +127,24 @@ export class PhysicsWorld {
     // playable route/surf/recovery geometry.
     if (obstacles) {
       for (const obstacle of obstacles) {
-        this.colliders.push(new BoxCollider(obstacle));
+        const collider = new BoxCollider(obstacle);
+        this.colliders.push(collider);
+
+        if (obstacle.obstacleMotion) {
+          const sin = Math.sin(obstacle.yaw);
+          const cos = Math.cos(obstacle.yaw);
+          this.dynamicObstacles.push({
+            collider,
+            baseX: obstacle.position.x,
+            baseY: obstacle.position.y,
+            baseZ: obstacle.position.z,
+            lateralX: cos,
+            lateralZ: -sin,
+            amplitude: obstacle.obstacleMotion.amplitude,
+            speed: obstacle.obstacleMotion.speed,
+            phase: obstacle.obstacleMotion.phase
+          });
+        }
       }
     }
 
@@ -124,6 +163,7 @@ export class PhysicsWorld {
 
   public clear(): void {
     this.colliders = [];
+    this.dynamicObstacles = [];
   }
 
   /**
@@ -232,7 +272,32 @@ export class PhysicsWorld {
     return pos.y < this.killPlaneY;
   }
 
+  /**
+   * Advances moving obstacle colliders to their deterministic position for the
+   * given song time. No-op when a track has no moving obstacles, so tracks that
+   * only use static obstacles pay nothing.
+   */
+  public updateDynamicObstacles(songTime: number): void {
+    if (this.dynamicObstacles.length === 0) return;
+    for (const dyn of this.dynamicObstacles) {
+      const offset = dyn.amplitude * Math.sin(songTime * dyn.speed + dyn.phase);
+      const collider = dyn.collider;
+      collider.center.set(
+        dyn.baseX + dyn.lateralX * offset,
+        dyn.baseY,
+        dyn.baseZ + dyn.lateralZ * offset
+      );
+      collider.matrix.setPosition(collider.center);
+      collider.invMatrix.copy(collider.matrix).invert();
+    }
+  }
+
+  public hasDynamicObstacles(): boolean {
+    return this.dynamicObstacles.length > 0;
+  }
+
   public dispose(): void {
     this.colliders = [];
+    this.dynamicObstacles = [];
   }
 }

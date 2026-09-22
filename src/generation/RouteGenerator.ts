@@ -603,7 +603,10 @@ export class RouteGenerator {
       recoveryShelves,
       signalSpines
     );
-    const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis);
+    const obstacles = RouteChallengeGenerator.generate(repairedNodes, analysis, {
+      signalSpines,
+      recoveryShelves
+    });
 
     return {
       generationVersion: ROUTE_GENERATION_VERSION,

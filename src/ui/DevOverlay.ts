@@ -10,6 +10,7 @@ import { TrackGenerator } from '../generation/TrackGenerator';
 import { Environment } from '../world/Environment';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { RouteChallengeGenerator } from '../generation/RouteChallengeGenerator';
 
 export class DevOverlay {
   public element: HTMLElement;
@@ -164,9 +165,33 @@ export class DevOverlay {
       `FLUX: ${vs.flux.toFixed(2)} | ONSET PULSE: ${vs.onsetPulse.toFixed(2)} | CENTROID: ${vs.brightness.toFixed(2)}`,
       `BUILDUP: ${vs.buildup.toFixed(2)} | DROP IMPACT: ${vs.dropImpact.toFixed(2)} | NEXT DROP DIST: ${vs.upcomingDropDistance > 9000 ? 'NONE' : vs.upcomingDropDistance.toFixed(1) + 'm'}`,
       `SYNC DELTA: ${vs.syncDelta.toFixed(2)}s | PLAYER PROG: ${(vs.playerProgress * 100).toFixed(1)}% | TIME PROG: ${(vs.progress * 100).toFixed(1)}%`,
-      world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE'
+      world.track ? `ROUTE NODES: ${world.track.route.length} | CPS: ${world.track.checkpoints.length} | REPAIRS: ${world.track.repairedJumpsCount} | ATTEMPTS: ${TrackGenerator.lastReport?.attempts || 1}` : 'TRACK: NONE',
+      obstacleDiagnosticsLine(world)
     ];
 
     this.textElement.innerText = lines.join('\n');
   }
+}
+
+function obstacleDiagnosticsLine(world: World): string {
+  const report = RouteChallengeGenerator.getLastReport();
+  const count = world.track?.obstacles?.length ?? 0;
+  if (!report) {
+    return `OBSTACLES: ${count} (no report)`;
+  }
+  const types = Object.entries(report.countByType)
+    .map(([type, n]) => `${type}:${n}`)
+    .join(' ');
+  const difficulty = Object.entries(report.countByDifficulty)
+    .map(([band, n]) => `${band}:${n}`)
+    .join(' ');
+  const rejections = Object.entries(report.rejectionReasons)
+    .map(([reason, n]) => `${reason}:${n}`)
+    .join(' ');
+  return (
+    `OBSTACLES: ${report.obstaclesGenerated} in ${report.phrasesGenerated} phrases ` +
+    `| ELIGIBLE: ${report.eligibleNodes} | REJECTED: ${report.rejected}` +
+    `\nOBSTACLE TYPES: ${types || 'none'} | DIFFICULTY: ${difficulty || 'none'}` +
+    `\nOBSTACLE REJECTIONS: ${rejections || 'none'}`
+  );
 }

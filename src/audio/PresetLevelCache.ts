@@ -55,22 +55,27 @@ export class PresetLevelCache {
         track = RouteGenerator.generate(json.analysis);
       }
 
-      if (!track.obstacles && json.analysis) {
-        track.obstacles = RouteChallengeGenerator.generate(track.route, json.analysis);
-      }
-
-      // Ensure optional side-surf skill ramps are present even in cached presets
+      // Ensure optional side-surf skill ramps + signal spines exist even in cached presets.
       if (!track.optionalRamps || track.optionalRamps.length === 0) {
         const rng = new SeededRandom(json.analysis?.seed || 12345);
         track.optionalRamps = RouteGenerator.generateOptionalSideSurfs(track.route, rng);
       }
 
-      // Ensure procedural top-surface signal spines are present even in cached presets
       if (!track.signalSpines || track.signalSpines.length === 0) {
         if (json.analysis) {
           const rng = new SeededRandom(json.analysis?.seed || 12345);
           track.signalSpines = SignalSpineGenerator.generate(track.route, json.analysis, rng);
         }
+      }
+
+      // Obstacle Pass 2 layouts are regenerated from the route + analysis so a
+      // cached preset can never retain an obsolete, sparse obstacle layout.
+      // Validation runs against the final spine / shelf recovery layer.
+      if (json.analysis) {
+        track.obstacles = RouteChallengeGenerator.generate(track.route, json.analysis, {
+          signalSpines: track.signalSpines,
+          recoveryShelves: track.recoveryShelves
+        });
       }
 
       const data: PrecomputedLevelData = {

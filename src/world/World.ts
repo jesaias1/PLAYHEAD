@@ -193,6 +193,20 @@ export class World {
   ): { arcProgress: number; syncDelta: number; progressRatio: number; targetSongTime: number } {
     // Decoration LOD distance is owned by the quality system (0 = never cull).
     const lodDistance = environment ? environment.decorationLodDistance : 0;
+
+    // Deterministic moving obstacles (shutters / sweep beams). Their collision
+    // boxes and visible meshes advance together from song time only.
+    this.physics.updateDynamicObstacles(songTime);
+    if (this.builtAssets && this.builtAssets.animatedObstacles.length > 0) {
+      for (const item of this.builtAssets.animatedObstacles) {
+        const offset = item.amplitude * Math.sin(songTime * item.speed + item.phase);
+        const x = item.baseX + item.lateralX * offset;
+        const z = item.baseZ + item.lateralZ * offset;
+        item.mesh.position.set(x, item.baseY, z);
+        if (item.outline) item.outline.position.set(x, item.baseY, z);
+      }
+    }
+
     const progress = this.getRouteProgress(playerPos);
     const totalDist = this.track && this.track.totalDistance > 0 ? this.track.totalDistance : 1;
     const progressRatio = progress.arcProgress / totalDist;

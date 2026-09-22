@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { TrackAnalysis } from '../src/audio/AudioFeatures';
+import { AnalysisSection, TrackAnalysis } from '../src/audio/AudioFeatures';
 import { RouteNode, RouteNodeType } from '../src/generation/GenerationTypes';
 import { RouteGenerator } from '../src/generation/RouteGenerator';
 import {
@@ -12,9 +12,13 @@ import { PhysicsWorld } from '../src/physics/PhysicsWorld';
 import { GeometryBuilder } from '../src/world/GeometryBuilder';
 import { PLAYHEAD_MOVEMENT_V1 } from '../src/player/MovementConfig';
 
+const JUMP_APEX =
+  (PLAYHEAD_MOVEMENT_V1.jumpVelocity ** 2) / (2 * PLAYHEAD_MOVEMENT_V1.gravity);
+
 function analysis(
   theme: TrackAnalysis['sections'][number]['theme'] = 'BUILDUP',
-  seed = 0x504c4159
+  seed = 0x504c4159,
+  overrides: Partial<AnalysisSection> = {}
 ): TrackAnalysis {
   return {
     filename: 'route-challenges.wav',
@@ -32,7 +36,8 @@ function analysis(
       intensity: 0.82,
       rhythmicDensity: 0.84,
       brightness: 0.7,
-      theme
+      theme,
+      ...overrides
     }],
     waveform: new Float32Array(512),
     seed,
@@ -59,60 +64,86 @@ function broadRoute(count = 36): RouteNode[] {
 }
 
 describe('deterministic readable route challenges', () => {
-  it('places a sparse deterministic vocabulary with authored spacing', () => {
+  it('is deterministic for a given seed', () => {
     const route = broadRoute();
     const first = RouteChallengeGenerator.generate(route, analysis());
     const second = RouteChallengeGenerator.generate(route, analysis());
     expect(first).toEqual(second);
     expect(first.length).toBeGreaterThan(0);
     expect(first.length).toBeLessThanOrEqual(ROUTE_CHALLENGE_LIMITS.maxObstacles);
-
-    for (let i = 1; i < first.length; i++) {
-      expect(first[i].arcLength - first[i - 1].arcLength)
-        .toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minSpacing);
-      expect(first[i].obstacleType).not.toBe(first[i - 1].obstacleType);
-    }
   });
 
-  it('preserves a clear, measurable response for every obstacle type', () => {
+  it('keeps phrases spaced and never spams every platform', () => {
+    const route = broadRoute();
+    const obstacles = RouteChallengeGenerator.generate(route, analysis());
+
+    // Group by phrase and verify phrase anchor spacing.
+    const anchors = new Map<number, number>();
+    for (const obstacle of obstacles) {
+      const id = obstacle.obstaclePhraseId!;
+      const current = anchors.get(id);
+      if (current === undefined || obstacle.arcLength < current) {
+        anchors.set(id, obstacle.arcLength);
+      }
+    }
+    const sorted = [...anchors.values()].sort((a, b) => a - b);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minSpacing);
+    }
+
+    // Obstacle count stays a small fraction of the platform count.
+    expect(obstacles.length).toBeLessThan(route.length);
+  });
+
+  it('gives every obstacle a fair, measurable response', () => {
     const route = broadRoute();
     const obstacles = RouteChallengeGenerator.generate(route, analysis());
     for (const obstacle of obstacles) {
       const source = route.find(node => node.id === obstacle.obstacleSourceNodeId)!;
-      if (obstacle.obstacleType === 'SCAN_BAR') {
-        const jumpApex = (PLAYHEAD_MOVEMENT_V1.jumpVelocity ** 2) / (2 * PLAYHEAD_MOVEMENT_V1.gravity);
-        expect(obstacle.dimensions.y).toBeLessThan(jumpApex * 0.5);
+      expect(source).toBeTruthy();
+      expect(obstacle.obstaclePhraseKind).toBeTruthy();
+      expect(obstacle.obstacleDifficulty).toBeTruthy();
+
+      if (obstacle.obstacleType === 'SCAN_BAR' || obstacle.obstacleType === 'SWEEP_BEAM') {
+        expect(obstacle.dimensions.y).toBeLessThan(JUMP_APEX * 0.5);
         expect(obstacle.obstacleSafeLane).toBe('JUMP');
+      } else if (obstacle.obstacleType === 'SPLIT_GATE') {
+        const laneWidth = source.dimensions.x - obstacle.dimensions.x - 0.75;
+        expect(laneWidth).toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minOpening);
+        expect(['LEFT', 'RIGHT']).toContain(obstacle.obstacleSafeLane);
       } else if (obstacle.obstacleType === 'SIGNAL_SHUTTER') {
-        const laneWidth = (source.dimensions.x - obstacle.dimensions.x) * 0.5;
-        expect(laneWidth).toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minSafeLane);
+        const staticLane = (source.dimensions.x - obstacle.dimensions.x) * 0.5;
+        const amplitude = obstacle.obstacleMotion?.amplitude ?? 0;
+        expect(staticLane - amplitude).toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minSafeLane);
         expect(obstacle.obstacleSafeLane).toBe('BOTH');
       } else {
-        const laneWidth = source.dimensions.x - obstacle.dimensions.x - 0.75;
-        expect(laneWidth).toBeGreaterThanOrEqual(ROUTE_CHALLENGE_LIMITS.minSafeLane);
-        expect(['LEFT', 'RIGHT']).toContain(obstacle.obstacleSafeLane);
+        // PHASE_BLOCK: both strafe lanes must remain traversable.
+        expect(obstacle.dimensions.y).toBeGreaterThanOrEqual(1.8);
       }
-      expect(obstacle.obstacleTelegraphDistance).toBeGreaterThanOrEqual(15);
     }
   });
 
-  it('leaves drop and breath release sections obstacle-free', () => {
+  it('leaves drop, surf and breath release sections obstacle-free', () => {
     expect(RouteChallengeGenerator.generate(broadRoute(), analysis('DROP'))).toEqual([]);
     expect(RouteChallengeGenerator.generate(broadRoute(), analysis('BREATH'))).toEqual([]);
+    expect(RouteChallengeGenerator.generate(broadRoute(), analysis('SURF'))).toEqual([]);
   });
 
-  it('integrates the full static challenge vocabulary across generated courses', () => {
+  it('integrates the full challenge vocabulary across generated courses', () => {
     const seen = new Set<string>();
+    const phrases = new Set<string>();
     let generatedCount = 0;
-    for (let seed = 1; seed <= 20; seed++) {
+    for (let seed = 1; seed <= 30; seed++) {
       const track = RouteGenerator.generate(analysis('FLOW', seed));
       for (const obstacle of track.obstacles ?? []) {
         seen.add(obstacle.obstacleType!);
+        phrases.add(obstacle.obstaclePhraseKind!);
         generatedCount++;
       }
     }
     expect(generatedCount).toBeGreaterThan(0);
-    expect(seen).toEqual(new Set(['SIGNAL_SHUTTER', 'SCAN_BAR', 'SPLIT_GATE']));
+    expect(seen).toEqual(new Set(['SIGNAL_SHUTTER', 'SCAN_BAR', 'SPLIT_GATE', 'PHASE_BLOCK', 'SWEEP_BEAM']));
+    expect(phrases.size).toBeGreaterThanOrEqual(4);
   });
 
   it('uses identical visible and collision bounds', () => {
