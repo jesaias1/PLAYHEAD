@@ -12,7 +12,7 @@
  * presentation only.
  */
 
-import { RacePlayer, RaceRoom, RaceResultRow } from '../online/RaceRoomService';
+import { RacePlayer, RaceRoom, RaceResultRow, computeBothReady } from '../online/RaceRoomService';
 import { formatRaceTime } from './RaceHud';
 
 export interface RaceCatalogEntry {
@@ -57,6 +57,18 @@ export class RacePanel {
 
   private readyState = false;
   private isHost = false;
+  /** Local transient state while a READY write is in flight. */
+  private pendingReady = false;
+  /** readyState before the in-flight click, restored if the write fails. */
+  private pendingFromReady = false;
+  /**
+   * Canonical map verification is a SEPARATE axis from readiness. A player who
+   * cannot verify the map is not 'NOT READY' - they are blocked, and the lobby
+   * must say so rather than implying they simply have not clicked.
+   */
+  private mapState: 'UNKNOWN' | 'VERIFYING' | 'OK' | 'MISMATCH' = 'UNKNOWN';
+  private mapDetail = '';
+  private readyError = '';
 
   constructor() {
     this.element = document.createElement('div');
@@ -163,9 +175,16 @@ export class RacePanel {
     });
 
     this.lobbyReadyBtn.addEventListener('click', () => {
-      this.readyState = !this.readyState;
-      this.callbacks?.onSetReady(this.readyState);
+      if (this.pendingReady) return;
+      const next = !this.readyState;
+      // Pending is shown until the server confirms; we never pretend a write
+      // succeeded. The service re-reads the row and reports the result.
+      this.pendingReady = true;
+      this.pendingFromReady = this.readyState;
+      this.readyError = '';
+      this.readyState = next;
       this.renderReadyButton();
+      this.callbacks?.onSetReady(next);
     });
     this.lobbyStartBtn.addEventListener('click', () => this.callbacks?.onStartSession());
     (this.element.querySelector('#race-leave-btn') as HTMLButtonElement).addEventListener('click', () =>
@@ -211,6 +230,15 @@ export class RacePanel {
     this.selectView.classList.remove('hidden');
     this.lobbyView.classList.add('hidden');
     this.resultsView.classList.add('hidden');
+    // Leaving the lobby resets every lobby-scoped axis: readiness, the pending
+    // write, and map verification must not leak into the next room.
+    this.readyState = false;
+    this.pendingReady = false;
+    this.pendingFromReady = false;
+    this.readyError = '';
+    this.mapState = 'UNKNOWN';
+    this.mapDetail = '';
+    this.renderReadyButton();
     this.clearError();
   }
 
@@ -269,12 +297,18 @@ export class RacePanel {
       } else {
         const isMe = player.userId === myUserId;
         row.classList.toggle('online-player-disconnected', !player.connected);
+        // Map verification and readiness are separate; the row must say which.
+        let state: string;
+        if (!player.connected) state = 'DISCONNECTED';
+        else if (isMe && this.mapState === 'MISMATCH') state = 'MAP MISMATCH';
+        else if (isMe && this.mapState === 'VERIFYING') state = 'MAP VERIFYING';
+        else if (isMe && this.pendingReady) state = 'SETTING READY...';
+        else state = player.ready ? 'READY' : 'NOT READY';
+
         row.innerHTML =
           `<span class="online-player-index">PLAYER ${i + 1}</span>` +
           `<span class="online-player-name">${this.escape(player.displayName)}${isMe ? ' (YOU)' : ''}</span>` +
-          `<span class="online-player-state">${
-            !player.connected ? 'DISCONNECTED' : player.ready ? 'READY' : 'NOT READY'
-          }</span>`;
+          `<span class="online-player-state">${state}</span>`;
       }
       this.lobbyPlayersElem.appendChild(row);
     }
@@ -283,13 +317,25 @@ export class RacePanel {
     this.readyState = me?.ready ?? false;
     this.renderReadyButton();
 
+    // START requires: two rows present, both connected, both ready, and both
+    // verified on the same canonical map. These are deliberately separate checks.
     const connected = players.filter((p) => p.connected);
-    const allReady = connected.length >= 2 && connected.every((p) => p.ready);
+    const allReady = computeBothReady(players);
     this.lobbyStartBtn.classList.toggle('hidden', !this.isHost);
-    this.lobbyStartBtn.disabled = !allReady;
+    this.lobbyStartBtn.disabled = !allReady || this.mapState === 'MISMATCH';
     this.lobbyStartBtn.textContent = allReady ? '> START SESSION' : '> WAITING FOR PLAYERS';
 
-    if (room.state === 'COUNTDOWN' && room.startAtMs !== null) {
+    // Readiness, map verification and connectivity are separate axes. The status
+    // line must never imply "just click READY" when the real blocker is the map.
+    if (this.mapState === 'MISMATCH') {
+      this.lobbyStatusElem.textContent = `MAP MISMATCH // ${this.mapDetail}`;
+    } else if (this.mapState === 'VERIFYING') {
+      this.lobbyStatusElem.textContent = 'MAP VERIFYING...';
+    } else if (this.readyError) {
+      this.lobbyStatusElem.textContent = this.readyError;
+    } else if (this.pendingReady) {
+      this.lobbyStatusElem.textContent = 'SETTING READY...';
+    } else if (room.state === 'COUNTDOWN' && room.startAtMs !== null) {
       const seconds = Math.max(0, Math.ceil((room.startAtMs - Date.now()) / 1000));
       this.lobbyStatusElem.textContent = `STARTING IN ${seconds}...`;
     } else if (connected.length < 2) {
@@ -302,8 +348,43 @@ export class RacePanel {
   }
 
   private renderReadyButton(): void {
-    this.lobbyReadyBtn.textContent = this.readyState ? '> READY ✓' : '> READY';
-    this.lobbyReadyBtn.classList.toggle('online-ready-active', this.readyState);
+    if (this.pendingReady) {
+      this.lobbyReadyBtn.textContent = '> SETTING READY...';
+      this.lobbyReadyBtn.disabled = true;
+    } else {
+      this.lobbyReadyBtn.textContent = this.readyState ? '> READY ✓' : '> READY';
+      // READY is only meaningful once the canonical map is verified. A player
+      // blocked by the map is not "not ready" - they are blocked.
+      this.lobbyReadyBtn.disabled = this.mapState !== 'OK';
+    }
+    this.lobbyReadyBtn.classList.toggle('online-ready-active', this.readyState && !this.pendingReady);
+  }
+
+  /**
+   * Called with the VERIFIED result of a READY write. Never assumed to succeed.
+   *
+   * On failure the optimistic toggle is rolled back to the pre-click value and
+   * the error is surfaced. On success `readyState` is left alone: the service
+   * always reconciles from the database before this runs, so `renderLobby` has
+   * already installed the true value.
+   */
+  public setReadyResult(ok: boolean, detail: string): void {
+    this.pendingReady = false;
+    if (ok) {
+      this.readyError = '';
+    } else {
+      this.readyState = this.pendingFromReady;
+      this.readyError = detail;
+    }
+    this.renderReadyButton();
+    if (!ok && this.readyError) this.lobbyStatusElem.textContent = this.readyError;
+  }
+
+  /** Map verification is a separate axis from readiness. */
+  public setMapState(state: 'UNKNOWN' | 'VERIFYING' | 'OK' | 'MISMATCH', detail = ''): void {
+    this.mapState = state;
+    this.mapDetail = detail;
+    this.renderReadyButton();
   }
 
   public renderResults(rows: readonly RaceResultRow[], myUserId: string | null): void {

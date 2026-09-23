@@ -91,6 +91,14 @@ export interface GhostSample {
   attempt: number;
 }
 
+export interface ReadyUpdateResult {
+  at: number;
+  requested: boolean;
+  ok: boolean;
+  rows: number;
+  detail: string;
+}
+
 export type RaceOutcome = 'WIN' | 'LOSS' | 'TIE' | 'NO_FINISH';
 
 export interface RaceResultRow {
@@ -102,6 +110,22 @@ export interface RaceResultRow {
   outcome: RaceOutcome;
   /** Difference from the winner, in microseconds (null when no finish). */
   gapUs: number | null;
+}
+
+/**
+ * Whether the lobby is actually startable.
+ *
+ * The host may start ONLY when two room-player rows exist, both are connected,
+ * and both are ready. Pure so the rule is unit-testable and cannot drift from
+ * the UI that renders it.
+ *
+ * Canonical MAP IDENTITY is deliberately a SEPARATE gate, checked before this
+ * one: a player blocked by map verification is not "not ready", and the lobby
+ * must say MAP VERIFYING / MAP MISMATCH rather than implying they never clicked.
+ */
+export function computeBothReady(players: readonly RacePlayer[]): boolean {
+  const connected = players.filter((p) => p.connected);
+  return connected.length >= 2 && connected.every((p) => p.ready);
 }
 
 /**
@@ -172,6 +196,10 @@ export class RaceRoomService {
   private myGhost: GhostSample | null = null;
   /** Locally tracked attempt index, used to reset the remote ghost to spawn. */
   private attemptIndex = 0;
+  /** DEV lobby diagnostics. */
+  private lobbySyncTimer: number | null = null;
+  private realtimePlayerEvents = 0;
+  private lastReadyUpdate: ReadyUpdateResult | null = null;
 
   constructor(
     private readonly onlineClient: OnlineClient = online,
@@ -325,15 +353,139 @@ export class RaceRoomService {
     await this.refreshPlayers();
   }
 
-  public async setReady(ready: boolean): Promise<void> {
+  /**
+   * Sets the local player's ready flag.
+   *
+   * This deliberately VERIFIES the write. A PostgREST UPDATE that is blocked by
+   * RLS, or whose filter matches nothing, returns 200 with an empty body and NO
+   * error — which is exactly how "clicking READY does nothing" presented. So we
+   * ask for the affected row back and treat zero rows as a failure.
+   */
+  public async setReady(ready: boolean): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     const userId = this.auth.getUserId();
-    if (!client || !userId || !this.room) return;
-    await client
-      .from('race_room_players')
-      .update({ ready, last_seen_at: new Date().toISOString() })
-      .eq('room_id', this.room.id)
-      .eq('user_id', userId);
+    if (!client) return this.failReady(ready, 'not connected');
+    if (!userId) return this.failReady(ready, 'not signed in');
+    if (!this.room) return this.failReady(ready, 'not in a room');
+
+    try {
+      const { data, error, status } = await client
+        .from('race_room_players')
+        .update({ ready, last_seen_at: new Date().toISOString() })
+        .eq('room_id', this.room.id)
+        .eq('user_id', userId)
+        .select('room_id, user_id, ready');
+
+      this.lastReadyUpdate = {
+        at: Date.now(),
+        requested: ready,
+        ok: false,
+        rows: 0,
+        detail: ''
+      };
+
+      if (error) {
+        this.lastReadyUpdate.detail = `${error.code ?? status}: ${error.message}`;
+        await this.refreshPlayers();
+        return { ok: false, detail: `READY FAILED // ${error.message}` };
+      }
+
+      const rows = data?.length ?? 0;
+      this.lastReadyUpdate.rows = rows;
+      if (rows === 0) {
+        // Zero rows means the filter matched nothing: wrong room id, wrong user
+        // id, or RLS blocked it. Treat as an error instead of silently failing.
+        this.lastReadyUpdate.detail = 'zero rows updated (filter/RLS mismatch)';
+        await this.refreshPlayers();
+        return {
+          ok: false,
+          detail: 'READY FAILED // NO ROW UPDATED (SESSION OR RLS MISMATCH)'
+        };
+      }
+
+      this.lastReadyUpdate.ok = true;
+      this.lastReadyUpdate.detail = `updated ${rows} row`;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.lastReadyUpdate = {
+        at: Date.now(),
+        requested: ready,
+        ok: false,
+        rows: 0,
+        detail
+      };
+      await this.refreshPlayers();
+      return { ok: false, detail: `READY FAILED // ${detail}` };
+    }
+
+    // Always reconcile from the database. On success this confirms the write; on
+    // failure it restores the true state instead of leaving our optimism on
+    // screen. This is the same path Realtime uses, so there is one truth.
+    await this.refreshPlayers();
+    return { ok: true, detail: 'READY' };
+  }
+
+  /** Records a pre-flight READY failure so DEV diagnostics can show why. */
+  private failReady(ready: boolean, detail: string): { ok: false; detail: string } {
+    this.lastReadyUpdate = {
+      at: Date.now(),
+      requested: ready,
+      ok: false,
+      rows: 0,
+      detail
+    };
+    return { ok: false, detail };
+  }
+
+  /** DEV diagnostics for the lobby. */
+  public getLobbyDiagnostics(): {
+    userIdSuffix: string;
+    roomId: string;
+    rowFound: boolean;
+    readyLocal: boolean;
+    readyDatabase: boolean | null;
+    connected: boolean;
+    realtimePlayerEvents: number;
+    lastReadyUpdate: ReadyUpdateResult | null;
+    lobbySyncActive: boolean;
+  } {
+    const userId = this.auth.getUserId() ?? '';
+    const mine = this.players.find((p) => p.userId === userId);
+    return {
+      userIdSuffix: userId ? userId.slice(-6) : 'none',
+      roomId: this.room ? this.room.id.slice(0, 8) : 'none',
+      rowFound: !!mine,
+      readyLocal: mine?.ready ?? false,
+      readyDatabase: mine ? mine.ready : null,
+      connected: mine?.connected ?? false,
+      realtimePlayerEvents: this.realtimePlayerEvents,
+      lastReadyUpdate: this.lastReadyUpdate,
+      lobbySyncActive: this.lobbySyncTimer !== null
+    };
+  }
+
+  /**
+   * Polling fallback for the lobby.
+   *
+   * Realtime `postgres_changes` is the primary path, but it depends on the table
+   * being in the `supabase_realtime` publication. If that is ever missing or the
+   * socket drops, the lobby would silently stop converging. A light poll while
+   * the room is still in LOBBY keeps both clients correct regardless; it stops
+   * polling once the session starts, and is cleared on leave/disconnect.
+   */
+  public startLobbySync(intervalMs = 2000): void {
+    if (typeof window === 'undefined') return;
+    this.stopLobbySync();
+    this.lobbySyncTimer = window.setInterval(() => {
+      if (this.room && this.room.state === 'LOBBY') void this.refreshPlayers();
+    }, intervalMs);
+  }
+
+  public stopLobbySync(): void {
+    if (this.lobbySyncTimer !== null && typeof window !== 'undefined') {
+      window.clearInterval(this.lobbySyncTimer);
+    }
+    this.lobbySyncTimer = null;
   }
 
   public isHost(): boolean {
@@ -450,6 +602,7 @@ export class RaceRoomService {
     });
 
     channel.on('postgres_changes', { event: '*', schema: 'public', table: 'race_room_players', filter: `room_id=eq.${room.id}` }, () => {
+      this.realtimePlayerEvents++;
       void this.refreshPlayers();
     });
     channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'race_rooms', filter: `id=eq.${room.id}` }, (payload) => {
@@ -460,7 +613,12 @@ export class RaceRoomService {
     });
 
     channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') this.onlineClient.setStatus('ONLINE');
+      if (status === 'SUBSCRIBED') {
+        this.onlineClient.setStatus('ONLINE');
+        // Resync on (re)connect: Realtime may have missed events while down.
+        void this.refreshPlayers();
+        this.startLobbySync();
+      }
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         this.onlineClient.setStatus('ERROR', `realtime ${status}`);
       }
@@ -534,10 +692,13 @@ export class RaceRoomService {
     this.players = [];
     this.myGhost = null;
     this.attemptIndex = 0;
+    this.realtimePlayerEvents = 0;
+    this.lastReadyUpdate = null;
   }
 
   public async unsubscribe(): Promise<void> {
     this.stopGhostBroadcast();
+    this.stopLobbySync();
     if (this.channel) {
       const client = this.onlineClient.getClient();
       if (client) await client.removeChannel(this.channel);

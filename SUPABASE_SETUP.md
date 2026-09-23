@@ -47,7 +47,7 @@ If you prefer not to use the CLI, skip to step 3b.
 
 ---
 
-## 3. Apply the database migration
+## 3. Apply the database migrations
 
 **3a. CLI**
 
@@ -57,8 +57,17 @@ supabase db push
 
 **3b. Dashboard alternative**
 
-Open **SQL Editor**, paste the entire contents of
-`supabase/migrations/20260922000000_online_v1.sql`, and run it.
+Open **SQL Editor**, paste the entire contents of each file in
+`supabase/migrations/` **in filename order**, and run them.
+
+- `20260922000000_online_v1.sql` — schema, RLS, RPCs, storage bucket.
+- `20260923000000_realtime_publication.sql` — **required for the friend-race
+  lobby.** It adds `race_room_players` and `race_rooms` to the
+  `supabase_realtime` publication and sets `replica identity full`.
+
+> Without the second migration the lobby still lets players see each other on
+> join, but `postgres_changes` events are never delivered — so a READY change is
+> never propagated and the race can never start.
 
 This creates: `profiles`, `player_progress`, `cosmetic_ownership`,
 `track_progress`, `custom_signal_claims`, `leaderboard_runs`, `race_rooms`,
@@ -66,6 +75,20 @@ This creates: `profiles`, `player_progress`, `cosmetic_ownership`,
 bucket, and the RPCs `sync_progression`, `my_pending_drop_ranks`, `spend_drop`,
 `grant_progression_events`, `upsert_track_progress`,
 `race_report_attempt_start`, `race_report_finish`, `expire_stale_race_rooms`.
+
+---
+
+## 3c. Verify Realtime publication (friend race)
+
+Dashboard → **Database → Publications**, or run:
+
+```sql
+select tablename from pg_publication_tables
+where pubname = 'supabase_realtime'
+  and schemaname = 'public';
+```
+
+`race_room_players` and `race_rooms` must both be listed.
 
 ---
 

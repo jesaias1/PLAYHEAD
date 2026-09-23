@@ -17,6 +17,7 @@ import { RouteForkGenerator } from '../generation/RouteForkGenerator';
 import type { ChannelIsolation } from '../world/MusicVisualController';
 import { onlineBootstrap } from '../online/OnlineBootstrap';
 import { leaderboardService } from '../online/LeaderboardService';
+import { raceRoomService } from '../online/RaceRoomService';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -217,6 +218,7 @@ export class DevOverlay {
       audioVisualDiagnosticsLine(world, this.channelIsolation),
       worldSafetyDiagnosticsLine(world),
       onlineDiagnosticsLine(),
+      raceLobbyDiagnosticsLine(),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -277,6 +279,27 @@ function onlineDiagnosticsLine(): string {
       status.lastSyncAt > 0 ? new Date(status.lastSyncAt).toISOString().slice(11, 19) : 'never'
     }` +
     `\n  SUBMIT ${canSubmit.ok ? 'ENABLED' : 'DISABLED'} // ${canSubmit.detail}`
+  );
+}
+
+/**
+ * DEV: friend-race lobby diagnostics.
+ *
+ * READY failures used to be invisible because the write result was discarded.
+ * This exposes the whole chain: local identity, the row, the DB value, the last
+ * verified write result, and how many realtime player events actually arrived.
+ * Only a short user-id suffix is shown - never a full UUID in normal UI.
+ */
+function raceLobbyDiagnosticsLine(): string {
+  const d = raceRoomService.getLobbyDiagnostics();
+  const last = d.lastReadyUpdate;
+  return (
+    `RACE LOBBY: user ..${d.userIdSuffix} | room ${d.roomId}` +
+    `\n  ROW ${d.rowFound ? 'yes' : 'no'} | READY local ${d.readyLocal} | READY db ${
+      d.readyDatabase === null ? 'n/a' : d.readyDatabase
+    }` +
+    `\n  CONNECTED ${d.connected} | sync ${d.lobbySyncActive ? 'polling' : 'off'} | realtime player events ${d.realtimePlayerEvents}` +
+    `\n  LAST READY: ${last ? `${last.ok ? 'ok' : 'FAIL'} rows=${last.rows} ${last.detail}` : 'none'}`
   );
 }
 

@@ -2331,7 +2331,13 @@ export class Game {
     racePanel.setCallbacks({
       onCreateRoom: (trackId) => void this.createRaceRoom(trackId),
       onJoinRoom: (code) => void this.joinRaceRoom(code),
-      onSetReady: (ready) => void raceRoomService.setReady(ready),
+      onSetReady: (ready) => {
+        void raceRoomService.setReady(ready).then((result) => {
+          // The lobby reflects the SERVER's answer, and reports a real failure.
+          this.ui.importScreen.racePanel.setReadyResult(result.ok, result.detail);
+          if (!result.ok) console.warn('[RACE] ready update failed:', result.detail);
+        });
+      },
       onStartSession: () => void this.startRaceSession(),
       onLeaveRoom: () => void this.leaveRaceRoom(),
       onRetryConnection: () => onlineBootstrap.retry()
@@ -2461,6 +2467,9 @@ export class Game {
       return;
     }
     panel.setHost(true);
+    // Canonical identity is verified against the room row, not assumed.
+    const verdict = raceRoomService.verifyLocalMap(level.track);
+    panel.setMapState(verdict.ok ? 'OK' : 'MISMATCH', verdict.ok ? '' : verdict.detail.replace(/\n/g, ' '));
     panel.showLobby();
     panel.renderLobby(
       result.room,
@@ -2481,18 +2490,23 @@ export class Game {
     }
 
     // Both clients MUST agree on the map before READY/START is meaningful.
+    panel.setMapState('VERIFYING');
     const level = await PresetLevelCache.loadPreset(result.room.trackId);
     if (!level) {
+      panel.setMapState('MISMATCH', 'canonical map unavailable');
       panel.showError('CANONICAL MAP UNAVAILABLE FOR THIS ROOM');
       await raceRoomService.leaveRoom();
       return;
     }
     const verdict = raceRoomService.verifyLocalMap(level.track);
     if (!verdict.ok) {
+      // Blocked by the MAP, not by readiness - say so explicitly.
+      panel.setMapState('MISMATCH', verdict.detail.replace(/\n/g, ' '));
       panel.showError(verdict.detail);
       await raceRoomService.leaveRoom();
       return;
     }
+    panel.setMapState('OK');
 
     panel.setHost(raceRoomService.isHost());
     panel.showLobby();
@@ -2530,6 +2544,7 @@ export class Game {
     }
     const verdict = raceRoomService.verifyLocalMap(level.track);
     if (!verdict.ok) {
+      this.ui.importScreen.racePanel.setMapState('MISMATCH', verdict.detail.replace(/\n/g, ' '));
       this.ui.importScreen.racePanel.showError(verdict.detail);
       return;
     }
