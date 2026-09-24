@@ -584,7 +584,85 @@ describe('START condition', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. UI contract — no permanent optimistic READY
+// 7. Lobby presentation contract (multiplayer polish)
+// ---------------------------------------------------------------------------
+
+describe('Lobby presentation', () => {
+  const panelSrc = () => fs.readFileSync(path.join(repoRoot, 'src', 'ui', 'RacePanel.ts'), 'utf8');
+  const cssSrc = () => fs.readFileSync(path.join(repoRoot, 'src', 'styles', 'screens.css'), 'utf8');
+
+  it('gives each player state its own colour semantics', () => {
+    const src = panelSrc();
+    expect(src).toMatch(/online-player-state-ready/);
+    expect(src).toMatch(/online-player-state-notready/);
+    expect(src).toMatch(/online-player-state-pending/);
+    expect(src).toMatch(/online-player-state-warn/);
+
+    const css = cssSrc();
+    for (const cls of [
+      '.online-player-state-ready',
+      '.online-player-state-notready',
+      '.online-player-state-pending',
+      '.online-player-state-warn'
+    ]) {
+      expect(css).toContain(cls);
+    }
+    // READY and NOT READY must not share one colour.
+    const ready = /\.online-player-state-ready\s*\{\s*color:\s*([^;]+);/.exec(css);
+    const notReady = /\.online-player-state-notready\s*\{\s*color:\s*([^;]+);/.exec(css);
+    expect(ready?.[1]).toBeTruthy();
+    expect(notReady?.[1]).toBeTruthy();
+    expect(ready![1]).not.toBe(notReady![1]);
+  });
+
+  it('makes a blocked lobby status visually distinct from ordinary guidance', () => {
+    const src = panelSrc();
+    expect(src).toMatch(/online-lobby-status-warn/);
+    expect(cssSrc()).toContain('.online-lobby-status-warn');
+  });
+
+  it('keeps the invite code prominent and labelled', () => {
+    expect(panelSrc()).toMatch(/online-invite-label/);
+    expect(cssSrc()).toContain('.online-invite-label');
+    // The room code is the largest text in the lobby head.
+    expect(cssSrc()).toMatch(/\.online-lobby-code\s*\{[^}]*font-size:\s*1\.25rem/);
+  });
+
+  it('does not duplicate the global online status / retry inside the race panel', () => {
+    // The single connection indicator + retry lives in the ImportScreen footer.
+    expect(panelSrc()).not.toMatch(/onRetryConnection/);
+    expect(panelSrc()).not.toMatch(/online-status-inline/);
+    const importSrc = fs.readFileSync(path.join(repoRoot, 'src', 'ui', 'ImportScreen.ts'), 'utf8');
+    expect(importSrc).toMatch(/footer\.appendChild\(this\.onlineStatusBar\.element\)/);
+  });
+
+  it('disables the lobby buttons while they are not actionable', () => {
+    const src = panelSrc();
+    expect(src).toMatch(/this\.lobbyStartBtn\.disabled = !allReady \|\| this\.mapState === 'MISMATCH';/);
+    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK';/);
+    expect(cssSrc()).toContain('.online-lobby-actions button:disabled');
+  });
+
+  it('keeps the in-race HUD minimal and non-blocking', () => {
+    const hud = fs.readFileSync(path.join(repoRoot, 'src', 'ui', 'RaceHud.ts'), 'utf8');
+    // Only the session clock, you, rival. No large popups.
+    expect(hud).toMatch(/SESSION/);
+    expect(hud).toMatch(/race-you-run/);
+    expect(hud).toMatch(/race-you-best/);
+    expect(hud).toMatch(/race-hud-rival/);
+    expect(hud).toMatch(/race-rival-best/);
+    // Notifications are small and auto-expire.
+    expect(hud).toMatch(/public showNotice\(text: string\)/);
+    expect(hud).toMatch(/window\.setTimeout\(\(\) => this\.clearNotice\(\), 4000\)/);
+
+    // The rival notice names the rival and states the role.
+    const game = fs.readFileSync(path.join(repoRoot, 'src', 'core', 'Game.ts'), 'utf8');
+    expect(game).toMatch(/RIVAL \$\{rival\.displayName\} \/\/ NEW BEST \$\{formatRaceTime\(rival\.sessionBestUs\)\}/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. UI contract — no permanent optimistic READY
 // ---------------------------------------------------------------------------
 
 describe('READY — UI contract', () => {

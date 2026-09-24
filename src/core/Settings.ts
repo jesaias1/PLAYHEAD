@@ -8,6 +8,12 @@ export type ViewmodelAccent = 'ADAPTIVE' | 'DEFAULT_CYAN' | 'OFF';
 export type TerminalCallouts = 'FULL' | 'MINIMAL' | 'OFF';
 /** Unified graphics tier. AUTO scales render cost to sustained performance. */
 export type GraphicsTier = 'AUTO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
+/**
+ * How strongly decorative / audio-reactive emissive reads on screen.
+ * Presentation only: it cannot alter geometry, collision, map identity,
+ * timing or competitive state.
+ */
+export type EffectIntensity = 'LOW' | 'STANDARD' | 'HIGH';
 
 export interface GameSettings {
   mouseSensitivity: number;
@@ -19,6 +25,8 @@ export interface GameSettings {
   /** @deprecated superseded by `graphics`; retained for saved-settings compat. */
   visualQuality: 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE';
   graphics: GraphicsTier;
+  /** Decorative / audio-reactive glow strength. Defaults to STANDARD. */
+  effectIntensity: EffectIntensity;
   ghostMode: GhostMode;
   viewmodelMode: ViewmodelMode;
   viewmodelAccent: ViewmodelAccent;
@@ -44,6 +52,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   showDebug: false,
   visualQuality: 'SIGNAL',
   graphics: 'AUTO',
+  effectIntensity: 'STANDARD',
   ghostMode: 'ALL',
   viewmodelMode: 'FULL',
   viewmodelAccent: 'ADAPTIVE',

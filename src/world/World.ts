@@ -287,6 +287,9 @@ export class World {
   ): { arcProgress: number; syncDelta: number; progressRatio: number; targetSongTime: number } {
     // Decoration LOD distance is owned by the quality system (0 = never cull).
     const lodDistance = environment ? environment.decorationLodDistance : 0;
+    // Effect intensity scales DECORATIVE / audio-reactive emissive only. It is
+    // read here and nowhere else in the gameplay path.
+    const effectEmissiveScale = environment ? environment.effectProfile.emissiveScale : 1.0;
 
     // Deterministic moving obstacles (shutters / sweep beams). Their collision
     // boxes and visible meshes advance together from song time only.
@@ -321,7 +324,8 @@ export class World {
     if (this.signalImpulse > 0) {
       this.signalImpulse = Math.max(0, this.signalImpulse - dt * 1.9);
     }
-    this.visualController.reactivityMultiplier = directorState.spectralReactivity + this.signalImpulse;
+    this.visualController.reactivityMultiplier =
+      (directorState.spectralReactivity + this.signalImpulse) * effectEmissiveScale;
 
     // Update procedural sky & atmosphere with director modulation
     this.sky.update(vState, playerPos, directorState.starVisibility);

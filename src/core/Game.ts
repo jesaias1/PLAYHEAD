@@ -249,7 +249,7 @@ export class Game {
 
     const settingsManager = SettingsManager.getInstance();
     this.applyLiveSettings(settingsManager.settings, new Set<SettingsKey>([
-      'mouseSensitivity', 'fov', 'masterVolume', 'ghostMode'
+      'mouseSensitivity', 'fov', 'masterVolume', 'ghostMode', 'effectIntensity'
     ]));
     settingsManager.subscribe((settings, changedKeys) => {
       this.applyLiveSettings(settings, changedKeys);
@@ -404,6 +404,12 @@ export class Game {
     }
     if (changedKeys.has('graphics')) {
       this.environment.applyQualityTier(settings.graphics as GraphicsTier, false);
+    }
+    if (changedKeys.has('effectIntensity')) {
+      // Presentation only: scales decorative / audio-reactive emissive and the
+      // rival ghost. Cannot reach geometry, collision, timing or scoring.
+      this.environment.setEffectIntensity(settings.effectIntensity || 'STANDARD');
+      this.raceGhost?.setEffectScale(this.environment.effectProfile.additiveScale);
     }
     if (changedKeys.has('ghostMode')) {
       this.ghostManager.applySettingsVisibility();
@@ -2324,6 +2330,7 @@ export class Game {
 
     // Remote ghost: a translucent signal body in the existing scene.
     this.raceGhost = new RemoteGhostRenderer(this.environment.scene);
+    this.raceGhost.setEffectScale(this.environment.effectProfile.additiveScale);
 
     const racePanel = this.ui.importScreen.racePanel;
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
@@ -2339,8 +2346,7 @@ export class Game {
         });
       },
       onStartSession: () => void this.startRaceSession(),
-      onLeaveRoom: () => void this.leaveRaceRoom(),
-      onRetryConnection: () => onlineBootstrap.retry()
+      onLeaveRoom: () => void this.leaveRaceRoom()
     });
 
     leaderboardPanel.setCallbacks({
@@ -2643,8 +2649,10 @@ export class Game {
       const previous = this.raceLastRivalBestUs;
       this.raceLastRivalBestUs = rival.sessionBestUs;
       if (previous !== null && rival.sessionBestUs < previous) {
+        // Small, non-blocking. Names the rival AND states the role, so the
+        // notification is unambiguous without a large popup.
         this.ui.raceHud.showNotice(
-          `${rival.displayName} // NEW BEST ${formatRaceTime(rival.sessionBestUs)}`
+          `RIVAL ${rival.displayName} // NEW BEST ${formatRaceTime(rival.sessionBestUs)}`
         );
       }
     }

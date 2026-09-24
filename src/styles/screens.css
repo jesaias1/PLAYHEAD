@@ -1839,16 +1839,23 @@ option:hover, option:focus, option:checked {
 }
 
 .online-lobby-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
-.online-lobby-code { font-family: var(--font-mono); font-size: 1.05rem; color: var(--accent-color); letter-spacing: 0.12em; }
+.online-lobby-code { font-family: var(--font-mono); font-size: 1.25rem; color: var(--accent-color); letter-spacing: 0.18em; }
 .online-lobby-title { font-family: var(--font-mono); font-size: 0.82rem; color: #d7e3ef; }
 .online-lobby-clock { font-family: var(--font-mono); font-size: 0.68rem; color: #6d7885; letter-spacing: 0.1em; }
 
-.online-invite-row { display: flex; gap: 10px; margin: 12px 0; }
+.online-invite-row { display: flex; gap: 10px; margin: 12px 0; align-items: center; }
+.online-invite-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: #6d7885;
+  white-space: nowrap;
+}
 
 .online-players { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
 .online-player-row {
   display: grid;
-  grid-template-columns: 110px 1fr 140px;
+  grid-template-columns: 110px 1fr 150px;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   padding: 7px 10px;
@@ -1857,14 +1864,21 @@ option:hover, option:focus, option:checked {
 }
 .online-player-index { color: #6d7885; font-size: 0.68rem; letter-spacing: 0.1em; align-self: center; }
 .online-player-name { color: #d7e3ef; }
-.online-player-state { text-align: right; color: var(--accent-color); font-size: 0.72rem; letter-spacing: 0.08em; }
+.online-player-state { text-align: right; font-size: 0.72rem; letter-spacing: 0.08em; }
+/* State colour semantics: a healthy READY must never look like a blocker. */
+.online-player-state-ready { color: #4dffb8; }
+.online-player-state-notready { color: #7b8794; }
+.online-player-state-pending { color: var(--accent-color); opacity: 0.75; }
+.online-player-state-warn { color: #ffb020; }
 .online-player-empty .online-player-name { color: #566170; }
 .online-player-empty .online-player-state { color: #566170; }
 .online-player-disconnected .online-player-state { color: #ffb020; }
 
 .online-lobby-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .online-lobby-status { font-family: var(--font-mono); font-size: 0.7rem; color: #6d7885; margin-top: 10px; letter-spacing: 0.08em; }
+.online-lobby-status-warn { color: #ffb020; }
 .online-ready-active { box-shadow: 0 0 12px var(--accent-glow); }
+.online-lobby-actions button:disabled { opacity: 0.42; cursor: default; }
 
 .online-results-title {
   font-family: var(--font-mono);

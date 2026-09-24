@@ -22,6 +22,7 @@ import { QualityMode } from '../rendering/PostProcessing';
 import { QualityPreset } from '../rendering/QualityPresets';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
+import { resolveEffectProfile } from '../rendering/EffectIntensity';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
@@ -652,11 +653,15 @@ export class ViewmodelController {
     // onset strength (0..1) and is scaled to at most 0.32 here, so a loud
     // transient produces a faint rim/flourish lift rather than the gate's
     // full bloom step. The viewmodel must never compete with the architecture.
+    //
+    // EFFECT INTENSITY scales this accent only. It cannot reach the frozen knife
+    // socket or any movement behaviour.
+    const vmEffectScale = resolveEffectProfile(settings.effectIntensity).viewmodelScale;
     this.transientPulse = Math.max(this.transientPulse - dt * 4.5, 0);
     const pulseTarget = Math.min(
       0.32,
       this.transientPulse * 0.55 + this.sustainedPulse * 0.16
-    );
+    ) * vmEffectScale;
     this.viewmodelAudioPulse += (pulseTarget - this.viewmodelAudioPulse) * Math.min(1.0, dt * 9.0);
 
     const vmAccent = settings.viewmodelAccent || 'ADAPTIVE';
@@ -665,7 +670,7 @@ export class ViewmodelController {
       this.styleFilter.setAudioPulse(0);
       this.rigInstance.setAudioPulse(0);
     } else if (vmAccent === 'DEFAULT_CYAN') {
-      this.rimLight.intensity = 0.75;
+      this.rimLight.intensity = 0.75 * vmEffectScale;
       this.rimLight.color.set(0x00f0ff);
       this.accentColor.set(0x00f0ff);
       this.rigInstance.setAccentColor(this.accentColor);
@@ -676,7 +681,7 @@ export class ViewmodelController {
       // ADAPTIVE: smoothly follow active map/track palette
       this.accentColor.lerp(this.targetAccentColor, Math.min(1.0, dt * 6.0));
       this.rimLight.color.copy(this.accentColor);
-      this.rimLight.intensity = 0.75 * (1.0 + this.viewmodelAudioPulse * 0.25);
+      this.rimLight.intensity = 0.75 * vmEffectScale * (1.0 + this.viewmodelAudioPulse * 0.25);
       this.rigInstance.setAccentColor(this.accentColor);
       this.styleFilter.setAudioPulse(this.viewmodelAudioPulse);
       this.rigInstance.setAudioPulse(this.viewmodelAudioPulse);

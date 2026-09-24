@@ -28,7 +28,6 @@ export interface RacePanelCallbacks {
   onSetReady: (ready: boolean) => void;
   onStartSession: () => void;
   onLeaveRoom: () => void;
-  onRetryConnection: () => void;
 }
 
 export class RacePanel {
@@ -110,8 +109,9 @@ export class RacePanel {
         </div>
 
         <div class="online-invite-row">
+          <span class="online-invite-label">INVITE LINK</span>
           <input class="online-input online-invite-input" id="race-invite-input" readonly />
-          <button class="terminal-btn-subtle" id="race-copy-invite" type="button">COPY INVITE LINK</button>
+          <button class="terminal-btn-subtle" id="race-copy-invite" type="button">COPY</button>
         </div>
 
         <div class="online-players" id="race-lobby-players"></div>
@@ -297,18 +297,35 @@ export class RacePanel {
       } else {
         const isMe = player.userId === myUserId;
         row.classList.toggle('online-player-disconnected', !player.connected);
-        // Map verification and readiness are separate; the row must say which.
+        // Map verification and readiness are separate axes, and the row must
+        // say WHICH one is blocking. The state class carries the colour
+        // semantics so a blocker never reads the same as a healthy READY.
         let state: string;
-        if (!player.connected) state = 'DISCONNECTED';
-        else if (isMe && this.mapState === 'MISMATCH') state = 'MAP MISMATCH';
-        else if (isMe && this.mapState === 'VERIFYING') state = 'MAP VERIFYING';
-        else if (isMe && this.pendingReady) state = 'SETTING READY...';
-        else state = player.ready ? 'READY' : 'NOT READY';
+        let stateClass: string;
+        if (!player.connected) {
+          state = 'DISCONNECTED';
+          stateClass = 'online-player-state-warn';
+        } else if (isMe && this.mapState === 'MISMATCH') {
+          state = 'MAP MISMATCH';
+          stateClass = 'online-player-state-warn';
+        } else if (isMe && this.mapState === 'VERIFYING') {
+          state = 'MAP VERIFYING';
+          stateClass = 'online-player-state-pending';
+        } else if (isMe && this.pendingReady) {
+          state = 'SETTING READY...';
+          stateClass = 'online-player-state-pending';
+        } else if (player.ready) {
+          state = 'READY';
+          stateClass = 'online-player-state-ready';
+        } else {
+          state = 'NOT READY';
+          stateClass = 'online-player-state-notready';
+        }
 
         row.innerHTML =
           `<span class="online-player-index">PLAYER ${i + 1}</span>` +
           `<span class="online-player-name">${this.escape(player.displayName)}${isMe ? ' (YOU)' : ''}</span>` +
-          `<span class="online-player-state">${state}</span>`;
+          `<span class="online-player-state ${stateClass}">${state}</span>`;
       }
       this.lobbyPlayersElem.appendChild(row);
     }
@@ -343,8 +360,13 @@ export class RacePanel {
     } else if (!allReady) {
       this.lobbyStatusElem.textContent = 'BOTH PLAYERS MUST BE READY';
     } else {
-      this.lobbyStatusElem.textContent = 'READY TO START';
+      this.lobbyStatusElem.textContent = this.isHost ? 'READY TO START' : 'WAITING FOR HOST TO START';
     }
+    // A blocked or failed state is visually distinct from ordinary guidance.
+    this.lobbyStatusElem.classList.toggle(
+      'online-lobby-status-warn',
+      this.mapState === 'MISMATCH' || !!this.readyError
+    );
   }
 
   private renderReadyButton(): void {

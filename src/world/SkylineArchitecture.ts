@@ -415,13 +415,13 @@ export class SkylineArchitecture {
       (0.03 + energy * 0.06 + ch.bassMass * 0.14 + tertiaryOnset * 0.22 + ch.dropTertiary * 0.40) * react;
 
     if (this.towerMaterials[0]) {
-      this.towerMaterials[0].emissiveIntensity = Math.min(1.5, primary);
+      this.towerMaterials[0].emissiveIntensity = Math.min(1.05, primary);
     }
     if (this.towerMaterials[1]) {
-      this.towerMaterials[1].emissiveIntensity = Math.min(1.1, secondary);
+      this.towerMaterials[1].emissiveIntensity = Math.min(0.78, secondary);
     }
     if (this.towerMaterials[2]) {
-      this.towerMaterials[2].emissiveIntensity = Math.min(0.8, tertiary);
+      this.towerMaterials[2].emissiveIntensity = Math.min(0.52, tertiary);
     }
 
     // Signal band sweep: one shared phase, per-tier gain. Reduced motion slows

@@ -29,6 +29,18 @@ export interface PlayheadActivationMesh {
 export type ReactiveChannel = 'TEMPORAL' | 'GATE_FRAME' | 'FINISH_PLANE' | 'ACCENT_TRIM' | 'HEADER_BAR';
 
 /**
+ * Fraction of an item's authored emissive that is NOT scaled by the music
+ * reactivity multiplier.
+ *
+ * This is the legibility floor. Route trim, gates and the finish portal keep a
+ * stable authored luminance in the quietest section, while the music-driven
+ * part of the response is free to sit much lower. The result is real dynamic
+ * range without raising the ceiling: quiet parts genuinely read quiet, and a
+ * drop is obviously bigger because it starts from further down.
+ */
+const PRESENT_LEGIBILITY_FLOOR = 0.5;
+
+/**
  * Shared attack/response curves per channel, in emissive-ratio terms.
  *
  * `onset` drives the fast transient flash, `drop` is the major-event surge and
@@ -40,8 +52,12 @@ export type ReactiveChannel = 'TEMPORAL' | 'GATE_FRAME' | 'FINISH_PLANE' | 'ACCE
  * enough to look impressive on its own it holds every gate permanently above
  * the bloom threshold, which reads as constant glow rather than as the world
  * answering the music. These coefficients keep the rest state clearly below the
- * 0.82 bloom threshold and let transients/drops cross it, so the glow is
+ * 0.88 bloom threshold and let transients/drops cross it, so the glow is
  * beat-locked by construction.
+ *
+ * `floor` is the legibility floor (see PRESENT_LEGIBILITY_FLOOR): it is applied
+ * OUTSIDE the reactivity multiplier, so it is unaffected by effect intensity or
+ * by a quiet section. It exists so gameplay-critical signals never disappear.
  */
 const CHANNEL_RESPONSE: Record<ReactiveChannel, { onset: number; energy: number; drop: number; floor: number }> = {
   // PRIMARY: major gates / important architecture — the strongest response.
@@ -198,11 +214,29 @@ export class PlayheadSystem {
 
         if ('emissiveIntensity' in mat) {
           const base = item.baseEmissive || 0.6;
-          mat.emissiveIntensity = (base + visualState.bass * 0.8 + visualState.flux * 0.5 + visualState.dropImpact * 1.5) * presenceFactor * (1.0 + ignitionPulse * 0.5) * reactMult;
+          // LEGIBILITY FLOOR + REACTIVE TERM.
+          //
+          // The floor is deliberately NOT scaled by the music multiplier: the
+          // route and its signals must stay readable in a quiet section. Only
+          // the reactive term follows the music, which is what lets quiet parts
+          // sit genuinely low and a drop be obviously bigger.
+          const legibility = base * PRESENT_LEGIBILITY_FLOOR;
+          const reactive =
+            (visualState.bass * 0.8 + visualState.flux * 0.5 + visualState.dropImpact * 1.5) *
+            presenceFactor *
+            (1.0 + ignitionPulse * 0.5) *
+            reactMult;
+          mat.emissiveIntensity = legibility + reactive;
           mat.emissive.copy(visualState.palette.primary).lerp(visualState.palette.highlight, visualState.highlightMix);
         }
         if ('opacity' in mat) {
-          mat.opacity = Math.min(1.0, item.baseOpacity * (0.75 + visualState.energy * 0.25 + ignitionPulse * 0.25));
+          // Resting trim opacity is kept LOW so route edges are not "always on".
+          // Transients and drops lift it; it never starts near maximum.
+          mat.opacity = Math.min(
+            1.0,
+            item.baseOpacity *
+              (0.50 + visualState.energy * 0.20 + ignitionPulse * 0.28 + visualState.dropImpact * 0.30)
+          );
         }
         if (isLine && 'color' in mat) {
           mat.color.copy(visualState.palette.primary).lerp(visualState.palette.highlight, 0.3 + ignitionPulse * 0.7);
@@ -246,7 +280,16 @@ export class PlayheadSystem {
     const sustained = resp.energy * (visualState.energy + visualState.bass * 0.5);
 
     if ('emissiveIntensity' in mat) {
-      mat.emissiveIntensity = (base * resp.floor + sustained + transient) * reactMult;
+      // LEGIBILITY FLOOR + REACTIVE TERM.
+      //
+      // The floor is NOT scaled by the music multiplier, so checkpoints, the
+      // finish portal and route accents stay readable even in the quietest
+      // section. Only the music-driven part follows the reactivity multiplier,
+      // which is what gives the world real dynamic range: the same authored
+      // floor at rest, with much more headroom for a drop to be obviously bigger.
+      const legibility = base * resp.floor;
+      const reactive = (sustained + transient) * reactMult;
+      mat.emissiveIntensity = legibility + reactive;
     }
 
     // Palette propagation: primary tinted toward the highlight on strong events,
@@ -258,7 +301,7 @@ export class PlayheadSystem {
 
     // Additive/mostly-opaque planes need a modest opacity lift to read as "lit".
     if ('opacity' in mat && (channel === 'FINISH_PLANE' || channel === 'ACCENT_TRIM')) {
-      mat.opacity = Math.min(1.0, item.baseOpacity + transient * 0.35 + sustained * 0.15);
+      mat.opacity = Math.min(1.0, item.baseOpacity + (transient + sustained * 0.4) * 0.30 * reactMult);
     }
   }
 

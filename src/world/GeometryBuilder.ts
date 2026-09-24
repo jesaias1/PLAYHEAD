@@ -142,7 +142,7 @@ export class GeometryBuilder {
     const accentMaterial = new THREE.MeshStandardMaterial({
       color: 0x05060a,
       emissive: primaryCol,
-      emissiveIntensity: 0.75,
+      emissiveIntensity: 0.55,
       roughness: 0.25,
       metalness: 0.85
     });
@@ -167,7 +167,7 @@ export class GeometryBuilder {
     const checkpointMaterial = new THREE.MeshStandardMaterial({
       color: 0x080c14,
       emissive: secondaryCol,
-      emissiveIntensity: 1.6,
+      emissiveIntensity: 1.3,
       transparent: true,
       opacity: 0.88,
       roughness: 0.15
@@ -178,7 +178,7 @@ export class GeometryBuilder {
     const finishMaterial = new THREE.MeshStandardMaterial({
       color: 0xf8fafc,
       emissive: primaryCol,
-      emissiveIntensity: 2.1,
+      emissiveIntensity: 1.7,
       roughness: 0.1,
       metalness: 0.9
     });
@@ -227,11 +227,11 @@ export class GeometryBuilder {
     };
 
     // Major checkpoint gate frame: luminous wireframe lattice, strong transient answer.
-    const gateFrameMaterial = makeBeaconMaterial(0x05060a, secondaryCol.clone(), 0.55, 0.62);
+    const gateFrameMaterial = makeBeaconMaterial(0x05060a, secondaryCol.clone(), 0.50, 0.62);
     gateFrameMaterial.wireframe = true;
 
     // Finish signal plane: the large glowing portal wall the player runs through.
-    const finishPlaneMaterial = makeBeaconMaterial(0x0a0f18, primaryCol.clone(), 0.62, 0.5);
+    const finishPlaneMaterial = makeBeaconMaterial(0x0a0f18, primaryCol.clone(), 0.55, 0.5);
     finishPlaneMaterial.side = THREE.DoubleSide;
     finishPlaneMaterial.blending = THREE.AdditiveBlending;
     finishPlaneMaterial.depthWrite = false;
@@ -240,7 +240,7 @@ export class GeometryBuilder {
     const accentTrimMaterial = makeBeaconMaterial(0x05060a, primaryCol.clone(), 0.42);
 
     // Tertiary detailing: floating header signal bar.
-    const headerBarMaterial = makeBeaconMaterial(0x080c14, secondaryCol.clone(), 0.45, 0.8);
+    const headerBarMaterial = makeBeaconMaterial(0x080c14, secondaryCol.clone(), 0.40, 0.8);
 
     // Gameplay obstacles share a small family of materials so each obstacle
     // type reads differently by SHAPE and edge treatment rather than by being

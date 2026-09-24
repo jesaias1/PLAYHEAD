@@ -67,7 +67,9 @@ export class ViewmodelGeometry {
     const knifeSignalMaterial = new THREE.MeshStandardMaterial({
       color: 0x00f0ff,
       emissive: accentColor,
-      emissiveIntensity: 2.8,
+      // Blade signal strip. Deliberately restrained: the viewmodel must never
+      // compete with the architecture or bloom into the player's view.
+      emissiveIntensity: 1.9,
       roughness: 0.1,
       metalness: 0.5
     });

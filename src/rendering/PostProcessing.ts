@@ -20,6 +20,7 @@ import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { SignalRenderPass } from './SignalRenderPass';
 import { GrainScanlinePass } from './GrainScanlinePass';
 import { QualityPreset, QualityTier, resolvePreset } from './QualityPresets';
+import { EffectIntensityProfile, resolveEffectProfile } from './EffectIntensity';
 
 /**
  * Legacy quality mode names, retained for saved settings compatibility.
@@ -27,7 +28,23 @@ import { QualityPreset, QualityTier, resolvePreset } from './QualityPresets';
  */
 export type QualityMode = 'SIGNAL' | 'CLEAN' | 'HIGH' | 'PERFORMANCE' | 'ULTRA';
 
-const clampBloom = (v: number): number => Math.max(0.15, Math.min(1.2, v));
+/**
+ * Bloom calibration (STANDARD effect intensity, HIGH quality).
+ *
+ * The threshold is deliberately HIGH: only genuinely bright emissive (gates on
+ * a transient, the finish portal, a drop) crosses it. Ordinary lit architecture,
+ * route trim and signage sit below it and stay crisp, which is what stops the
+ * frame reading as a constant glow.
+ *
+ * The radius is tight so bright elements get a controlled halo instead of a
+ * wide wash that costs fill-rate and eats course readability.
+ */
+const BASE_BLOOM_STRENGTH = 0.34;
+const BLOOM_THRESHOLD = 0.88;
+const BLOOM_RADIUS = 0.28;
+
+/** Bloom is never disabled, but LOW effect intensity may take it near-off. */
+const clampBloom = (v: number): number => Math.max(0.08, Math.min(1.2, v));
 
 export interface IViewmodelRenderable {
   render: (renderer: THREE.WebGLRenderer) => void;
@@ -70,6 +87,9 @@ export class PostProcessing {
   /** Currently applied concrete preset (single source of truth for cost). */
   public preset: QualityPreset | null = null;
 
+  /** Presentation-only effect-intensity scales (STANDARD = identity). */
+  private effectProfile: EffectIntensityProfile = resolveEffectProfile('STANDARD');
+
   private renderPass: RenderPass;
   private outputPass: OutputPass;
 
@@ -88,9 +108,9 @@ export class PostProcessing {
     // 2. Selective bloom — high threshold so only emissive signals bloom
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      0.45,   // strength
-      0.35,   // radius
-      0.82   // threshold
+      BASE_BLOOM_STRENGTH,  // strength
+      BLOOM_RADIUS,         // radius (tight halo, not a wash)
+      BLOOM_THRESHOLD       // threshold (only genuinely bright emissive blooms)
     );
     this.composer.addPass(this.bloomPass);
 
@@ -145,7 +165,11 @@ export class PostProcessing {
 
     // Bloom is NEVER disabled — audio-reactive gate glow is core identity.
     this.bloomPass.enabled = true;
-    this.bloomPass.strength = clampBloom(0.45 * preset.bloomScale);
+    this.bloomPass.strength = clampBloom(
+      BASE_BLOOM_STRENGTH * preset.bloomScale * this.effectProfile.bloomScale
+    );
+    this.bloomPass.threshold = BLOOM_THRESHOLD;
+    this.bloomPass.radius = BLOOM_RADIUS;
 
     this.signalPass.enabled = preset.signalPassEnabled;
     if (preset.signalPassEnabled) {
@@ -162,10 +186,19 @@ export class PostProcessing {
     }
   }
 
+  /**
+   * Applies a presentation-only effect-intensity profile.
+   * Re-derives bloom from the current preset so the two scales compose.
+   */
+  public setEffectIntensity(profile: EffectIntensityProfile): void {
+    this.effectProfile = profile;
+    if (this.preset) this.applyPreset(this.preset);
+  }
+
   /** Update bloom intensity based on dramatic arc / section */
   public setBloomIntensity(strength: number): void {
     const scale = this.preset ? this.preset.bloomScale : 1.0;
-    this.bloomPass.strength = clampBloom(strength * scale);
+    this.bloomPass.strength = clampBloom(strength * scale * this.effectProfile.bloomScale);
   }
 
   public setVignetteIntensity(intensity: number): void {

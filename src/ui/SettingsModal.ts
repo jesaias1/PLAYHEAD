@@ -16,6 +16,7 @@ export class SettingsModal {
   private ghostSelect: HTMLSelectElement;
   private vmModeSelect: HTMLSelectElement;
   private graphicsSelect: HTMLSelectElement;
+  private effectIntensitySelect: HTMLSelectElement;
   private vmAccentSelect: HTMLSelectElement;
   private calloutsSelect: HTMLSelectElement;
   private hideHudInput: HTMLInputElement;
@@ -72,6 +73,15 @@ export class SettingsModal {
             <option value="MEDIUM">MEDIUM</option>
             <option value="HIGH">HIGH (REFERENCE LOOK)</option>
             <option value="ULTRA">ULTRA (SHARPEST)</option>
+          </select>
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">EFFECT INTENSITY</label>
+          <select class="settings-select" id="set-effect-intensity">
+            <option value="LOW">LOW (CALMEST, LEAST GLOW)</option>
+            <option value="STANDARD">STANDARD (REFERENCE)</option>
+            <option value="HIGH">HIGH (STRONGEST REACTIVITY)</option>
           </select>
         </div>
 
@@ -149,6 +159,7 @@ export class SettingsModal {
     this.ghostSelect = this.element.querySelector('#set-ghost') as HTMLSelectElement;
     this.vmModeSelect = this.element.querySelector('#set-vm-mode') as HTMLSelectElement;
     this.graphicsSelect = this.element.querySelector('#set-graphics') as HTMLSelectElement;
+    this.effectIntensitySelect = this.element.querySelector('#set-effect-intensity') as HTMLSelectElement;
     this.vmAccentSelect = this.element.querySelector('#set-vm-accent') as HTMLSelectElement;
     this.calloutsSelect = this.element.querySelector('#set-callouts') as HTMLSelectElement;
     this.hideHudInput = this.element.querySelector('#set-hide-hud') as HTMLInputElement;
@@ -190,6 +201,7 @@ export class SettingsModal {
     this.ghostSelect.value = s.ghostMode || 'ALL';
     this.vmModeSelect.value = s.viewmodelMode || 'FULL';
     this.graphicsSelect.value = s.graphics || 'AUTO';
+    this.effectIntensitySelect.value = s.effectIntensity || 'STANDARD';
     this.vmAccentSelect.value = s.viewmodelAccent || 'ADAPTIVE';
     this.calloutsSelect.value = s.terminalCallouts || 'MINIMAL';
     this.hideHudInput.checked = !!s.hideHud;
@@ -237,6 +249,11 @@ export class SettingsModal {
     this.graphicsSelect.addEventListener('change', () => {
       const tier = this.graphicsSelect.value as any;
       this.settingsManager.update({ graphics: tier });
+    });
+
+    this.effectIntensitySelect.addEventListener('change', () => {
+      // Presentation-only display control: decorative / audio-reactive glow.
+      this.settingsManager.update({ effectIntensity: this.effectIntensitySelect.value as any });
     });
 
     this.calloutsSelect.addEventListener('change', () => {

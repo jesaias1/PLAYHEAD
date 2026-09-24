@@ -245,7 +245,7 @@ export class RouteSignalPackets {
       .lerp(state.palette.highlight, Math.min(1, transient * 0.8 + dropGlow * 0.7));
     this.material.opacity = Math.min(
       1.0,
-      (0.35 + transient * 0.55 + ch.bassMass * 0.25) * Math.min(1.6, state.reactivityMultiplier)
+      (0.22 + transient * 0.58 + ch.bassMass * 0.30) * Math.min(1.6, state.reactivityMultiplier)
     );
   }
 

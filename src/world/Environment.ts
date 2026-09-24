@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { PostProcessing, QualityMode } from '../rendering/PostProcessing';
-import { SettingsManager } from '../core/Settings';
+import { SettingsManager, EffectIntensity } from '../core/Settings';
 import {
   AdaptiveQuality,
   QualityPreset,
@@ -14,6 +14,15 @@ import {
   scaledRenderSize,
   effectivePixelRatio
 } from '../rendering/QualityPresets';
+import { EffectIntensityProfile, resolveEffectProfile } from '../rendering/EffectIntensity';
+
+/**
+ * Base scene exposure at STANDARD effect intensity.
+ *
+ * Slightly below the previous 1.15: the reference look should read clean and
+ * dark, with the music adding light rather than the frame starting bright.
+ */
+const BASE_EXPOSURE = 1.10;
 
 export class Environment {
   public scene: THREE.Scene;
@@ -27,6 +36,13 @@ export class Environment {
   public qualityTier: QualityTier = 'AUTO';
   public resolvedTier: Exclude<QualityTier, 'AUTO'> = 'HIGH';
   public activePreset: QualityPreset = resolvePreset('HIGH');
+
+  /**
+   * Presentation-only effect-intensity profile (STANDARD = identity).
+   * Read by World each frame to scale audio-reactive emissive, and by
+   * PostProcessing for bloom. Never read by physics, generation or scoring.
+   */
+  public effectProfile: EffectIntensityProfile = resolveEffectProfile('STANDARD');
 
   private adaptive: AdaptiveQuality = new AdaptiveQuality('HIGH');
 
@@ -58,7 +74,7 @@ export class Environment {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = BASE_EXPOSURE;
 
     // Accumulate render statistics across the whole frame (every composer pass)
     // instead of only reporting the last pass. Game resets this once per frame.
@@ -112,6 +128,7 @@ export class Environment {
 
     // --- 2. Postprocessing cost ------------------------------------------
     this.postProcessing.applyPreset(preset);
+    this.postProcessing.setEffectIntensity(this.effectProfile);
     this.viewmodelControllerRef?.applyQuality?.(preset);
 
     // --- 3. Distant decoration detail ------------------------------------
@@ -123,6 +140,16 @@ export class Environment {
     if (persist) {
       SettingsManager.getInstance().update({ graphics: tier });
     }
+  }
+
+  /**
+   * Applies a presentation-only effect-intensity profile.
+   * Scales decorative / audio-reactive output only; it cannot reach gameplay
+   * geometry, collision, map identity, timing or competitive state.
+   */
+  public setEffectIntensity(value: EffectIntensity): void {
+    this.effectProfile = resolveEffectProfile(value);
+    this.postProcessing.setEffectIntensity(this.effectProfile);
   }
 
   /**
@@ -318,8 +345,14 @@ export class Environment {
       this.postProcessing.setVignetteIntensity(directorState.vignetteIntensity);
     }
 
-    // Subtle exposure modulation on musical peaks
-    const targetExposure = 1.15 + visualState.dropImpact * 0.15 + visualState.energy * 0.05;
+    // Subtle exposure modulation on musical peaks.
+    //
+    // Only the LIFT is scaled by effect intensity; the base exposure never is.
+    // That keeps LOW dark by lowering peaks rather than dimming the whole frame.
+    const exposureLift =
+      (visualState.dropImpact * 0.13 + visualState.energy * 0.04) *
+      this.effectProfile.exposureLiftScale;
+    const targetExposure = BASE_EXPOSURE + exposureLift;
     this.renderer.toneMappingExposure += (targetExposure - this.renderer.toneMappingExposure) * Math.min(1.0, dt * 4.0);
   }
 

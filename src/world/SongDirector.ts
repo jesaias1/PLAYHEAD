@@ -42,7 +42,7 @@ export class SongDirector {
   private smoothStarVis = 0.4;
   private smoothFogNear = 45;
   private smoothFogFar = 380;
-  private smoothBloom = 0.4;
+  private smoothBloom = 0.26;
   private smoothVignette = 0.35;
 
   private lastAnnouncedSectionIndex = -1;
@@ -57,7 +57,7 @@ export class SongDirector {
       starVisibility: 0.3,
       fogNear: 45,
       fogFar: 380,
-      bloomStrength: 0.4,
+      bloomStrength: 0.26,
       vignetteIntensity: 0.35,
       spectralReactivity: 0.6,
       activeSpectacle: null,
@@ -72,7 +72,7 @@ export class SongDirector {
     this.smoothStarVis = 0.25;
     this.smoothFogNear = 40;
     this.smoothFogFar = 340;
-    this.smoothBloom = 0.35;
+    this.smoothBloom = 0.22;
     this.smoothVignette = 0.35;
     this.lastAnnouncedSectionIndex = -1;
     this.lastAnnouncedTheme = '';
@@ -130,9 +130,9 @@ export class SongDirector {
     let targetStarVis = 0.45;
     let targetFogNear = 45;
     let targetFogFar = 400;
-    let targetBloom = 0.45;
+    let targetBloom = 0.30;
     let targetVignette = 0.35;
-    let spectralReactivity = 0.75;
+    let spectralReactivity = 0.52;
 
     switch (currentPhase) {
       case 'INTRO':
@@ -141,9 +141,9 @@ export class SongDirector {
         targetStarVis = 0.30;
         targetFogNear = 35;
         targetFogFar = 320;
-        targetBloom = 0.35;
+        targetBloom = 0.20;
         targetVignette = 0.4;
-        spectralReactivity = 0.70;
+        spectralReactivity = 0.40;
         break;
 
       case 'TRAVEL':
@@ -152,9 +152,9 @@ export class SongDirector {
         targetStarVis = 0.55;
         targetFogNear = 45;
         targetFogFar = 420;
-        targetBloom = 0.45;
+        targetBloom = 0.30;
         targetVignette = 0.35;
-        spectralReactivity = 0.90;
+        spectralReactivity = 0.60;
         break;
 
       case 'BUILDUP':
@@ -163,9 +163,9 @@ export class SongDirector {
         targetStarVis = 0.25; // Dims as tension builds
         targetFogNear = 28;   // Fog draws closer
         targetFogFar = 240;
-        targetBloom = 0.60;
+        targetBloom = 0.42;
         targetVignette = 0.45;
-        spectralReactivity = 1.0;
+        spectralReactivity = 0.76;
 
         // Intentional Pre-Drop Tension Dip: in the final breath of buildup, drop intensity sharply
         if (visualState.buildup > 0.82) {
@@ -176,14 +176,15 @@ export class SongDirector {
         break;
 
       case 'DROP':
-        // Major range: 0.78 - 0.92
+        // Major range: 0.78 - 0.92. Peak deliberately preserved: the whole
+        // dynamic-range strategy is to LOWER the floor, not the ceiling.
         targetIntensity = 0.82 + visualState.dropImpact * 0.10;
         targetStarVis = 0.95;
         targetFogNear = 65;
         targetFogFar = 540;   // World bursts open
-        targetBloom = 0.75 + visualState.dropImpact * 0.20;
+        targetBloom = 0.72 + visualState.dropImpact * 0.24;
         targetVignette = 0.30;
-        spectralReactivity = 1.35;
+        spectralReactivity = 1.32;
         break;
 
       case 'SURF':
@@ -192,9 +193,9 @@ export class SongDirector {
         targetStarVis = 0.85;
         targetFogNear = 55;
         targetFogFar = 480;
-        targetBloom = 0.65;
+        targetBloom = 0.46;
         targetVignette = 0.40;
-        spectralReactivity = 1.25;
+        spectralReactivity = 0.92;
         break;
 
       case 'BREAKDOWN':
@@ -203,10 +204,10 @@ export class SongDirector {
         targetStarVis = 0.35;
         targetFogNear = 42;
         targetFogFar = 360;
-        targetBloom = 0.30;
+        targetBloom = 0.18;
         targetVignette = 0.35;
         // Breakdown still breathes musically — never a dead stretch.
-        spectralReactivity = 0.72;
+        spectralReactivity = 0.42;
         break;
 
       case 'CLIMAX':
@@ -215,9 +216,9 @@ export class SongDirector {
         targetStarVis = 1.0;
         targetFogNear = 75;
         targetFogFar = 580;
-        targetBloom = 0.85;
+        targetBloom = 0.80;
         targetVignette = 0.32;
-        spectralReactivity = 1.45;
+        spectralReactivity = 1.42;
         break;
 
       case 'OUTRO':
@@ -226,9 +227,9 @@ export class SongDirector {
         targetStarVis = 0.70; // Calmed stars remain
         targetFogNear = 48;
         targetFogFar = 420;
-        targetBloom = 0.35;
+        targetBloom = 0.20;
         targetVignette = 0.35;
-        spectralReactivity = 0.72;
+        spectralReactivity = 0.42;
         break;
     }
 
@@ -236,7 +237,7 @@ export class SongDirector {
     if (activeSpectacle) {
       if (isSignatureActive) {
         targetIntensity = 1.0; // Peak signature moment
-        targetBloom = Math.max(targetBloom, 0.95);
+        targetBloom = Math.max(targetBloom, 0.92);
         targetStarVis = 1.0;
       }
 
@@ -247,11 +248,11 @@ export class SongDirector {
           break;
         case 'STARFIELD_BLOOM':
           targetStarVis = 1.0;
-          targetBloom = Math.max(targetBloom, 0.85);
+          targetBloom = Math.max(targetBloom, 0.70);
           break;
         case 'WORLD_POWER_DOWN':
           targetIntensity = 0.12;
-          targetBloom = 0.20;
+          targetBloom = 0.12;
           targetStarVis = 0.15;
           targetFogNear = 25;
           targetFogFar = 220;
@@ -265,19 +266,31 @@ export class SongDirector {
           targetVignette = 0.45;
           break;
         case 'CATHEDRAL_IGNITION':
-          targetBloom = Math.max(targetBloom, 0.70);
+          targetBloom = Math.max(targetBloom, 0.56);
           break;
       }
     }
 
-    // Smooth transitions
-    const lerpRate = Math.min(1.0, dt * 4.0);
-    this.smoothIntensity += (targetIntensity - this.smoothIntensity) * lerpRate;
-    this.smoothStarVis += (targetStarVis - this.smoothStarVis) * lerpRate;
-    this.smoothFogNear += (targetFogNear - this.smoothFogNear) * lerpRate;
-    this.smoothFogFar += (targetFogFar - this.smoothFogFar) * lerpRate;
-    this.smoothBloom += (targetBloom - this.smoothBloom) * lerpRate;
-    this.smoothVignette += (targetVignette - this.smoothVignette) * lerpRate;
+    // Smooth transitions.
+    //
+    // ASYMMETRIC envelope: rise at the musical rate, fall noticeably faster.
+    // This is what buys dynamic range WITHOUT raising peaks — a drop still hits
+    // the same ceiling, but the world drops back to the quiet baseline quickly
+    // instead of sitting near the top of the range afterwards.
+    const attack = Math.min(1.0, dt * 4.0);
+    const release = Math.min(1.0, dt * 7.5);
+    const approach = (current: number, target: number): number =>
+      current + (target - current) * (target < current ? release : attack);
+    // Fog keeps the symmetric rate: it is a spatial cue, and asymmetric fog
+    // would read as the level breathing rather than the music.
+    const fogRate = attack;
+
+    this.smoothIntensity = approach(this.smoothIntensity, targetIntensity);
+    this.smoothStarVis = approach(this.smoothStarVis, targetStarVis);
+    this.smoothFogNear += (targetFogNear - this.smoothFogNear) * fogRate;
+    this.smoothFogFar += (targetFogFar - this.smoothFogFar) * fogRate;
+    this.smoothBloom = approach(this.smoothBloom, targetBloom);
+    this.smoothVignette = approach(this.smoothVignette, targetVignette);
 
     this.state = {
       phase: currentPhase,
@@ -291,7 +304,7 @@ export class SongDirector {
       // baseline. The floor is deliberately LOW: "always alive" must not mean
       // "always at 80%", because a drop then has nowhere to go. Quiet sections
       // sit clearly dimmer than dense ones, and the drop range is preserved.
-      spectralReactivity: Math.max(0.6, spectralReactivity),
+      spectralReactivity: Math.max(0.34, spectralReactivity),
       activeSpectacle,
       isSignatureActive,
       announcement: pendingAnnouncement
