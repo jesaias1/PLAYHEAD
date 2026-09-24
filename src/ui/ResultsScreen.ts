@@ -8,6 +8,12 @@ import { formatSpeed, formatTime } from '../utils/math';
 import { seedToHex } from '../utils/hash';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { getUnrankedReason } from './RankResultCopy';
+import {
+  SUBMISSION_FEEDBACK_TEXT,
+  SubmissionFeedback,
+  SubmissionState,
+  isRetryableSubmission
+} from '../leaderboard/SubmissionFeedback';
 import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 
 export class ResultsScreen {
@@ -143,9 +149,7 @@ export class ResultsScreen {
           <button class="btn-preview signal-drop-open" id="btn-res-signal-drop">DECODE SIGNAL</button>
         </div>
 
-        <div class="leaderboard-feedback-bar hidden" id="res-leaderboard-feedback">
-          LEADERBOARD ENTRY SAVED // ONLINE SUBMISSION COMING LATER
-        </div>
+        <div class="leaderboard-feedback-bar hidden" id="res-leaderboard-feedback"></div>
 
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
@@ -231,7 +235,9 @@ export class ResultsScreen {
       label: string;
       ghostTimeUs: number;
       deltaUs: number;
-    }
+    },
+    /** Real world-submission state at the moment the results screen opens. */
+    submissionFeedback?: SubmissionFeedback
   ): void {
     this.clearTimeouts();
 
@@ -364,6 +370,9 @@ export class ResultsScreen {
     } else {
       this.ghostRaceElem.classList.add('hidden');
     }
+
+    // Real world-submission state for this run.
+    this.setSubmissionState(submissionFeedback?.state ?? 'NOT_OFFICIAL', submissionFeedback?.detail);
 
     // Staged Quick Reveal Sequence (Total ~700ms)
     this.element.classList.remove('hidden');
@@ -548,13 +557,39 @@ export class ResultsScreen {
     this.signalDropOpenBtn.addEventListener('click', () => this.openSignalDrop());
     this.leaderboardBtn.addEventListener('click', () => {
       if (!this.activeCandidate) return;
+      // Manual retry path: queue locally so the existing offline flush can carry
+      // it later. The real submission state is always reported by the game, so
+      // this never claims a world entry was accepted.
       const queued = LeaderboardManager.getInstance().queueCandidate(this.activeCandidate);
       if (queued) {
-        this.leaderboardBtn.textContent = '[ ENTRY SAVED ]';
+        this.leaderboardBtn.textContent = '[ ENTRY QUEUED ]';
         this.leaderboardBtn.disabled = true;
-        this.leaderboardFeedbackElem.textContent = 'LEADERBOARD ENTRY SAVED // ONLINE SUBMISSION COMING LATER';
-        this.leaderboardFeedbackElem.classList.remove('hidden');
+        this.setSubmissionState('WORLD_ENTRY_QUEUED_OFFLINE');
       }
     });
+  }
+
+  /**
+   * Renders the REAL world-submission state for this run.
+   *
+   * Called once when the screen opens and again whenever the server answers, so
+   * the player never sees a claim that the server has not confirmed.
+   */
+  public setSubmissionState(state: SubmissionState, detail?: string): void {
+    this.leaderboardFeedbackElem.textContent = detail
+      ? `${SUBMISSION_FEEDBACK_TEXT[state]} // ${detail.toUpperCase()}`
+      : SUBMISSION_FEEDBACK_TEXT[state];
+    this.leaderboardFeedbackElem.classList.remove('hidden');
+    this.leaderboardFeedbackElem.dataset.state = state;
+
+    // The retry button is only meaningful when the run has NOT reached the board
+    // and something can still be done about it.
+    if (this.activeCandidate && isRetryableSubmission(state)) {
+      this.leaderboardBtn.classList.remove('hidden');
+      this.leaderboardBtn.disabled = false;
+      this.leaderboardBtn.textContent = '[ ADD TO LEADERBOARD ]';
+    } else if (this.activeCandidate) {
+      this.leaderboardBtn.classList.add('hidden');
+    }
   }
 }

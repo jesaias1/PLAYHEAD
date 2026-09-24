@@ -630,26 +630,32 @@ export class ImportScreen {
   }
 
   /**
-   * Restrained PB-ghost state for the selected track.
+   * Restrained ghost state for the selected track.
    *
-   * A PB with no recorded replay must NOT offer a fake action, so the button is
-   * disabled and reads UNAVAILABLE rather than pretending to work.
+   * The three cases are never conflated: no PB, PB with no replay, PB GHOST
+   * (replay matches the PB exactly) and BEST RECORDED GHOST (fastest available
+   * replay, slower than the PB). A PB with no replay must NOT offer a fake
+   * action, so the button is disabled and says so.
    */
   public setPbGhostAvailability(state: {
     available: boolean;
     pbTimeSeconds?: number | null;
+    actionText?: string;
+    state?: string;
   }): void {
     if (!this.showcaseRacePbBtn) return;
     if (state.available) {
       this.showcaseRacePbBtn.disabled = false;
-      this.showcaseRacePbBtn.textContent = '> RACE PB GHOST';
+      this.showcaseRacePbBtn.textContent = state.actionText ?? '> RACE PB GHOST';
       this.showcaseRacePbBtn.classList.add('available');
     } else {
       this.showcaseRacePbBtn.disabled = true;
       this.showcaseRacePbBtn.textContent =
-        state.pbTimeSeconds ? 'PB GHOST // UNAVAILABLE' : 'PB GHOST // NO PERSONAL BEST';
+        state.actionText ??
+        (state.pbTimeSeconds ? 'PB GHOST // NO REPLAY' : 'PB GHOST // NO PERSONAL BEST');
       this.showcaseRacePbBtn.classList.remove('available');
     }
+    this.showcaseRacePbBtn.dataset.ghostState = state.state ?? '';
   }
 
   public setCallbacks(

@@ -18,7 +18,7 @@ import { Environment } from '../world/Environment';
 import { World } from '../world/World';
 import { CameraController } from '../player/CameraController';
 import { PlayerController } from '../player/PlayerController';
-import type { RunRank } from '../player/PlayerStats';
+import type { RunRank, RunResults } from '../player/PlayerStats';
 import { ReplayRecorder } from '../replay/ReplayRecorder';
 import { ReplayPlayer } from '../replay/ReplayPlayer';
 import { GhostManager } from '../replay/GhostManager';
@@ -31,19 +31,21 @@ import {
   GHOST_BROADCAST_HZ
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
+import type { RunSubmission } from '../online/LeaderboardService';
 import { authService } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
+import type { MapIdentity } from '../online/MapIdentity';
+import { OFFICIAL_MAP_REGISTRY } from '../online/OfficialMapRegistry';
 import { RemoteGhostRenderer } from '../online/RemoteGhostRenderer';
 import { formatRaceTime } from '../ui/RaceHud';
 import { PovReplayRecorder } from '../replay/pov/PovReplayRecorder';
 import { PovReplayPlayer } from '../replay/pov/PovReplayPlayer';
-import { PovReplay, PovReplayEventType, PovReplayIdentity, encodePovReplay, decodePovReplay } from '../replay/pov/PovReplayFormat';
+import { PovReplay, PovReplayEventType, PovReplayIdentity, POV_REPLAY_VERSION, encodePovReplay, decodePovReplay } from '../replay/pov/PovReplayFormat';
 import { GhostRaceController } from '../replay/GhostRaceController';
 import {
   GhostFinishComparison,
   GhostRaceRun,
   buildGhostRaceRun,
-  pbGhostLabel,
   worldGhostLabel
 } from '../replay/GhostRaceSource';
 import { replayStorageService } from '../online/ReplayStorageService';
@@ -64,11 +66,21 @@ import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagn
 import { PointerInputProbe } from './PointerInputProbe';
 import { BUILD_LABEL } from './BuildInfo';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
+import type { LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
+import type { SubmissionState, SubmissionFeedback } from '../leaderboard/SubmissionFeedback';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
 import { GateDiagnosticState } from '../ui/DevOverlay';
 import { MovementSfx } from '../audio/MovementSfx';
+
+/**
+ * Player-facing outcome of an official run's world submission.
+ *
+ * The states and copy live in `leaderboard/SubmissionFeedback` so the results
+ * screen can render them without importing the game loop.
+ */
+export type { SubmissionState, SubmissionFeedback };
 
 export class Game {
   public stateMachine: StateMachine;
@@ -117,6 +129,14 @@ export class Game {
   private pendingGhostRun: GhostRaceRun | null = null;
   /** Comparison captured at finish, for the results screen. */
   private lastGhostComparison: GhostFinishComparison | null = null;
+  /** Result of the most recent official submission attempt, for the results UI. */
+  private lastSubmissionState: SubmissionFeedback | null = null;
+  /**
+   * Upload promise from the run that just finished, so the submission can carry
+   * the replay metadata. Reset at the start of every recording.
+   */
+  private pendingReplayUpload: Promise<{ ok: boolean; path?: string; hash?: string } | null> | null =
+    null;
   private raceActive = false;
   /** Shared session start, as an epoch ms timestamp agreed by all clients. */
   private raceStartAtMs: number | null = null;
@@ -710,8 +730,18 @@ export class Game {
                     ghostTimeUs: this.lastGhostComparison.ghostTimeUs,
                     deltaUs: this.lastGhostComparison.deltaUs
                   }
-                : undefined
+                : undefined,
+              this.lastSubmissionState ?? { state: 'NOT_OFFICIAL' }
             );
+
+            // WORLD SUBMISSION: runs independently of the results screen so the
+            // player is never blocked, and reports the REAL outcome as it lands.
+            this.lastSubmissionState = { state: 'SUBMITTING' };
+            if (this.currentOfficialTrackId) {
+              void this.submitOfficialRun(results, officialInfo?.candidate);
+            } else {
+              this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
+            }
           }
           break;
 
@@ -2815,6 +2845,9 @@ export class Game {
   }
 
   private startPovRecording(): void {
+    // A fresh attempt: any previous run's upload must not leak into this run's
+    // submission.
+    this.pendingReplayUpload = null;
     const identity = this.currentMapIdentity();
     if (!identity) {
       // Custom audio and non-canonical maps are not competitively replayable.
@@ -2841,24 +2874,121 @@ export class Game {
     if (replay) {
       // Local cache first: WATCH works instantly and offline.
       replayStorageService.rememberLocally(replay);
-      // Upload is fire-and-forget and never blocks or fails the run.
-      void replayStorageService.uploadReplay(replay).then((uploaded) => {
-        // Record the storage reference against the PB so RACE PB GHOST survives
-        // a reload. This only writes when the uploaded run IS the stored PB, so
-        // a slower run's replay can never be attached to a faster PB.
-        if (uploaded.ok && uploaded.path && uploaded.hash) {
-          LeaderboardManager.getInstance().attachReplayToPb(
-            replay.identity.trackId,
-            replay.finishTimeUs,
-            uploaded.path,
-            uploaded.hash
-          );
-        }
-        if (this.currentOfficialTrackId) {
-          this.refreshPbGhostAvailability(this.currentOfficialTrackId);
-        }
-      });
+      // Upload is fire-and-forget and never blocks or fails the run. The
+      // submission chains on this promise so it can carry the replay metadata.
+      this.pendingReplayUpload = replayStorageService
+        .uploadReplay(replay)
+        .catch(() => null);
     }
+  }
+
+  /**
+   * Full canonical identity (including generator + analysis fingerprints) for the
+   * loaded official track, or null when the run is not canonical.
+   */
+  private fullMapIdentity(): MapIdentity | null {
+    if (!this.currentTrack || !this.currentAnalysis || !this.currentOfficialTrackId) return null;
+    if (!this.currentTrackCanonical) return null;
+    return computeMapIdentity(this.currentOfficialTrackId, this.currentTrack, this.currentAnalysis);
+  }
+
+  /**
+   * Submits a finished official run through the existing submit-run path, records
+   * the replay reference for ghost racing, and reports the REAL outcome.
+   *
+   * Deliberately independent: PB update, replay storage, ghost bookkeeping and
+   * world submission each happen on their own terms. A rejected submission never
+   * costs the player their ghost, and a slower run never overwrites a faster PB.
+   */
+  private async submitOfficialRun(
+    results: RunResults,
+    candidate: LeaderboardSubmissionCandidate | undefined
+  ): Promise<void> {
+    const trackId = this.currentOfficialTrackId;
+    if (!trackId) return;
+
+    const publish = (state: SubmissionState, detail?: string): void => {
+      this.lastSubmissionState = { state, detail };
+      this.ui.resultsScreen.setSubmissionState(state, detail);
+    };
+
+    // 1. Canonical guard. A non-canonical map can never be submitted.
+    const identity = this.fullMapIdentity();
+    if (!identity) {
+      publish('RUN_INELIGIBLE_NON_CANONICAL');
+      return;
+    }
+    if (this.isOvertime) {
+      publish('RUN_INELIGIBLE_OVERTIME');
+      return;
+    }
+    if (!candidate) {
+      publish('RUN_INELIGIBLE_UNRANKED');
+      return;
+    }
+
+    // 2. Wait for the replay upload so the submission can carry its metadata.
+    //    The results screen is already visible and reads SUBMITTING meanwhile.
+    publish('SUBMITTING');
+    const uploaded = await (this.pendingReplayUpload ?? Promise.resolve(null));
+    const replay = this.lastFinalizedReplay;
+
+    // 3. Ghost bookkeeping FIRST, so ghost racing works even if the world
+    //    submission is rejected. The FASTEST recorded replay wins; a slower run
+    //    becomes the best available ghost without touching the PB.
+    if (uploaded?.ok && uploaded.path && uploaded.hash && replay) {
+      const changed = LeaderboardManager.getInstance().recordGhostReplay(
+        trackId,
+        replay.finishTimeUs,
+        uploaded.path,
+        uploaded.hash,
+        identity.mapFingerprint
+      );
+      if (changed) this.refreshPbGhostAvailability(trackId);
+    }
+
+    // 4. Submit. The server is the authority.
+    const submission: RunSubmission = {
+      identity,
+      timeUs: Math.round(results.completionTime * 1_000_000),
+      rank: results.rank,
+      checkpointCount: this.passedCheckpoints.size,
+      resetCount: Math.max(0, results.restartsCount),
+      devMode: this.movementLab !== null,
+      replayVersion: uploaded?.ok ? POV_REPLAY_VERSION : undefined,
+      replayHash: uploaded?.ok ? uploaded.hash : undefined,
+      replayPath: uploaded?.ok ? uploaded.path : undefined
+    };
+
+    const outcome = await leaderboardService.submitRun(submission);
+
+    if (outcome.ok) {
+      publish(outcome.isPersonalBest ? 'WORLD_PB_UPDATED' : 'WORLD_ENTRY_SUBMITTED');
+      return;
+    }
+
+    // Offline / not signed in: queue locally and say so plainly. Never claim the
+    // run reached the world board.
+    if (outcome.reason === 'OFFLINE' || outcome.reason === 'NOT_AUTHENTICATED') {
+      const queued = LeaderboardManager.getInstance().queueCandidate(candidate);
+      publish(
+        queued ? 'WORLD_ENTRY_QUEUED_OFFLINE' : 'WORLD_SUBMISSION_FAILED',
+        outcome.detail
+      );
+      return;
+    }
+
+    // Identity / registry / dev rejections are ineligibility, with the real reason.
+    if (
+      outcome.reason === 'IDENTITY_MISMATCH' ||
+      outcome.reason === 'REGISTRY_NOT_READY' ||
+      outcome.reason === 'DEV_RUN'
+    ) {
+      publish('RUN_INELIGIBLE_NON_CANONICAL', outcome.detail);
+      return;
+    }
+
+    publish('WORLD_SUBMISSION_FAILED', outcome.detail);
   }
 
   /** Records one simulation frame into the POV replay (cheap, allocation-free). */
@@ -2974,32 +3104,50 @@ export class Game {
   }
 
   /**
-   * Resolves the replay payload for the player's CURRENT personal best.
-   * Local first (instant and offline), then the owner-scoped cloud copy.
+   * Resolves the replay payload for this track's best raceable ghost.
+   *
+   * Order: local in-session replay for the PB time (instant, offline), then the
+   * stored fastest replay — but ONLY when it was recorded on the current
+   * canonical map. An old-map replay is never used for a current race.
    */
-  private async resolvePbReplayPayload(trackId: string): Promise<string | null> {
+  private async resolveGhostPayload(
+    trackId: string
+  ): Promise<{ payload: string; finishTimeUs: number | null } | null> {
     const manager = LeaderboardManager.getInstance();
-    const ref = manager.getPbReplayRef(trackId);
+    const pbTimeUs = manager.getPbTimeUs(trackId);
 
-    if (ref) {
+    if (pbTimeUs !== null) {
+      const local = replayStorageService.getLocal(trackId, pbTimeUs);
+      if (local) return { payload: local, finishTimeUs: pbTimeUs };
+    }
+
+    const ref = manager.getGhostReplayRef(trackId);
+    const fingerprint = this.canonicalFingerprintFor(trackId);
+    if (ref && fingerprint && ref.mapFingerprint === fingerprint) {
       const local = replayStorageService.getLocal(trackId, ref.finishTimeUs);
-      if (local) return local;
-    }
+      if (local) return { payload: local, finishTimeUs: ref.finishTimeUs };
 
-    const summary = manager.getRecordSummary(trackId);
-    if (summary.pbTime !== null) {
-      const local = replayStorageService.getLocal(
-        trackId,
-        Math.round(summary.pbTime * 1_000_000)
-      );
-      if (local) return local;
-    }
-
-    if (ref) {
       const fetched = await replayStorageService.fetchOwnReplay(ref.path);
-      if (fetched.ok && fetched.payload) return fetched.payload;
+      if (fetched.ok && fetched.payload) {
+        return { payload: fetched.payload, finishTimeUs: ref.finishTimeUs };
+      }
     }
+
     return null;
+  }
+
+  /** Shipped canonical map fingerprint for a track id, or null when unknown. */
+  private canonicalFingerprintFor(trackId: string): string | null {
+    return OFFICIAL_MAP_REGISTRY.find((e) => e.trackId === trackId)?.mapFingerprint ?? null;
+  }
+
+  /** Correct, non-conflated ghost label for a resolved ghost time. */
+  private ghostLabelFor(trackId: string, ghostTimeUs: number | null): 'PB GHOST' | 'BEST RECORDED GHOST' {
+    const pbTimeUs = LeaderboardManager.getInstance().getPbTimeUs(trackId);
+    if (pbTimeUs !== null && ghostTimeUs !== null && ghostTimeUs !== pbTimeUs) {
+      return 'BEST RECORDED GHOST';
+    }
+    return 'PB GHOST';
   }
 
   /**
@@ -3008,6 +3156,10 @@ export class Game {
    *
    * Flow: retrieve replay -> validate identity -> load canonical map -> enter
    * the normal run flow. Nothing is fetched after movement has begun.
+   *
+   * A legacy PB with no replay is reported honestly and never fabricated. When a
+   * slower run has a replay, that run is raced as BEST RECORDED GHOST and the
+   * faster PB time is untouched.
    */
   public async racePbGhost(trackId: string): Promise<{ ok: boolean; detail: string }> {
     const entry = this.ui.importScreen.getCatalogEntry(trackId);
@@ -3016,18 +3168,18 @@ export class Game {
     const expected = await this.canonicalIdentityFor(trackId);
     if (!expected) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
 
-    const payload = await this.resolvePbReplayPayload(trackId);
-    if (!payload) return { ok: false, detail: 'PB GHOST // UNAVAILABLE' };
+    const resolved = await this.resolveGhostPayload(trackId);
+    if (!resolved) return { ok: false, detail: 'PB GHOST // NO REPLAY' };
 
-    const decoded = decodePovReplay(payload);
-    if (!decoded.ok) return { ok: false, detail: `PB GHOST // REJECTED (${decoded.reason})` };
+    const decoded = decodePovReplay(resolved.payload);
+    if (!decoded.ok) return { ok: false, detail: `GHOST // REJECTED (${decoded.reason})` };
 
     const built = buildGhostRaceRun({
       kind: 'PB',
-      label: pbGhostLabel(),
+      label: this.ghostLabelFor(trackId, resolved.finishTimeUs),
       replay: decoded.replay,
       expectedIdentity: expected,
-      payload,
+      payload: resolved.payload,
       // Self-consistency: the bytes must match the hash the replay carries.
       expectedHash: decoded.replay.hash
     });
@@ -3080,23 +3232,26 @@ export class Game {
   }
 
   /**
-   * Refreshes the restrained PB-ghost action for the selected track. A PB with
-   * no usable replay is reported as unavailable rather than offered.
+   * Refreshes the restrained ghost action for the selected track.
+   *
+   * Reports one of four distinct, non-conflated states: no PB, PB with no
+   * replay, PB GHOST, or BEST RECORDED GHOST. A PB whose only replay is from an
+   * older map is reported as having no usable replay rather than offering a
+   * ghost that would be rejected on load.
    */
   public refreshPbGhostAvailability(trackId: string): void {
     const manager = LeaderboardManager.getInstance();
-    const summary = manager.getRecordSummary(trackId);
-    const ref = manager.getPbReplayRef(trackId);
-
-    let localAvailable = false;
-    if (summary.pbTime !== null) {
-      localAvailable =
-        replayStorageService.getLocal(trackId, Math.round(summary.pbTime * 1_000_000)) !== null;
-    }
+    const info = manager.resolveGhostAvailability(
+      trackId,
+      this.canonicalFingerprintFor(trackId),
+      (finishTimeUs) => replayStorageService.getLocal(trackId, finishTimeUs) !== null
+    );
 
     this.ui.importScreen.setPbGhostAvailability({
-      available: localAvailable || ref !== null,
-      pbTimeSeconds: summary.pbTime
+      available: info.available,
+      pbTimeSeconds: info.pbTimeUs !== null ? info.pbTimeUs / 1_000_000 : null,
+      actionText: info.actionText,
+      state: info.state
     });
   }
 

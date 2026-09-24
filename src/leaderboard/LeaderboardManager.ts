@@ -40,16 +40,110 @@ export interface OfficialRecordEntry {
   localFirstScore: number;
   localFirstDate: number;
   /**
-   * Storage reference for the replay that belongs to the CURRENT personal best.
+   * Storage reference for the FASTEST recorded replay on this track.
+   *
+   * This is deliberately separate from `pbTime`. A legacy PB may have no replay
+   * at all, and a slower run may still be the best replay available. Keeping the
+   * fastest replay here (rather than only accepting a replay that exactly equals
+   * the PB) is what stops legacy-PB players from being permanently unable to race
+   * a ghost.
    *
    * Additive bookkeeping only — it never influences which run becomes the PB,
-   * any rank threshold, or any leaderboard ordering. It exists so RACE PB GHOST
-   * can retrieve the recorded run after a page reload.
+   * any rank threshold, or any leaderboard ordering.
    */
-  pbReplayPath?: string;
-  pbReplayHash?: string;
-  /** The PB's completion time in integer microseconds, matching the replay. */
-  pbReplayFinishUs?: number;
+  ghostReplayPath?: string;
+  ghostReplayHash?: string;
+  ghostReplayFinishUs?: number;
+  /** Canonical map fingerprint the ghost replay was recorded on. */
+  ghostReplayMapFingerprint?: string;
+}
+
+/** What a track's ghost situation actually is. */
+export type GhostAvailabilityState =
+  | 'NO_PB'
+  | 'PB_NO_REPLAY'
+  | 'PB_GHOST'
+  | 'BEST_RECORDED_GHOST';
+
+/** Correct, non-conflated ghost labels. */
+export type GhostRaceLabel = 'PB GHOST' | 'BEST RECORDED GHOST';
+
+export interface GhostAvailabilityInfo {
+  state: GhostAvailabilityState;
+  /** The stored personal best, in integer microseconds. */
+  pbTimeUs: number | null;
+  /** The replay we can actually race, in integer microseconds. */
+  ghostTimeUs: number | null;
+  /** HUD label for the ghost, or null when none can be raced. */
+  label: GhostRaceLabel | null;
+  /** Restrained SIGNAL PACK action text. */
+  actionText: string;
+  /** True only when a ghost can actually be raced. */
+  available: boolean;
+}
+
+/**
+ * Classifies a track's ghost situation from the PB and the best raceable replay.
+ *
+ * PURE: the caller resolves which replay is actually usable (identity-validated,
+ * in-session or cloud) and this decides what to call it. The three cases are
+ * deliberately never conflated:
+ *
+ *   PB GHOST              replay corresponds EXACTLY to the current PB
+ *   BEST RECORDED GHOST   fastest available replay, but NOT equal to the PB
+ *   PB_NO_REPLAY          a PB exists with no replay yet
+ *   NO_PB                 no personal best at all
+ */
+export function classifyGhostAvailability(input: {
+  pbTimeUs: number | null;
+  /** Fastest replay that can actually be raced, already identity-validated. */
+  ghostTimeUs: number | null;
+}): GhostAvailabilityInfo {
+  const pb = input.pbTimeUs;
+  const ghost = input.ghostTimeUs;
+
+  if (pb === null) {
+    return {
+      state: 'NO_PB',
+      pbTimeUs: null,
+      ghostTimeUs: ghost,
+      label: null,
+      actionText: 'PB GHOST // NO PERSONAL BEST',
+      available: false
+    };
+  }
+
+  if (ghost === null) {
+    return {
+      state: 'PB_NO_REPLAY',
+      pbTimeUs: pb,
+      ghostTimeUs: null,
+      label: null,
+      actionText: 'PB GHOST // NO REPLAY',
+      available: false
+    };
+  }
+
+  // The replay is the PB only when the recorded time matches it exactly.
+  if (ghost === pb) {
+    return {
+      state: 'PB_GHOST',
+      pbTimeUs: pb,
+      ghostTimeUs: ghost,
+      label: 'PB GHOST',
+      actionText: '> RACE PB GHOST',
+      available: true
+    };
+  }
+
+  return {
+    state: 'BEST_RECORDED_GHOST',
+    pbTimeUs: pb,
+    ghostTimeUs: ghost,
+    label: 'BEST RECORDED GHOST',
+    actionText: '> RACE BEST GHOST',
+    available: true
+  };
 }
 
 const STORAGE_OFFICIAL_RECORDS = 'playhead_official_records_v1';
@@ -190,47 +284,97 @@ export class LeaderboardManager {
   }
 
   /**
-   * Attaches a replay reference to the CURRENT personal best.
+   * Records a replay reference for this track, keeping the FASTEST one.
    *
-   * Only writes when the supplied run time actually IS the stored PB, so a
-   * slower run's replay can never be attached to a faster PB. Returns whether
-   * the reference was stored.
+   * A slower completion is still recorded when nothing faster has a replay, so a
+   * legacy PB without a replay does not lock the player out of ghost racing. The
+   * PB itself is never touched here — a slower run can never overwrite a faster
+   * PB time.
+   *
+   * Returns true when the stored ghost reference changed.
    */
-  public attachReplayToPb(
+  public recordGhostReplay(
     trackId: string,
     finishTimeUs: number,
     path: string,
-    hash: string
+    hash: string,
+    mapFingerprint: string
   ): boolean {
     const rec = this.records[trackId];
-    if (!rec || !Number.isFinite(rec.pbTime)) return false;
+    if (!rec) return false;
+    if (!Number.isFinite(finishTimeUs) || finishTimeUs <= 0) return false;
 
-    // Tolerance is 1 ms: both sides derive from the same authoritative timer.
-    const pbUs = Math.round(rec.pbTime * 1_000_000);
-    if (Math.abs(pbUs - finishTimeUs) > 1000) return false;
+    // Fastest wins. Equal times keep the existing reference (no churn).
+    if (rec.ghostReplayFinishUs !== undefined && rec.ghostReplayFinishUs <= finishTimeUs) {
+      return false;
+    }
 
-    rec.pbReplayPath = path;
-    rec.pbReplayHash = hash;
-    rec.pbReplayFinishUs = finishTimeUs;
+    rec.ghostReplayPath = path;
+    rec.ghostReplayHash = hash;
+    rec.ghostReplayFinishUs = finishTimeUs;
+    rec.ghostReplayMapFingerprint = mapFingerprint;
     this.saveState();
     return true;
   }
 
-  /** Storage reference for the current PB's replay, when one is recorded. */
-  public getPbReplayRef(trackId: string): {
+  /** Storage reference for the fastest recorded replay, when one exists. */
+  public getGhostReplayRef(trackId: string): {
     path: string;
     hash: string;
     finishTimeUs: number;
+    mapFingerprint: string | null;
   } | null {
     const rec = this.records[trackId];
-    if (!rec?.pbReplayPath || !rec.pbReplayHash || rec.pbReplayFinishUs === undefined) {
+    if (!rec?.ghostReplayPath || !rec.ghostReplayHash || rec.ghostReplayFinishUs === undefined) {
       return null;
     }
     return {
-      path: rec.pbReplayPath,
-      hash: rec.pbReplayHash,
-      finishTimeUs: rec.pbReplayFinishUs
+      path: rec.ghostReplayPath,
+      hash: rec.ghostReplayHash,
+      finishTimeUs: rec.ghostReplayFinishUs,
+      mapFingerprint: rec.ghostReplayMapFingerprint ?? null
     };
+  }
+
+  /** The stored personal best time in integer microseconds, or null. */
+  public getPbTimeUs(trackId: string): number | null {
+    const rec = this.records[trackId];
+    if (!rec || !Number.isFinite(rec.pbTime)) return null;
+    return Math.round(rec.pbTime * 1_000_000);
+  }
+
+  /**
+   * Resolves and classifies this track's ghost situation.
+   *
+   * A replay is only considered when its recorded map fingerprint matches the
+   * CURRENT canonical map. An old-map replay is never used for a current race,
+   * a current PB ghost, or a current map comparison.
+   *
+   * @param hasLocalReplay reports in-session replay availability for a time.
+   */
+  public resolveGhostAvailability(
+    trackId: string,
+    currentMapFingerprint: string | null,
+    hasLocalReplay: (finishTimeUs: number) => boolean
+  ): GhostAvailabilityInfo {
+    const pbTimeUs = this.getPbTimeUs(trackId);
+    const ref = this.getGhostReplayRef(trackId);
+
+    // A local in-session replay for the PB time is the strongest case: it is
+    // exactly the PB and needs no network.
+    if (pbTimeUs !== null && hasLocalReplay(pbTimeUs)) {
+      return classifyGhostAvailability({ pbTimeUs, ghostTimeUs: pbTimeUs });
+    }
+
+    // Otherwise use the stored fastest replay, but ONLY when it belongs to the
+    // current canonical map.
+    if (ref && currentMapFingerprint && ref.mapFingerprint === currentMapFingerprint) {
+      return classifyGhostAvailability({ pbTimeUs, ghostTimeUs: ref.finishTimeUs });
+    }
+
+    // A legacy PB whose replay predates recording, or whose replay is from an
+    // older map: honest NO_REPLAY rather than a fabricated ghost.
+    return classifyGhostAvailability({ pbTimeUs, ghostTimeUs: null });
   }
 
   public canSubmitToLeaderboard(run: {
