@@ -32,7 +32,7 @@ export interface ViewmodelRigInstance {
 export class ViewmodelAssetLoader {
   private static armsUrl = '/assets/viewmodel/arms/arms_rig.glb';
   private static karambitUrl = '/assets/viewmodel/karambit/karambit.glb';
-  private static gloveTexUrl = '/assets/viewmodel/textures/arms_gloves_01.png';
+  private static gloveTexUrl = '/assets/viewmodel/textures/arms_gloves_01.webp';
 
   /**
    * Loads and constructs the complete viewmodel rig with arms and karambit

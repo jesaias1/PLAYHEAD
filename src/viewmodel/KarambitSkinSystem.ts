@@ -146,7 +146,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       fresnelPower: 2.8,
       audioReactivity: 0.25,
       isCanonical: false,
-      texturePath: '/assets/viewmodel/karambit/textures/astral_cosmic.png',
+      texturePath: '/assets/viewmodel/karambit/textures/astral_cosmic.webp',
       exposure: 1.25,
       contrast: 1.05,
       emission: 1.2,
@@ -178,7 +178,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       fresnelPower: 3.0,
       audioReactivity: 0.22,
       isCanonical: false,
-      texturePath: '/assets/viewmodel/karambit/textures/void_signal_cosmic.png',
+      texturePath: '/assets/viewmodel/karambit/textures/void_signal_cosmic.webp',
       exposure: 1.18,
       contrast: 1.2,
       emission: 1.15,
@@ -210,7 +210,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       fresnelPower: 2.6,
       audioReactivity: 0.30,
       isCanonical: false,
-      texturePath: '/assets/viewmodel/karambit/textures/redshift_cosmic.png',
+      texturePath: '/assets/viewmodel/karambit/textures/redshift_cosmic.webp',
       exposure: 1.3,
       contrast: 1.1,
       emission: 1.3,
@@ -243,7 +243,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       audioReactivity: 0.22,
       isCanonical: false,
       isPrism: true,
-      texturePath: '/assets/viewmodel/karambit/textures/prism_static_cosmic.png',
+      texturePath: '/assets/viewmodel/karambit/textures/prism_static_cosmic.webp',
       exposure: 1.08,
       contrast: 1.0,
       emission: 1.12,
@@ -276,7 +276,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       audioReactivity: 0.12,
       isCanonical: false,
       isBlackstar: true,
-      texturePath: '/assets/viewmodel/karambit/textures/blackstar_cosmic.png',
+      texturePath: '/assets/viewmodel/karambit/textures/blackstar_cosmic.webp',
       exposure: 0.95,
       contrast: 1.35,
       emission: 1.0,
@@ -860,7 +860,9 @@ export class KarambitSkinSystem {
   private listeners: Array<(skinId: string) => void> = [];
   private skinTextures: Map<string, THREE.Texture> = new Map();
   private textureLoader = new THREE.TextureLoader();
-  private activeVideo: { skinId: string; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
+  private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
+  /** Which animated-cosmetic encode to decode. Presentation only. */
+  private videoQuality: 'STANDARD' | 'LOW' = 'STANDARD';
   private progression: SignalDropProgressionV2 = this.createDefaultProgression();
 
   private readonly STORAGE_KEY_RECORDS = 'playhead.karambit.trackRecords';
@@ -872,12 +874,36 @@ export class KarambitSkinSystem {
     this.preloadTextures();
   }
 
+  /**
+   * STARTUP IS LAZY.
+   *
+   * Only the EQUIPPED skin's static texture is fetched at boot. Previously every
+   * cosmetic texture was downloaded and uploaded up front, which pinned ~28 MB
+   * of GPU texture memory and ~12 MB of network for skins the player was not
+   * even using. Browsing the Armory must never pay that cost.
+   */
   private preloadTextures(): void {
     if (typeof window === 'undefined') return;
-    for (const skin of KARAMBIT_SKINS) {
-      if (skin.profile.texturePath) {
-        this.getSkinTexture(skin.id);
-      }
+    this.retainStaticTextureFor(this.equippedSkinId);
+  }
+
+  /**
+   * Keeps exactly one static texture resident (the retained skin's) and disposes
+   * every other cached one. Bounds GPU texture memory to a single cosmetic
+   * instead of growing as the player browses the Armory.
+   *
+   * Video-backed skins keep no static texture; their lifecycle is handled by
+   * releaseActiveVideoTexture().
+   */
+  private retainStaticTextureFor(skinId: string): void {
+    for (const [id, texture] of this.skinTextures) {
+      if (id === skinId) continue;
+      texture.dispose();
+      this.skinTextures.delete(id);
+    }
+    const skin = this.getSkin(skinId);
+    if (skin.profile.texturePath && !skin.profile.videoPath) {
+      this.getSkinTexture(skinId);
     }
   }
 
@@ -922,12 +948,17 @@ export class KarambitSkinSystem {
     if (!skin.profile.videoPath || skin.id !== this.equippedSkinId || typeof document === 'undefined') {
       return null;
     }
-    if (this.activeVideo?.skinId === skin.id) return this.activeVideo.texture;
+    if (this.activeVideo?.skinId === skin.id && this.activeVideo.quality === this.videoQuality) {
+      return this.activeVideo.texture;
+    }
 
     this.releaseActiveVideoTexture();
 
+    const url = this.videoUrlFor(skin);
+    if (!url) return null;
+
     const video = document.createElement('video');
-    video.src = skin.profile.videoPath;
+    video.src = url;
     video.muted = true;
     video.defaultMuted = true;
     video.loop = true;
@@ -944,7 +975,7 @@ export class KarambitSkinSystem {
     texture.magFilter = THREE.LinearFilter;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    this.activeVideo = { skinId: skin.id, element: video, texture };
+    this.activeVideo = { skinId: skin.id, quality: this.videoQuality, element: video, texture };
 
     try {
       const playResult = video.play();
@@ -955,6 +986,69 @@ export class KarambitSkinSystem {
       // The material remains valid and the first frame can still be sampled.
     }
     return texture;
+  }
+
+  /**
+   * Resolves the encode for the current quality tier.
+   *
+   * Convention: `<name>.mp4` is the standard encode and `<name>.low.mp4` is the
+   * reduced one. The low variant is only fetched when a weak tier is active, so
+   * a strong machine never pays for it.
+   */
+  private videoUrlFor(skin: KarambitSkin): string | null {
+    const base = skin.profile.videoPath;
+    if (!base) return null;
+    if (this.videoQuality === 'LOW') return base.replace(/\.mp4$/, '.low.mp4');
+    return base;
+  }
+
+  /**
+   * Presentation-only: selects which animated-cosmetic encode is decoded.
+   * Never touches gameplay, and never affects the frozen knife socket.
+   */
+  public setVideoQuality(quality: 'STANDARD' | 'LOW'): void {
+    if (quality === this.videoQuality) return;
+    this.videoQuality = quality;
+    // Force the next material application to rebuild the video at the new size.
+    if (this.activeVideo) this.releaseActiveVideoTexture();
+    this.notifyListeners();
+  }
+
+  public getVideoQuality(): 'STANDARD' | 'LOW' {
+    return this.videoQuality;
+  }
+
+  /** DEV diagnostics: what the animated cosmetic is actually doing right now. */
+  public getVideoDiagnostics(): {
+    activeSkinId: string | null;
+    quality: 'STANDARD' | 'LOW';
+    width: number;
+    height: number;
+    readyState: number;
+    paused: boolean;
+    src: string;
+  } | null {
+    if (!this.activeVideo) return null;
+    const v = this.activeVideo.element;
+    return {
+      activeSkinId: this.activeVideo.skinId,
+      quality: this.activeVideo.quality,
+      width: v.videoWidth,
+      height: v.videoHeight,
+      readyState: v.readyState,
+      paused: v.paused,
+      src: v.currentSrc || v.src
+    };
+  }
+
+  /** Number of live VideoTextures (must never exceed one). */
+  public getActiveVideoCount(): number {
+    return this.activeVideo ? 1 : 0;
+  }
+
+  /** Number of resident static cosmetic textures (must never exceed one). */
+  public getResidentTextureCount(): number {
+    return this.skinTextures.size;
   }
 
   private releaseActiveVideoTexture(): void {
@@ -1124,6 +1218,9 @@ export class KarambitSkinSystem {
     if (target.id === this.equippedSkinId) return true;
     this.releaseActiveVideoTexture();
     this.equippedSkinId = target.id;
+    // Drop the previous cosmetic's static texture so GPU memory does not grow
+    // as the player switches skins.
+    this.retainStaticTextureFor(target.id);
     this.saveState();
     this.notifyListeners();
     return true;
@@ -1138,6 +1235,7 @@ export class KarambitSkinSystem {
     if (!enabled && !this.isSkinUnlocked(this.equippedSkinId)) {
       this.releaseActiveVideoTexture();
       this.equippedSkinId = 'SIGNAL_CYAN';
+      this.retainStaticTextureFor('SIGNAL_CYAN');
     }
     this.saveState();
     this.notifyListeners();
@@ -1318,6 +1416,10 @@ export class KarambitSkinSystem {
     }
 
     if (changed) {
+      // Cloud state may have changed the equipped skin: reconcile resident
+      // cosmetic resources so a cloud equip does not leak a video or texture.
+      if (this.equippedSkinId !== this.activeVideo?.skinId) this.releaseActiveVideoTexture();
+      this.retainStaticTextureFor(this.equippedSkinId);
       this.saveState();
       this.notifyListeners();
     }

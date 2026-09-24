@@ -255,6 +255,14 @@ export class Game {
       this.applyLiveSettings(settings, changedKeys);
     });
 
+    // Animated cosmetics follow the resolved quality tier: weaker tiers decode a
+    // smaller encode, which cuts GPU upload traffic several-fold. Presentation
+    // only — it cannot touch the frozen knife socket or any movement behaviour.
+    this.environment.onQualityResolved = (preset) => {
+      KarambitSkinSystem.getInstance().setVideoQuality(preset.cosmeticVideoScale);
+    };
+    KarambitSkinSystem.getInstance().setVideoQuality(this.environment.activePreset.cosmeticVideoScale);
+
     this.setupCallbacks();
     this.setupStateMachine();
     this.setupInputHandlers();

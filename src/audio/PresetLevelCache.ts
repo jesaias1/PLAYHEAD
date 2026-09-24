@@ -22,6 +22,11 @@ export interface PrecomputedLevelData {
 export class PresetLevelCache {
   private static cache: Map<string, PrecomputedLevelData> = new Map();
 
+  /** DEV diagnostics: proves presets are not being re-fetched or re-parsed. */
+  private static loadCount = 0;
+  private static hitCount = 0;
+  private static missCount = 0;
+
   public static set(trackId: string, data: PrecomputedLevelData): void {
     this.cache.set(trackId, data);
   }
@@ -33,6 +38,18 @@ export class PresetLevelCache {
   /** Clears the in-memory preset cache (used when simulating a cold session). */
   public static clear(): void {
     this.cache.clear();
+    this.loadCount = 0;
+    this.hitCount = 0;
+    this.missCount = 0;
+  }
+
+  public static getCacheInfo(): { cached: number; loads: number; hits: number; misses: number } {
+    return {
+      cached: this.cache.size,
+      loads: this.loadCount,
+      hits: this.hitCount,
+      misses: this.missCount
+    };
   }
 
   /**
@@ -96,12 +113,15 @@ export class PresetLevelCache {
 
   public static async loadPreset(trackId: string): Promise<PrecomputedLevelData | null> {
     if (this.cache.has(trackId)) {
+      this.hitCount++;
       return this.cache.get(trackId)!;
     }
 
+    this.loadCount++;
     try {
       const response = await fetch(`/music/presets/${trackId}.json`);
       if (!response.ok) {
+        this.missCount++;
         return null;
       }
 
@@ -110,6 +130,7 @@ export class PresetLevelCache {
       this.cache.set(trackId, data);
       return data;
     } catch {
+      this.missCount++;
       return null;
     }
   }

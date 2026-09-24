@@ -38,6 +38,13 @@ export class Environment {
   public activePreset: QualityPreset = resolvePreset('HIGH');
 
   /**
+   * Notified whenever the RESOLVED preset changes (explicit tier or an
+   * AdaptiveQuality step). Lets presentation-only consumers — such as the
+   * animated-cosmetic encode selector — follow the tier without polling.
+   */
+  public onQualityResolved?: (preset: QualityPreset) => void;
+
+  /**
    * Presentation-only effect-intensity profile (STANDARD = identity).
    * Read by World each frame to scale audio-reactive emissive, and by
    * PostProcessing for bloom. Never read by physics, generation or scoring.
@@ -140,6 +147,9 @@ export class Environment {
     if (persist) {
       SettingsManager.getInstance().update({ graphics: tier });
     }
+
+    // Presentation-only consumers follow the resolved tier.
+    this.onQualityResolved?.(preset);
   }
 
   /**

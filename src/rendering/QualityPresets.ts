@@ -57,6 +57,16 @@ export interface QualityPreset {
   reactiveLandmarkScale: number;
   /** Pool size for the travelling route signal packets (one draw call total). */
   routeSignalPackets: number;
+  /**
+   * Which animated-cosmetic encode to load.
+   *
+   * Animated knife skins are video textures, and a video texture re-uploads the
+   * whole decoded frame to the GPU every time the video advances. At 1080p that
+   * is ~250 MB/s of upload traffic; at 540p it is ~62 MB/s; at 360p ~28 MB/s.
+   * This is one of the single most effective laptop levers available, so weaker
+   * tiers load the smaller encode.
+   */
+  cosmeticVideoScale: 'STANDARD' | 'LOW';
 }
 
 export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset> = {
@@ -75,7 +85,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     // Fewer hero landmarks and a smaller packet pool, but every core reactive
     // behaviour (bass mass, route pulse, primary city, drop) is retained.
     reactiveLandmarkScale: 0.35,
-    routeSignalPackets: 12
+    routeSignalPackets: 12,
+    cosmeticVideoScale: 'LOW'
   },
   MEDIUM: {
     renderScale: 0.85,
@@ -90,7 +101,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     decorationLodDistance: 1500,
     viewmodelSamples: 2,
     reactiveLandmarkScale: 0.65,
-    routeSignalPackets: 20
+    routeSignalPackets: 20,
+    cosmeticVideoScale: 'LOW'
   },
   HIGH: {
     // Reference look — matches the pre-existing behaviour.
@@ -106,7 +118,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     decorationLodDistance: 0,
     viewmodelSamples: 4,
     reactiveLandmarkScale: 1.0,
-    routeSignalPackets: 32
+    routeSignalPackets: 32,
+    cosmeticVideoScale: 'STANDARD'
   },
   ULTRA: {
     renderScale: 1.0,
@@ -121,7 +134,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     decorationLodDistance: 0,
     viewmodelSamples: 4,
     reactiveLandmarkScale: 1.0,
-    routeSignalPackets: 40
+    routeSignalPackets: 40,
+    cosmeticVideoScale: 'STANDARD'
   }
 };
 

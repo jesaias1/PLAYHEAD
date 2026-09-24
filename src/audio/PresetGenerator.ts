@@ -37,7 +37,13 @@ export class PresetGenerator {
       spectacleEvents: planner.events
     };
 
-    return JSON.stringify(data, null, 2);
+    // PRODUCTION SERIALIZATION: minified, not pretty-printed.
+    //
+    // Formatting only. The parsed object graph is byte-for-byte semantically
+    // identical to the pretty form, so canonical map/analysis fingerprints are
+    // unaffected. Pretty-printing roughly tripled the shipped preset payload
+    // (69 MB across the Signal Pack) and added parse cost for no runtime value.
+    return JSON.stringify(data);
   }
 
   public static async generateAllPresets(

@@ -18,6 +18,7 @@ import type { ChannelIsolation } from '../world/MusicVisualController';
 import { onlineBootstrap } from '../online/OnlineBootstrap';
 import { leaderboardService } from '../online/LeaderboardService';
 import { raceRoomService } from '../online/RaceRoomService';
+import { PresetLevelCache } from '../audio/PresetLevelCache';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -187,7 +188,9 @@ export class DevOverlay {
         (city ? `\n  VISIBLE CITY   ${city.visible} / ${city.total}` : '') +
         `\n  QUALITY        ${environment.qualityTier}${environment.qualityTier === 'AUTO' ? ` -> ${environment.resolvedTier}` : ''}` +
         `\n  DECOR LOD      ${preset.decorationLodDistance > 0 ? preset.decorationLodDistance + 'm' : 'off'}` +
-        `\n  ADAPTIVE FPS   ${environment.averageFps > 0 ? environment.averageFps.toFixed(0) : 'n/a'}`;
+        `\n  ADAPTIVE FPS   ${environment.averageFps > 0 ? environment.averageFps.toFixed(0) : 'n/a'}` +
+        `\n  ADAPTIVE TIER  ${environment.resolvedTier} | BLOOM ${environment.postProcessing.bloomPass.strength.toFixed(2)}` +
+        `\n  COSMETIC VID   ${preset.cosmeticVideoScale}`;
     }
 
     const conn = TrackGenerator.lastReport?.connectivity;
@@ -219,6 +222,7 @@ export class DevOverlay {
       worldSafetyDiagnosticsLine(world),
       onlineDiagnosticsLine(),
       raceLobbyDiagnosticsLine(),
+      assetDiagnosticsLine(),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
           `complete=${gates.complete} incomplete=${gates.incomplete} | ` +
@@ -301,6 +305,34 @@ function raceLobbyDiagnosticsLine(): string {
     `\n  CONNECTED ${d.connected} | sync ${d.lobbySyncActive ? 'polling' : 'off'} | realtime player events ${d.realtimePlayerEvents}` +
     `\n  LAST READY: ${last ? `${last.ok ? 'ok' : 'FAIL'} rows=${last.rows} ${last.detail}` : 'none'}`
   );
+}
+
+/**
+ * DEV: asset + cosmetic resource diagnostics.
+ *
+ * Covers the laptop suspects the PERF block cannot: how much cosmetic resource
+ * is actually resident, whether an animated skin is decoding (and at what
+ * resolution), and whether canonical presets are being re-fetched or re-parsed.
+ */
+function assetDiagnosticsLine(): string {
+  const skins = KarambitSkinSystem.getInstance();
+  const vid = skins.getVideoDiagnostics();
+  const cache = PresetLevelCache.getCacheInfo();
+  const lines = [
+    `ASSETS: equipped ${skins.getEquippedSkinId()}` +
+      `\n  STATIC TEX ${skins.getResidentTextureCount()} resident (max 1)` +
+      ` | LIVE VIDEO ${skins.getActiveVideoCount()} (max 1)`
+  ];
+  lines.push(
+    vid
+      ? `  VIDEO ${vid.width}x${vid.height} ${vid.quality} | ready ${vid.readyState} | ` +
+          `${vid.paused ? 'PAUSED' : 'PLAYING'} | ${vid.src.split('/').pop()}`
+      : '  VIDEO none (no animated skin equipped)'
+  );
+  lines.push(
+    `  PRESETS cached ${cache.cached} | fetches ${cache.loads} | cache hits ${cache.hits} | failed ${cache.misses}`
+  );
+  return lines.join('\n');
 }
 
 function worldSafetyDiagnosticsLine(world: World): string {  const r = world.worldSafetyReport;
