@@ -32,7 +32,8 @@ import {
 import { SettingsManager } from '../src/core/Settings';
 import { SongDirector } from '../src/world/SongDirector';
 import { PlayheadSystem } from '../src/world/PlayheadSystem';
-import { RemoteGhostRenderer } from '../src/online/RemoteGhostRenderer';
+import { RemoteGhostRenderer, RIVAL_SIGNAL_COLOR } from '../src/online/RemoteGhostRenderer';
+import { GhostVisual } from '../src/replay/GhostVisual';
 import type { MusicVisualState } from '../src/world/MusicVisualController';
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -428,48 +429,80 @@ describe('PlayheadSystem — gameplay legibility floors', () => {
 // ---------------------------------------------------------------------------
 
 describe('Remote ghost — readability', () => {
+  // The visual representation is shared (GhostVisual) between the live
+  // multiplayer ghost and the recorded-run ghost race. The readability contract
+  // lives there so the two can never drift apart.
+  const bodyOf = (visual: GhostVisual): THREE.MeshBasicMaterial =>
+    (visual as unknown as { bodyMaterial: THREE.MeshBasicMaterial }).bodyMaterial;
+  const traceOf = (visual: GhostVisual): THREE.MeshBasicMaterial =>
+    (visual as unknown as { traceMaterial: THREE.MeshBasicMaterial }).traceMaterial;
+
   it('has a translucent, normal-blended body that cannot add light', () => {
-    const ghost = new RemoteGhostRenderer(new THREE.Scene());
-    const body = (ghost as unknown as { material: THREE.MeshBasicMaterial }).material;
+    const visual = new GhostVisual(new THREE.Scene(), { color: RIVAL_SIGNAL_COLOR });
+    const body = bodyOf(visual);
     expect(body.transparent).toBe(true);
     expect(body.blending).toBe(THREE.NormalBlending);
     expect(body.depthWrite).toBe(false);
     expect(body.opacity).toBeGreaterThan(0.25);
     expect(body.opacity).toBeLessThan(0.55);
+    visual.dispose();
   });
 
   it('keeps only a thin additive trace, not a wide halo', () => {
-    const ghost = new RemoteGhostRenderer(new THREE.Scene());
-    const trace = (ghost as unknown as { outerMaterial: THREE.MeshBasicMaterial }).outerMaterial;
+    const visual = new GhostVisual(new THREE.Scene(), { color: RIVAL_SIGNAL_COLOR });
+    const trace = traceOf(visual);
     expect(trace.wireframe).toBe(true);
     expect(trace.blending).toBe(THREE.AdditiveBlending);
     expect(trace.opacity).toBeLessThan(0.3);
+    visual.dispose();
   });
 
   it('is visually distinct from the local player accent (rival violet, not cyan)', () => {
-    const ghost = new RemoteGhostRenderer(new THREE.Scene());
-    const body = (ghost as unknown as { material: THREE.MeshBasicMaterial }).material;
-    expect(body.color.getHex()).toBe(0x9d8cff);
+    const visual = new GhostVisual(new THREE.Scene(), { color: RIVAL_SIGNAL_COLOR });
+    expect(bodyOf(visual).color.getHex()).toBe(0x9d8cff);
+    // The multiplayer renderer defaults to the same identity.
+    const live = new RemoteGhostRenderer(new THREE.Scene());
+    expect(bodyOf((live as unknown as { visual: GhostVisual }).visual).color.getHex()).toBe(0x9d8cff);
+    live.dispose();
+    visual.dispose();
   });
 
-  it('scales with effect intensity but stays clamped and never occludes', () => {
-    const ghost = new RemoteGhostRenderer(new THREE.Scene());
-    const body = (ghost as unknown as { material: THREE.MeshBasicMaterial }).material;
-    const trace = (ghost as unknown as { outerMaterial: THREE.MeshBasicMaterial }).outerMaterial;
+  it('scales with effect intensity but stays clamped and never fully disappears', () => {
+    const visual = new GhostVisual(new THREE.Scene(), { color: RIVAL_SIGNAL_COLOR });
+    const body = bodyOf(visual);
+    const trace = traceOf(visual);
 
-    ghost.setEffectScale(0.55);
+    visual.setOpacityScale(0.55);
     expect(body.opacity).toBeLessThan(0.3);
     expect(trace.opacity).toBeLessThan(0.15);
 
-    ghost.setEffectScale(1.35);
+    visual.setOpacityScale(1.35);
     expect(body.opacity).toBeLessThanOrEqual(0.75);
     expect(trace.opacity).toBeLessThanOrEqual(0.5);
 
+    // A weak tier must never erase the ghost entirely.
+    visual.setOpacityScale(0.01);
+    expect(body.opacity).toBeGreaterThan(0.1);
+    expect(trace.opacity).toBeGreaterThan(0);
+
     // Invalid values are ignored, never crash.
     const before = body.opacity;
-    ghost.setEffectScale(0);
-    ghost.setEffectScale(Number.NaN);
+    visual.setOpacityScale(0);
+    visual.setOpacityScale(Number.NaN);
     expect(body.opacity).toBe(before);
+    visual.dispose();
+  });
+
+  it('the live multiplayer renderer delegates its visual to the shared component', () => {
+    const live = new RemoteGhostRenderer(new THREE.Scene());
+    const visual = (live as unknown as { visual: GhostVisual }).visual;
+    expect(visual).toBeInstanceOf(GhostVisual);
+    // Effect scaling and colour route through the shared visual.
+    live.setEffectScale(0.55);
+    expect(bodyOf(visual).opacity).toBeLessThan(0.3);
+    live.setColor(0x123456);
+    expect(bodyOf(visual).color.getHex()).toBe(0x123456);
+    live.dispose();
   });
 });
 

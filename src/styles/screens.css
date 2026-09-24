@@ -610,6 +610,64 @@
   align-items: center;
 }
 
+/* PB GHOST action: only reads as actionable once a recorded replay exists. */
+#btn-showcase-race-pb {
+  border-color: rgba(157, 140, 255, 0.5);
+  color: #b8a8ff;
+}
+#btn-showcase-race-pb.available {
+  border-color: #9d8cff;
+  color: #d8ccff;
+}
+#btn-showcase-race-pb:disabled {
+  opacity: 0.5;
+  cursor: default;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #6d7885;
+}
+
+/* Recorded-ghost finish comparison (results screen). */
+.results-ghost-race {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 14px 0 2px;
+  padding: 10px 14px;
+  border: 1px solid rgba(157, 140, 255, 0.32);
+  border-left: 3px solid #9d8cff;
+  background: rgba(20, 14, 34, 0.5);
+  font-family: var(--font-mono);
+}
+.results-ghost-race.hidden { display: none; }
+.results-ghost-race-head,
+.results-ghost-race-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+.results-ghost-race-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: #b8a8ff;
+}
+.results-ghost-race-time {
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  color: #e8e2ff;
+}
+.results-ghost-race-delta-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  color: #6d7885;
+}
+.results-ghost-race-delta {
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+}
+.results-ghost-race-delta.ahead { color: #00ff88; }
+.results-ghost-race-delta.behind { color: #ff3366; }
+
 /* Command Buttons */
 .btn-hero {
   font-family: var(--font-mono);
@@ -1903,9 +1961,9 @@ option:hover, option:focus, option:checked {
 .online-result-meta { text-align: right; color: #6d7885; font-size: 0.7rem; letter-spacing: 0.08em; }
 .online-result-attempts { font-size: 0.68rem; color: #6d7885; margin-top: 10px; letter-spacing: 0.06em; }
 
-/* WATCH RUN action inside the world leaderboard table. */
-.online-lb-row { grid-template-columns: 42px 1fr 110px 78px; }
-.online-lb-watch { text-align: right; }
+/* WATCH RUN / RACE GHOST actions inside the world leaderboard table. */
+.online-lb-row { grid-template-columns: 42px 1fr 110px 170px; }
+.online-lb-watch { text-align: right; display: flex; gap: 6px; justify-content: flex-end; }
 .online-lb-watch-btn {
   background: none;
   border: 1px solid var(--accent-color);
@@ -1917,3 +1975,16 @@ option:hover, option:focus, option:checked {
   cursor: pointer;
 }
 .online-lb-watch-btn:hover { background: var(--accent-dim); }
+
+/* Recorded-run ghost race: restrained secondary identity, subordinate to WATCH. */
+.online-lb-race-btn {
+  background: none;
+  border: 1px solid rgba(157, 140, 255, 0.55);
+  color: #b8a8ff;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.online-lb-race-btn:hover { background: rgba(157, 140, 255, 0.14); }

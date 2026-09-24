@@ -37,7 +37,15 @@ import { RemoteGhostRenderer } from '../online/RemoteGhostRenderer';
 import { formatRaceTime } from '../ui/RaceHud';
 import { PovReplayRecorder } from '../replay/pov/PovReplayRecorder';
 import { PovReplayPlayer } from '../replay/pov/PovReplayPlayer';
-import { PovReplay, PovReplayEventType, PovReplayIdentity, encodePovReplay } from '../replay/pov/PovReplayFormat';
+import { PovReplay, PovReplayEventType, PovReplayIdentity, encodePovReplay, decodePovReplay } from '../replay/pov/PovReplayFormat';
+import { GhostRaceController } from '../replay/GhostRaceController';
+import {
+  GhostFinishComparison,
+  GhostRaceRun,
+  buildGhostRaceRun,
+  pbGhostLabel,
+  worldGhostLabel
+} from '../replay/GhostRaceSource';
 import { replayStorageService } from '../online/ReplayStorageService';
 import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { UIManager } from '../ui/UIManager';
@@ -99,6 +107,16 @@ export class Game {
 
   /** Translucent remote signal ghost (presentation only, no collision). */
   private raceGhost: RemoteGhostRenderer | null = null;
+  /**
+   * RECORDED ghost race (solo). A completely separate lifecycle from the live
+   * friend-race ghost above: a live multiplayer session never loads a recorded
+   * ghost, and a recorded ghost is never driven by network samples.
+   */
+  public ghostRace: GhostRaceController;
+  /** Validated ghost armed for the NEXT run start. */
+  private pendingGhostRun: GhostRaceRun | null = null;
+  /** Comparison captured at finish, for the results screen. */
+  private lastGhostComparison: GhostFinishComparison | null = null;
   private raceActive = false;
   /** Shared session start, as an epoch ms timestamp agreed by all clients. */
   private raceStartAtMs: number | null = null;
@@ -208,6 +226,8 @@ export class Game {
     this.replayRecorder = new ReplayRecorder();
     this.replayPlayer = new ReplayPlayer(this.environment.scene, this.environment.camera);
     this.ghostManager = new GhostManager(this.environment.scene);
+    // Recorded ghost racing is a separate lifecycle from the live friend ghost.
+    this.ghostRace = new GhostRaceController(this.environment.scene);
 
     // 5. UI Manager
     this.ui = new UIManager(uiRoot);
@@ -284,7 +304,17 @@ export class Game {
       (genre) => this.handleDevTrackSelected(genre),
       (err) => alert(err),
       (trackId) => this.enterMovementLab(trackId),
-      (track) => this.handleCatalogTrackSelected(track)
+      (track) => this.handleCatalogTrackSelected(track),
+      (trackId) => {
+        // RACE PB GHOST: retrieve + validate + enter the level. Failures surface
+        // in the restrained showcase state instead of a fake action.
+        void this.racePbGhost(trackId).then((r) => {
+          if (!r.ok) {
+            this.ui.importScreen.setPbGhostAvailability({ available: false });
+            console.warn('[GHOST]', r.detail);
+          }
+        });
+      }
     );
 
     // Analysis Screen
@@ -418,6 +448,7 @@ export class Game {
       // rival ghost. Cannot reach geometry, collision, timing or scoring.
       this.environment.setEffectIntensity(settings.effectIntensity || 'STANDARD');
       this.raceGhost?.setEffectScale(this.environment.effectProfile.additiveScale);
+      this.ghostRace.setEffectScale(this.environment.effectProfile.additiveScale);
     }
     if (changedKeys.has('ghostMode')) {
       this.ghostManager.applySettingsVisibility();
@@ -558,6 +589,12 @@ export class Game {
           this.cameraController.unlock();
           this.replayRecorder.stop();
           this.finishPovRecording();
+          // Capture the recorded-ghost comparison BEFORE anything can clear the
+          // ghost. The active ghost is never mutated mid-run: a new PB only
+          // becomes the next run's ghost.
+          this.lastGhostComparison = this.ghostRace.finishComparison(
+            Math.round(this.runElapsedTime * 1_000_000)
+          );
           this.ui.hud.hide();
           if (this.currentAnalysis && this.currentTrack) {
             const results = this.playerController.stats.computeResults(
@@ -666,7 +703,14 @@ export class Game {
               { isOvertime, overtimeDuration },
               { dropsAwarded, bestDropRank },
               officialInfo,
-              customRewardInfo
+              customRewardInfo,
+              this.lastGhostComparison
+                ? {
+                    label: this.lastGhostComparison.label,
+                    ghostTimeUs: this.lastGhostComparison.ghostTimeUs,
+                    deltaUs: this.lastGhostComparison.deltaUs
+                  }
+                : undefined
             );
           }
           break;
@@ -708,7 +752,15 @@ export class Game {
     }
   }
 
-  private async handleCatalogTrackSelected(trackEntry: TrackCatalogEntry): Promise<void> {
+  private async handleCatalogTrackSelected(
+    trackEntry: TrackCatalogEntry,
+    ghostRun: GhostRaceRun | null = null
+  ): Promise<void> {
+    // A plain track entry clears any armed ghost. Only an explicit ghost-race
+    // entry arms one.
+    this.pendingGhostRun = ghostRun;
+    this.lastGhostComparison = null;
+    this.ghostRace.clear();
     try {
       this.currentOfficialTrackId = trackEntry.id;
       this.currentCustomAudioBuffer = null;
@@ -748,6 +800,9 @@ export class Game {
         this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.97);
         this.ui.analysisScreen.displayAnalysis(precomputed.analysis);
         this.currentTrackCanonical = true;
+        // The selected track is now current: refresh the restrained PB-ghost
+        // action so it reflects whether a usable recorded replay exists.
+        this.refreshPbGhostAvailability(trackEntry.id);
         this.stateMachine.transitionTo(GameState.READY);
         return;
       }
@@ -873,6 +928,13 @@ export class Game {
     // Prepare ghosts for track
     this.ghostManager.prepareTrack(this.currentTrack, this.currentAnalysis?.filename || 'PLAYHEAD TRACK');
     this.ghostManager.start();
+
+    // RECORDED GHOST RACE: arm the validated ghost for this run and reset it to
+    // t=0. A full restart (hold-R) lands here, so the ghost returns to its start
+    // alongside the player. Tap-R checkpoint restore does NOT land here and must
+    // not rewind the ghost — the run timer keeps running, so the ghost keeps its
+    // pace.
+    this.armPendingGhostRun();
 
     const startNode = this.currentTrack.route[0];
     const safeMargin = Math.min(2.5, startNode.dimensions.z * 0.25);
@@ -2107,6 +2169,10 @@ export class Game {
       // Update Ghosts
       this.ghostManager.update(this.runElapsedTime, this.playerController.position, frameDelta);
 
+      // Recorded ghost race: driven by the AUTHORITATIVE run timer, never a wall
+      // clock. Presentation only.
+      this.ghostRace.update(this.runElapsedTime, this.playerController.position);
+
       // Update HUD
       this.ui.hud.update(
         this.playerController.getSpeedUnits(),
@@ -2160,7 +2226,19 @@ export class Game {
               // an elevated checkpoint can never raise the death plane above the
               // route below it.
               const split = this.ghostManager.onPlayerReachCheckpoint(i, this.runElapsedTime);
-              if (split) {
+              // A recorded ghost race takes precedence for the split display: it
+              // is the pace actually being chased, and it uses the same
+              // authoritative run timer.
+              const ghostSplit = this.ghostRace.onPlayerCheckpoint(i, this.runElapsedTime);
+              if (ghostSplit) {
+                this.ui.hud.showSplit({
+                  checkpointIndex: ghostSplit.checkpointIndex,
+                  deltaSeconds: ghostSplit.deltaSeconds,
+                  target: 'GHOST',
+                  isAhead: ghostSplit.isAhead,
+                  label: ghostSplit.label
+                });
+              } else if (split) {
                 this.ui.hud.showSplit(split);
               } else {
                 this.ui.hud.showToast(`CHECKPOINT ${i + 1} REACHED`, 2000);
@@ -2361,6 +2439,16 @@ export class Game {
       onSelectTrack: (trackId) => void this.refreshLeaderboard(trackId),
       onPlaySignal: (trackId) => void this.loadPresetTrack(trackId),
       onWatchRun: (runId) => void this.watchLeaderboardRun(runId),
+      onRaceRun: (runId) => {
+        // RACE GHOST is the only path that arms a recorded ghost. A failure is
+        // reported, never silently ignored.
+        void this.raceLeaderboardGhost(runId).then((r) => {
+          if (!r.ok) {
+            this.ui.importScreen.leaderboardPanel.setStatus(r.detail);
+            console.warn('[GHOST]', r.detail);
+          }
+        });
+      },
       onRetryConnection: () => {
         onlineBootstrap.retry();
         void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
@@ -2548,6 +2636,9 @@ export class Game {
    */
   private async beginRaceFromSchedule(startAtMs: number): Promise<void> {
     if (this.raceActive) return;
+    // FRIEND RACE and GHOST RACE are separate lifecycles. A live multiplayer
+    // session must never inherit a recorded solo ghost.
+    this.clearGhostRace();
     const room = raceRoomService.getRoom();
     if (!room) return;
 
@@ -2751,7 +2842,22 @@ export class Game {
       // Local cache first: WATCH works instantly and offline.
       replayStorageService.rememberLocally(replay);
       // Upload is fire-and-forget and never blocks or fails the run.
-      void replayStorageService.uploadReplay(replay);
+      void replayStorageService.uploadReplay(replay).then((uploaded) => {
+        // Record the storage reference against the PB so RACE PB GHOST survives
+        // a reload. This only writes when the uploaded run IS the stored PB, so
+        // a slower run's replay can never be attached to a faster PB.
+        if (uploaded.ok && uploaded.path && uploaded.hash) {
+          LeaderboardManager.getInstance().attachReplayToPb(
+            replay.identity.trackId,
+            replay.finishTimeUs,
+            uploaded.path,
+            uploaded.hash
+          );
+        }
+        if (this.currentOfficialTrackId) {
+          this.refreshPbGhostAvailability(this.currentOfficialTrackId);
+        }
+      });
     }
   }
 
@@ -2817,6 +2923,183 @@ export class Game {
     );
   }
 
+  /** Arms the ghost for the next run start and resets it to t=0. */
+  private armPendingGhostRun(): void {
+    if (this.pendingGhostRun) {
+      this.ghostRace.load(this.pendingGhostRun);
+      this.ghostRace.setEffectScale(this.environment.effectProfile.additiveScale);
+      this.ui.hud.setGhostRaceIndicator(this.pendingGhostRun.label, this.pendingGhostRun.finishTimeUs);
+    } else {
+      this.ui.hud.setGhostRaceIndicator(null, null);
+    }
+    // start() is safe with no ghost: it only resets presentation state.
+    this.ghostRace.start();
+  }
+
+  /**
+   * Releases any recorded ghost. Used when leaving ghost racing so a live
+   * friend race (or a plain run) can never inherit one.
+   */
+  public clearGhostRace(): void {
+    this.pendingGhostRun = null;
+    this.lastGhostComparison = null;
+    this.ghostRace.clear();
+    this.ui.hud.setGhostRaceIndicator(null, null);
+  }
+
+  /** Maps a ghost rejection to the player-facing text. */
+  private static ghostRejectionDetail(reason: string): string {
+    if (
+      reason === 'MAP_VERSION_MISMATCH' ||
+      reason === 'MAP_FINGERPRINT_MISMATCH' ||
+      reason === 'MOVEMENT_VERSION_MISMATCH' ||
+      reason === 'TRACK_MISMATCH'
+    ) {
+      return 'GHOST // MAP VERSION MISMATCH';
+    }
+    return `GHOST // ${reason}`;
+  }
+
+  /** Canonical identity of a track as shipped, or null when unavailable. */
+  private async canonicalIdentityFor(trackId: string): Promise<PovReplayIdentity | null> {
+    const level = await PresetLevelCache.loadPreset(trackId);
+    if (!level) return null;
+    const identity = computeMapIdentity(trackId, level.track, level.analysis);
+    return {
+      trackId,
+      mapVersion: identity.mapVersion,
+      mapFingerprint: identity.mapFingerprint,
+      movementVersion: identity.movementVersion
+    };
+  }
+
+  /**
+   * Resolves the replay payload for the player's CURRENT personal best.
+   * Local first (instant and offline), then the owner-scoped cloud copy.
+   */
+  private async resolvePbReplayPayload(trackId: string): Promise<string | null> {
+    const manager = LeaderboardManager.getInstance();
+    const ref = manager.getPbReplayRef(trackId);
+
+    if (ref) {
+      const local = replayStorageService.getLocal(trackId, ref.finishTimeUs);
+      if (local) return local;
+    }
+
+    const summary = manager.getRecordSummary(trackId);
+    if (summary.pbTime !== null) {
+      const local = replayStorageService.getLocal(
+        trackId,
+        Math.round(summary.pbTime * 1_000_000)
+      );
+      if (local) return local;
+    }
+
+    if (ref) {
+      const fetched = await replayStorageService.fetchOwnReplay(ref.path);
+      if (fetched.ok && fetched.payload) return fetched.payload;
+    }
+    return null;
+  }
+
+  /**
+   * RACE YOUR PB — runs the official level with the player's recorded PB as a
+   * non-interactive ghost.
+   *
+   * Flow: retrieve replay -> validate identity -> load canonical map -> enter
+   * the normal run flow. Nothing is fetched after movement has begun.
+   */
+  public async racePbGhost(trackId: string): Promise<{ ok: boolean; detail: string }> {
+    const entry = this.ui.importScreen.getCatalogEntry(trackId);
+    if (!entry) return { ok: false, detail: 'TRACK NOT FOUND' };
+
+    const expected = await this.canonicalIdentityFor(trackId);
+    if (!expected) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
+
+    const payload = await this.resolvePbReplayPayload(trackId);
+    if (!payload) return { ok: false, detail: 'PB GHOST // UNAVAILABLE' };
+
+    const decoded = decodePovReplay(payload);
+    if (!decoded.ok) return { ok: false, detail: `PB GHOST // REJECTED (${decoded.reason})` };
+
+    const built = buildGhostRaceRun({
+      kind: 'PB',
+      label: pbGhostLabel(),
+      replay: decoded.replay,
+      expectedIdentity: expected,
+      payload,
+      // Self-consistency: the bytes must match the hash the replay carries.
+      expectedHash: decoded.replay.hash
+    });
+    if (!built.ok) return { ok: false, detail: Game.ghostRejectionDetail(built.reason) };
+
+    await this.handleCatalogTrackSelected(entry, built.run);
+    return { ok: true, detail: 'GHOST // VERIFIED' };
+  }
+
+  /**
+   * RACE A WORLD LEADERBOARD RUN — same flow, but the replay must come from an
+   * ACCEPTED leaderboard run through the existing secure retrieval path.
+   */
+  public async raceLeaderboardGhost(runId: string): Promise<{ ok: boolean; detail: string }> {
+    const panel = this.ui.importScreen.leaderboardPanel;
+    const entry = panel.getEntryByRunId(runId);
+    const trackId = entry?.trackId ?? panel.getSelectedTrack();
+    const finishTimeUs = entry?.timeUs;
+
+    const catalogEntry = this.ui.importScreen.getCatalogEntry(trackId);
+    if (!catalogEntry) return { ok: false, detail: 'TRACK NOT FOUND' };
+
+    const expected = await this.canonicalIdentityFor(trackId);
+    if (!expected) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
+
+    // Local replay first (the player's own accepted run), then the secure
+    // accepted-run path. No new retrieval backend is introduced.
+    const localPayload = finishTimeUs
+      ? replayStorageService.getLocal(trackId, finishTimeUs)
+      : null;
+    const payload = localPayload ?? (await replayStorageService.fetchReplayForRun(runId)).payload;
+    if (!payload) return { ok: false, detail: 'GHOST // REPLAY UNAVAILABLE' };
+
+    const decoded = decodePovReplay(payload);
+    if (!decoded.ok) return { ok: false, detail: `GHOST // REJECTED (${decoded.reason})` };
+
+    const built = buildGhostRaceRun({
+      kind: 'WORLD',
+      label: worldGhostLabel(entry?.rankPosition ?? 0, entry?.displayName ?? 'RUNNER'),
+      replay: decoded.replay,
+      expectedIdentity: expected,
+      expectedFinishTimeUs: finishTimeUs,
+      payload,
+      expectedHash: entry?.replayHash ?? undefined
+    });
+    if (!built.ok) return { ok: false, detail: Game.ghostRejectionDetail(built.reason) };
+
+    await this.handleCatalogTrackSelected(catalogEntry, built.run);
+    return { ok: true, detail: 'GHOST // VERIFIED' };
+  }
+
+  /**
+   * Refreshes the restrained PB-ghost action for the selected track. A PB with
+   * no usable replay is reported as unavailable rather than offered.
+   */
+  public refreshPbGhostAvailability(trackId: string): void {
+    const manager = LeaderboardManager.getInstance();
+    const summary = manager.getRecordSummary(trackId);
+    const ref = manager.getPbReplayRef(trackId);
+
+    let localAvailable = false;
+    if (summary.pbTime !== null) {
+      localAvailable =
+        replayStorageService.getLocal(trackId, Math.round(summary.pbTime * 1_000_000)) !== null;
+    }
+
+    this.ui.importScreen.setPbGhostAvailability({
+      available: localAvailable || ref !== null,
+      pbTimeSeconds: summary.pbTime
+    });
+  }
+
   public hasLocalReplay(): boolean {
     return this.lastFinalizedReplay !== null && this.currentMapIdentity() !== null;
   }
@@ -2844,6 +3127,7 @@ export class Game {
     this.replayMode = 'NONE';
     this.povPlayer.unload();
     this.ui.replayOverlay.hide();
+    this.clearGhostRace();
     this.stateMachine.transitionTo(GameState.IMPORT);
   }
 

@@ -5,6 +5,7 @@
 import { formatSpeed } from '../utils/math';
 import { SettingsManager } from '../core/Settings';
 import { SplitResult } from '../replay/GhostManager';
+import { formatRaceTime } from './RaceHud';
 
 export class Hud {
   public element: HTMLElement;
@@ -53,6 +54,10 @@ export class Hud {
             <span class="hud-sync-label">SYNC DELTA</span>
             <span class="hud-sync-val" id="hud-sync">0.00s</span>
           </div>
+          <div class="hud-ghost-indicator hidden" id="hud-ghost-indicator">
+            <span class="hud-ghost-label" id="hud-ghost-label">PB GHOST</span>
+            <span class="hud-ghost-time" id="hud-ghost-time">--:--.---</span>
+          </div>
           <div class="hud-split-badge hidden" id="hud-split-badge">
             <span class="hud-split-badge-label" id="hud-split-badge-label">VS ECHO</span>
             <span class="hud-split-badge-val" id="hud-split-badge-val">0.00s</span>
@@ -85,6 +90,9 @@ export class Hud {
     this.splitBadgeElem = this.element.querySelector('#hud-split-badge') as HTMLElement;
     this.splitBadgeLabelElem = this.element.querySelector('#hud-split-badge-label') as HTMLElement;
     this.splitBadgeValElem = this.element.querySelector('#hud-split-badge-val') as HTMLElement;
+    this.ghostIndicatorElem = this.element.querySelector('#hud-ghost-indicator') as HTMLElement;
+    this.ghostLabelElem = this.element.querySelector('#hud-ghost-label') as HTMLElement;
+    this.ghostTimeElem = this.element.querySelector('#hud-ghost-time') as HTMLElement;
 
     this.restartHoldElem = this.element.querySelector('#hud-restart-hold') as HTMLElement;
     this.restartBarElem = this.element.querySelector('#hud-restart-bar') as HTMLElement;
@@ -100,6 +108,9 @@ export class Hud {
   private splitBadgeElem: HTMLElement;
   private splitBadgeLabelElem: HTMLElement;
   private splitBadgeValElem: HTMLElement;
+  private ghostIndicatorElem: HTMLElement;
+  private ghostLabelElem: HTMLElement;
+  private ghostTimeElem: HTMLElement;
   private restartHoldElem: HTMLElement;
   private restartBarElem: HTMLElement;
   private splitTimeout: number | null = null;
@@ -256,6 +267,22 @@ export class Hud {
     }
   }
 
+  /**
+   * Restrained in-race ghost indicator. Small and non-blocking: it names the
+   * opponent and its recorded time, and never covers the route.
+   * Pass null to hide it when no ghost is being raced.
+   */
+  public setGhostRaceIndicator(label: string | null, ghostTimeUs: number | null): void {
+    if (!label) {
+      this.ghostIndicatorElem.classList.add('hidden');
+      return;
+    }
+    this.ghostIndicatorElem.classList.remove('hidden');
+    this.ghostLabelElem.textContent = label;
+    this.ghostTimeElem.textContent =
+      ghostTimeUs === null ? '--:--.---' : formatRaceTime(ghostTimeUs);
+  }
+
   public showToast(msg: string, durationMs = 2000): void {
     const callouts = SettingsManager.getInstance().settings.terminalCallouts || 'MINIMAL';
     if (callouts === 'OFF') return;
@@ -294,7 +321,8 @@ export class Hud {
       clearTimeout(this.splitTimeout);
     }
 
-    const targetName = split.target === 'PB' ? 'PB' : 'ECHO';
+    const targetName =
+      split.label ?? (split.target === 'PB' ? 'PB' : split.target === 'GHOST' ? 'GHOST' : 'ECHO');
     const sign = split.isAhead ? '▲ -' : '▼ +';
     const absVal = Math.abs(split.deltaSeconds).toFixed(2);
     const splitClass = split.isAhead ? 'ahead' : 'behind';

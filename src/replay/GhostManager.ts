@@ -14,8 +14,13 @@ import { SettingsManager, GhostMode } from '../core/Settings';
 export interface SplitResult {
   checkpointIndex: number;
   deltaSeconds: number;
-  target: 'PB' | 'ECHO';
+  target: 'PB' | 'ECHO' | 'GHOST';
   isAhead: boolean;
+  /**
+   * Optional precise label for the HUD (e.g. `PB GHOST`, `WORLD #1 // SIGNAL-4F21`).
+   * Falls back to the target name when absent.
+   */
+  label?: string;
 }
 
 export class GhostManager {

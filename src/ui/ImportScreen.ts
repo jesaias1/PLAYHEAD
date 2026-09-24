@@ -76,6 +76,7 @@ export class ImportScreen {
   private showcaseFingerprintElem: HTMLElement;
   private showcaseEnterBtn: HTMLButtonElement;
   private showcasePreviewBtn: HTMLButtonElement;
+  private showcaseRacePbBtn: HTMLButtonElement;
   private previewIconElem: HTMLElement;
   private previewTextElem: HTMLElement;
   private selectorStripElem: HTMLElement;
@@ -105,6 +106,7 @@ export class ImportScreen {
 
   private onFileSelectedCallback?: (file: File) => void;
   private onCatalogTrackCallback?: (track: TrackCatalogEntry) => void;
+  private onRacePbGhostCallback?: (trackId: string) => void;
   private onDevTrackCallback?: (genre?: SyntheticGenre) => void;
   private onErrorCallback?: (err: string) => void;
   private onMovementLabCallback?: (trackId?: string) => void;
@@ -186,6 +188,9 @@ export class ImportScreen {
               <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
                 <span id="preview-icon">▶</span>
                 <span id="preview-text">> AUDITION // PREVIEW</span>
+              </button>
+              <button class="btn-preview btn-terminal-action" id="btn-showcase-race-pb" title="Race your personal best as a recorded ghost.">
+                PB GHOST // UNAVAILABLE
               </button>
             </div>
           </div>
@@ -318,6 +323,7 @@ export class ImportScreen {
     this.showcaseFingerprintElem = this.element.querySelector('#showcase-fingerprint') as HTMLElement;
     this.showcaseEnterBtn = this.element.querySelector('#btn-showcase-enter') as HTMLButtonElement;
     this.showcasePreviewBtn = this.element.querySelector('#btn-showcase-preview') as HTMLButtonElement;
+    this.showcaseRacePbBtn = this.element.querySelector('#btn-showcase-race-pb') as HTMLButtonElement;
     this.previewIconElem = this.element.querySelector('#preview-icon') as HTMLElement;
     this.previewTextElem = this.element.querySelector('#preview-text') as HTMLElement;
     this.selectorStripElem = this.element.querySelector('#showcase-strip') as HTMLElement;
@@ -471,6 +477,10 @@ export class ImportScreen {
     const pbElem = this.element.querySelector('#showcase-pb-time') as HTMLElement;
     const local1Elem = this.element.querySelector('#showcase-local-first') as HTMLElement;
 
+    // Default the PB-ghost action to unavailable; Game confirms availability
+    // once it knows whether a usable recorded replay exists for this track.
+    this.setPbGhostAvailability({ available: false, pbTimeSeconds: summary.pbTime });
+
     if (bestRankElem) {
       if (summary.bestRank) {
         bestRankElem.textContent = summary.bestRank;
@@ -619,22 +629,55 @@ export class ImportScreen {
     this.decoderButton.textContent = pending > 0 ? '[ DECODE SIGNAL ]' : '[ NO SIGNAL AVAILABLE ]';
   }
 
+  /**
+   * Restrained PB-ghost state for the selected track.
+   *
+   * A PB with no recorded replay must NOT offer a fake action, so the button is
+   * disabled and reads UNAVAILABLE rather than pretending to work.
+   */
+  public setPbGhostAvailability(state: {
+    available: boolean;
+    pbTimeSeconds?: number | null;
+  }): void {
+    if (!this.showcaseRacePbBtn) return;
+    if (state.available) {
+      this.showcaseRacePbBtn.disabled = false;
+      this.showcaseRacePbBtn.textContent = '> RACE PB GHOST';
+      this.showcaseRacePbBtn.classList.add('available');
+    } else {
+      this.showcaseRacePbBtn.disabled = true;
+      this.showcaseRacePbBtn.textContent =
+        state.pbTimeSeconds ? 'PB GHOST // UNAVAILABLE' : 'PB GHOST // NO PERSONAL BEST';
+      this.showcaseRacePbBtn.classList.remove('available');
+    }
+  }
+
   public setCallbacks(
     onFileSelected: (file: File) => void,
     onDevTrack: (genre?: SyntheticGenre) => void,
     onError: (err: string) => void,
     onMovementLab?: (trackId?: string) => void,
-    onCatalogTrack?: (track: TrackCatalogEntry) => void
+    onCatalogTrack?: (track: TrackCatalogEntry) => void,
+    onRacePbGhost?: (trackId: string) => void
   ): void {
     this.onFileSelectedCallback = onFileSelected;
     this.onDevTrackCallback = onDevTrack;
     this.onErrorCallback = onError;
     this.onMovementLabCallback = onMovementLab;
     this.onCatalogTrackCallback = onCatalogTrack;
+    this.onRacePbGhostCallback = onRacePbGhost;
   }
 
   public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
     this.decodeModal = modal;
+  }
+
+  /**
+   * Catalog entry for a track id. Used by ghost racing to enter the level that a
+   * recorded run actually belongs to.
+   */
+  public getCatalogEntry(trackId: string): TrackCatalogEntry | null {
+    return this.catalog.find((t) => t.id === trackId) ?? null;
   }
 
   public show(): void {
@@ -773,6 +816,12 @@ export class ImportScreen {
       } else {
         this.onDevTrackCallback?.('ELECTRONIC_DROP');
       }
+    });
+
+    this.showcaseRacePbBtn.addEventListener('click', () => {
+      if (this.showcaseRacePbBtn.disabled) return;
+      this.stopPreview();
+      this.onRacePbGhostCallback?.(this.selectedTrack.id);
     });
 
     this.showcasePreviewBtn.addEventListener('click', () => {

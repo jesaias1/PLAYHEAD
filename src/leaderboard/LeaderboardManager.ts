@@ -39,6 +39,17 @@ export interface OfficialRecordEntry {
   localFirstTime: number;
   localFirstScore: number;
   localFirstDate: number;
+  /**
+   * Storage reference for the replay that belongs to the CURRENT personal best.
+   *
+   * Additive bookkeeping only — it never influences which run becomes the PB,
+   * any rank threshold, or any leaderboard ordering. It exists so RACE PB GHOST
+   * can retrieve the recorded run after a page reload.
+   */
+  pbReplayPath?: string;
+  pbReplayHash?: string;
+  /** The PB's completion time in integer microseconds, matching the replay. */
+  pbReplayFinishUs?: number;
 }
 
 const STORAGE_OFFICIAL_RECORDS = 'playhead_official_records_v1';
@@ -176,6 +187,50 @@ export class LeaderboardManager {
 
     this.saveState();
     return { isNewPB, isNewLocalFirst };
+  }
+
+  /**
+   * Attaches a replay reference to the CURRENT personal best.
+   *
+   * Only writes when the supplied run time actually IS the stored PB, so a
+   * slower run's replay can never be attached to a faster PB. Returns whether
+   * the reference was stored.
+   */
+  public attachReplayToPb(
+    trackId: string,
+    finishTimeUs: number,
+    path: string,
+    hash: string
+  ): boolean {
+    const rec = this.records[trackId];
+    if (!rec || !Number.isFinite(rec.pbTime)) return false;
+
+    // Tolerance is 1 ms: both sides derive from the same authoritative timer.
+    const pbUs = Math.round(rec.pbTime * 1_000_000);
+    if (Math.abs(pbUs - finishTimeUs) > 1000) return false;
+
+    rec.pbReplayPath = path;
+    rec.pbReplayHash = hash;
+    rec.pbReplayFinishUs = finishTimeUs;
+    this.saveState();
+    return true;
+  }
+
+  /** Storage reference for the current PB's replay, when one is recorded. */
+  public getPbReplayRef(trackId: string): {
+    path: string;
+    hash: string;
+    finishTimeUs: number;
+  } | null {
+    const rec = this.records[trackId];
+    if (!rec?.pbReplayPath || !rec.pbReplayHash || rec.pbReplayFinishUs === undefined) {
+      return null;
+    }
+    return {
+      path: rec.pbReplayPath,
+      hash: rec.pbReplayHash,
+      finishTimeUs: rec.pbReplayFinishUs
+    };
   }
 
   public canSubmitToLeaderboard(run: {

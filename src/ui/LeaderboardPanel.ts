@@ -24,6 +24,7 @@ export interface LeaderboardPanelCallbacks {
   onSelectTrack: (trackId: string) => void;
   onPlaySignal: (trackId: string) => void;
   onWatchRun: (runId: string) => void;
+  onRaceRun: (runId: string) => void;
   onRetryConnection: () => void;
 }
 
@@ -96,6 +97,11 @@ export class LeaderboardPanel {
     return this.currentEntries.find((e) => e.runId === runId);
   }
 
+  /** Restrained status line, used to report a refused ghost race. */
+  public setStatus(message: string): void {
+    this.statusElem.textContent = message;
+  }
+
   public setLoading(trackTitle: string): void {
     this.statusElem.textContent = `LOADING // ${trackTitle}`;
     this.tableElem.innerHTML = '';
@@ -126,28 +132,35 @@ export class LeaderboardPanel {
         `</div>`;
       const rows = view.entries
         .map((e) => {
-          // A WATCH action is offered only when the run actually has a replay.
-          // Entries without one simply show nothing here; ranking is unaffected.
-          const watch = e.replayVersion !== null
-            ? `<button class="online-lb-watch-btn" type="button" data-run-id="${this.escape(e.runId)}">WATCH</button>`
+          // WATCH and RACE GHOST are offered only when the run actually has a
+          // replay. Entries without one show nothing here; ranking is unaffected.
+          const actions = e.replayVersion !== null
+            ? `<button class="online-lb-watch-btn" type="button" data-run-id="${this.escape(e.runId)}">WATCH</button>` +
+              `<button class="online-lb-race-btn" type="button" data-run-id="${this.escape(e.runId)}" title="Race this recorded run as a ghost.">RACE GHOST</button>`
             : '';
           return (
             `<div class="online-lb-row">` +
             `<span class="online-lb-rank">${e.rankPosition}</span>` +
             `<span class="online-lb-name">${this.escape(e.displayName)}</span>` +
             `<span class="online-lb-time">${formatRaceTime(e.timeUs)}</span>` +
-            `<span class="online-lb-watch">${watch}</span>` +
+            `<span class="online-lb-watch">${actions}</span>` +
             `</div>`
           );
         })
         .join('');
       this.tableElem.innerHTML = head + rows;
 
-      // Delegate WATCH clicks (rows are re-rendered on every board refresh).
+      // Delegate WATCH / RACE GHOST clicks (rows are re-rendered on every refresh).
       this.tableElem.querySelectorAll<HTMLButtonElement>('.online-lb-watch-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const runId = btn.dataset.runId;
           if (runId) this.callbacks?.onWatchRun(runId);
+        });
+      });
+      this.tableElem.querySelectorAll<HTMLButtonElement>('.online-lb-race-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const runId = btn.dataset.runId;
+          if (runId) this.callbacks?.onRaceRun(runId);
         });
       });
     }

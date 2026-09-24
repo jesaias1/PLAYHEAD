@@ -301,6 +301,36 @@
   display: none;
 }
 
+/* Restrained in-race ghost indicator: names the recorded opponent and its time.
+   Small, bottom-strip only, and never over the route. */
+.hud-ghost-indicator {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: var(--bg-surface-translucent);
+  border: 1px solid rgba(157, 140, 255, 0.28);
+  border-left: 2px solid #9d8cff;
+  padding: 4px 14px;
+}
+
+.hud-ghost-indicator.hidden {
+  display: none;
+}
+
+.hud-ghost-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  color: #b8a8ff;
+}
+
+.hud-ghost-time {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: #e8e2ff;
+}
+
 .hud-split-badge-label {
   font-family: var(--font-mono);
   font-size: 0.65rem;

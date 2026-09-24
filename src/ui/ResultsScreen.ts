@@ -42,6 +42,10 @@ export class ResultsScreen {
   private newTrackBtn: HTMLButtonElement;
   private leaderboardBtn: HTMLButtonElement;
   private leaderboardFeedbackElem: HTMLElement;
+  private ghostRaceElem: HTMLElement;
+  private ghostRaceLabelElem: HTMLElement;
+  private ghostRaceTimeElem: HTMLElement;
+  private ghostRaceDeltaElem: HTMLElement;
   private activeCandidate: LeaderboardSubmissionCandidate | null = null;
 
   private onReplayCallback?: () => void;
@@ -119,6 +123,17 @@ export class ResultsScreen {
           </div>
         </div>
 
+        <div class="results-ghost-race hidden" id="res-ghost-race" aria-live="polite">
+          <div class="results-ghost-race-head">
+            <span class="results-ghost-race-label" id="res-ghost-race-label">PB GHOST</span>
+            <span class="results-ghost-race-time" id="res-ghost-race-time">--:--.---</span>
+          </div>
+          <div class="results-ghost-race-foot">
+            <span class="results-ghost-race-delta-label">DELTA</span>
+            <span class="results-ghost-race-delta" id="res-ghost-race-delta">+0.000</span>
+          </div>
+        </div>
+
         <div class="signal-drop-panel hidden" id="res-signal-drop" aria-live="polite">
           <div class="signal-drop-copy">
             <div class="signal-drop-kicker" id="res-signal-drop-status">SIGNAL ACQUIRED</div>
@@ -171,6 +186,10 @@ export class ResultsScreen {
     this.newTrackBtn = this.element.querySelector('#btn-res-new') as HTMLButtonElement;
     this.leaderboardBtn = this.element.querySelector('#btn-res-leaderboard') as HTMLButtonElement;
     this.leaderboardFeedbackElem = this.element.querySelector('#res-leaderboard-feedback') as HTMLElement;
+    this.ghostRaceElem = this.element.querySelector('#res-ghost-race') as HTMLElement;
+    this.ghostRaceLabelElem = this.element.querySelector('#res-ghost-race-label') as HTMLElement;
+    this.ghostRaceTimeElem = this.element.querySelector('#res-ghost-race-time') as HTMLElement;
+    this.ghostRaceDeltaElem = this.element.querySelector('#res-ghost-race-delta') as HTMLElement;
 
     this.initEvents();
   }
@@ -203,6 +222,15 @@ export class ResultsScreen {
       eligible: boolean;
       statusMessage: string;
       reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
+    },
+    /**
+     * Recorded-ghost comparison. Raw integer microseconds in, formatting out.
+     * Absent when the run was not a ghost race.
+     */
+    ghostRaceInfo?: {
+      label: string;
+      ghostTimeUs: number;
+      deltaUs: number;
     }
   ): void {
     this.clearTimeouts();
@@ -319,6 +347,22 @@ export class ResultsScreen {
     } else {
       this.rivalElem.textContent = '—';
       this.rivalElem.style.color = 'var(--text-primary)';
+    }
+
+    // Recorded-ghost race comparison (PB ghost / world ghost).
+    // Raw microseconds are compared; formatting happens only here.
+    if (ghostRaceInfo) {
+      const beaten = ghostRaceInfo.deltaUs < 0;
+      this.ghostRaceElem.classList.remove('hidden');
+      this.ghostRaceLabelElem.textContent = ghostRaceInfo.label;
+      this.ghostRaceTimeElem.textContent = formatTime(ghostRaceInfo.ghostTimeUs / 1_000_000);
+      const sign = beaten ? '-' : '+';
+      this.ghostRaceDeltaElem.textContent = `${sign}${formatTime(
+        Math.abs(ghostRaceInfo.deltaUs) / 1_000_000
+      )}`;
+      this.ghostRaceDeltaElem.className = `results-ghost-race-delta ${beaten ? 'ahead' : 'behind'}`;
+    } else {
+      this.ghostRaceElem.classList.add('hidden');
     }
 
     // Staged Quick Reveal Sequence (Total ~700ms)
