@@ -21,6 +21,7 @@
 import { OnlineClient, online } from './supabaseClient';
 import { AuthService, authService } from './AuthService';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { RunRank } from '../player/PlayerStats';
@@ -31,6 +32,11 @@ const QUEUE_KEY = 'playhead_cloud_queue_v1';
 
 export interface LocalProgressionSnapshot {
   equippedSkinId: string;
+  /**
+   * Equipped mastery glove. Captured in the snapshot (and therefore in the
+   * pre-migration backup) so a future backend field can carry it across devices.
+   */
+  equippedGloveId: string;
   awardedRankKeys: string[];
   pendingDropRanks: RunRank[];
   rewardOwnedSkinIds: string[];
@@ -53,6 +59,15 @@ export interface CloudProgressionRow {
   spent_drop_keys: string[] | null;
   pending_drop_ranks: string[] | null;
   reward_owned_skin_ids: string[] | null;
+  /**
+   * Optional mastery glove field.
+   *
+   * FORWARD COMPATIBLE: this milestone adds no backend migration, so the current
+   * RPC does not return it. When the backend gains the column, cloud carry-over
+   * of the equipped mastery glove activates automatically with no client change.
+   * Local persistence already works today.
+   */
+  equipped_glove?: string | null;
 }
 
 /** A queued offline mutation, replayed idempotently on reconnect. */
@@ -140,6 +155,7 @@ export class CloudProgression {
 
     return {
       equippedSkinId: skins.getEquippedSkinId(),
+      equippedGloveId: MasteryGloveSystem.getInstance().getEquippedGloveId(),
       awardedRankKeys: [...skins.getAwardedRankKeys()],
       pendingDropRanks: [...skins.getPendingDropRanks()],
       rewardOwnedSkinIds: [...skins.getRewardOwnedSkinIds()],
@@ -311,6 +327,11 @@ export class CloudProgression {
       pendingDropRanks: pending,
       equippedSkinId: row.equipped_knife ?? undefined
     });
+
+    // Mastery gloves: eligibility is DERIVED, so only the equipped id can ever
+    // need reconciling. Applied only when it is still genuinely satisfied, which
+    // also means a reconnect can never duplicate or invent an achievement.
+    MasteryGloveSystem.getInstance().applyCloudEquippedGlove(row.equipped_glove ?? undefined);
   }
 
   /** DEV-only reset of the migration marker (never touches the backup). */

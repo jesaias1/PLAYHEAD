@@ -4,10 +4,12 @@
  */
 
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 
 export class ArmoryModal {
   public element: HTMLElement;
   private skinsContainer: HTMLElement;
+  private glovesContainer: HTMLElement;
   private devToggleBtn: HTMLButtonElement;
   private dropCount: HTMLElement;
   private dropOpenBtn: HTMLButtonElement;
@@ -44,6 +46,14 @@ export class ArmoryModal {
           <!-- Dynamically populated -->
         </div>
 
+        <!-- MASTERY GLOVES: earned, never random, never in the decoder. -->
+        <div class="armory-catalog-heading mastery-heading" style="margin-top: 18px;">
+          <span>[MASTERY] GLOVES // PROOF OF SKILL</span>
+        </div>
+        <div id="armory-modal-gloves" class="mastery-gloves-grid">
+          <!-- Dynamically populated -->
+        </div>
+
         <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
           <span style="font-family: var(--font-mono); font-size: 0.65rem; color: #5a6678;">[ESC / BUTTON] RETURN TO PAUSE</span>
           <button class="primary" id="btn-armory-modal-close" style="padding: 8px 24px; font-size: 0.78rem;">[ < BACK TO PAUSE ]</button>
@@ -52,6 +62,7 @@ export class ArmoryModal {
     `;
 
     this.skinsContainer = this.element.querySelector('#armory-modal-skins-grid') as HTMLElement;
+    this.glovesContainer = this.element.querySelector('#armory-modal-gloves') as HTMLElement;
     this.devToggleBtn = this.element.querySelector('#btn-armory-modal-dev-toggle') as HTMLButtonElement;
     this.dropCount = this.element.querySelector('#armory-drop-count') as HTMLElement;
     this.dropOpenBtn = this.element.querySelector('#btn-armory-open-drop') as HTMLButtonElement;
@@ -67,8 +78,66 @@ export class ArmoryModal {
 
   public show(): void {
     this.renderSkins();
+    this.renderGloves();
     this.element.classList.remove('hidden');
     this.closeBtn.focus();
+  }
+
+  /**
+   * MASTERY GLOVES.
+   *
+   * Requirements are never hidden, so the player always knows exactly what to
+   * accomplish. Locked gloves stay previewable; ownership is derived, never
+   * stored, and no glove can ever come from the Signal Decoder.
+   */
+  private renderGloves(): void {
+    if (!this.glovesContainer) return;
+    const evaluation = masteryGloveSystem.evaluate();
+    const equippedId = masteryGloveSystem.getEquippedGloveId();
+    this.glovesContainer.innerHTML = '';
+
+    for (const status of evaluation.gloves) {
+      const d = status.definition;
+      const isEquipped = d.id === equippedId;
+      const card = document.createElement('div');
+      card.className = 'mastery-glove-card';
+      card.dataset.gloveId = d.id;
+      card.dataset.state = status.satisfied ? 'UNLOCKED' : 'LOCKED';
+      if (isEquipped) card.classList.add('equipped');
+
+      card.innerHTML =
+        `<div class="mastery-glove-head">` +
+        `<span class="mastery-glove-name">${d.name}</span>` +
+        `<span class="mastery-glove-tier">T${d.tier}</span>` +
+        `</div>` +
+        `<div class="mastery-glove-codename">${d.codename}</div>` +
+        `<div class="mastery-glove-req">${d.requirementLabel}</div>` +
+        `<div class="mastery-glove-status ${status.satisfied ? 'unlocked' : 'locked'}">` +
+        `${isEquipped ? 'EQUIPPED' : status.satisfied ? 'UNLOCKED' : `LOCKED // ${status.progressLabel}`}</div>`;
+
+      const action = document.createElement('button');
+      action.className = 'terminal-btn-subtle mastery-glove-action';
+      if (isEquipped) {
+        action.textContent = '[ EQUIPPED ]';
+        action.disabled = true;
+      } else if (status.satisfied) {
+        action.textContent = '[ EQUIP ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.equipGlove(d.id);
+          this.renderGloves();
+        });
+      } else {
+        action.textContent = '[ PREVIEW ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.setDevPreview(
+            masteryGloveSystem.getDevPreviewGloveId() === d.id ? null : d.id
+          );
+          this.renderGloves();
+        });
+      }
+      card.appendChild(action);
+      this.glovesContainer.appendChild(card);
+    }
   }
 
   public hide(): void {

@@ -23,6 +23,7 @@ import { QualityPreset } from '../rendering/QualityPresets';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { resolveEffectProfile } from '../rendering/EffectIntensity';
+import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
@@ -37,6 +38,10 @@ export class ViewmodelController {
   private rimLight: THREE.DirectionalLight;
 
   private unsubscribeSkin?: () => void;
+  private unsubscribeGlove?: () => void;
+  /** Last mastery glove + effect scale applied, so re-application is cheap. */
+  private appliedGloveId: string | null = null;
+  private appliedGloveScale = -1;
   private audioImpact = 0;
   private audioBass = 0;
 
@@ -186,6 +191,13 @@ export class ViewmodelController {
       this.applySkin(skinId);
     });
 
+    // 7. Subscribe to mastery glove equip updates. Eligibility is derived by the
+    //    mastery system; this only re-applies the visual treatment.
+    this.unsubscribeGlove = MasteryGloveSystem.getInstance().addListener(() => {
+      this.applyMasteryGlove(true);
+    });
+    this.applyMasteryGlove(true);
+
     if (typeof window !== 'undefined') {
       window.addEventListener('resize', this.onResize);
     }
@@ -288,6 +300,8 @@ export class ViewmodelController {
       this.rigInstance = realRig;
       this.applyRigBaseTransform();
       this.rigInstance.applySkin(KarambitSkinSystem.getInstance().getEquippedSkinId());
+      // Re-apply the mastery glove: the real rig replaced the fallback rig.
+      this.applyMasteryGlove(true);
       this.actionGroup.add(this.rigInstance.rootGroup);
       this.isRigLoaded = true;
     } catch (err) {
@@ -664,8 +678,7 @@ export class ViewmodelController {
     ) * vmEffectScale;
     this.viewmodelAudioPulse += (pulseTarget - this.viewmodelAudioPulse) * Math.min(1.0, dt * 9.0);
 
-    const vmAccent = settings.viewmodelAccent || 'ADAPTIVE';
-    if (vmAccent === 'OFF') {
+    const vmAccent = settings.viewmodelAccent || 'ADAPTIVE';    if (vmAccent === 'OFF') {
       this.rimLight.intensity = 0.0;
       this.styleFilter.setAudioPulse(0);
       this.rigInstance.setAudioPulse(0);
@@ -686,6 +699,28 @@ export class ViewmodelController {
       this.styleFilter.setAudioPulse(this.viewmodelAudioPulse);
       this.rigInstance.setAudioPulse(this.viewmodelAudioPulse);
     }
+
+    // 12. MASTERY GLOVE.
+    // Applied to the EXISTING arm materials: material parameters only, no new
+    // textures, geometry or draw calls. Presentation only — eligibility is
+    // derived by the mastery system and this can never change what was earned.
+    // The frozen knife socket is never touched.
+    this.applyMasteryGlove(false, vmEffectScale);
+  }
+
+  /**
+   * Applies the equipped mastery glove to the arm materials.
+   *
+   * `force` re-applies even when nothing changed (used on equip and on rig load).
+   */
+  private applyMasteryGlove(force: boolean, effectScale = 1): void {
+    if (!this.rigInstance?.applyGlove) return;
+    const gloveId = MasteryGloveSystem.getInstance().getEffectiveGloveId();
+    const scale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
+    if (!force && gloveId === this.appliedGloveId && scale === this.appliedGloveScale) return;
+    this.appliedGloveId = gloveId;
+    this.appliedGloveScale = scale;
+    this.rigInstance.applyGlove(gloveId, scale);
   }
 
   /**
@@ -752,6 +787,9 @@ export class ViewmodelController {
   public dispose(): void {
     if (this.unsubscribeSkin) {
       this.unsubscribeSkin();
+    }
+    if (this.unsubscribeGlove) {
+      this.unsubscribeGlove();
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('resize', this.onResize);

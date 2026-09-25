@@ -68,6 +68,13 @@ import { BUILD_LABEL } from './BuildInfo';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import type { LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 import type { SubmissionState, SubmissionFeedback } from '../leaderboard/SubmissionFeedback';
+import {
+  MasteryGloveId,
+  MasteryProgressDelta,
+  masteryProgressDeltas,
+  newlySatisfiedGloves
+} from '../mastery/MasteryLadder';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
@@ -302,6 +309,15 @@ export class Game {
       KarambitSkinSystem.getInstance().setVideoQuality(preset.cosmeticVideoScale);
     };
     KarambitSkinSystem.getInstance().setVideoQuality(this.environment.activePreset.cosmeticVideoScale);
+
+    // MASTERY: recognise historical achievements once, compactly. A returning
+    // player who already qualifies gets the gloves WITHOUT repeating anything.
+    const masterySync = masteryGloveSystem.reconcile();
+    if (masterySync.newlyRecognized.length > 0) {
+      console.info(
+        `[MASTERY] ${masterySync.newlyRecognized.length} achievement(s) recognized: ${masterySync.newlyRecognized.join(', ')}`
+      );
+    }
 
     this.setupCallbacks();
     this.setupStateMachine();
@@ -655,10 +671,20 @@ export class Game {
               statusMessage: string;
               reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
             } | undefined;
+            let masteryProgress: MasteryProgressDelta[] = [];
+            let newlyEarnedGloves: MasteryGloveId[] = [];
 
             if (this.currentOfficialTrackId) {
               const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
               const progressionKey = this.currentOfficialTrackId;
+              // MASTERY: capture authoritative progress before and after the run
+              // so the results screen can report only progress that ACTUALLY
+              // changed, and the Armory can recognise a newly earned glove.
+              //
+              // Eligibility is derived from the same canonical records the drop
+              // economy already uses. Custom Audio and the Movement Lab never set
+              // currentOfficialTrackId, so they can never satisfy a requirement.
+              const masteryBefore = masteryGloveSystem.evaluate();
               if (results.rank !== 'UNRANKED') {
                 const completionReward = KarambitSkinSystem.getInstance().recordTrackCompletion(
                   progressionKey,
@@ -667,6 +693,13 @@ export class Game {
                 );
                 dropsAwarded = completionReward.dropsAwarded;
                 bestDropRank = completionReward.awardedDropRanks[0];
+              }
+              const masteryAfter = masteryGloveSystem.evaluate();
+              masteryProgress = masteryProgressDeltas(masteryBefore.summary, masteryAfter.summary);
+              newlyEarnedGloves = newlySatisfiedGloves(masteryBefore, masteryAfter);
+              if (newlyEarnedGloves.length > 0) {
+                // Recognise them so the Armory shows them without a reveal burst.
+                masteryGloveSystem.reconcile();
               }
 
               // Record official run in LeaderboardManager
@@ -731,7 +764,10 @@ export class Game {
                     deltaUs: this.lastGhostComparison.deltaUs
                   }
                 : undefined,
-              this.lastSubmissionState ?? { state: 'NOT_OFFICIAL' }
+              this.lastSubmissionState ?? { state: 'NOT_OFFICIAL' },
+              masteryProgress.length > 0 || newlyEarnedGloves.length > 0
+                ? { progress: masteryProgress, gloves: newlyEarnedGloves }
+                : undefined
             );
 
             // WORLD SUBMISSION: runs independently of the results screen so the

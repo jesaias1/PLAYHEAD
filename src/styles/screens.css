@@ -668,6 +668,153 @@
 .results-ghost-race-delta.ahead { color: #00ff88; }
 .results-ghost-race-delta.behind { color: #ff3366; }
 
+/* ==========================================================================
+   MASTERY — proof-of-skill gloves (earned, never random)
+   ========================================================================== */
+
+.mastery-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Signal Pack global progress: raw counts, never an invented XP scalar. */
+.showcase-mastery-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+.showcase-mastery-chip {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  color: #8fa2b8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 10px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.mastery-summary {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px 14px;
+  margin: 10px 0 12px;
+  max-width: 360px;
+}
+.mastery-summary-title {
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  color: var(--accent-color);
+  margin-bottom: 6px;
+}
+.mastery-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.7rem;
+  padding: 1px 0;
+}
+.mastery-summary-row span { color: #6d7885; letter-spacing: 0.08em; }
+.mastery-summary-row b { color: #d7e3ef; font-weight: 500; }
+.mastery-sync-notice {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  color: #b8a8ff;
+  border-left: 2px solid #9d8cff;
+  padding: 3px 8px;
+  margin-bottom: 6px;
+}
+
+.mastery-gloves-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.mastery-glove-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid #444c5c;
+  background: var(--bg-surface-elevated, rgba(10, 14, 21, 0.6));
+  font-family: var(--font-mono);
+}
+.mastery-glove-card[data-state='UNLOCKED'] { border-left-color: var(--accent-color); }
+.mastery-glove-card.equipped { border-color: var(--accent-color); background: var(--accent-dim); }
+.mastery-glove-card.previewing { border-left-color: #ffdd00; }
+
+.mastery-glove-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.mastery-glove-name { font-size: 0.88rem; font-weight: 700; color: #d7e3ef; }
+.mastery-glove-tier { font-size: 0.62rem; color: #6d7885; letter-spacing: 0.1em; }
+.mastery-glove-codename { font-size: 0.66rem; color: #8899aa; letter-spacing: 0.08em; }
+.mastery-glove-req { font-size: 0.68rem; color: #9fb0c8; letter-spacing: 0.06em; }
+.mastery-glove-status { font-size: 0.7rem; letter-spacing: 0.08em; margin-top: 2px; }
+.mastery-glove-status.unlocked { color: #4dffb8; }
+.mastery-glove-status.locked { color: #6d7885; }
+.mastery-glove-action { align-self: flex-start; margin-top: 4px; }
+
+/* Results-screen mastery progress + restrained unlock reveal. */
+.results-mastery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0 2px;
+}
+.results-mastery.hidden { display: none; }
+.results-mastery-progress {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid var(--accent-color);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px 14px;
+}
+.results-mastery-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.72rem;
+  padding: 2px 0;
+}
+.results-mastery-line span { color: #6d7885; letter-spacing: 0.1em; }
+.results-mastery-line b { color: #d7e3ef; font-weight: 500; }
+
+.results-mastery-unlock {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-left: 3px solid var(--accent-color);
+  background: rgba(6, 20, 26, 0.6);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.results-mastery-unlock.hidden { display: none; }
+.results-mastery-unlock-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  color: var(--accent-color);
+}
+.results-mastery-unlock-name { font-size: 1.05rem; font-weight: 700; color: #eaf6ff; }
+.results-mastery-unlock-status {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: #4dffb8;
+}
+.results-mastery-unlock-req { font-size: 0.66rem; color: #9fb0c8; letter-spacing: 0.08em; }
+.results-mastery-unlock button { margin-top: 6px; }
+
 /* Command Buttons */
 .btn-hero {
   font-family: var(--font-mono);

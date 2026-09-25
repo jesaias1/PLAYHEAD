@@ -9,6 +9,12 @@
 import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+
+/** Two-digit zero padding for mastery counters. */
+function pad2(n: number): string {
+  return Math.max(0, Math.floor(n)).toString().padStart(2, '0');
+}
 import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
 import { createProgramFingerprint } from './SignalIdentity';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
@@ -88,6 +94,10 @@ export class ImportScreen {
 
   // Armory Elements
   private armoryGridElem: HTMLElement;
+  private masterySummaryElem: HTMLElement;
+  private masteryGlovesGridElem: HTMLElement;
+  private masteryDevPreviewBtn: HTMLButtonElement;
+  private showcaseMasteryStripElem: HTMLElement;
   private armoryDevToggleBtn: HTMLButtonElement;
   private decoderPendingElem: HTMLElement;
   private decoderStatusElem: HTMLElement;
@@ -199,6 +209,7 @@ export class ImportScreen {
           <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
             <!-- Populated dynamically via buildStrip() -->
           </div>
+          <div class="showcase-mastery-strip" id="showcase-mastery-strip"></div>
         </div>
 
         <!-- 02: CUSTOM AUDIO PANEL -->
@@ -269,6 +280,16 @@ export class ImportScreen {
           <div id="armory-skins-grid" class="armory-skins-grid">
             <!-- Populated dynamically via renderArmory() -->
           </div>
+
+          <!-- MASTERY GLOVES: earned, never random. Separate from the knife catalog. -->
+          <div class="armory-catalog-heading mastery-heading">
+            <span>[MASTERY] GLOVES // PROOF OF SKILL</span>
+            <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
+          </div>
+          <div class="mastery-summary" id="mastery-summary"></div>
+          <div id="mastery-gloves-grid" class="mastery-gloves-grid">
+            <!-- Populated dynamically via renderMasteryGloves() -->
+          </div>
         </div>
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
@@ -335,6 +356,10 @@ export class ImportScreen {
 
     // Armory elements
     this.armoryGridElem = this.element.querySelector('#armory-skins-grid') as HTMLElement;
+    this.masterySummaryElem = this.element.querySelector('#mastery-summary') as HTMLElement;
+    this.masteryGlovesGridElem = this.element.querySelector('#mastery-gloves-grid') as HTMLElement;
+    this.masteryDevPreviewBtn = this.element.querySelector('#btn-mastery-dev-preview') as HTMLButtonElement;
+    this.showcaseMasteryStripElem = this.element.querySelector('#showcase-mastery-strip') as HTMLElement;
     this.armoryDevToggleBtn = this.element.querySelector('#btn-armory-dev-toggle') as HTMLButtonElement;
     this.decoderPendingElem = this.element.querySelector('#decoder-pending') as HTMLElement;
     this.decoderStatusElem = this.element.querySelector('#decoder-status') as HTMLElement;
@@ -506,6 +531,7 @@ export class ImportScreen {
     this.showcaseGenreElem.style.borderColor = t.accentColor;
     this.showcaseGenreElem.style.color = t.accentColor;
     this.renderFingerprint(this.showcaseFingerprintElem, t);
+    this.renderMasterySummary();
   }
 
   private renderFingerprint(container: HTMLElement, track: TrackCatalogEntry, count = 18): void {
@@ -518,8 +544,132 @@ export class ImportScreen {
     container.replaceChildren(fragment);
   }
 
+  /**
+   * Compact global mastery progress for the Signal Pack.
+   *
+   * Raw accomplishment counts, not an invented XP scalar. A Diamond track counts
+   * toward every lower tier, so these numbers only ever go up.
+   */
+  public renderMasterySummary(): void {
+    const evaluation = masteryGloveSystem.evaluate();
+    const s = evaluation.summary;
+
+    if (this.showcaseMasteryStripElem) {
+      const parts = [
+        `FULL SIGNAL PACK // ${pad2(s.cleared)} / ${pad2(s.total)} CLEARED`,
+        `GOLD MASTERY // ${pad2(s.goldPlus)} / ${pad2(s.total)}`,
+        `DIAMOND MASTERY // ${pad2(s.diamond)} / ${pad2(s.total)}`
+      ];
+      this.showcaseMasteryStripElem.innerHTML = parts
+        .map((p) => `<span class="showcase-mastery-chip">${p}</span>`)
+        .join('');
+    }
+
+    if (this.masterySummaryElem) {
+      const rows: Array<[string, number]> = [
+        ['CLEARED', s.cleared],
+        ['BRONZE+', s.bronzePlus],
+        ['SILVER+', s.silverPlus],
+        ['GOLD+', s.goldPlus],
+        ['DIAMOND', s.diamond]
+      ];
+      // First launch after mastery shipped: report historical recognition in ONE
+      // compact line rather than firing a burst of reveals.
+      const reconcile = masteryGloveSystem.getLastReconcile();
+      const syncNotice =
+        reconcile && reconcile.firstRecognition && reconcile.newlyRecognized.length > 1
+          ? `<div class="mastery-sync-notice">MASTERY SYNC // ${reconcile.newlyRecognized.length} ACHIEVEMENTS RECOGNIZED</div>`
+          : '';
+      this.masterySummaryElem.innerHTML =
+        `<div class="mastery-summary-title">SIGNAL MASTERY</div>` +
+        syncNotice +
+        rows
+          .map(
+            ([label, value]) =>
+              `<div class="mastery-summary-row"><span>${label}</span><b>${pad2(value)} / ${pad2(
+                s.total
+              )}</b></div>`
+          )
+          .join('');
+    }
+  }
+
+  /**
+   * MASTERY GLOVES.
+   *
+   * Locked gloves are always previewable and their requirement is never hidden,
+   * so a player always understands exactly what they need to accomplish. Gloves
+   * are never random and never appear in the Signal Decoder.
+   */
+  public renderMasteryGloves(): void {
+    if (!this.masteryGlovesGridElem) return;
+    const evaluation = masteryGloveSystem.evaluate();
+    const equippedId = masteryGloveSystem.getEquippedGloveId();
+    const previewId = masteryGloveSystem.getDevPreviewGloveId();
+
+    this.masteryDevPreviewBtn.textContent = previewId
+      ? `DEV PREVIEW: ${previewId}`
+      : 'DEV // PREVIEW GLOVE';
+    this.masteryDevPreviewBtn.style.color = previewId ? '#ffdd00' : '#00f0ff';
+    this.masteryDevPreviewBtn.style.borderColor = previewId ? '#ffdd00' : '#00f0ff';
+
+    this.masteryGlovesGridElem.innerHTML = '';
+
+    for (const status of evaluation.gloves) {
+      const d = status.definition;
+      const isEquipped = d.id === equippedId;
+      const isPreview = d.id === previewId;
+      const unlocked = status.satisfied;
+
+      const card = document.createElement('div');
+      card.className = 'mastery-glove-card';
+      card.dataset.gloveId = d.id;
+      card.dataset.state = unlocked ? 'UNLOCKED' : 'LOCKED';
+      if (isEquipped) card.classList.add('equipped');
+      if (isPreview) card.classList.add('previewing');
+
+      const statusLine = isEquipped
+        ? 'EQUIPPED'
+        : unlocked
+          ? 'UNLOCKED'
+          : `LOCKED // ${status.progressLabel}`;
+
+      card.innerHTML =
+        `<div class="mastery-glove-head">` +
+        `<span class="mastery-glove-name">${d.name}</span>` +
+        `<span class="mastery-glove-tier">T${d.tier}</span>` +
+        `</div>` +
+        `<div class="mastery-glove-codename">${d.codename}</div>` +
+        `<div class="mastery-glove-req">${d.requirementLabel}</div>` +
+        `<div class="mastery-glove-status ${unlocked ? 'unlocked' : 'locked'}">${statusLine}</div>`;
+
+      const action = document.createElement('button');
+      action.className = 'terminal-btn-subtle mastery-glove-action';
+      if (isEquipped) {
+        action.textContent = '[ EQUIPPED ]';
+        action.disabled = true;
+      } else if (unlocked) {
+        action.textContent = '[ EQUIP ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.equipGlove(d.id);
+          this.renderMasteryGloves();
+        });
+      } else {
+        action.textContent = '[ PREVIEW ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.setDevPreview(isPreview ? null : d.id);
+          this.renderMasteryGloves();
+        });
+      }
+      card.appendChild(action);
+      this.masteryGlovesGridElem.appendChild(card);
+    }
+  }
+
   public renderArmory(): void {
     this.renderSignalDecoder();
+    this.renderMasterySummary();
+    this.renderMasteryGloves();
     const isDev = this.skinSystem.isDevPreview();
     this.armoryDevToggleBtn.textContent = `DEV PREVIEW: ${isDev ? 'ACTIVE' : 'OFF'}`;
     this.armoryDevToggleBtn.style.color = isDev ? '#ffdd00' : '#00f0ff';
@@ -828,6 +978,16 @@ export class ImportScreen {
       if (this.showcaseRacePbBtn.disabled) return;
       this.stopPreview();
       this.onRacePbGhostCallback?.(this.selectedTrack.id);
+    });
+
+    this.masteryDevPreviewBtn.addEventListener('click', () => {
+      // DEV ONLY: cycles a visual preview. Never writes ownership or progress.
+      const gloves = masteryGloveSystem.evaluate().gloves;
+      const current = masteryGloveSystem.getDevPreviewGloveId();
+      const index = gloves.findIndex((g) => g.definition.id === current);
+      const next = index < 0 ? gloves[0] : gloves[(index + 1) % gloves.length];
+      masteryGloveSystem.setDevPreview(index >= gloves.length - 1 ? null : next.definition.id);
+      this.renderMasteryGloves();
     });
 
     this.showcasePreviewBtn.addEventListener('click', () => {

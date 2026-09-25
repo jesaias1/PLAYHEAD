@@ -14,6 +14,12 @@ import {
   SubmissionState,
   isRetryableSubmission
 } from '../leaderboard/SubmissionFeedback';
+import {
+  MasteryGloveId,
+  MasteryProgressDelta,
+  getMasteryGlove
+} from '../mastery/MasteryLadder';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 
 export class ResultsScreen {
@@ -49,6 +55,12 @@ export class ResultsScreen {
   private leaderboardBtn: HTMLButtonElement;
   private leaderboardFeedbackElem: HTMLElement;
   private ghostRaceElem: HTMLElement;
+  private masteryElem: HTMLElement;
+  private masteryProgressElem: HTMLElement;
+  private masteryUnlockElem: HTMLElement;
+  private masteryUnlockNameElem: HTMLElement;
+  private masteryUnlockReqElem: HTMLElement;
+  private masteryEquipBtn: HTMLButtonElement;
   private ghostRaceLabelElem: HTMLElement;
   private ghostRaceTimeElem: HTMLElement;
   private ghostRaceDeltaElem: HTMLElement;
@@ -140,6 +152,17 @@ export class ResultsScreen {
           </div>
         </div>
 
+        <div class="results-mastery hidden" id="res-mastery" aria-live="polite">
+          <div class="results-mastery-progress" id="res-mastery-progress"></div>
+          <div class="results-mastery-unlock hidden" id="res-mastery-unlock">
+            <div class="results-mastery-unlock-kicker">MASTERY ACHIEVEMENT</div>
+            <div class="results-mastery-unlock-name" id="res-mastery-unlock-name"></div>
+            <div class="results-mastery-unlock-status">UNLOCKED</div>
+            <div class="results-mastery-unlock-req" id="res-mastery-unlock-req"></div>
+            <button class="terminal-btn-subtle" id="btn-res-mastery-equip" type="button">[ EQUIP ]</button>
+          </div>
+        </div>
+
         <div class="signal-drop-panel hidden" id="res-signal-drop" aria-live="polite">
           <div class="signal-drop-copy">
             <div class="signal-drop-kicker" id="res-signal-drop-status">SIGNAL ACQUIRED</div>
@@ -191,6 +214,12 @@ export class ResultsScreen {
     this.leaderboardBtn = this.element.querySelector('#btn-res-leaderboard') as HTMLButtonElement;
     this.leaderboardFeedbackElem = this.element.querySelector('#res-leaderboard-feedback') as HTMLElement;
     this.ghostRaceElem = this.element.querySelector('#res-ghost-race') as HTMLElement;
+    this.masteryElem = this.element.querySelector('#res-mastery') as HTMLElement;
+    this.masteryProgressElem = this.element.querySelector('#res-mastery-progress') as HTMLElement;
+    this.masteryUnlockElem = this.element.querySelector('#res-mastery-unlock') as HTMLElement;
+    this.masteryUnlockNameElem = this.element.querySelector('#res-mastery-unlock-name') as HTMLElement;
+    this.masteryUnlockReqElem = this.element.querySelector('#res-mastery-unlock-req') as HTMLElement;
+    this.masteryEquipBtn = this.element.querySelector('#btn-res-mastery-equip') as HTMLButtonElement;
     this.ghostRaceLabelElem = this.element.querySelector('#res-ghost-race-label') as HTMLElement;
     this.ghostRaceTimeElem = this.element.querySelector('#res-ghost-race-time') as HTMLElement;
     this.ghostRaceDeltaElem = this.element.querySelector('#res-ghost-race-delta') as HTMLElement;
@@ -237,7 +266,15 @@ export class ResultsScreen {
       deltaUs: number;
     },
     /** Real world-submission state at the moment the results screen opens. */
-    submissionFeedback?: SubmissionFeedback
+    submissionFeedback?: SubmissionFeedback,
+    /**
+     * MASTERY: only supplied when progress ACTUALLY changed, so the player never
+     * sees mastery noise after an unrelated run.
+     */
+    masteryInfo?: {
+      progress: MasteryProgressDelta[];
+      gloves: MasteryGloveId[];
+    }
   ): void {
     this.clearTimeouts();
 
@@ -373,6 +410,9 @@ export class ResultsScreen {
 
     // Real world-submission state for this run.
     this.setSubmissionState(submissionFeedback?.state ?? 'NOT_OFFICIAL', submissionFeedback?.detail);
+
+    // MASTERY: progress lines and a restrained unlock reveal.
+    this.renderMasteryInfo(masteryInfo);
 
     // Staged Quick Reveal Sequence (Total ~700ms)
     this.element.classList.remove('hidden');
@@ -567,6 +607,56 @@ export class ResultsScreen {
         this.setSubmissionState('WORLD_ENTRY_QUEUED_OFFLINE');
       }
     });
+  }
+
+  /**
+   * MASTERY progress for this run.
+   *
+   * Only rendered when progress actually changed, and the reveal is a single
+   * restrained "you earned this" moment — never random-reward language, and never
+   * a burst of five animations when a returning player is recognised.
+   */
+  private renderMasteryInfo(masteryInfo?: {
+    progress: MasteryProgressDelta[];
+    gloves: MasteryGloveId[];
+  }): void {
+    if (!masteryInfo || (masteryInfo.progress.length === 0 && masteryInfo.gloves.length === 0)) {
+      this.masteryElem.classList.add('hidden');
+      return;
+    }
+    this.masteryElem.classList.remove('hidden');
+
+    this.masteryProgressElem.innerHTML = masteryInfo.progress
+      .map(
+        (d) =>
+          `<div class="results-mastery-line"><span>${d.label}</span>` +
+          `<b>${d.before.toString().padStart(2, '0')} / ${d.total} &rarr; ${d.after
+            .toString()
+            .padStart(2, '0')} / ${d.total}</b></div>`
+      )
+      .join('');
+
+    const first = masteryInfo.gloves[0];
+    if (!first) {
+      this.masteryUnlockElem.classList.add('hidden');
+      return;
+    }
+
+    const definition = getMasteryGlove(first);
+    this.masteryUnlockElem.classList.remove('hidden');
+    this.masteryUnlockNameElem.textContent = definition.name;
+    this.masteryUnlockReqElem.textContent = definition.requirementLabel;
+
+    // More than one historical achievement recognised at once: say so compactly
+    // instead of stacking reveals.
+    const extra = masteryInfo.gloves.length - 1;
+    this.masteryEquipBtn.textContent = extra > 0 ? `[ EQUIP ] +${extra} MORE` : '[ EQUIP ]';
+    this.masteryEquipBtn.disabled = false;
+    this.masteryEquipBtn.onclick = () => {
+      const equipped = masteryGloveSystem.equipGlove(first);
+      this.masteryEquipBtn.textContent = equipped ? '[ EQUIPPED ]' : '[ LOCKED ]';
+      this.masteryEquipBtn.disabled = true;
+    };
   }
 
   /**

@@ -9,6 +9,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
+import { DEFAULT_MASTERY_GLOVE_ID } from '../mastery/MasteryLadder';
+import { applyGloveTreatment, getGloveTreatment } from './GloveTreatments';
 
 export interface ViewmodelRigInstance {
   rootGroup: THREE.Group;
@@ -26,6 +28,14 @@ export interface ViewmodelRigInstance {
   setAccentColor: (col: THREE.Color) => void;
   /** Weak musical accent applied to the hands' reflected-light shading. */
   setAudioPulse: (pulse: number) => void;
+  /**
+   * MASTERY GLOVE: applies a mastery treatment to the EXISTING arm materials.
+   * Material parameters only — no new textures, geometry, materials or draw
+   * calls, and it never touches the frozen knife socket.
+   */
+  applyGlove: (gloveId: string, effectScale?: number) => void;
+  /** Arm materials, exposed for DEV diagnostics and tests. */
+  armMaterials: THREE.MeshStandardMaterial[];
   dispose: () => void;
 }
 
@@ -74,12 +84,13 @@ export class ViewmodelAssetLoader {
     const baseHandEmissive = new THREE.Color(0x101722);
     const baseHandEmissiveIntensity = 0.08;
     let handAudioPulse = 0;
+    // MASTERY GLOVE treatment. Defaults to the standard-issue glove, which is
+    // the same neutral lift the hands used before mastery gloves existed.
+    let activeGloveTreatment = getGloveTreatment(DEFAULT_MASTERY_GLOVE_ID);
+    let gloveEffectScale = 1;
 
     const applyArmMaterialLift = () => {
-      for (const mat of armMaterials) {
-        mat.emissive.copy(baseHandEmissive);
-        mat.emissiveIntensity = baseHandEmissiveIntensity * (1.0 + handAudioPulse * 0.2);
-      }
+      applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
     };
 
     // Configure Arms Materials and Textures
@@ -236,6 +247,16 @@ export class ViewmodelAssetLoader {
       applyArmMaterialLift();
     };
 
+    const applyGlove = (gloveId: string, effectScale = 1) => {
+      activeGloveTreatment = getGloveTreatment(gloveId);
+      gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
+      applyArmMaterialLift();
+    };
+
+    // Start on the standard-issue glove so the authored look is unchanged until
+    // the controller applies the equipped mastery glove.
+    applyArmMaterialLift();
+
     const dispose = () => {
       if (mixer) mixer.stopAllAction();
       rootGroup.traverse((obj) => {
@@ -267,6 +288,8 @@ export class ViewmodelAssetLoader {
       accentColor: activeAccent,
       setAccentColor,
       setAudioPulse,
+      applyGlove,
+      armMaterials,
       dispose
     };
   }
@@ -295,6 +318,20 @@ export class ViewmodelAssetLoader {
     KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat);
     const fallbackRim = new THREE.Color();
 
+    // A real hand material so mastery glove treatments are exercised (and
+    // testable) even without the authored GLB assets.
+    const fallbackHandMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.62,
+      metalness: 0.18,
+      emissive: 0x101722,
+      emissiveIntensity: 0.08
+    });
+    const armMaterials: THREE.MeshStandardMaterial[] = [fallbackHandMaterial];
+    let handAudioPulse = 0;
+    let activeGloveTreatment = getGloveTreatment(DEFAULT_MASTERY_GLOVE_ID);
+    let gloveEffectScale = 1;
+
     return {
       rootGroup,
       armsScene,
@@ -319,11 +356,19 @@ export class ViewmodelAssetLoader {
           cosmicMat.uniforms.uRimColor.value.copy(fallbackRim);
         }
       },
-      setAudioPulse: () => {
-        // Headless fallback rig has no hand material to modulate.
+      setAudioPulse: (pulse: number) => {
+        handAudioPulse = Math.max(0, Math.min(0.32, pulse));
+        applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
       },
+      applyGlove: (gloveId: string, effectScale = 1) => {
+        activeGloveTreatment = getGloveTreatment(gloveId);
+        gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
+        applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
+      },
+      armMaterials,
       dispose: () => {
         cosmicMat.dispose();
+        fallbackHandMaterial.dispose();
       }
     };
   }
