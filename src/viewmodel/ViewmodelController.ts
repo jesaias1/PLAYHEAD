@@ -24,7 +24,7 @@ import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { resolveEffectProfile } from '../rendering/EffectIntensity';
 import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
-import { disposeGloveTextureCaches } from './GloveTextures';
+import { disposeGloveTextureCaches, setGloveTextureQuality } from './GloveTextures';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
@@ -331,6 +331,12 @@ export class ViewmodelController {
   /** Applies a resolved quality preset (render scale / MSAA / stylization cost). */
   public applyQuality(preset: QualityPreset): void {
     this.styleFilter.applyPreset(preset);
+    // HIGH / ULTRA load the sharper 1024 glove textures. The equipped glove is
+    // re-applied so the switch is immediate and never disturbs equipped state:
+    // the tier only changes which asset path is fetched, not what is worn.
+    if (setGloveTextureQuality(preset.gloveTextureQuality)) {
+      this.applyMasteryGlove(true, this.appliedGloveScale);
+    }
   }
 
   public setPalette(palette: { surfaceDark?: THREE.Color; secondary?: THREE.Color; primary?: THREE.Color; highlight?: THREE.Color }): void {

@@ -74,13 +74,24 @@ export function resolveGloveTexturePath(gloveId: string): string {
 /**
  * Resolves the base-color texture for ANY glove id — mastery or Signal Drop.
  *
- * Signal Drop gloves carry their path on the catalog entry, so the reward logic
- * never has to know about texture plumbing.
+ * Signal Drop gloves carry BOTH resolutions on the catalog entry, so the reward
+ * logic never has to know about texture plumbing and the quality tier is applied
+ * in exactly one place.
  */
 export function resolveAnyGloveTexturePath(gloveId: string): string {
   const drop = getDropGlove(gloveId);
-  if (drop) return drop.texturePath;
+  if (drop) return resolveTexturePathForQuality(drop.texturePath, drop.hiTexturePath);
   return resolveGloveTexturePath(gloveId);
+}
+
+/**
+ * Every path a glove could resolve to, for cache warming and diagnostics.
+ * Never includes a path that is not selected by some tier.
+ */
+export function gloveTexturePathVariants(gloveId: string): string[] {
+  const drop = getDropGlove(gloveId);
+  if (!drop) return [resolveGloveTexturePath(gloveId)];
+  return [drop.texturePath, drop.hiTexturePath];
 }
 
 /** True when a glove (of either family) ships its own texture. */
@@ -93,6 +104,66 @@ export function hasAnyOwnGloveTexture(gloveId: string): boolean {
 export function isAllowedGloveTexturePath(path: string): boolean {
   return /\.(webp|png|jpg|jpeg)$/i.test(path);
 }
+
+// ---------------------------------------------------------------------------
+// Quality tier
+// ---------------------------------------------------------------------------
+
+/**
+ * Which glove texture resolution the current quality tier uses.
+ *
+ *   STANDARD  512 px   LOW / MEDIUM
+ *   HIGH      1024 px  HIGH / ULTRA
+ *
+ * The tier never changes WHICH glove is equipped or owned — only which asset
+ * path is fetched for it. Both resolutions share one cache keyed by path, so
+ * switching back and forth is instant and never re-downloads.
+ */
+export type GloveTextureQuality = 'STANDARD' | 'HIGH';
+
+let gloveTextureQuality: GloveTextureQuality = 'STANDARD';
+
+/** Sets the active glove texture quality. Returns true when it actually changed. */
+export function setGloveTextureQuality(quality: GloveTextureQuality): boolean {
+  if (quality === gloveTextureQuality) return false;
+  gloveTextureQuality = quality;
+  return true;
+}
+
+export function getGloveTextureQuality(): GloveTextureQuality {
+  return gloveTextureQuality;
+}
+
+/**
+ * Picks the asset path for the active quality tier.
+ *
+ * Pure and total: a missing hi path falls back to the standard path, and a
+ * missing standard path falls back to the canonical atlas. The viewmodel is
+ * never left without a texture.
+ */
+export function resolveTexturePathForQuality(
+  standardPath: string | null,
+  hiPath: string | null,
+  quality: GloveTextureQuality = gloveTextureQuality
+): string {
+  if (quality === 'HIGH' && hiPath) return hiPath;
+  return standardPath ?? BASE_GLOVE_TEXTURE_PATH;
+}
+
+/**
+ * Anisotropic filtering level for glove textures.
+ *
+ * THIS IS THE MAIN SHARPNESS FIX. A first-person viewmodel is viewed at a very
+ * grazing angle: the forearm runs away from the camera, so the texture's
+ * screen-space derivative is large along the view direction and small across it.
+ * With the default anisotropy of 1, isotropic mip selection blurs BOTH axes to
+ * the coarsest requirement, which is exactly why the gloves read as soft even
+ * on HIGH. Anisotropic filtering keeps the across-view detail sharp.
+ *
+ * 8 is a safe universal value; the driver clamps to the real maximum and ignores
+ * it entirely when EXT_texture_filter_anisotropic is unavailable.
+ */
+export const GLOVE_ANISOTROPY = 8;
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -108,6 +179,8 @@ export function configureGloveTexture(texture: THREE.Texture): THREE.Texture {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.NearestFilter; // keeps the sharp retro PSX texel look
   texture.generateMipmaps = true;
+  // Grazing-angle viewmodel: without this the mip chain over-blurs the glove.
+  texture.anisotropy = GLOVE_ANISOTROPY;
   texture.needsUpdate = true;
   return texture;
 }
@@ -128,9 +201,16 @@ export function configureMaskTexture(texture: THREE.Texture): THREE.Texture {
 /**
  * In-memory texture cache.
  *
- * A texture is fetched AT MOST ONCE per session: concurrent requests for the same
- * path share one in-flight promise, and a resolved texture is retained until the
- * cache is cleared.
+ * A texture is fetched AT MOST ONCE while it is resident: concurrent requests
+ * for the same path share one in-flight promise, and a resolved texture is
+ * retained until it is evicted or the cache is cleared.
+ *
+ * BOUNDED BY DESIGN. The HIGH / ULTRA glove path is 1024 px, which is ~5.6 MB of
+ * VRAM per glove with mipmaps. Retaining every glove a player ever equipped
+ * would grow without limit, so the cache keeps only the most recently used few.
+ * The most-recently-used entry is never evicted, so the texture currently bound
+ * to the arm material is always safe; an evicted glove is simply re-fetched
+ * (from the HTTP cache) if the player equips it again.
  */
 export class GloveTextureCache {
   private textures = new Map<string, THREE.Texture>();
@@ -147,7 +227,9 @@ export class GloveTextureCache {
         onProgress: undefined,
         onError: () => void
       ) => unknown;
-    } = new THREE.TextureLoader()
+    } = new THREE.TextureLoader(),
+    /** How many distinct textures stay resident. The MRU entry is never evicted. */
+    private readonly capacity = 4
   ) {}
 
   public has(path: string): boolean {
@@ -155,11 +237,34 @@ export class GloveTextureCache {
   }
 
   public get(path: string): THREE.Texture | null {
-    return this.textures.get(path) ?? null;
+    const texture = this.textures.get(path);
+    if (!texture) return null;
+    this.touch(path, texture);
+    return texture;
   }
 
   public size(): number {
     return this.textures.size;
+  }
+
+  /** Moves an entry to the most-recently-used position. */
+  private touch(path: string, texture: THREE.Texture): void {
+    this.textures.delete(path);
+    this.textures.set(path, texture);
+  }
+
+  /** Evicts the least-recently-used entries, never the MRU one. */
+  private evictOverflow(): void {
+    while (this.textures.size > Math.max(1, this.capacity)) {
+      const oldest = this.textures.keys().next();
+      if (oldest.done) return;
+      // Map iteration is insertion-ordered and `touch` re-inserts, so the first
+      // key is the least recently used. With capacity >= 1 the MRU is the last
+      // key and is therefore never the one removed.
+      const victim = this.textures.get(oldest.value);
+      this.textures.delete(oldest.value);
+      victim?.dispose();
+    }
   }
 
   /**
@@ -168,7 +273,10 @@ export class GloveTextureCache {
    */
   public load(path: string): Promise<THREE.Texture | null> {
     const cached = this.textures.get(path);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      this.touch(path, cached);
+      return Promise.resolve(cached);
+    }
 
     const pending = this.inFlight.get(path);
     if (pending) return pending;
@@ -186,6 +294,7 @@ export class GloveTextureCache {
           const configured = this.configure(texture);
           this.textures.set(path, configured);
           this.inFlight.delete(path);
+          this.evictOverflow();
           resolve(configured);
         },
         undefined,

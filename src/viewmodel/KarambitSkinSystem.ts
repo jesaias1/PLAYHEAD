@@ -871,6 +871,38 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       emission: 1.1,
       uvScale: 1.0
     }
+  },
+  {
+    id: 'BLUE_GEM',
+    name: '23 // BLUE GEM',
+    codename: 'AZURE LATTICE',
+    description: 'Dense azure crystal aggregate shot through with raw gold veining. A static signal interior that reads as solid mineral rather than light.',
+    unlockRequirement: 'DISCOVERED THROUGH A SIGNAL DROP',
+    shortRequirement: 'SIGNAL DROP',
+    tier: 13,
+    rarity: 'RARE',
+    dropEligible: true,
+    dropWeight: 1,
+    paletteTag: 'AZURE // #1E6BFF',
+    profile: {
+      baseColor: new THREE.Color(0x0a1c4a),
+      nebulaPrimary: new THREE.Color(0x1e6bff),
+      nebulaSecondary: new THREE.Color(0xc9962e),
+      starColor: new THREE.Color(0xdff0ff),
+      rimColor: new THREE.Color(0x4da6ff),
+      parallaxDepth: 0.2,
+      layer2Scale: 1.8,
+      flowSpeed: 0.0,
+      sparkleRate: 1.4,
+      fresnelPower: 2.9,
+      audioReactivity: 0.22,
+      isCanonical: false,
+      texturePath: '/assets/viewmodel/karambit/textures/blue_gem_cosmic.webp',
+      exposure: 1.2,
+      contrast: 1.06,
+      emission: 1.15,
+      uvScale: 1.0
+    }
   }
 ];
 

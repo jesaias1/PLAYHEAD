@@ -12,6 +12,7 @@ import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { DEFAULT_MASTERY_GLOVE_ID } from '../mastery/MasteryLadder';
 import { applyGloveTreatment, getGloveTreatment, resolveGloveTreatment } from './GloveTreatments';
 import {
+  GLOVE_ANISOTROPY,
   GLOVE_MASK_TEXTURE_PATH,
   GloveTextureSwitcher,
   gloveMaskCache,
@@ -136,6 +137,9 @@ export class ViewmodelAssetLoader {
       gloveTexture.minFilter = THREE.LinearMipmapLinearFilter;
       gloveTexture.magFilter = THREE.NearestFilter; // Sharp retro PSX texture filtering
       gloveTexture.generateMipmaps = true;
+      // The viewmodel is viewed at a grazing angle; without anisotropic
+      // filtering the mip chain over-blurs the whole arm sheet.
+      gloveTexture.anisotropy = GLOVE_ANISOTROPY;
 
       armsScene.traverse((obj: THREE.Object3D) => {
         if ((obj as THREE.Mesh).isMesh) {

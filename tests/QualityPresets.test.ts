@@ -147,7 +147,10 @@ describe('Quality presets — gameplay protection', () => {
       'renderScale', 'dprCap', 'signalPixelSize', 'signalDither', 'signalQuantize',
       'vignetteScale', 'bloomScale', 'grainScale', 'signalPassEnabled',
       'decorationLodDistance', 'viewmodelSamples',
-      'reactiveLandmarkScale', 'routeSignalPackets', 'cosmeticVideoScale'
+      'reactiveLandmarkScale', 'routeSignalPackets', 'cosmeticVideoScale',
+      // Which cosmetic ASSET resolution a tier loads. Presentation only: it
+      // selects a texture path and can never touch gameplay state.
+      'gloveTextureQuality'
     ]);
     for (const preset of Object.values(QUALITY_PRESETS)) {
       for (const key of Object.keys(preset)) {

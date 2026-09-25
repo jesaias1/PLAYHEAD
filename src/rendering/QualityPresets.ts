@@ -67,6 +67,16 @@ export interface QualityPreset {
    * tiers load the smaller encode.
    */
   cosmeticVideoScale: 'STANDARD' | 'LOW';
+
+  /**
+   * Which base-color texture resolution cosmetic gloves load.
+   *
+   * A first-person viewmodel magnifies the glove, and the authored sheets carry
+   * far more detail than a 512 px sheet can hold, so HIGH and ULTRA load the
+   * 1024 px variant. This costs nothing at LOW/MEDIUM, which keep the light 512,
+   * and only the equipped glove is ever resident.
+   */
+  gloveTextureQuality: 'STANDARD' | 'HIGH';
 }
 
 export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset> = {
@@ -86,7 +96,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     // behaviour (bass mass, route pulse, primary city, drop) is retained.
     reactiveLandmarkScale: 0.35,
     routeSignalPackets: 12,
-    cosmeticVideoScale: 'LOW'
+    cosmeticVideoScale: 'LOW',
+    gloveTextureQuality: 'STANDARD'
   },
   MEDIUM: {
     renderScale: 0.85,
@@ -102,7 +113,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     viewmodelSamples: 2,
     reactiveLandmarkScale: 0.65,
     routeSignalPackets: 20,
-    cosmeticVideoScale: 'LOW'
+    cosmeticVideoScale: 'LOW',
+    gloveTextureQuality: 'STANDARD'
   },
   HIGH: {
     // Reference look — matches the pre-existing behaviour.
@@ -119,7 +131,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     viewmodelSamples: 4,
     reactiveLandmarkScale: 1.0,
     routeSignalPackets: 32,
-    cosmeticVideoScale: 'STANDARD'
+    cosmeticVideoScale: 'STANDARD',
+    gloveTextureQuality: 'HIGH'
   },
   ULTRA: {
     renderScale: 1.0,
@@ -135,7 +148,8 @@ export const QUALITY_PRESETS: Record<Exclude<QualityTier, 'AUTO'>, QualityPreset
     viewmodelSamples: 4,
     reactiveLandmarkScale: 1.0,
     routeSignalPackets: 40,
-    cosmeticVideoScale: 'STANDARD'
+    cosmeticVideoScale: 'STANDARD',
+    gloveTextureQuality: 'HIGH'
   }
 };
 
