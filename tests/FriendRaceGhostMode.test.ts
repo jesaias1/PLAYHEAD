@@ -238,7 +238,24 @@ function baseRaceDiagnostics(): RaceGhostDiagnosticState {
     color: 0x9d8cff,
     documentVisible: true,
     windowFocused: true,
-    lastVisibilityChangeAt: 0
+    lastVisibilityChangeAt: 0,
+    rxPosition: null,
+    ghostLocal: { x: 0, y: 0, z: 0 },
+    ghostWorld: { x: 0, y: 0, z: 0 },
+    ghostAttached: false,
+    ghostRootVisible: false,
+    ghostRootScale: { x: 1, y: 1, z: 1 },
+    ghostChildCount: 0,
+    cameraDistanceM: null,
+    ghostFrustum: 'UNKNOWN',
+    cameraLayerMask: null,
+    ghostLayerMask: 1,
+    ghostMaterialAlpha: 0,
+    ghostMaterialVisible: false,
+    ghostFrustumCulled: true,
+    debugMarker: 'OFF',
+    debugOffset: false,
+    forceVisible: false
   };
 }
 
@@ -1109,13 +1126,22 @@ describe('Friend race � background throttling', () => {
     // The state machine reads presence for DISCONNECTED...
     expect(src).toMatch(/remotePresent/);
     expect(src).toMatch(/PRESENCE_GRACE_MS/);
-    const update = src.slice(src.indexOf('public update('), src.indexOf('public update(') + 1600);
+    const update = src.slice(src.indexOf('public update('), src.indexOf('public update(') + 2600);
     // ...and the STALE_HOLD branch freezes at the last received transform.
     expect(update).toMatch(/state === 'STALE_HOLD'/);
-    expect(update).toMatch(/setTransform\(\s*this\.currentPos\.x/);
-    // No extrapolation anywhere in the render path: currentPos only ever moves
-    // towards a genuinely received target, and never on its own.
-    expect(update).not.toMatch(/currentPos\.addScaledVector|currentPos\.add\(|targetPos\.clone/);
+    // The render pose is written from currentPos (the frozen pose), and the
+    // STALE_HOLD path never advances interpolation.
+    const stale = src.slice(
+      src.indexOf("if (state === 'STALE_HOLD')"),
+      src.indexOf("if (state === 'STALE_HOLD')") + 460
+    );
+    expect(stale).toMatch(/applyRenderPosition\(\)/);
+    expect(stale).toMatch(/return;/);
+    expect(stale).not.toMatch(/advanceInterpolation/);
+    expect(src).toMatch(/private applyRenderPosition\(\)/);
+    // No extrapolation anywhere: currentPos only ever moves towards a genuinely
+    // received target, and never on its own.
+    expect(update).not.toMatch(/currentPos\.addScaledVector|currentPos\.add\(/);
   });
 
   it('STALE_HOLD is dimmed but never invisible, and overlap still shows it', () => {

@@ -76,14 +76,22 @@ export function isSafetyExempt(object: THREE.Object3D): boolean {
 
 /**
  * Objects that legitimately have no world role: the camera, the viewmodel
- * overlay, and anything explicitly marked as a DEV helper. Everything else that
- * renders must resolve a role.
+ * overlay, and anything explicitly marked as a DEV helper or safety-exempt.
+ *
+ * The flags are read from the object AND its ancestors. Reading only the object
+ * itself was a trap: `GhostVisual` set `worldSafetyExempt` on its group, the pass
+ * checked the child MESH, and the ghost's meshes were deleted as unregistered
+ * DECORATION. A group-level exemption must protect its subtree.
  */
 export function isRoleExemptObject(object: THREE.Object3D): boolean {
-  const anyObj = object as unknown as { isCamera?: boolean; isLight?: boolean };
-  if (anyObj.isCamera || anyObj.isLight) return true;
-  if (object.userData?.devHelper === true) return true;
-  if (object.userData?.worldSafetyExempt === true) return true;
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const anyObj = current as unknown as { isCamera?: boolean; isLight?: boolean };
+    if (anyObj.isCamera || anyObj.isLight) return true;
+    if (current.userData?.devHelper === true) return true;
+    if (current.userData?.worldSafetyExempt === true) return true;
+    current = current.parent;
+  }
   return false;
 }
 

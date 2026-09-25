@@ -22,6 +22,7 @@
  */
 
 import * as THREE from 'three';
+import { tagWorldRole } from '../world/WorldRoles';
 
 /** Translucent body — reads as a signal body, cannot add light. */
 export const GHOST_BODY_OPACITY = 0.40;
@@ -62,6 +63,17 @@ export class GhostVisual {
     this.group = new THREE.Group();
     this.group.visible = false;
     // Presentation only: never part of world-safety or gameplay validation.
+    //
+    // THIS MUST BE TAGGED, NOT JUST FLAGGED. The world geometry safety pass walks
+    // every MESH in the scene and resolves a role per leaf. A `userData` flag set
+    // on this GROUP does not protect the body/trace meshes, and without a role
+    // tag the pass treats them as DECORATION and deletes them the moment they
+    // intersect the route corridor — which they always do, because a ghost is
+    // created at the world origin and the route's first node is the origin.
+    // The remote opponent is created at boot, so it was present for the audit and
+    // had its only two meshes removed on the first map load. It then existed,
+    // was fed, was positioned and was visible, with nothing to draw.
+    tagWorldRole(this.group, 'IGNORE_WORLD_SAFETY', 'GhostVisual', true);
     this.group.userData.worldSafetyExempt = true;
     this.group.userData.devHelper = true;
 

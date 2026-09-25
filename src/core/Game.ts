@@ -2531,6 +2531,14 @@ export class Game {
     this.raceGhost = new RemoteGhostRenderer(this.environment.scene);
     this.raceGhost.setEffectScale(this.environment.effectProfile.additiveScale);
 
+    // DEV-only remote-opponent probes (F3). They bypass the ghost visual to
+    // separate "wrong transform/scene" from "wrong rendering".
+    this.devOverlay.onRaceProbeChange = (state) => {
+      this.raceGhost?.setDebugMarker(state.marker);
+      this.raceGhost?.setDebugOffset(state.offset);
+      this.raceGhost?.setForceVisible(state.force);
+    };
+
     const racePanel = this.ui.importScreen.racePanel;
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
 
@@ -2983,7 +2991,8 @@ export class Game {
    * DEV snapshot of the friend-race ghost pipeline. Read-only.
    */
   private raceGhostDiagnostics(): RaceGhostDiagnosticState {
-    const ghost = this.raceGhost?.getDiagnostics() ?? null;
+    const camera = this.environment.camera;
+    const ghost = this.raceGhost?.getDiagnostics(Date.now(), camera) ?? null;
     const net = raceRoomService.getGhostDiagnostics();
     const myId = authService.getUserId();
     const players = raceRoomService.getPlayers();
@@ -3010,7 +3019,24 @@ export class Game {
       color: ghost?.color ?? 0,
       documentVisible: net.documentVisible,
       windowFocused: net.windowFocused,
-      lastVisibilityChangeAt: net.lastVisibilityChangeAt
+      lastVisibilityChangeAt: net.lastVisibilityChangeAt,
+      rxPosition: ghost?.rxPosition ?? null,
+      ghostLocal: ghost?.ghostLocal ?? { x: 0, y: 0, z: 0 },
+      ghostWorld: ghost?.ghostWorld ?? { x: 0, y: 0, z: 0 },
+      ghostAttached: ghost?.attached ?? false,
+      ghostRootVisible: ghost?.rootVisible ?? false,
+      ghostRootScale: ghost?.rootScale ?? { x: 0, y: 0, z: 0 },
+      ghostChildCount: ghost?.childCount ?? 0,
+      cameraDistanceM: ghost?.cameraDistanceM ?? null,
+      ghostFrustum: ghost?.frustum ?? 'UNKNOWN',
+      cameraLayerMask: ghost?.cameraLayerMask ?? null,
+      ghostLayerMask: ghost?.ghostLayerMask ?? 0,
+      ghostMaterialAlpha: ghost?.materialAlpha ?? 0,
+      ghostMaterialVisible: ghost?.materialVisible ?? false,
+      ghostFrustumCulled: ghost?.frustumCulled ?? true,
+      debugMarker: ghost?.debugMarker ?? 'OFF',
+      debugOffset: ghost?.debugOffset ?? false,
+      forceVisible: ghost?.forceVisible ?? false
     };
   }
 

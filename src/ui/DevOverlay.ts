@@ -70,6 +70,26 @@ export interface RaceGhostDiagnosticState {
   documentVisible: boolean;
   windowFocused: boolean;
   lastVisibilityChangeAt: number;
+
+  // -- DEV probe surface ----------------------------------------------------
+  /** The raw received transform, exactly as it arrived. */
+  rxPosition: { x: number; y: number; z: number } | null;
+  ghostLocal: { x: number; y: number; z: number };
+  ghostWorld: { x: number; y: number; z: number };
+  ghostAttached: boolean;
+  ghostRootVisible: boolean;
+  ghostRootScale: { x: number; y: number; z: number };
+  ghostChildCount: number;
+  cameraDistanceM: number | null;
+  ghostFrustum: 'IN' | 'OUT' | 'UNKNOWN';
+  cameraLayerMask: number | null;
+  ghostLayerMask: number;
+  ghostMaterialAlpha: number;
+  ghostMaterialVisible: boolean;
+  ghostFrustumCulled: boolean;
+  debugMarker: 'OFF' | 'VISIBLE' | 'HIDDEN';
+  debugOffset: boolean;
+  forceVisible: boolean;
 }
 
 export class DevOverlay {
@@ -112,11 +132,45 @@ export class DevOverlay {
     this.buttonBar.innerHTML = `
       <button id="btn-dev-grant-signals" style="background: rgba(0, 240, 255, 0.12); color: #00f0ff; border: 1px solid #00f0ff; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ GRANT 999 SIGNALS ]</button>
       <button id="btn-dev-clear-signals" style="background: rgba(255, 50, 50, 0.12); color: #ff5555; border: 1px solid #ff5555; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ CLEAR SIGNALS ]</button>
+      <button id="btn-dev-remote-marker" style="background: rgba(255, 0, 255, 0.12); color: #ff00ff; border: 1px solid #ff00ff; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ REMOTE DEBUG MARKER ]</button>
+      <button id="btn-dev-remote-offset" style="background: rgba(255, 0, 255, 0.08); color: #ff00ff; border: 1px solid #7a007a; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ REMOTE OFFSET +1.5m ]</button>
+      <button id="btn-dev-remote-force" style="background: rgba(255, 0, 255, 0.08); color: #ff00ff; border: 1px solid #7a007a; padding: 4px 8px; font-family: monospace; font-size: 10px; cursor: pointer;">[ FORCE REMOTE VISIBLE ]</button>
     `;
     this.element.appendChild(this.buttonBar);
 
     const grantBtn = this.buttonBar.querySelector('#btn-dev-grant-signals') as HTMLButtonElement;
     const clearBtn = this.buttonBar.querySelector('#btn-dev-clear-signals') as HTMLButtonElement;
+
+    // DEV-only remote-opponent probes. They change nothing in production; they
+    // exist so one screenshot from a two-browser test identifies the fault.
+    const markerBtn = this.buttonBar.querySelector('#btn-dev-remote-marker') as HTMLButtonElement;
+    const offsetBtn = this.buttonBar.querySelector('#btn-dev-remote-offset') as HTMLButtonElement;
+    const forceBtn = this.buttonBar.querySelector('#btn-dev-remote-force') as HTMLButtonElement;
+    const paintProbeButtons = () => {
+      markerBtn.textContent = `[ REMOTE DEBUG MARKER: ${this.raceProbe.marker ? 'ON' : 'OFF'} ]`;
+      markerBtn.style.borderColor = this.raceProbe.marker ? '#ff00ff' : '#7a007a';
+      offsetBtn.textContent = `[ REMOTE OFFSET +1.5m: ${this.raceProbe.offset ? 'ON' : 'OFF'} ]`;
+      offsetBtn.style.borderColor = this.raceProbe.offset ? '#ff00ff' : '#7a007a';
+      forceBtn.textContent = `[ FORCE REMOTE VISIBLE: ${this.raceProbe.force ? 'ON' : 'OFF'} ]`;
+      forceBtn.style.borderColor = this.raceProbe.force ? '#ff00ff' : '#7a007a';
+    };
+    const emitProbe = () => {
+      paintProbeButtons();
+      this.onRaceProbeChange?.({ ...this.raceProbe });
+    };
+    markerBtn?.addEventListener('click', () => {
+      this.raceProbe.marker = !this.raceProbe.marker;
+      emitProbe();
+    });
+    offsetBtn?.addEventListener('click', () => {
+      this.raceProbe.offset = !this.raceProbe.offset;
+      emitProbe();
+    });
+    forceBtn?.addEventListener('click', () => {
+      this.raceProbe.force = !this.raceProbe.force;
+      emitProbe();
+    });
+    paintProbeButtons();
 
     grantBtn?.addEventListener('click', () => {
       KarambitSkinSystem.getInstance().grantDevPendingSignals(999);
@@ -170,6 +224,11 @@ export class DevOverlay {
 
   /** DEV-only: current audio-visual channel isolation mode. */
   public channelIsolation: ChannelIsolation = 'FULL';
+
+  /** DEV-only remote-opponent probe switches. Off in production. */
+  public raceProbe = { marker: false, offset: false, force: false };
+  /** Notified whenever a remote-opponent probe switch changes. */
+  public onRaceProbeChange?: (state: { marker: boolean; offset: boolean; force: boolean }) => void;
 
   public toggle(): void {
     if (this.isVisible) this.hide();
@@ -363,6 +422,8 @@ export function raceGhostDiagnosticsLine(race?: RaceGhostDiagnosticState): strin
   if (!race) return 'REMOTE PLAYER: n/a (no race diagnostics)';
   const age = (ms: number): string => (ms < 0 ? 'never' : `${ms} ms`);
   const dist = race.distanceM === null ? 'n/a' : `${race.distanceM.toFixed(2)} m`;
+  const vec = (v: { x: number; y: number; z: number } | null): string =>
+    v === null ? 'n/a' : `${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.z.toFixed(2)}`;
   const visChange =
     race.lastVisibilityChangeAt > 0
       ? `${Math.round((Date.now() - race.lastVisibilityChangeAt) / 1000)}s ago`
@@ -373,6 +434,8 @@ export function raceGhostDiagnosticsLine(race?: RaceGhostDiagnosticState): strin
       ? 'PRESENT'
       : 'RECONNECTING';
   const transformState = race.ghostState === 'LIVE' ? 'LIVE' : 'STALE';
+  const hex = (mask: number | null): string =>
+    mask === null ? 'n/a' : `0x${mask.toString(16)}`;
   return (
     `REMOTE PLAYER: ${race.remoteName} | CONNECTED ${race.remoteConnected ? 'YES' : 'NO'}` +
     ` | PRESENCE ${presence}` +
@@ -386,7 +449,19 @@ export function raceGhostDiagnosticsLine(race?: RaceGhostDiagnosticState): strin
     `\n  TRANSFORM TX: ${race.txCount} | age ${age(race.txAgeMs)} | background ${race.txBackgroundCount}` +
     `\n  TRANSFORM RX: ${race.rxCount} | age ${age(race.rxAgeMs)} | ${transformState}` +
     `\n  REMOTE GHOST STATE: ${race.ghostState.replace('_', ' ')} | samples ${race.ghostSamples}` +
+    `\n  REMOTE SAMPLE: ${race.ghostHasTarget ? 'YES' : 'NO'} | RX POSITION ${vec(race.rxPosition)}` +
+    `\n  GHOST LOCAL: ${vec(race.ghostLocal)} | GHOST WORLD: ${vec(race.ghostWorld)}` +
+    `\n  GHOST ROOT: ${race.ghostAttached ? 'ATTACHED' : 'DETACHED'}` +
+    ` | VISIBLE ${race.ghostRootVisible ? 'TRUE' : 'FALSE'}` +
+    ` | SCALE ${vec(race.ghostRootScale)} | MESHES ${race.ghostChildCount}` +
+    `\n  CAMERA DISTANCE: ${race.cameraDistanceM === null ? 'n/a' : `${race.cameraDistanceM.toFixed(2)} m`}` +
+    ` | FRUSTUM ${race.ghostFrustum} | FRUSTUM CULLED ${race.ghostFrustumCulled ? 'TRUE' : 'FALSE'}` +
+    `\n  CAMERA LAYER MASK: ${hex(race.cameraLayerMask)} | GHOST LAYER MASK: ${hex(race.ghostLayerMask)}` +
+    `\n  MATERIAL ALPHA: ${race.ghostMaterialAlpha.toFixed(3)}` +
+    ` | VISIBLE ${race.ghostMaterialVisible ? 'TRUE' : 'FALSE'}` +
     `\n  DISTANCE TO REMOTE: ${dist} | COLOUR #${race.color.toString(16).padStart(6, '0')}` +
+    `\n  REMOTE DEBUG MARKER: ${race.debugMarker}` +
+    ` | OFFSET ${race.debugOffset ? 'ON' : 'OFF'} | FORCE ${race.forceVisible ? 'ON' : 'OFF'}` +
     `\n  PROXIMITY FADE: none (live opponent is never faded out)`
   );
 }
