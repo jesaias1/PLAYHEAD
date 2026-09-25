@@ -19,6 +19,8 @@ import { onlineBootstrap } from '../online/OnlineBootstrap';
 import { leaderboardService } from '../online/LeaderboardService';
 import { raceRoomService } from '../online/RaceRoomService';
 import { PresetLevelCache } from '../audio/PresetLevelCache';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { gloveMaskCache, gloveTextureCache } from '../viewmodel/GloveTextures';
 import type { MovementFeedbackState } from '../feedback/MovementFeedbackController';
 
 /** DEV-only Signal Gate diagnostics. */
@@ -331,6 +333,14 @@ function assetDiagnosticsLine(): string {
   );
   lines.push(
     `  PRESETS cached ${cache.cached} | fetches ${cache.loads} | cache hits ${cache.hits} | failed ${cache.misses}`
+  );
+  // Mastery glove texture pipeline: proves which texture is actually on the arms.
+  const gloves = masteryGloveSystem.evaluate();
+  const equippedGlove = masteryGloveSystem.getEffectiveGloveId();
+  lines.push(
+    `  GLOVE ${equippedGlove} | textures ${gloveTextureCache.size()}/${gloves.gloves.length}` +
+      ` | fetches ${gloveTextureCache.loadCount}` +
+      ` | mask ${gloveMaskCache.size() > 0 ? 'loaded' : 'absent'}`
   );
   return lines.join('\n');
 }

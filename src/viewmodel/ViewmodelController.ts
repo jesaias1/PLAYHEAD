@@ -24,6 +24,7 @@ import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { resolveEffectProfile } from '../rendering/EffectIntensity';
 import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { disposeGloveTextureCaches } from './GloveTextures';
 import { clamp } from '../utils/math';
 
 export class ViewmodelController {
@@ -796,5 +797,7 @@ export class ViewmodelController {
     }
     this.styleFilter.dispose();
     this.rigInstance.dispose();
+    // Release the shared mastery glove texture cache with the viewmodel.
+    disposeGloveTextureCaches();
   }
 }

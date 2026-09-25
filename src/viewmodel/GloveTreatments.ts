@@ -133,19 +133,25 @@ export function getGloveTreatment(id: string): GloveTreatment {
  * `audioPulse` is the viewmodel's existing restrained musical envelope (already
  * capped at 0.32 upstream), and `effectScale` is the presentation-only EFFECT
  * INTENSITY viewmodel scale. Neither can change eligibility.
+ *
+ * `hasOwnTexture` is true when the glove ships its own base-color texture. In
+ * that case the material stays NEUTRAL: the authored arms atlas is ~74% exposed
+ * skin, so a global tint would repaint human skin as gold/cyan instead of only
+ * the glove.
  */
 export function applyGloveTreatment(
   materials: readonly THREE.MeshStandardMaterial[],
   treatment: GloveTreatment,
   audioPulse: number,
-  effectScale = 1
+  effectScale = 1,
+  hasOwnTexture = false
 ): void {
   const clampedPulse = Math.max(0, Math.min(1, Number.isFinite(audioPulse) ? audioPulse : 0));
   const lift = 1 + clampedPulse * treatment.audioReactive * GLOVE_AUDIO_PULSE_GAIN;
   const scale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
 
   for (const mat of materials) {
-    mat.color.setHex(treatment.tint);
+    mat.color.setHex(hasOwnTexture ? 0xffffff : treatment.tint);
     mat.roughness = treatment.roughness;
     mat.metalness = treatment.metalness;
     mat.emissive.setHex(treatment.emissive);

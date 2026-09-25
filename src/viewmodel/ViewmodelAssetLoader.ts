@@ -11,6 +11,14 @@ import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { DEFAULT_MASTERY_GLOVE_ID } from '../mastery/MasteryLadder';
 import { applyGloveTreatment, getGloveTreatment } from './GloveTreatments';
+import {
+  GLOVE_MASK_TEXTURE_PATH,
+  GloveTextureSwitcher,
+  gloveMaskCache,
+  gloveTextureCache,
+  hasOwnGloveTexture,
+  setGloveMask
+} from './GloveTextures';
 
 export interface ViewmodelRigInstance {
   rootGroup: THREE.Group;
@@ -34,6 +42,10 @@ export interface ViewmodelRigInstance {
    * calls, and it never touches the frozen knife socket.
    */
   applyGlove: (gloveId: string, effectScale?: number) => void;
+  /** The glove currently applied, for DEV diagnostics and tests. */
+  getActiveGloveId: () => string;
+  /** The base-color texture currently on the arm materials. */
+  getActiveGloveTexture: () => THREE.Texture | null;
   /** Arm materials, exposed for DEV diagnostics and tests. */
   armMaterials: THREE.MeshStandardMaterial[];
   dispose: () => void;
@@ -88,9 +100,33 @@ export class ViewmodelAssetLoader {
     // the same neutral lift the hands used before mastery gloves existed.
     let activeGloveTreatment = getGloveTreatment(DEFAULT_MASTERY_GLOVE_ID);
     let gloveEffectScale = 1;
+    let activeGloveId: string = DEFAULT_MASTERY_GLOVE_ID;
+    let activeGloveHasOwnTexture = false;
+    /** Shared glove-region mask. Null until (and unless) the optional asset loads. */
+    let gloveMaskTexture: THREE.Texture | null = null;
+    /**
+     * Monotonic selection token. A slow texture load for an EARLIER glove must
+     * never overwrite a later selection.
+     */
+    const gloveSwitcher = new GloveTextureSwitcher(gloveTextureCache);
 
     const applyArmMaterialLift = () => {
-      applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
+      applyGloveTreatment(
+        armMaterials,
+        activeGloveTreatment,
+        handAudioPulse,
+        gloveEffectScale,
+        activeGloveHasOwnTexture
+      );
+      // Scope metalness/roughness to glove pixels when a shared mask exists.
+      for (const mat of armMaterials) {
+        setGloveMask(
+          mat,
+          gloveMaskTexture,
+          activeGloveTreatment.metalness,
+          activeGloveTreatment.roughness
+        );
+      }
     };
 
     // Configure Arms Materials and Textures
@@ -247,11 +283,50 @@ export class ViewmodelAssetLoader {
       applyArmMaterialLift();
     };
 
+    /**
+     * MASTERY GLOVE — texture + treatment, async safe.
+     *
+     * 1. resolve treatment
+     * 2. resolve texture path
+     * 3. load lazily (cache hit avoids any fetch)
+     * 4. apply to the EXISTING arm materials
+     * 5. apply the material treatment
+     *
+     * Geometry, skeleton, mixer, knife and the viewmodel root are never touched.
+     * A missing optional texture falls back to the canonical atlas, and a slow
+     * load can never overwrite a newer selection (see GloveTextureSwitcher).
+     */
     const applyGlove = (gloveId: string, effectScale = 1) => {
+      activeGloveId = gloveId;
       activeGloveTreatment = getGloveTreatment(gloveId);
       gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
-      applyArmMaterialLift();
+      activeGloveHasOwnTexture = hasOwnGloveTexture(gloveId);
+
+      void gloveSwitcher.apply(gloveId, gloveTexture, (texture, hasOwnTexture) => {
+        setArmTexture(texture, hasOwnTexture);
+        applyArmMaterialLift();
+      });
     };
+
+    /** Swaps the base-color map on every arm material. Nothing else changes. */
+    const setArmTexture = (texture: THREE.Texture | null, neutralColor: boolean) => {
+      for (const mat of armMaterials) {
+        if (texture) mat.map = texture;
+        if (neutralColor) {
+          // The texture carries the colour, so skin is never repainted.
+          mat.color.setHex(0xffffff);
+        }
+        mat.needsUpdate = true;
+      }
+    };
+
+    // The shared glove mask is fetched once per session, lazily, and is entirely
+    // optional: with no mask the shader patch is a no-op.
+    void gloveMaskCache.load(GLOVE_MASK_TEXTURE_PATH).then((mask) => {
+      if (!mask) return;
+      gloveMaskTexture = mask;
+      applyArmMaterialLift();
+    });
 
     // Start on the standard-issue glove so the authored look is unchanged until
     // the controller applies the equipped mastery glove.
@@ -289,6 +364,8 @@ export class ViewmodelAssetLoader {
       setAccentColor,
       setAudioPulse,
       applyGlove,
+      getActiveGloveId: () => activeGloveId,
+      getActiveGloveTexture: () => armMaterials[0]?.map ?? null,
       armMaterials,
       dispose
     };
@@ -331,6 +408,8 @@ export class ViewmodelAssetLoader {
     let handAudioPulse = 0;
     let activeGloveTreatment = getGloveTreatment(DEFAULT_MASTERY_GLOVE_ID);
     let gloveEffectScale = 1;
+    let activeGloveId: string = DEFAULT_MASTERY_GLOVE_ID;
+    let activeGloveHasOwnTexture = false;
 
     return {
       rootGroup,
@@ -358,13 +437,32 @@ export class ViewmodelAssetLoader {
       },
       setAudioPulse: (pulse: number) => {
         handAudioPulse = Math.max(0, Math.min(0.32, pulse));
-        applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
+        applyGloveTreatment(
+          armMaterials,
+          activeGloveTreatment,
+          handAudioPulse,
+          gloveEffectScale,
+          activeGloveHasOwnTexture
+        );
       },
       applyGlove: (gloveId: string, effectScale = 1) => {
         activeGloveTreatment = getGloveTreatment(gloveId);
+        activeGloveId = gloveId;
+        activeGloveHasOwnTexture = hasOwnGloveTexture(gloveId);
         gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
-        applyGloveTreatment(armMaterials, activeGloveTreatment, handAudioPulse, gloveEffectScale);
+        applyGloveTreatment(
+          armMaterials,
+          activeGloveTreatment,
+          handAudioPulse,
+          gloveEffectScale,
+          activeGloveHasOwnTexture
+        );
+        for (const mat of armMaterials) {
+          setGloveMask(mat, null, activeGloveTreatment.metalness, activeGloveTreatment.roughness);
+        }
       },
+      getActiveGloveId: () => activeGloveId,
+      getActiveGloveTexture: () => armMaterials[0]?.map ?? null,
       armMaterials,
       dispose: () => {
         cosmicMat.dispose();
