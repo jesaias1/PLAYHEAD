@@ -10,13 +10,14 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { DEFAULT_MASTERY_GLOVE_ID } from '../mastery/MasteryLadder';
-import { applyGloveTreatment, getGloveTreatment } from './GloveTreatments';
+import { applyGloveTreatment, getGloveTreatment, resolveGloveTreatment } from './GloveTreatments';
 import {
   GLOVE_MASK_TEXTURE_PATH,
   GloveTextureSwitcher,
   gloveMaskCache,
   gloveTextureCache,
-  hasOwnGloveTexture,
+  hasAnyOwnGloveTexture,
+  setGloveColorComposite,
   setGloveMask
 } from './GloveTextures';
 
@@ -298,9 +299,9 @@ export class ViewmodelAssetLoader {
      */
     const applyGlove = (gloveId: string, effectScale = 1) => {
       activeGloveId = gloveId;
-      activeGloveTreatment = getGloveTreatment(gloveId);
+      activeGloveTreatment = resolveGloveTreatment(gloveId);
       gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
-      activeGloveHasOwnTexture = hasOwnGloveTexture(gloveId);
+      activeGloveHasOwnTexture = hasAnyOwnGloveTexture(gloveId);
 
       void gloveSwitcher.apply(gloveId, gloveTexture, (texture, hasOwnTexture) => {
         setArmTexture(texture, hasOwnTexture);
@@ -308,11 +309,23 @@ export class ViewmodelAssetLoader {
       });
     };
 
-    /** Swaps the base-color map on every arm material. Nothing else changes. */
-    const setArmTexture = (texture: THREE.Texture | null, neutralColor: boolean) => {
+    /** Swaps the base-color state on every arm material. Nothing else changes. */
+    const setArmTexture = (texture: THREE.Texture | null, hasOwnTexture: boolean) => {
+      // COMPOSITION MODE: with a shared mask present and a cosmetic texture, the
+      // material's `map` stays the CANONICAL atlas so exposed skin keeps the
+      // player's own hand tone, and the cosmetic is blended in only on glove
+      // pixels. Without a mask we fall back to swapping the map directly.
+      const compose = gloveMaskTexture !== null && hasOwnTexture && texture !== null;
+
       for (const mat of armMaterials) {
-        if (texture) mat.map = texture;
-        if (neutralColor) {
+        if (compose) {
+          mat.map = gloveTexture;
+          setGloveColorComposite(mat, texture, true);
+        } else {
+          mat.map = texture ?? gloveTexture;
+          setGloveColorComposite(mat, null, false);
+        }
+        if (compose || hasOwnTexture) {
           // The texture carries the colour, so skin is never repainted.
           mat.color.setHex(0xffffff);
         }
@@ -448,7 +461,7 @@ export class ViewmodelAssetLoader {
       applyGlove: (gloveId: string, effectScale = 1) => {
         activeGloveTreatment = getGloveTreatment(gloveId);
         activeGloveId = gloveId;
-        activeGloveHasOwnTexture = hasOwnGloveTexture(gloveId);
+        activeGloveHasOwnTexture = hasAnyOwnGloveTexture(gloveId);
         gloveEffectScale = Number.isFinite(effectScale) && effectScale > 0 ? effectScale : 1;
         applyGloveTreatment(
           armMaterials,

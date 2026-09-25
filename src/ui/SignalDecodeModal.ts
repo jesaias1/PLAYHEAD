@@ -3,7 +3,9 @@
  * pending signal drops into Karambit cosmetics.
  */
 
-import { KarambitSkin, KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
+import { CosmeticRarity, KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
+import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
+import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { SignalDecoderAudio } from '../audio/SignalDecoderAudio';
 
 export class SignalDecodeModal {
@@ -16,7 +18,7 @@ export class SignalDecodeModal {
   private statusElem: HTMLElement;
   private skipBtn: HTMLButtonElement;
   private closeBtn: HTMLButtonElement;
-  private onCompleteCallback?: (skin: KarambitSkin) => void;
+  private onCompleteCallback?: (reward: OpenedSignalDrop) => void;
 
   private skinSystem = KarambitSkinSystem.getInstance();
   private decoderAudio = SignalDecoderAudio.getInstance();
@@ -95,7 +97,7 @@ export class SignalDecodeModal {
     });
   }
 
-  public open(onComplete?: (skin: KarambitSkin) => void): void {
+  public open(onComplete?: (reward: OpenedSignalDrop) => void): void {
     if (this.isRolling) return;
     this.onCompleteCallback = onComplete;
 
@@ -165,17 +167,22 @@ export class SignalDecodeModal {
     const cards: HTMLElement[] = [];
 
     for (let i = 0; i < TOTAL_CARDS; i++) {
-      let skin: KarambitSkin;
+      // The TARGET card always reflects the REAL award, so the strip can never
+      // show a knife when a glove was decoded.
+      let view: { rarity: CosmeticRarity; name: string; codename: string; isLive: boolean };
       if (i === TARGET_INDEX) {
-        skin = reward.skin;
+        view = { rarity: reward.rarity, name: reward.name, codename: reward.codename, isLive: reward.isLive };
       } else if ((i === TARGET_INDEX - 1 || i === TARGET_INDEX + 1) && highTierSkins.length > 0) {
-        // Dramatic near-miss on either side of target
-        skin = highTierSkins[Math.floor(Math.random() * highTierSkins.length)];
+        const near = highTierSkins[Math.floor(Math.random() * highTierSkins.length)];
+        view = { rarity: near.rarity, name: near.name, codename: near.codename, isLive: !!near.profile.isVideoArtifact };
       } else {
-        skin = allSkins[Math.floor(Math.random() * allSkins.length)] || reward.skin;
+        const filler = allSkins[Math.floor(Math.random() * allSkins.length)];
+        view = filler
+          ? { rarity: filler.rarity, name: filler.name, codename: filler.codename, isLive: !!filler.profile.isVideoArtifact }
+          : { rarity: reward.rarity, name: reward.name, codename: reward.codename, isLive: reward.isLive };
       }
 
-      const rarityColor = this.getRarityColor(skin.rarity);
+      const rarityColor = this.getRarityColor(view.rarity);
       const isTarget = i === TARGET_INDEX;
 
       const card = document.createElement('div');
@@ -196,18 +203,18 @@ export class SignalDecodeModal {
       card.innerHTML = `
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-family: var(--font-mono); font-size: 0.52rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${skin.rarity}</span>
-            <span style="font-family: var(--font-mono); font-size: 0.50rem; color: #64748b;">${skin.profile.isVideoArtifact ? 'VIDEO' : 'STATIC'}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.52rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${view.rarity}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.50rem; color: #64748b;">${view.isLive ? 'VIDEO' : 'STATIC'}</span>
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.70rem; font-weight: 700; color: #f1f5f9; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${skin.name}
+            ${view.name}
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.56rem; color: #8899aa; margin-top: 2px;">
-            ${skin.codename}
+            ${view.codename}
           </div>
         </div>
-        <div style="font-family: var(--font-mono); font-size: 0.52rem; color: ${skin.profile.isVideoArtifact ? '#00f0ff' : '#475569'};">
-          ${skin.profile.isVideoArtifact ? '[LIVE ARTIFACT]' : '[SIGNAL PROFILE]'}
+        <div style="font-family: var(--font-mono); font-size: 0.52rem; color: ${view.isLive ? '#00f0ff' : '#475569'};">
+          ${isTarget ? 'TARGET' : ''}
         </div>
       `;
 
@@ -290,11 +297,14 @@ export class SignalDecodeModal {
   }
 
   private revealAward(reward: OpenedSignalDrop): void {
-    this.decoderAudio.playRevealAccent(reward.skin.rarity);
+    this.decoderAudio.playRevealAccent(reward.rarity);
     this.skipBtn.style.display = 'none';
-    const rarityColor = this.getRarityColor(reward.skin.rarity);
-    const isOverclocked = reward.skin.rarity === 'OVERCLOCKED';
-    const isHighTier = isOverclocked || reward.skin.rarity === 'ARTIFACT' || reward.skin.rarity === 'RELIC';
+    const rarityColor = this.getRarityColor(reward.rarity);
+    // The reveal must state the SLOT TYPE explicitly. The player must never have
+    // to infer "was that a knife or a glove?" from the artwork.
+    const slotLabel = cosmeticKindLabel(reward.kind);
+    const isOverclocked = reward.rarity === 'OVERCLOCKED';
+    const isHighTier = isOverclocked || reward.rarity === 'ARTIFACT' || reward.rarity === 'RELIC';
 
     if (isOverclocked) {
       this.titleElem.textContent = 'SYSTEM LIMIT EXCEEDED // OVERCLOCKED SIGNAL ACQUIRED';
@@ -303,7 +313,7 @@ export class SignalDecodeModal {
       this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
       this.kickerElem.textContent = '// SIGNAL RECOVERY BUS';
     }
-    this.statusElem.textContent = reward.skin.rarity;
+    this.statusElem.textContent = reward.rarity;
     this.statusElem.style.borderColor = rarityColor;
     this.statusElem.style.color = rarityColor;
 
@@ -323,23 +333,26 @@ export class SignalDecodeModal {
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
         <div>
           <div style="font-family: var(--font-mono); font-size: 0.62rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
-            [${reward.qualityLabel} // ${reward.skin.rarity}] ${isOverclocked ? '★ APEX SYSTEM OVERCLOCK ACHIEVED' : (isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : '')}
+            [${reward.qualityLabel} // ${reward.rarity}] ${isOverclocked ? '★ APEX SYSTEM OVERCLOCK ACHIEVED' : (isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : '')}
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8; margin-top: 8px; letter-spacing: 0.2em;">
+            ${slotLabel}
           </div>
           <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 3px; letter-spacing: 0.04em;">
-            ${reward.skin.name}
+            ${reward.name}
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">
-            ${reward.skin.codename} · ${reward.skin.paletteTag}
+            ${reward.codename} · ${reward.accentTag}
           </div>
         </div>
         <div style="text-align: right;">
           <span style="font-family: var(--font-mono); font-size: 0.60rem; padding: 3px 8px; border: 1px solid ${rarityColor}; color: ${rarityColor}; background: ${rarityColor}18;">
-            ${reward.skin.profile.isVideoArtifact ? 'LIVE VIDEO ARTIFACT' : 'PROFILE TIER'}
+            ${reward.isLive ? 'LIVE VIDEO ARTIFACT' : 'PROFILE TIER'}
           </span>
         </div>
       </div>
       <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #cbd5e1; margin-top: 10px; line-height: 1.45;">
-        ${reward.skin.description}
+        ${reward.kind === 'GLOVE' ? 'SIGNAL DROP GLOVE // EQUIP TO APPLY' : ''}
       </div>
       <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: flex-end;">
         <button id="btn-decode-equip" class="primary" style="padding: 8px 22px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
@@ -355,17 +368,29 @@ export class SignalDecodeModal {
     const claimBtn = this.celebrationCard.querySelector('#btn-decode-claim') as HTMLButtonElement;
 
     equipBtn.addEventListener('click', () => {
-      this.skinSystem.equipSkin(reward.skin.id);
+      this.equipAward(reward);
       this.hide();
-      this.onCompleteCallback?.(reward.skin);
+      this.onCompleteCallback?.(reward);
     });
 
     claimBtn.addEventListener('click', () => {
       this.hide();
-      this.onCompleteCallback?.(reward.skin);
+      this.onCompleteCallback?.(reward);
     });
 
     equipBtn.focus();
+  }
+
+  /**
+   * Equips whatever was decoded. A knife goes to the knife slot, a glove to the
+   * shared equipped-glove slot. Neither path can touch mastery eligibility.
+   */
+  private equipAward(reward: OpenedSignalDrop): void {
+    if (reward.kind === 'GLOVE') {
+      masteryGloveSystem.equipAnyGlove(reward.item.id);
+      return;
+    }
+    if (reward.skin) this.skinSystem.equipSkin(reward.skin.id);
   }
 
   public hide(): void {

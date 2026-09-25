@@ -10,6 +10,8 @@ import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { DROP_GLOVES } from '../viewmodel/DropGloveCatalog';
+import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 
 /** Two-digit zero padding for mastery counters. */
 function pad2(n: number): string {
@@ -102,6 +104,7 @@ export class ImportScreen {
   private masterySummaryElem: HTMLElement;
   private masteryGlovesGridElem: HTMLElement;
   private masteryDevPreviewBtn: HTMLButtonElement;
+  private dropGlovesGridElem: HTMLElement;
   private showcaseMasteryStripElem: HTMLElement;
   private armoryDevToggleBtn: HTMLButtonElement;
   private decoderPendingElem: HTMLElement;
@@ -286,15 +289,19 @@ export class ImportScreen {
             <!-- Populated dynamically via renderArmory() -->
           </div>
 
-          <!-- MASTERY GLOVES: earned, never random. Separate from the knife catalog. -->
+          <!-- GLOVES: two clearly separated families. A random drop glove must
+               never sit in an unlabelled list beside an earned mastery glove. -->
           <div class="armory-catalog-heading mastery-heading">
-            <span>[MASTERY] GLOVES // PROOF OF SKILL</span>
+            <span>[GLOVES] SIGNAL DROPS // MASTERY</span>
             <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
           </div>
           <div class="mastery-summary" id="mastery-summary"></div>
-          <div id="mastery-gloves-grid" class="mastery-gloves-grid">
-            <!-- Populated dynamically via renderMasteryGloves() -->
-          </div>
+
+          <div class="armory-subheading">SIGNAL DROPS // RANDOM REWARDS</div>
+          <div id="drop-gloves-grid" class="mastery-gloves-grid"></div>
+
+          <div class="armory-subheading">MASTERY // EARNED ACHIEVEMENTS</div>
+          <div id="mastery-gloves-grid" class="mastery-gloves-grid"></div>
         </div>
 
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
@@ -364,6 +371,7 @@ export class ImportScreen {
     this.masterySummaryElem = this.element.querySelector('#mastery-summary') as HTMLElement;
     this.masteryGlovesGridElem = this.element.querySelector('#mastery-gloves-grid') as HTMLElement;
     this.masteryDevPreviewBtn = this.element.querySelector('#btn-mastery-dev-preview') as HTMLButtonElement;
+    this.dropGlovesGridElem = this.element.querySelector('#drop-gloves-grid') as HTMLElement;
     this.showcaseMasteryStripElem = this.element.querySelector('#showcase-mastery-strip') as HTMLElement;
     this.armoryDevToggleBtn = this.element.querySelector('#btn-armory-dev-toggle') as HTMLButtonElement;
     this.decoderPendingElem = this.element.querySelector('#decoder-pending') as HTMLElement;
@@ -600,6 +608,70 @@ export class ImportScreen {
   }
 
   /**
+   * SIGNAL DROP GLOVES.
+   *
+   * Clearly labelled as random rewards and kept SEPARATE from the mastery list.
+   * Ownership comes from the drop ledger; nothing here can affect mastery
+   * eligibility. Locked entries are still previewable so the player can see what
+   * exists.
+   */
+  public renderDropGloves(): void {
+    if (!this.dropGlovesGridElem) return;
+    const equippedId = masteryGloveSystem.getEquippedGloveId();
+    const previewId = masteryGloveSystem.getDevPreviewGloveId();
+    this.dropGlovesGridElem.innerHTML = '';
+
+    for (const glove of DROP_GLOVES) {
+      const owned = this.skinSystem.isDropGloveOwned(glove.id);
+      const isEquipped = glove.id === equippedId;
+      const isPreview = glove.id === previewId;
+
+      const card = document.createElement('div');
+      card.className = 'mastery-glove-card';
+      card.dataset.gloveId = glove.id;
+      card.dataset.state = owned ? 'UNLOCKED' : 'LOCKED';
+      if (isEquipped) card.classList.add('equipped');
+      if (isPreview) card.classList.add('previewing');
+
+      const status = isEquipped
+        ? 'EQUIPPED'
+        : owned
+          ? 'UNLOCKED'
+          : 'LOCKED // SIGNAL DROP';
+
+      card.innerHTML =
+        `<div class="mastery-glove-head">` +
+        `<span class="mastery-glove-name">${glove.name}</span>` +
+        `<span class="mastery-glove-tier">${glove.rarity}</span>` +
+        `</div>` +
+        `<div class="mastery-glove-codename">${glove.codename}</div>` +
+        `<div class="mastery-glove-req">SOURCE // SIGNAL DROP</div>` +
+        `<div class="mastery-glove-status ${owned ? 'unlocked' : 'locked'}">${status}</div>`;
+
+      const action = document.createElement('button');
+      action.className = 'terminal-btn-subtle mastery-glove-action';
+      if (isEquipped) {
+        action.textContent = '[ EQUIPPED ]';
+        action.disabled = true;
+      } else if (owned) {
+        action.textContent = '[ EQUIP ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.equipAnyGlove(glove.id);
+          this.renderArmory();
+        });
+      } else {
+        action.textContent = '[ PREVIEW ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.setDevPreview(isPreview ? null : glove.id);
+          this.renderArmory();
+        });
+      }
+      card.appendChild(action);
+      this.dropGlovesGridElem.appendChild(card);
+    }
+  }
+
+  /**
    * MASTERY GLOVES.
    *
    * Locked gloves are always previewable and their requirement is never hidden,
@@ -645,6 +717,7 @@ export class ImportScreen {
         `<span class="mastery-glove-tier">T${d.tier}</span>` +
         `</div>` +
         `<div class="mastery-glove-codename">${d.codename}</div>` +
+        `<div class="mastery-glove-req">SOURCE // MASTERY</div>` +
         `<div class="mastery-glove-req">${d.requirementLabel}</div>` +
         `<div class="mastery-glove-status ${unlocked ? 'unlocked' : 'locked'}">${statusLine}</div>`;
 
@@ -674,6 +747,7 @@ export class ImportScreen {
   public renderArmory(): void {
     this.renderSignalDecoder();
     this.renderMasterySummary();
+    this.renderDropGloves();
     this.renderMasteryGloves();
     const isDev = this.skinSystem.isDevPreview();
     this.armoryDevToggleBtn.textContent = `DEV PREVIEW: ${isDev ? 'ACTIVE' : 'OFF'}`;
@@ -770,8 +844,8 @@ export class ImportScreen {
     if (this.lastDecoderReward) {
       const reward = this.lastDecoderReward;
       this.decoderStatusElem.textContent = 'ARMORY SIGNAL FOUND';
-      this.decoderStatusElem.dataset.rarity = reward.skin.rarity;
-      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.skin.rarity} // ${reward.skin.name}`;
+      this.decoderStatusElem.dataset.rarity = reward.rarity;
+      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.rarity} // ${cosmeticKindLabel(reward.kind)} // ${reward.name}`;
     } else {
       this.decoderStatusElem.textContent = pending > 0 ? 'SIGNAL ACQUIRED' : 'NO SIGNAL AVAILABLE';
       this.decoderStatusElem.removeAttribute('data-rarity');

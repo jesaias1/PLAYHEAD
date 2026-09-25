@@ -218,13 +218,18 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     expect(reward).not.toBeNull();
     expect(reward!.sourceRank).toBe('DIAMOND');
     expect(reward!.qualityLabel).toBe('PRISTINE SIGNAL');
-    expect(skinSystem.isSkinRewardOwned(reward!.skin.id)).toBe(true);
+    // Ownership lands in the ledger for the resolved CATEGORY.
+    expect(skinSystem.isCosmeticOwned(reward!.item.id)).toBe(true);
 
     (KarambitSkinSystem as any).instance = null;
     skinSystem = KarambitSkinSystem.getInstance();
     expect(skinSystem.getPendingDropCount()).toBe(3);
-    expect(skinSystem.isSkinRewardOwned(reward!.skin.id)).toBe(true);
-    expect(skinSystem.isSkinUnlocked(reward!.skin.id)).toBe(true);
+    expect(skinSystem.isCosmeticOwned(reward!.item.id)).toBe(true);
+    if (reward!.kind === 'KNIFE') {
+      expect(skinSystem.isSkinUnlocked(reward!.item.id)).toBe(true);
+    } else {
+      expect(skinSystem.isDropGloveOwned(reward!.item.id)).toBe(true);
+    }
   });
 
   it('uses a deterministic persisted bag, protects unowned rewards, and avoids identical streaks', () => {
@@ -234,10 +239,10 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
         system.recordTrackCompletion(track.id, 'DIAMOND', track.id);
       }
       const rewards: string[] = [];
-      while (system.getPendingDropCount() > 0 && !system.isCollectionComplete()) {
+      while (system.getPendingDropCount() > 0 && !(system.isCollectionComplete() && system.isGloveCollectionComplete())) {
         const drop = system.openSignalDrop();
         if (!drop || drop.isCollectionComplete) break;
-        rewards.push(drop.skin.id);
+        rewards.push(`${drop.kind}:${drop.item.id}`);
       }
       return rewards;
     };
@@ -268,13 +273,22 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     for (const track of SignalPackCatalog.getTracks()) {
       skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
     }
+    // Only KNIFE awards can be video Artifacts. A glove drop is skipped.
     let opened = skinSystem.openSignalDrop()!;
-    while (opened && opened.skin.rarity !== 'ARTIFACT' && !opened.isCollectionComplete) {
+    let guard = 0;
+    while (
+      opened &&
+      !opened.isCollectionComplete &&
+      guard++ < 400 &&
+      !(opened.kind === 'KNIFE' && opened.skin?.rarity === 'ARTIFACT')
+    ) {
       const next = skinSystem.openSignalDrop();
       if (!next) break;
       opened = next;
     }
-    const artifact = opened.skin;
+    expect(opened.kind).toBe('KNIFE');
+    const artifact = opened.skin!;
+    expect(artifact.rarity).toBe('ARTIFACT');
 
     const fakeVideo = {
       src: '', muted: false, defaultMuted: false, loop: false, playsInline: false,

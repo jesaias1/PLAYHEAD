@@ -5,6 +5,7 @@
 
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 
 export class ArmoryModal {
   public element: HTMLElement;
@@ -270,9 +271,9 @@ export class ArmoryModal {
         return;
       }
       this.dropReveal.classList.remove('hidden');
-      this.dropReveal.style.borderLeftColor = this.getRarityColor(reward.skin.rarity);
-      this.dropReveal.style.color = this.getRarityColor(reward.skin.rarity);
-      this.dropReveal.textContent = `${reward.qualityLabel} // ${reward.skin.rarity} FOUND // ${reward.skin.name}`;
+      this.dropReveal.style.borderLeftColor = this.getRarityColor(reward.rarity);
+      this.dropReveal.style.color = this.getRarityColor(reward.rarity);
+      this.dropReveal.textContent = `${reward.qualityLabel} // ${reward.rarity} FOUND // ${cosmeticKindLabel(reward.kind)} // ${reward.name}`;
       this.renderSkins();
     });
   }

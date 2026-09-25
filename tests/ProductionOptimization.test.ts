@@ -223,7 +223,9 @@ describe('Cosmetic assets — inventory integrity', () => {
     const referenced = new Set<string>();
     const skinSrc = read('src/viewmodel/KarambitSkinSystem.ts');
     const loaderSrc = read('src/viewmodel/ViewmodelAssetLoader.ts');
-    for (const src of [skinSrc, loaderSrc]) {
+    const dropGloveSrc = read('src/viewmodel/DropGloveCatalog.ts');
+    const gloveTexturesSrc = read('src/viewmodel/GloveTextures.ts');
+    for (const src of [skinSrc, loaderSrc, dropGloveSrc, gloveTexturesSrc]) {
       for (const m of src.matchAll(/['"](\/assets\/[^'"]+)['"]/g)) referenced.add(m[1]);
     }
     expect(referenced.size).toBeGreaterThan(0);
@@ -238,12 +240,22 @@ describe('Cosmetic assets — inventory integrity', () => {
       return out;
     };
 
+    // Some assets are composed from a directory constant plus a filename
+    // (mastery/drop glove textures), so match on basename as well as full path.
+    const referencedNames = new Set<string>();
+    for (const src of [skinSrc, loaderSrc, dropGloveSrc, gloveTexturesSrc]) {
+      for (const m of src.matchAll(/['"`]([^'"`]+\.(?:webp|png|jpg|jpeg|mp4|glb))['"`]/g)) {
+        referencedNames.add(m[1].split('/').pop()!);
+      }
+    }
+
     const orphans: string[] = [];
     for (const file of walk(VIEWMODEL_DIR)) {
       const url = '/' + path.relative(path.join(repoRoot, 'public'), file).split(path.sep).join('/');
+      const base = path.basename(file);
       // The low-tier encodes are referenced by convention, not by literal path.
       const isLowVariant = url.endsWith('.low.mp4');
-      if (!referenced.has(url) && !isLowVariant) orphans.push(url);
+      if (!referenced.has(url) && !referencedNames.has(base) && !isLowVariant) orphans.push(url);
     }
     expect(orphans).toEqual([]);
   });

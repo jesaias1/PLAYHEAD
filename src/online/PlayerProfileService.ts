@@ -22,7 +22,8 @@ import { OnlineClient, online } from './supabaseClient';
 import { AuthService, authService } from './AuthService';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
-import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { masteryGloveSystem, MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { getDropGlove, isDropGloveId } from '../viewmodel/DropGloveCatalog';
 import {
   MasterySummary,
   computeMasterySummary,
@@ -57,9 +58,17 @@ export interface PlayerProfileView {
   isLocal: boolean;
   displayName: string;
   equippedKnifeId: string;
-  /** Achievement text behind the equipped glove. Never just a skin name. */
   equippedGloveId: string;
   gloveName: string;
+  /**
+   * Where the glove came from. A Signal Drop glove must NEVER be described as an
+   * achievement.
+   */
+  gloveSource: 'MASTERY' | 'DROP' | 'NONE';
+  /**
+   * MASTERY: the achievement requirement.
+   * DROP:    its source and rarity, never an achievement claim.
+   */
   gloveRequirement: string;
   /** Canonical mastery counts, from the SAME ladder the rest of the game uses. */
   mastery: MasterySummary;
@@ -86,6 +95,25 @@ function titleFor(trackId: string): string {
 
 function isRunRank(value: unknown): value is RunRank {
   return value === 'BRONZE' || value === 'SILVER' || value === 'GOLD' || value === 'DIAMOND';
+}
+
+/**
+ * Honest glove description.
+ *
+ * A MASTERY glove is described by the achievement it required. A SIGNAL DROP
+ * glove is described by its SOURCE and rarity - never as an achievement, because
+ * it was rolled, not earned.
+ */
+export function describeGloveSource(gloveId: string, masteryRequirement: string): string {
+  if (isDropGloveId(gloveId)) {
+    const drop = getDropGlove(gloveId);
+    return drop ? `SIGNAL DROP // ${drop.rarity}` : 'SIGNAL DROP';
+  }
+  return masteryRequirement;
+}
+
+function normalizeGloveSource(value: 'MASTERY' | 'DROP' | 'UNKNOWN'): 'MASTERY' | 'DROP' | 'NONE' {
+  return value === 'UNKNOWN' ? 'NONE' : value;
 }
 
 export class PlayerProfileService {
@@ -172,7 +200,8 @@ export class PlayerProfileService {
       equippedKnifeId: skins.getEquippedSkinId(),
       equippedGloveId: gloveId,
       gloveName: glove.name,
-      gloveRequirement: glove.requirementLabel,
+      gloveSource: normalizeGloveSource(MasteryGloveSystem.gloveSource(gloveId)),
+      gloveRequirement: describeGloveSource(gloveId, glove.requirementLabel),
       mastery: mastery.summary,
       tracks,
       worldPosition: null,
@@ -258,7 +287,8 @@ export class PlayerProfileService {
       equippedKnifeId: identity.equippedKnifeId,
       equippedGloveId: identity.equippedGloveId,
       gloveName: glove.name,
-      gloveRequirement: glove.requirementLabel,
+      gloveSource: normalizeGloveSource(MasteryGloveSystem.gloveSource(identity.equippedGloveId)),
+      gloveRequirement: describeGloveSource(identity.equippedGloveId, glove.requirementLabel),
       mastery,
       tracks,
       worldPosition: null,
@@ -282,6 +312,7 @@ export class PlayerProfileService {
       equippedKnifeId: '',
       equippedGloveId: '',
       gloveName: '',
+      gloveSource: 'NONE',
       gloveRequirement: '',
       mastery: { total: canonicalTrackIds().length, cleared: 0, bronzePlus: 0, silverPlus: 0, goldPlus: 0, diamond: 0 },
       tracks: [],

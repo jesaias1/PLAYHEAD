@@ -45,18 +45,30 @@ describe('Signal Decoder & Dev Signal System', () => {
     // Grant enough signals to decode all skins
     skinSystem.grantDevPendingSignals(100, 'DIAMOND');
 
-    const awardedSkinIds = new Set<string>();
+    const awardedIds = new Set<string>();
 
-    for (let i = 0; i < dropEligibleSkins.length; i++) {
+    // Decode until the KNIFE pool is exhausted (gloves may be awarded too, so
+    // the loop is bounded rather than counted).
+    let guard = 0;
+    while (
+      !(skinSystem.isCollectionComplete() && skinSystem.isGloveCollectionComplete()) &&
+      guard++ < 500
+    ) {
       const drop = skinSystem.openSignalDrop();
       expect(drop).toBeDefined();
-      expect(drop!.skin).toBeDefined();
-      expect(awardedSkinIds.has(drop!.skin.id)).toBe(false); // Must never be duplicate!
-      awardedSkinIds.add(drop!.skin.id);
+      if (!drop || drop.isCollectionComplete) break;
+      // A decode can now yield a KNIFE or a GLOVE. Duplicate protection applies
+      // WITHIN the resolved category: no repeat while unowned items remain.
+      const id = drop.item.id;
+      expect(awardedIds.has(id), `duplicate award ${id}`).toBe(false);
+      awardedIds.add(id);
+      if (drop.kind === 'KNIFE') expect(drop.skin).toBeDefined();
+      if (drop.kind === 'GLOVE') expect(drop.skin).toBeUndefined();
     }
 
-    // Now all drop eligible skins should be owned
-    expect(awardedSkinIds.size).toBe(dropEligibleSkins.length);
+    // Every drop eligible KNIFE should now be owned.
+    const ownedKnives = dropEligibleSkins.filter(s => skinSystem.isSkinRewardOwned(s.id));
+    expect(ownedKnives.length).toBe(dropEligibleSkins.length);
     expect(skinSystem.isCollectionComplete()).toBe(true);
 
     // Any subsequent openSignalDrop must report isCollectionComplete and not award duplicate

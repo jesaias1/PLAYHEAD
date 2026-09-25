@@ -4,6 +4,7 @@ import {
   KARAMBIT_SKINS,
   SIGNAL_DROP_RARITY_WEIGHTS
 } from '../src/viewmodel/KarambitSkinSystem';
+import { DROP_GLOVES } from '../src/viewmodel/DropGloveCatalog';
 
 function createLocalStorageMock(): Storage {
   const values = new Map<string, string>();
@@ -75,6 +76,9 @@ describe('Karambit Overclocked Apex Tier & Signal Drops', () => {
       completedTracks: {},
       pendingDropRanks: ['BRONZE'],
       rewardOwnedSkinIds: otherEligibleIds,
+      // Exhaust the GLOVE pool too, so the category roll falls through to KNIFE
+      // (duplicate protection must never let a full glove pool block knives).
+      rewardOwnedGloveIds: DROP_GLOVES.map(g => g.id),
       rewardRngState: 123456,
       rewardBag: []
     };

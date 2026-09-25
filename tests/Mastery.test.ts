@@ -395,31 +395,43 @@ describe('Mastery glove system', () => {
 // ---------------------------------------------------------------------------
 
 describe('Mastery gloves — integrity', () => {
-  it('no glove id can ever enter the Signal Drop pool', () => {
+  it('no MASTERY glove id can ever enter the Signal Drop pool', () => {
+    // Signal Drop gloves now exist, so the invariant is narrower and sharper:
+    // the RANDOM pool may contain DROP_GLOVE_* ids only, never a mastery id.
     const skinSystem = read('src/viewmodel/KarambitSkinSystem.ts');
-    // The drop economy only knows about drop-eligible KARAMBIT skins.
     expect(skinSystem).toMatch(/KARAMBIT_SKINS\.filter\(skin => skin\.dropEligible\)/);
 
-    // The drop-opening path itself must not know mastery exists.
+    // The glove bag is built exclusively from the drop glove catalog.
+    const refill = skinSystem.slice(
+      skinSystem.indexOf('private refillGloveBag('),
+      skinSystem.indexOf('private shuffleBag(')
+    );
+    expect(refill.length).toBeGreaterThan(50);
+    expect(refill).toMatch(/dropEligibleGloves\(\)/);
+    for (const glove of MASTERY_GLOVES) {
+      expect(refill, glove.id).not.toContain(glove.id);
+    }
+
+    // And no mastery id appears anywhere in the award path.
     const dropFn = skinSystem.slice(
       skinSystem.indexOf('public openSignalDrop('),
       skinSystem.indexOf('public getSkinProgress(')
     );
-    expect(dropFn.length).toBeGreaterThan(50);
-    expect(dropFn).not.toMatch(/mastery|MASTERY|GLOVE/i);
     for (const glove of MASTERY_GLOVES) {
       expect(dropFn, glove.id).not.toContain(glove.id);
     }
   });
 
-  it('the decoder cannot reference mastery', () => {
-    // The decoder is the random-reward surface. It must know nothing about
-    // mastery gloves, so a glove can never be rolled.
+  it('the decoder can never ROLL a mastery glove', () => {
+    // The decoder may equip whatever it awarded, but it must never know the
+    // mastery ladder: mastery gloves cannot be rolled.
     const decode = read('src/ui/SignalDecodeModal.ts');
-    expect(decode).not.toMatch(/masteryGloveSystem|MASTERY_GLOVES|GLOVE_TREATMENTS/);
+    expect(decode).not.toMatch(/MASTERY_GLOVES|GLOVE_TREATMENTS|recordTrackCompletion|isSatisfied/);
     for (const glove of MASTERY_GLOVES) {
       expect(decode, glove.id).not.toContain(glove.id);
     }
+    // Equipping goes through the unified namespace-safe entry point.
+    expect(decode).toMatch(/equipAnyGlove/);
   });
 
   it('the drop-opener cannot reference mastery', () => {

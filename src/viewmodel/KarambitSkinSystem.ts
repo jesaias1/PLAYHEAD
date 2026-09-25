@@ -14,6 +14,14 @@ import * as THREE from 'three';
 import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { RunRank } from '../player/PlayerStats';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
+import { dropEligibleGloves, getDropGlove, isDropGloveId } from './DropGloveCatalog';
+import type { DropGlove } from './DropGloveCatalog';
+import {
+  CosmeticDropItem,
+  CosmeticKind,
+  rollDropCategory,
+  resolveDropCategory
+} from './CosmeticDrop';
 
 export type CosmeticRarity = 'STANDARD' | 'RARE' | 'RELIC' | 'ARTIFACT' | 'OVERCLOCKED';
 
@@ -26,6 +34,17 @@ interface SignalDropProgressionV2 {
   rewardBagCursors: Record<RunRank, number>;
   rngState: number;
   lastRewardSkinId?: string;
+  /**
+   * SIGNAL DROP GLOVE ownership and bags.
+   *
+   * ADDITIVE and deliberately SEPARATE from the knife ledgers. Mastery glove
+   * ownership stays DERIVED and is never written here, so a random cosmetic
+   * ledger can never imply an earned achievement.
+   */
+  rewardOwnedGloveIds?: string[];
+  gloveRewardBags?: Record<RunRank, string[]>;
+  gloveRewardBagCursors?: Record<RunRank, number>;
+  lastRewardGloveId?: string;
 }
 
 export interface TrackCompletionReward {
@@ -37,7 +56,20 @@ export interface TrackCompletionReward {
 }
 
 export interface OpenedSignalDrop {
-  skin: KarambitSkin;
+  /** Which cosmetic family was awarded. The reveal must never make the player infer it. */
+  kind: CosmeticKind;
+  /** Unified item view: identical shape for knives and gloves. */
+  item: CosmeticDropItem;
+  /** Display name of the awarded cosmetic. */
+  name: string;
+  codename: string;
+  rarity: CosmeticRarity;
+  /** Secondary tag (knife palette tag, or the glove codename). */
+  accentTag: string;
+  /** True for a live video artifact. Knives only; gloves are never video. */
+  isLive: boolean;
+  /** Present only for a knife award, so legacy consumers keep working. */
+  skin?: KarambitSkin;
   sourceRank: RunRank;
   qualityLabel: 'STANDARD SIGNAL' | 'REFINED SIGNAL' | 'HIGH-FIDELITY SIGNAL' | 'PRISTINE SIGNAL';
   isCollectionComplete?: boolean;
@@ -1105,6 +1137,8 @@ export class KarambitSkinSystem {
         officialIds.flatMap(levelId => RANK_THRESHOLDS.map(rank => `${levelId}:${rank}`))
       );
       const rewardIds = new Set(KARAMBIT_SKINS.filter(skin => skin.dropEligible).map(skin => skin.id));
+      // Signal Drop GLOVES live in their own validated id space.
+      const gloveIds = new Set<string>(dropEligibleGloves().map(glove => glove.id));
       const uniqueStrings = (value: unknown, allowed: Set<string>): string[] => {
         if (!Array.isArray(value)) return [];
         return [...new Set(value.filter((item): item is string => typeof item === 'string' && allowed.has(item)))];
@@ -1122,6 +1156,21 @@ export class KarambitSkinSystem {
           : 0;
       }
 
+      // Additive glove ledgers. Validated against the glove catalog so a corrupt
+      // or forged entry can never invent ownership.
+      const gloveRewardBags = this.createEmptyRewardBags();
+      const gloveRewardBagCursors = this.createEmptyRewardBagCursors();
+      for (const rank of RANK_THRESHOLDS) {
+        const rawBag = parsed.gloveRewardBags?.[rank];
+        gloveRewardBags[rank] = Array.isArray(rawBag)
+          ? rawBag.filter((item): item is string => typeof item === 'string' && gloveIds.has(item))
+          : [];
+        const rawCursor = parsed.gloveRewardBagCursors?.[rank];
+        gloveRewardBagCursors[rank] = Number.isFinite(rawCursor)
+          ? Math.max(0, Math.min(gloveRewardBags[rank].length, Math.floor(rawCursor as number)))
+          : 0;
+      }
+
       this.progression = {
         version: SIGNAL_DROP_PROGRESSION_VERSION,
         awardedRankKeys: uniqueStrings(parsed.awardedRankKeys, validRankKeys),
@@ -1136,7 +1185,15 @@ export class KarambitSkinSystem {
           : DEFAULT_REWARD_RNG_STATE,
         lastRewardSkinId: typeof parsed.lastRewardSkinId === 'string' && rewardIds.has(parsed.lastRewardSkinId)
           ? parsed.lastRewardSkinId
-          : undefined
+          : undefined,
+        // Additive Signal Drop GLOVE state.
+        rewardOwnedGloveIds: uniqueStrings(parsed.rewardOwnedGloveIds, gloveIds),
+        gloveRewardBags,
+        gloveRewardBagCursors,
+        lastRewardGloveId:
+          typeof parsed.lastRewardGloveId === 'string' && gloveIds.has(parsed.lastRewardGloveId)
+            ? parsed.lastRewardGloveId
+            : undefined
       };
     } catch {
       this.progression = this.createDefaultProgression();
@@ -1380,8 +1437,19 @@ export class KarambitSkinSystem {
 
     if (cloud.rewardOwnedSkinIds) {
       const existing = new Set(this.progression.rewardOwnedSkinIds);
+      const ownedGloves = new Set(this.progression.rewardOwnedGloveIds ?? []);
       for (const id of cloud.rewardOwnedSkinIds) {
         if (typeof id !== 'string' || id.length === 0) continue;
+        // The server ledger is a generic cosmetic-id ledger. Split by namespace so
+        // a random cosmetic can never be mistaken for a knife (or the reverse),
+        // and so Mastery ownership stays DERIVED and is never written here.
+        if (isDropGloveId(id)) {
+          if (ownedGloves.has(id)) continue;
+          ownedGloves.add(id);
+          this.progression.rewardOwnedGloveIds = [...ownedGloves];
+          changed = true;
+          continue;
+        }
         if (existing.has(id)) continue;
         existing.add(id);
         this.progression.rewardOwnedSkinIds.push(id);
@@ -1485,12 +1553,169 @@ export class KarambitSkinSystem {
       const entries = qualityWeights[skin.rarity] * skin.dropWeight;
       for (let i = 0; i < entries; i++) bag.push(skin.id);
     }
+    this.shuffleBag(bag);
+    this.progression.rewardBags[rank] = bag;
+    this.progression.rewardBagCursors[rank] = 0;
+  }
+
+  /**
+   * Glove bags use the SAME rank-weighted rarity principles as knives, drawn from
+   * the Signal Drop glove catalog. Separate bag, separate cursor, same rules.
+   */
+  private refillGloveBag(rank: RunRank): void {
+    const bag: string[] = [];
+    const qualityWeights = SIGNAL_DROP_RARITY_WEIGHTS[rank];
+    for (const glove of dropEligibleGloves()) {
+      const entries = qualityWeights[glove.rarity] * glove.dropWeight;
+      for (let i = 0; i < entries; i++) bag.push(glove.id);
+    }
+    this.shuffleBag(bag);
+    this.ensureGloveBags()[rank] = bag;
+    this.ensureGloveBagCursors()[rank] = 0;
+  }
+
+  private shuffleBag(bag: string[]): void {
     for (let i = bag.length - 1; i > 0; i--) {
       const j = Math.floor(this.nextRandom() * (i + 1));
       [bag[i], bag[j]] = [bag[j], bag[i]];
     }
-    this.progression.rewardBags[rank] = bag;
-    this.progression.rewardBagCursors[rank] = 0;
+  }
+
+  /** Lazily creates the additive glove bag ledger. */
+  private ensureGloveBags(): Record<RunRank, string[]> {
+    if (!this.progression.gloveRewardBags) {
+      this.progression.gloveRewardBags = this.createEmptyRewardBags();
+    }
+    return this.progression.gloveRewardBags;
+  }
+
+  private ensureGloveBagCursors(): Record<RunRank, number> {
+    if (!this.progression.gloveRewardBagCursors) {
+      this.progression.gloveRewardBagCursors = this.createEmptyRewardBagCursors();
+    }
+    return this.progression.gloveRewardBagCursors;
+  }
+
+  /** Drop glove ids the player owns. Never includes a mastery glove. */
+  public getOwnedDropGloveIds(): string[] {
+    return [...(this.progression.rewardOwnedGloveIds ?? [])];
+  }
+
+  public isDropGloveOwned(id: string): boolean {
+    return (this.progression.rewardOwnedGloveIds ?? []).includes(id);
+  }
+
+  /** Unified ownership check across both cosmetic families. */
+  public isCosmeticOwned(id: string): boolean {
+    if (getDropGlove(id)) return this.isDropGloveOwned(id);
+    return this.isSkinRewardOwned(id);
+  }
+
+  /** Counts of UNOWNED eligible items per category, for duplicate protection. */
+  private unownedAvailability(): Record<CosmeticKind, number> {
+    const knives = KARAMBIT_SKINS.filter(
+      (s) => s.dropEligible && !this.isSkinUnlockedWithoutDev(s.id)
+    ).length;
+    const gloves = dropEligibleGloves().filter(
+      (g) => !this.isDropGloveOwned(g.id)
+    ).length;
+    return { KNIFE: knives, GLOVE: gloves };
+  }
+
+  public isGloveCollectionComplete(): boolean {
+    const eligible = dropEligibleGloves();
+    return eligible.length > 0 && eligible.every((g) => this.isDropGloveOwned(g.id));
+  }
+
+  private getNextRewardGlove(rank: RunRank): DropGlove | null {
+    const eligible = dropEligibleGloves();
+    if (eligible.length === 0) return null;
+
+    const unowned = eligible.filter((g) => !this.isDropGloveOwned(g.id));
+    if (unowned.length === 0) return null;
+    const candidateIds = new Set<string>(unowned.map((g) => g.id));
+
+    const bags = this.ensureGloveBags();
+    const cursors = this.ensureGloveBagCursors();
+
+    for (let refill = 0; refill < 2; refill++) {
+      let bag = bags[rank];
+      let cursor = cursors[rank];
+      if (!bag || cursor >= bag.length) {
+        this.refillGloveBag(rank);
+        bag = bags[rank];
+        cursor = cursors[rank];
+      }
+
+      let fallbackIndex = -1;
+      for (let i = cursor; i < bag.length; i++) {
+        const id = bag[i];
+        if (!candidateIds.has(id)) continue;
+        if (fallbackIndex < 0) fallbackIndex = i;
+        if (unowned.length > 1 && id === this.progression.lastRewardGloveId) continue;
+        cursors[rank] = i + 1;
+        return getDropGlove(id);
+      }
+      if (fallbackIndex >= 0) {
+        cursors[rank] = fallbackIndex + 1;
+        return getDropGlove(bag[fallbackIndex]);
+      }
+      this.refillGloveBag(rank);
+    }
+    return unowned[0] ?? null;
+  }
+
+  private knifeDropItem(skin: KarambitSkin): CosmeticDropItem {
+    return {
+      id: skin.id,
+      kind: 'KNIFE',
+      name: skin.name,
+      rarity: skin.rarity,
+      dropEligible: skin.dropEligible
+    };
+  }
+
+  private gloveDropItem(glove: DropGlove): CosmeticDropItem {
+    return {
+      id: glove.id,
+      kind: 'GLOVE',
+      name: glove.name,
+      rarity: glove.rarity,
+      dropEligible: glove.dropEligible
+    };
+  }
+
+  /** Builds the unified reveal payload for a knife award. */
+  private buildKnifeDrop(skin: KarambitSkin, sourceRank: RunRank): OpenedSignalDrop {
+    return {
+      kind: 'KNIFE',
+      item: this.knifeDropItem(skin),
+      name: skin.name,
+      codename: skin.codename,
+      rarity: skin.rarity,
+      accentTag: skin.paletteTag,
+      isLive: !!skin.profile.isVideoArtifact,
+      skin,
+      sourceRank,
+      qualityLabel: this.getQualityLabel(sourceRank),
+      isCollectionComplete: false
+    };
+  }
+
+  /** Builds the unified reveal payload for a glove award. */
+  private buildGloveDrop(glove: DropGlove, sourceRank: RunRank): OpenedSignalDrop {
+    return {
+      kind: 'GLOVE',
+      item: this.gloveDropItem(glove),
+      name: glove.name,
+      codename: glove.codename,
+      rarity: glove.rarity,
+      accentTag: glove.codename,
+      isLive: false, // gloves are never video assets
+      sourceRank,
+      qualityLabel: this.getQualityLabel(sourceRank),
+      isCollectionComplete: false
+    };
   }
 
   private getNextRewardSkin(rank: RunRank): KarambitSkin | null {
@@ -1549,25 +1774,44 @@ export class KarambitSkinSystem {
     const sourceRank = this.progression.pendingDropRanks[0];
     if (!sourceRank) return null;
 
-    if (this.isCollectionComplete()) {
-      return {
-        skin: this.getEquippedSkin(),
-        sourceRank,
-        qualityLabel: this.getQualityLabel(sourceRank),
-        isCollectionComplete: true
-      };
+    const exhausted = (): OpenedSignalDrop => ({
+      kind: 'KNIFE',
+      item: this.knifeDropItem(this.getEquippedSkin()),
+      name: this.getEquippedSkin().name,
+      codename: this.getEquippedSkin().codename,
+      rarity: this.getEquippedSkin().rarity,
+      accentTag: this.getEquippedSkin().paletteTag,
+      isLive: !!this.getEquippedSkin().profile.isVideoArtifact,
+      skin: this.getEquippedSkin(),
+      sourceRank,
+      qualityLabel: this.getQualityLabel(sourceRank),
+      isCollectionComplete: true
+    });
+
+    // 1. Category roll (single named weighting), then duplicate protection.
+    const availability = this.unownedAvailability();
+    const rolled = rollDropCategory(this.nextRandom());
+    const category = resolveDropCategory(rolled, availability);
+
+    // 2. Both pools exhausted: preserve the existing "collection complete" path.
+    if (!category) return exhausted();
+
+    // 3. Rarity within the resolved category, using the existing rank-weighted bag.
+    if (category === 'GLOVE') {
+      const glove = this.getNextRewardGlove(sourceRank);
+      if (!glove) return exhausted();
+      this.progression.pendingDropRanks.shift();
+      const owned = this.progression.rewardOwnedGloveIds ?? [];
+      if (!owned.includes(glove.id)) owned.push(glove.id);
+      this.progression.rewardOwnedGloveIds = owned;
+      this.progression.lastRewardGloveId = glove.id;
+      this.saveState();
+      this.notifyListeners();
+      return this.buildGloveDrop(glove, sourceRank);
     }
 
     const skin = this.getNextRewardSkin(sourceRank);
-    if (!skin) {
-      return {
-        skin: this.getEquippedSkin(),
-        sourceRank,
-        qualityLabel: this.getQualityLabel(sourceRank),
-        isCollectionComplete: true
-      };
-    }
-
+    if (!skin) return exhausted();
     this.progression.pendingDropRanks.shift();
     if (!this.progression.rewardOwnedSkinIds.includes(skin.id)) {
       this.progression.rewardOwnedSkinIds.push(skin.id);
@@ -1575,7 +1819,7 @@ export class KarambitSkinSystem {
     this.progression.lastRewardSkinId = skin.id;
     this.saveState();
     this.notifyListeners();
-    return { skin, sourceRank, qualityLabel: this.getQualityLabel(sourceRank), isCollectionComplete: false };
+    return this.buildKnifeDrop(skin, sourceRank);
   }
 
   public getSkinProgress(id: string, includeDevPreview = true): { current: number; total: number; label: string; isUnlocked: boolean } {

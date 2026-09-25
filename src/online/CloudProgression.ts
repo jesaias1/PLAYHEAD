@@ -158,9 +158,8 @@ export class CloudProgression {
       equippedGloveId: MasteryGloveSystem.getInstance().getEquippedGloveId(),
       awardedRankKeys: [...skins.getAwardedRankKeys()],
       pendingDropRanks: [...skins.getPendingDropRanks()],
-      rewardOwnedSkinIds: [...skins.getRewardOwnedSkinIds()],
-      trackRecords: { ...skins.getTrackRecords() },
-      officialRecords: records.map((r) => ({
+      rewardOwnedSkinIds: [...skins.getRewardOwnedSkinIds(), ...skins.getOwnedDropGloveIds()],
+      trackRecords: { ...skins.getTrackRecords() },      officialRecords: records.map((r) => ({
         trackId: r.trackId,
         bestRank: r.rank === 'UNRANKED' ? 'BRONZE' : r.rank,
         pbTime: r.completionTime,

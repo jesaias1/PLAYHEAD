@@ -351,8 +351,8 @@ describe('Shared glove mask', () => {
     const declarations = (shader.fragmentShader.match(/uniform sampler2D uGloveMask;/g) ?? []).length;
     expect(declarations).toBe(1);
     // Both maps are scoped by the SAME mask.
-    expect(shader.fragmentShader).toMatch(/roughnessFactor = mix\(roughnessFactor, uGloveRough, gloveMaskR\)/);
-    expect(shader.fragmentShader).toMatch(/metalnessFactor = mix\(metalnessFactor, uGloveMetal, gloveMaskM\)/);
+    expect(shader.fragmentShader).toMatch(/roughnessFactor = mix\(roughnessFactor, uGloveRough, gloveMaskFactor\)/);
+    expect(shader.fragmentShader).toMatch(/metalnessFactor = mix\(metalnessFactor, uGloveMetal, gloveMaskFactor\)/);
   });
 
   it('the mask is scoped so exposed skin keeps its authored roughness and metalness', () => {

@@ -161,10 +161,168 @@ export function applyGloveTreatment(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// SIGNAL DROP GLOVE TREATMENTS
+// ---------------------------------------------------------------------------
+
+/**
+ * Treatments for the random Signal Drop gloves.
+ *
+ * The authored texture carries most of the visual identity, so these stay
+ * SUPPORTIVE rather than heavy: no global tint (the texture carries colour), no
+ * aggressive emissive, and metalness that only ever reads on glove pixels
+ * because the shared mask scopes it.
+ */
+export const DROP_GLOVE_TREATMENTS: Record<string, GloveTreatment> = {
+  // Clean, premium, barely there.
+  DROP_GLOVE_CREME: {
+    tint: 0xffffff,
+    roughness: 0.66,
+    metalness: 0.1,
+    emissive: 0x121418,
+    emissiveIntensity: 0.07,
+    audioReactive: 0.18,
+    accent: 0.1,
+    seam: 0
+  },
+  // Soft iridescent shell: low metalness, smooth, clean.
+  DROP_GLOVE_PEARL: {
+    tint: 0xffffff,
+    roughness: 0.4,
+    metalness: 0.24,
+    emissive: 0x1a2430,
+    emissiveIntensity: 0.1,
+    audioReactive: 0.28,
+    accent: 0.25,
+    seam: 0.15
+  },
+  DROP_GLOVE_PEARL_ICE: {
+    tint: 0xffffff,
+    roughness: 0.32,
+    metalness: 0.3,
+    emissive: 0x1b2c3a,
+    emissiveIntensity: 0.11,
+    audioReactive: 0.3,
+    accent: 0.3,
+    seam: 0.2
+  },
+  // Cool plate: moderate-high metalness with a cool response.
+  DROP_GLOVE_SILVERSKIN: {
+    tint: 0xffffff,
+    roughness: 0.3,
+    metalness: 0.55,
+    emissive: 0x18222e,
+    emissiveIntensity: 0.11,
+    audioReactive: 0.35,
+    accent: 0.35,
+    seam: 0.2
+  },
+  // Dark material with a restrained neon response.
+  DROP_GLOVE_CYBER: {
+    tint: 0xffffff,
+    roughness: 0.44,
+    metalness: 0.34,
+    emissive: 0x0d2a3a,
+    emissiveIntensity: 0.14,
+    audioReactive: 0.5,
+    accent: 0.45,
+    seam: 0.3
+  },
+  DROP_GLOVE_CYBER_2: {
+    tint: 0xffffff,
+    roughness: 0.38,
+    metalness: 0.42,
+    emissive: 0x2a1038,
+    emissiveIntensity: 0.15,
+    audioReactive: 0.55,
+    accent: 0.55,
+    seam: 0.4
+  },
+  DROP_GLOVE_CYBER_FULL: {
+    tint: 0xffffff,
+    roughness: 0.34,
+    metalness: 0.48,
+    emissive: 0x241040,
+    emissiveIntensity: 0.16,
+    audioReactive: 0.6,
+    accent: 0.6,
+    seam: 0.45
+  },
+  // Glassy and precise, without pretending the mesh is transparent.
+  DROP_GLOVE_CRYSTAL: {
+    tint: 0xffffff,
+    roughness: 0.16,
+    metalness: 0.5,
+    emissive: 0x14314d,
+    emissiveIntensity: 0.15,
+    audioReactive: 0.42,
+    accent: 0.55,
+    seam: 0.4
+  },
+  // Controlled spectral accents.
+  DROP_GLOVE_SYNTH: {
+    tint: 0xffffff,
+    roughness: 0.3,
+    metalness: 0.4,
+    emissive: 0x241a44,
+    emissiveIntensity: 0.15,
+    audioReactive: 0.58,
+    accent: 0.5,
+    seam: 0.45
+  },
+  DROP_GLOVE_SYNTH_FULL: {
+    tint: 0xffffff,
+    roughness: 0.24,
+    metalness: 0.46,
+    emissive: 0x2a1c50,
+    emissiveIntensity: 0.17,
+    audioReactive: 0.65,
+    accent: 0.62,
+    seam: 0.55
+  },
+  // Dark base with metallic gold tracing.
+  DROP_GLOVE_AUREATE: {
+    tint: 0xffffff,
+    roughness: 0.3,
+    metalness: 0.58,
+    emissive: 0x33260a,
+    emissiveIntensity: 0.14,
+    audioReactive: 0.4,
+    accent: 0.5,
+    seam: 0.3
+  },
+  DROP_GLOVE_AUREATE_FULL: {
+    tint: 0xffffff,
+    roughness: 0.22,
+    metalness: 0.66,
+    emissive: 0x3d2d0c,
+    emissiveIntensity: 0.16,
+    audioReactive: 0.5,
+    accent: 0.7,
+    seam: 0.5
+  }
+};
+
+/**
+ * Resolves a treatment for ANY glove id — mastery or Signal Drop — without the
+ * reward logic ever touching Three.js. Unknown ids fall back to the default.
+ */
+export function resolveGloveTreatment(gloveId: string): GloveTreatment {
+  return (
+    GLOVE_TREATMENTS[gloveId as MasteryGloveId] ??
+    DROP_GLOVE_TREATMENTS[gloveId] ??
+    GLOVE_TREATMENTS.STANDARD_ISSUE
+  );
+}
+
 /** Highest emissive intensity any glove can reach at full pulse. */
 export function maxGloveEmissiveIntensity(effectScale = 1.3): number {
   let max = 0;
-  for (const treatment of Object.values(GLOVE_TREATMENTS)) {
+  for (const treatment of [
+    ...Object.values(GLOVE_TREATMENTS),
+    ...Object.values(DROP_GLOVE_TREATMENTS)
+  ]) {
     const lift = 1 + treatment.audioReactive * GLOVE_AUDIO_PULSE_GAIN;
     max = Math.max(max, Math.min(0.45, treatment.emissiveIntensity * lift * effectScale));
   }

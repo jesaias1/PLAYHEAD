@@ -33,6 +33,7 @@
 
 import * as THREE from 'three';
 import type { MasteryGloveId } from '../mastery/MasteryLadder';
+import { getDropGlove } from './DropGloveCatalog';
 
 /** Runtime directory for mastery glove textures. */
 export const GLOVE_TEXTURE_DIR = '/assets/viewmodel/gloves';
@@ -68,6 +69,24 @@ export function hasOwnGloveTexture(gloveId: string): boolean {
 /** The path to try for a glove. Never null: falls back to the authored atlas. */
 export function resolveGloveTexturePath(gloveId: string): string {
   return GLOVE_TEXTURES[gloveId as MasteryGloveId] ?? BASE_GLOVE_TEXTURE_PATH;
+}
+
+/**
+ * Resolves the base-color texture for ANY glove id — mastery or Signal Drop.
+ *
+ * Signal Drop gloves carry their path on the catalog entry, so the reward logic
+ * never has to know about texture plumbing.
+ */
+export function resolveAnyGloveTexturePath(gloveId: string): string {
+  const drop = getDropGlove(gloveId);
+  if (drop) return drop.texturePath;
+  return resolveGloveTexturePath(gloveId);
+}
+
+/** True when a glove (of either family) ships its own texture. */
+export function hasAnyOwnGloveTexture(gloveId: string): boolean {
+  if (getDropGlove(gloveId)) return true;
+  return hasOwnGloveTexture(gloveId);
 }
 
 /** Rejects anything that is not a still image, so a video can never slip in. */
@@ -221,8 +240,8 @@ export class GloveTextureSwitcher {
     onApply: (texture: THREE.Texture | null, hasOwnTexture: boolean) => void
   ): Promise<void> {
     const generation = ++this.generation;
-    const hasOwn = hasOwnGloveTexture(gloveId);
-    const path = resolveGloveTexturePath(gloveId);
+    const hasOwn = hasAnyOwnGloveTexture(gloveId);
+    const path = resolveAnyGloveTexturePath(gloveId);
 
     const cached = this.cache.get(path);
     if (cached) {
@@ -257,10 +276,12 @@ export function disposeGloveTextureCaches(): void {
 // Shared mask shader patch
 // ---------------------------------------------------------------------------
 
-/** Uniforms injected into an arm material when the mask patch is installed. */
+/** Uniforms injected into an arm material when the glove patch is installed. */
 export interface GloveMaskUniforms {
   uGloveMask: { value: THREE.Texture | null };
   uGloveMaskOn: { value: number };
+  uGloveColorMap: { value: THREE.Texture | null };
+  uGloveColorOn: { value: number };
   uGloveMetal: { value: number };
   uGloveRough: { value: number };
 }
@@ -268,9 +289,18 @@ export interface GloveMaskUniforms {
 /**
  * Installs the shared-mask patch on an arm material.
  *
- * The patch only ever LERPS toward the treatment values where the mask says
- * "glove". With `uGloveMaskOn = 0` every mix is a no-op, so a build without a
- * mask behaves exactly as it did before this pipeline existed.
+ * The patch does two things, both scoped by the SAME shared mask:
+ *
+ *   1. BASE-COLOUR COMPOSITION. The material's `map` stays the canonical atlas,
+ *      so exposed skin keeps the player's own hand tone, and the cosmetic glove
+ *      texture is blended in ONLY where the mask says "glove". This is what stops
+ *      a drop glove from importing its own baked skin tone.
+ *   2. METALNESS / ROUGHNESS SCOPING. The treatment's material values only apply
+ *      to glove pixels, so exposed skin never becomes metallic.
+ *
+ * UV NOTE: three r174 uses per-map UV varyings. `vMapUv` is the correct one here
+ * because the arm materials always have a `map`. Using `vUv` would have been
+ * silently inert.
  *
  * No new material, no new geometry, no extra draw call.
  */
@@ -281,6 +311,8 @@ export function installGloveMaskPatch(material: THREE.MeshStandardMaterial): Glo
   const uniforms: GloveMaskUniforms = {
     uGloveMask: { value: null },
     uGloveMaskOn: { value: 0 },
+    uGloveColorMap: { value: null },
+    uGloveColorOn: { value: 0 },
     uGloveMetal: { value: material.metalness },
     uGloveRough: { value: material.roughness }
   };
@@ -288,6 +320,8 @@ export function installGloveMaskPatch(material: THREE.MeshStandardMaterial): Glo
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGloveMask = uniforms.uGloveMask;
     shader.uniforms.uGloveMaskOn = uniforms.uGloveMaskOn;
+    shader.uniforms.uGloveColorMap = uniforms.uGloveColorMap;
+    shader.uniforms.uGloveColorOn = uniforms.uGloveColorOn;
     shader.uniforms.uGloveMetal = uniforms.uGloveMetal;
     shader.uniforms.uGloveRough = uniforms.uGloveRough;
 
@@ -297,24 +331,33 @@ export function installGloveMaskPatch(material: THREE.MeshStandardMaterial): Glo
         `#include <common>
 uniform sampler2D uGloveMask;
 uniform float uGloveMaskOn;
+uniform sampler2D uGloveColorMap;
+uniform float uGloveColorOn;
 uniform float uGloveMetal;
-uniform float uGloveRough;`
+uniform float uGloveRough;
+// 1.0 = apply glove treatment, 0.0 = leave the authored pixel alone.
+float gloveMaskFactor = 0.0;`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+#ifdef USE_MAP
+  gloveMaskFactor = mix(1.0, texture2D(uGloveMask, vMapUv).r, uGloveMaskOn);
+  if (uGloveColorOn > 0.5) {
+    vec4 gloveCosmetic = texture2D(uGloveColorMap, vMapUv);
+    diffuseColor.rgb = mix(diffuseColor.rgb, gloveCosmetic.rgb, gloveMaskFactor);
+  }
+#endif`
       )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-#ifdef USE_UV
-  float gloveMaskR = mix(1.0, texture2D(uGloveMask, vUv).r, uGloveMaskOn);
-  roughnessFactor = mix(roughnessFactor, uGloveRough, gloveMaskR);
-#endif`
+roughnessFactor = mix(roughnessFactor, uGloveRough, gloveMaskFactor);`
       )
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
-#ifdef USE_UV
-  float gloveMaskM = mix(1.0, texture2D(uGloveMask, vUv).r, uGloveMaskOn);
-  metalnessFactor = mix(metalnessFactor, uGloveMetal, gloveMaskM);
-#endif`
+metalnessFactor = mix(metalnessFactor, uGloveMetal, gloveMaskFactor);`
       );
   };
   material.needsUpdate = true;
@@ -323,7 +366,24 @@ uniform float uGloveRough;`
   return uniforms;
 }
 
-/** Updates the shared mask on a material. `null` disables the patch entirely. */
+/**
+ * Enables/disables base-colour composition.
+ *
+ * `colorMap` is the cosmetic glove texture; `enabled` blends it in only where the
+ * shared mask says "glove". Disabled means the material's own `map` is the base
+ * colour, exactly as before this pipeline existed.
+ */
+export function setGloveColorComposite(
+  material: THREE.MeshStandardMaterial,
+  colorMap: THREE.Texture | null,
+  enabled: boolean
+): void {
+  const uniforms = installGloveMaskPatch(material);
+  uniforms.uGloveColorMap.value = colorMap;
+  uniforms.uGloveColorOn.value = enabled && colorMap ? 1 : 0;
+}
+
+/** Updates the shared mask on a material. `null` disables the scoping entirely. */
 export function setGloveMask(
   material: THREE.MeshStandardMaterial,
   mask: THREE.Texture | null,

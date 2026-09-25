@@ -20,6 +20,7 @@ import {
   getMasteryGlove
 } from '../mastery/MasteryLadder';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 
 export class ResultsScreen {
@@ -547,9 +548,9 @@ export class ResultsScreen {
 
     this.revealTimeouts.push(window.setTimeout(() => {
       this.signalDropPanel.classList.remove('decoding');
-      this.signalDropPanel.classList.add(`rarity-${reward.skin.rarity.toLowerCase()}`);
-      this.signalDropStatus.textContent = `${reward.qualityLabel} // ${reward.skin.rarity} FOUND`;
-      this.signalDropReward.textContent = reward.skin.name;
+      this.signalDropPanel.classList.add(`rarity-${reward.rarity.toLowerCase()}`);
+      this.signalDropStatus.textContent = `${reward.qualityLabel} // ${reward.rarity} FOUND`;
+      this.signalDropReward.textContent = `${cosmeticKindLabel(reward.kind)} // ${reward.name}`;
       const pending = skinSystem.getPendingDropCount();
       this.signalDropCount.textContent = `${pending.toString().padStart(2, '0')} SIGNAL${pending === 1 ? '' : 'S'} REMAINING`;
       if (pending > 0) {

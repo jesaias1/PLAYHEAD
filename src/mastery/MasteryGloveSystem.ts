@@ -20,6 +20,7 @@
 
 import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { getDropGlove, isDropGloveId } from '../viewmodel/DropGloveCatalog';
 import {
   DEFAULT_MASTERY_GLOVE_ID,
   MasteryEvaluation,
@@ -45,12 +46,14 @@ export interface MasteryReconcileResult {
 export class MasteryGloveSystem {
   private static instance: MasteryGloveSystem;
 
-  private equippedGloveId: MasteryGloveId = DEFAULT_MASTERY_GLOVE_ID;
+  /** Equipped glove id. Supports BOTH the mastery and Signal Drop namespaces. */
+  private equippedGloveId: MasteryGloveId | string = DEFAULT_MASTERY_GLOVE_ID;
   /** DEV-only visual preview. NEVER writes ownership or progress. */
-  private devPreviewGloveId: MasteryGloveId | null = null;
+  /** DEV-only visual preview. Supports BOTH namespaces. */
+  private devPreviewGloveId: string | null = null;
   private recognizedIds: MasteryGloveId[] = [];
   private lastReconcile: MasteryReconcileResult | null = null;
-  private listeners = new Set<(gloveId: MasteryGloveId) => void>();
+  private listeners = new Set<(gloveId: string) => void>();
 
   private constructor() {
     this.loadState();
@@ -69,8 +72,9 @@ export class MasteryGloveSystem {
     try {
       if (typeof localStorage === 'undefined') return;
       const equipped = localStorage.getItem(STORAGE_KEY_EQUIPPED);
-      if (equipped && MASTERY_GLOVES.some((g) => g.id === equipped)) {
-        this.equippedGloveId = equipped as MasteryGloveId;
+      // Accept either namespace; unknown ids fall back safely on read.
+      if (equipped && (MASTERY_GLOVES.some((g) => g.id === equipped) || isDropGloveId(equipped))) {
+        this.equippedGloveId = equipped;
       }
       const raw = localStorage.getItem(STORAGE_KEY_RECOGNIZED);
       if (raw) {
@@ -125,15 +129,48 @@ export class MasteryGloveSystem {
 
   // -- equipped ------------------------------------------------------------
 
-  public getEquippedGloveId(): MasteryGloveId {
-    // An invalid or no-longer-satisfied glove falls back safely. The viewmodel
-    // must never crash because of a stale saved id.
+  public getEquippedGloveId(): MasteryGloveId | string {
+    // SIGNAL DROP namespace: valid only while the glove is genuinely owned.
+    if (isDropGloveId(this.equippedGloveId)) {
+      const owned = KarambitSkinSystem.getInstance().isDropGloveOwned(this.equippedGloveId);
+      return owned && getDropGlove(this.equippedGloveId) ? this.equippedGloveId : DEFAULT_MASTERY_GLOVE_ID;
+    }
+    // MASTERY namespace: valid only while the requirement is still satisfied.
     if (!this.isSatisfied(this.equippedGloveId)) return DEFAULT_MASTERY_GLOVE_ID;
     return this.equippedGloveId;
   }
 
+  /**
+   * Equips a glove from EITHER namespace.
+   *
+   * Mastery gloves require their achievement; Signal Drop gloves require
+   * ownership. A mastery glove can never be equipped by owning it randomly, and
+   * a drop glove can never be equipped by satisfying an achievement.
+   */
+  public equipAnyGlove(id: string): boolean {
+    if (isDropGloveId(id)) {
+      if (!getDropGlove(id)) return false;
+      if (!KarambitSkinSystem.getInstance().isDropGloveOwned(id)) return false;
+      if (id === this.equippedGloveId) return true;
+      this.equippedGloveId = id;
+      this.saveState();
+      this.notify();
+      return true;
+    }
+    // A mastery id must be a REAL ladder id: an unknown string must never silently
+    // resolve to the default glove and report success.
+    if (!MASTERY_GLOVES.some((g) => g.id === id)) return false;
+    return this.equipGlove(id);
+  }
+
+  /** Where an equipped glove came from, for honest profile labelling. */
+  public static gloveSource(id: string): 'MASTERY' | 'DROP' | 'UNKNOWN' {
+    if (isDropGloveId(id)) return getDropGlove(id) ? 'DROP' : 'UNKNOWN';
+    return MASTERY_GLOVES.some((g) => g.id === id) ? 'MASTERY' : 'UNKNOWN';
+  }
+
   /** The glove the viewmodel should actually render (DEV preview wins). */
-  public getEffectiveGloveId(): MasteryGloveId {
+  public getEffectiveGloveId(): MasteryGloveId | string {
     if (this.devPreviewGloveId) return this.devPreviewGloveId;
     return this.getEquippedGloveId();
   }
@@ -151,6 +188,15 @@ export class MasteryGloveSystem {
   /** Cloud reconciliation: adopt a remote equipped glove when it is valid. */
   public applyCloudEquippedGlove(id: string | undefined): void {
     if (!id) return;
+    if (isDropGloveId(id)) {
+      if (!getDropGlove(id)) return;
+      if (!KarambitSkinSystem.getInstance().isDropGloveOwned(id)) return;
+      if (id === this.equippedGloveId) return;
+      this.equippedGloveId = id;
+      this.saveState();
+      this.notify();
+      return;
+    }
     const definition = getMasteryGlove(id);
     if (definition.id === DEFAULT_MASTERY_GLOVE_ID && id !== DEFAULT_MASTERY_GLOVE_ID) return;
     if (!this.isSatisfied(definition.id)) return;
@@ -165,14 +211,18 @@ export class MasteryGloveSystem {
   public setDevPreview(id: string | null): void {
     if (id === null) {
       this.devPreviewGloveId = null;
+    } else if (isDropGloveId(id)) {
+      // A drop glove is previewable by id, even before it is owned.
+      this.devPreviewGloveId = getDropGlove(id) ? id : null;
+    } else if (MASTERY_GLOVES.some((g) => g.id === id)) {
+      this.devPreviewGloveId = id as MasteryGloveId;
     } else {
-      const definition = getMasteryGlove(id);
-      this.devPreviewGloveId = definition.id;
+      this.devPreviewGloveId = null;
     }
     this.notify();
   }
 
-  public getDevPreviewGloveId(): MasteryGloveId | null {
+  public getDevPreviewGloveId(): string | null {
     return this.devPreviewGloveId;
   }
 
@@ -221,7 +271,7 @@ export class MasteryGloveSystem {
 
   // -- listeners -----------------------------------------------------------
 
-  public addListener(fn: (gloveId: MasteryGloveId) => void): () => void {
+  public addListener(fn: (gloveId: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
