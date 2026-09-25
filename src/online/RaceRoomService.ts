@@ -218,7 +218,19 @@ export class RaceRoomService {
   private players: RacePlayer[] = [];
   private callbacks: RaceRoomCallbacks = {};
   private ghostTimer: number | null = null;
-  private myGhost: GhostSample | null = null;
+  /**
+   * LATEST LOCAL PRESENTATION TRANSFORM — deliberately NOT a packet.
+   *
+   * The game loop stores the current transform here every active frame. The
+   * BROADCAST CADENCE owns the packet: it stamps `t = Date.now()` at send time.
+   *
+   * This separation is what makes background throttling survivable. Previously
+   * the timestamp was stamped inside the rAF-driven game update, so when a
+   * background tab stopped animating its `t` froze and every re-sent packet was
+   * rejected as stale by the receiver — the opponent vanished even though the
+   * network was fine.
+   */
+  private myTransform: Omit<GhostSample, 'userId' | 't' | 'attempt'> | null = null;
   /** Locally tracked attempt index, used to reset the remote ghost to spawn. */
   private attemptIndex = 0;
   /** DEV lobby diagnostics. */
@@ -228,9 +240,14 @@ export class RaceRoomService {
   /** DEV ghost-pipeline diagnostics (presentation only). */
   private ghostTxCount = 0;
   private ghostTxAt = 0;
+  private ghostTxBackgroundCount = 0;
   private ghostRxCount = 0;
   private ghostRxAt = 0;
   private ghostRxUserId: string | null = null;
+  /** DEV visibility diagnostics. */
+  private lastVisibilityChangeAt = 0;
+  private windowFocused = true;
+  private visibilityListenersAttached = false;
 
   constructor(
     private readonly onlineClient: OnlineClient = online,
@@ -562,8 +579,10 @@ export class RaceRoomService {
     if (!client || !userId || !this.room) return;
 
     this.attemptIndex++;
-    // Full restart: the remote ghost returns to spawn/reset state.
-    this.myGhost = null;
+    // Full restart: the next published transform is the new spawn pose. The
+    // transform itself is refreshed by the game loop on the very next frame, so
+    // clearing it here can never leave the opponent without a position.
+    this.myTransform = null;
 
     await client.rpc('race_report_attempt_start', {
       p_room_id: this.room.id,
@@ -662,20 +681,30 @@ export class RaceRoomService {
     // Fresh session: ghost pipeline counters start clean.
     this.ghostTxCount = 0;
     this.ghostTxAt = 0;
+    this.ghostTxBackgroundCount = 0;
     this.ghostRxCount = 0;
     this.ghostRxAt = 0;
     this.ghostRxUserId = null;
+    this.lastVisibilityChangeAt = 0;
+    this.windowFocused = typeof document === 'undefined' || document.hasFocus();
+    this.attachVisibilityListeners();
     this.startGhostBroadcast();
   }
 
+  /**
+   * The broadcast cadence is INDEPENDENT of requestAnimationFrame.
+   *
+   * A background tab throttles rAF to zero and timers to roughly 1 Hz, so this
+   * interval may fire far less often than 12 Hz while hidden. That is expected
+   * and acceptable: each tick still carries a FRESH timestamp and the last known
+   * transform, so the opponent holds position instead of disappearing.
+   */
   private startGhostBroadcast(): void {
     if (typeof window === 'undefined') return;
     this.stopGhostBroadcast();
     const intervalMs = Math.round(1000 / GHOST_BROADCAST_HZ);
     this.ghostTimer = window.setInterval(() => {
-      if (!this.channel || !this.myGhost) return;
-      // Broadcast only — no DB row per movement packet.
-      void this.channel.send({ type: 'broadcast', event: 'ghost', payload: this.myGhost });
+      this.publishNow();
     }, intervalMs);
   }
 
@@ -687,15 +716,91 @@ export class RaceRoomService {
   }
 
   /**
-   * Called from the render loop at a throttled rate by the caller.
-   * Presentation only; the local simulation is authoritative.
+   * Publishes the latest local transform immediately.
+   *
+   * Safe to call at any time: it no-ops without a channel or a stored transform.
+   * Used by the 12 Hz tick and by every visibility / focus transition, so a tab
+   * returning to the foreground never waits up to a full interval to reappear.
    */
-  public updateGhostSample(sample: Omit<GhostSample, 'userId' | 't' | 'attempt'>): void {
+  public publishNow(): void {
+    if (!this.channel || !this.myTransform) return;
     const userId = this.auth.getUserId();
     if (!userId) return;
-    this.myGhost = { ...sample, userId, t: Date.now(), attempt: this.attemptIndex };
+    const hidden = typeof document !== 'undefined' && document.hidden === true;
+    const payload: GhostSample = {
+      ...this.myTransform,
+      userId,
+      t: Date.now(),
+      attempt: this.attemptIndex
+    };
     this.ghostTxCount++;
     this.ghostTxAt = Date.now();
+    if (hidden) this.ghostTxBackgroundCount++;
+    // Broadcast only — no DB row per movement packet.
+    void this.channel.send({ type: 'broadcast', event: 'ghost', payload });
+  }
+
+  /**
+   * Stores the latest local presentation transform.
+   *
+   * Called every active game frame. Presentation only; the local simulation
+   * stays authoritative and nothing here is ever fed back into physics.
+   *
+   * The stored object is MUTATED rather than replaced, so the hot path performs
+   * no allocation. The broadcast tick only ever reads it.
+   */
+  public setLocalTransform(
+    sample: Omit<GhostSample, 'userId' | 't' | 'attempt'>
+  ): void {
+    if (!this.auth.getUserId()) return;
+    if (this.myTransform) {
+      Object.assign(this.myTransform, sample);
+      return;
+    }
+    this.myTransform = { ...sample };
+  }
+
+  /**
+   * Foreground resync after a background pause or a focus change.
+   *
+   * Publishes immediately, then reconciles room membership so a socket that
+   * dropped while hidden cannot leave a phantom opponent. It never touches the
+   * session clock, the attempt timer, audio, the map or physics.
+   */
+  public resyncRacePresence(): void {
+    this.publishNow();
+    if (!this.room) return;
+    void this.refreshPlayers();
+  }
+
+  private attachVisibilityListeners(): void {
+    if (typeof window === 'undefined' || this.visibilityListenersAttached) return;
+    this.visibilityListenersAttached = true;
+
+    document.addEventListener('visibilitychange', () => {
+      this.lastVisibilityChangeAt = Date.now();
+      if (document.hidden) {
+        // Going hidden: one final transform while timers are still allowed.
+        this.publishNow();
+        return;
+      }
+      // Coming back: publish at once and reconcile presence.
+      this.resyncRacePresence();
+    });
+
+    window.addEventListener('focus', () => {
+      this.windowFocused = true;
+      this.resyncRacePresence();
+    });
+    window.addEventListener('blur', () => {
+      this.windowFocused = false;
+    });
+
+    // Page Lifecycle: a frozen tab resumes with a full resync.
+    document.addEventListener('resume', () => {
+      this.lastVisibilityChangeAt = Date.now();
+      this.resyncRacePresence();
+    });
   }
 
   /**
@@ -703,26 +808,36 @@ export class RaceRoomService {
    *
    * Reports BOTH directions, because "the opponent is invisible" has two very
    * different causes: nothing is being published, or nothing is being received.
+   * Also reports the visibility/focus state, because background throttling is
+   * the third cause and is invisible without it.
    * Presentation only — never used by gameplay.
    */
   public getGhostDiagnostics(): {
     txCount: number;
     txAgeMs: number;
+    txBackgroundCount: number;
     rxCount: number;
     rxAgeMs: number;
     rxUserId: string | null;
     hasLocalSample: boolean;
     roomState: RoomState | null;
+    documentVisible: boolean;
+    windowFocused: boolean;
+    lastVisibilityChangeAt: number;
   } {
     const now = Date.now();
     return {
       txCount: this.ghostTxCount,
       txAgeMs: this.ghostTxAt > 0 ? now - this.ghostTxAt : -1,
+      txBackgroundCount: this.ghostTxBackgroundCount,
       rxCount: this.ghostRxCount,
       rxAgeMs: this.ghostRxAt > 0 ? now - this.ghostRxAt : -1,
       rxUserId: this.ghostRxUserId,
-      hasLocalSample: this.myGhost !== null,
-      roomState: this.room?.state ?? null
+      hasLocalSample: this.myTransform !== null,
+      roomState: this.room?.state ?? null,
+      documentVisible: typeof document === 'undefined' || document.hidden !== true,
+      windowFocused: this.windowFocused,
+      lastVisibilityChangeAt: this.lastVisibilityChangeAt
     };
   }
 
@@ -760,7 +875,7 @@ export class RaceRoomService {
     await this.unsubscribe();
     this.room = null;
     this.players = [];
-    this.myGhost = null;
+    this.myTransform = null;
     this.attemptIndex = 0;
     this.realtimePlayerEvents = 0;
     this.lastReadyUpdate = null;

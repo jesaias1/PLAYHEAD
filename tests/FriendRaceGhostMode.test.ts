@@ -36,13 +36,20 @@ import {
   RIVAL_SIGNAL_COLOR,
   HOST_SIGNAL_COLOR,
   GUEST_SIGNAL_COLOR,
-  STALE_MS
+  SAMPLE_REJECT_MS,
+  LIVE_MS,
+  PRESENCE_GRACE_MS,
+  STALE_OPACITY_SCALE,
+  RemoteGhostState
 } from '../src/online/RemoteGhostRenderer';
 import {
   GhostSample,
-  shouldAcceptRemoteGhost
+  shouldAcceptRemoteGhost,
+  RaceRoomService
 } from '../src/online/RaceRoomService';
-import { raceGhostDiagnosticsLine } from '../src/ui/DevOverlay';
+import { OnlineClient } from '../src/online/supabaseClient';
+import { AuthService } from '../src/online/AuthService';
+import { raceGhostDiagnosticsLine, RaceGhostDiagnosticState } from '../src/ui/DevOverlay';
 import { buildGhostRaceRun, pbGhostLabel } from '../src/replay/GhostRaceSource';
 import {
   PovReplay,
@@ -205,6 +212,34 @@ function pbRun() {
   });
   if (!built.ok) throw new Error(`fixture failed: ${built.reason}`);
   return built.run;
+}
+
+/** Baseline DEV race-diagnostics snapshot; tests override only what they assert. */
+function baseRaceDiagnostics(): RaceGhostDiagnosticState {
+  return {
+    friendRace: false,
+    raceActive: false,
+    raceStartAtMs: null,
+    soloGhostsDisabled: false,
+    recordedGhostArmed: false,
+    remoteConnected: false,
+    remotePresent: false,
+    remoteName: 'none',
+    txCount: 0,
+    txAgeMs: -1,
+    txBackgroundCount: 0,
+    rxCount: 0,
+    rxAgeMs: -1,
+    ghostState: 'NO_SAMPLE',
+    ghostHasTarget: false,
+    ghostVisible: false,
+    ghostSamples: 0,
+    distanceM: null,
+    color: 0x9d8cff,
+    documentVisible: true,
+    windowFocused: true,
+    lastVisibilityChangeAt: 0
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -606,11 +641,13 @@ describe('Friend race — reset, leave, staleness', () => {
     expect(restart).toMatch(/reportAttemptStart/);
   });
 
-  it('drops stale packets and fades rather than freezing', () => {
+  it('drops genuinely stale packets at the receiver', () => {
     const remote = new RemoteGhostRenderer(new THREE.Scene());
-    const stale = sample({ t: Date.now() - (STALE_MS + 500) });
+    const stale = sample({ t: Date.now() - (SAMPLE_REJECT_MS + 500) });
     remote.setSample(stale);
+    // Nothing was ever accepted, so there is no pose to hold.
     expect(remote.getDiagnostics().hasTarget).toBe(false);
+    expect(remote.getState()).toBe('NO_SAMPLE');
     expect(remote.isShowing()).toBe(false);
   });
 
@@ -720,11 +757,24 @@ describe('Friend race — diagnostics', () => {
     expect(overlay).toMatch(/RACE MODE: \$\{race\.friendRace \? 'FRIEND' : 'SOLO'\}/);
   });
 
-  it('reports SPAWNED / HIDDEN / STALE distinctly', () => {
+  it('reports every lifecycle state distinctly', () => {
     const overlay = read('src/ui/DevOverlay.ts');
-    expect(overlay).toMatch(/'STALE'/);
-    expect(overlay).toMatch(/'SPAWNED \/\/ VISIBLE'/);
-    expect(overlay).toMatch(/'HIDDEN \/\/ NO SAMPLE'/);
+    expect(overlay).toMatch(/ghostState\.replace\('_', ' '\)/);
+    for (const state of ['NO_SAMPLE', 'LIVE', 'STALE_HOLD', 'DISCONNECTED']) {
+      expect(overlay, state).toContain(state);
+    }
+  });
+
+  it('reports DOCUMENT, WINDOW and the last visibility change', () => {
+    const overlay = read('src/ui/DevOverlay.ts');
+    expect(overlay).toContain('DOCUMENT');
+    expect(overlay).toContain('VISIBLE');
+    expect(overlay).toContain('HIDDEN');
+    expect(overlay).toContain('WINDOW');
+    expect(overlay).toContain('FOCUSED');
+    expect(overlay).toContain('BLURRED');
+    expect(overlay).toContain('LAST VISIBILITY CHANGE');
+    expect(overlay).toContain('background ${race.txBackgroundCount}');
   });
 
   it('is wired from the game, not invented in the overlay', () => {
@@ -734,46 +784,83 @@ describe('Friend race — diagnostics', () => {
 
   it('renders a complete, readable block for a live race', () => {
     const line = raceGhostDiagnosticsLine({
+      ...baseRaceDiagnostics(),
       friendRace: true,
-      raceActive: false,
-      raceStartAtMs: Date.now() + 4000,
+      raceActive: true,
+      raceStartAtMs: Date.now() - 1000,
       soloGhostsDisabled: true,
-      recordedGhostArmed: false,
       remoteConnected: true,
       remotePresent: true,
       remoteName: 'RIVAL',
       txCount: 128,
       txAgeMs: 41,
+      txBackgroundCount: 7,
       rxCount: 127,
       rxAgeMs: 55,
+      ghostState: 'LIVE',
       ghostHasTarget: true,
       ghostVisible: true,
-      ghostStale: false,
       ghostSamples: 127,
       distanceM: 1.42,
-      color: 0x9d8cff
+      documentVisible: true,
+      windowFocused: true,
+      lastVisibilityChangeAt: Date.now() - 3000
     });
     expect(line).toContain('REMOTE PLAYER: RIVAL');
     expect(line).toContain('CONNECTED YES');
-    expect(line).toContain('PRESENCE YES');
+    expect(line).toContain('PRESENCE PRESENT');
+    expect(line).toContain('DOCUMENT VISIBLE');
+    expect(line).toContain('WINDOW FOCUSED');
     expect(line).toContain('RACE MODE: FRIEND');
     expect(line).toContain('SOLO GHOSTS: DISABLED');
-    expect(line).toContain('TRANSFORM TX: 128 | age 41 ms');
-    expect(line).toContain('TRANSFORM RX: 127 | age 55 ms');
-    expect(line).toContain('REMOTE GHOST: SPAWNED // VISIBLE');
+    expect(line).toContain('TRANSFORM TX: 128 | age 41 ms | background 7');
+    expect(line).toContain('TRANSFORM RX: 127 | age 55 ms | LIVE');
+    expect(line).toContain('REMOTE GHOST STATE: LIVE');
     expect(line).toContain('DISTANCE TO REMOTE: 1.42 m');
     expect(line).toContain('#9d8cff');
-    // Never a raw undefined / NaN in the DEV readout.
+    expect(line).not.toMatch(/undefined|NaN/);
+  });
+
+  it('renders the STALE_HOLD case the Alt-Tab test actually hits', () => {
+    const line = raceGhostDiagnosticsLine({
+      ...baseRaceDiagnostics(),
+      friendRace: true,
+      raceActive: true,
+      raceStartAtMs: Date.now() - 30_000,
+      soloGhostsDisabled: true,
+      remoteConnected: true,
+      remotePresent: true,
+      remoteName: 'RIVAL',
+      txCount: 12,
+      txAgeMs: 900,
+      txBackgroundCount: 11,
+      rxCount: 40,
+      rxAgeMs: 6200,
+      ghostState: 'STALE_HOLD',
+      ghostHasTarget: true,
+      ghostVisible: true,
+      ghostSamples: 40,
+      distanceM: 12.5,
+      documentVisible: false,
+      windowFocused: false,
+      lastVisibilityChangeAt: Date.now() - 6200
+    });
+    expect(line).toContain('DOCUMENT HIDDEN');
+    expect(line).toContain('WINDOW BLURRED');
+    // Presence still present: the opponent is held, NOT deleted.
+    expect(line).toContain('PRESENCE PRESENT');
+    expect(line).toContain('TRANSFORM RX: 40 | age 6200 ms | STALE');
+    expect(line).toContain('REMOTE GHOST STATE: STALE HOLD');
     expect(line).not.toMatch(/undefined|NaN/);
   });
 
   it('reports the pre-start window and a missing opponent distinctly', () => {
     const noOpponent = raceGhostDiagnosticsLine({
+      ...baseRaceDiagnostics(),
       friendRace: true,
       raceActive: false,
       raceStartAtMs: null,
       soloGhostsDisabled: true,
-      recordedGhostArmed: false,
       remoteConnected: false,
       remotePresent: false,
       remoteName: 'none',
@@ -781,38 +868,49 @@ describe('Friend race — diagnostics', () => {
       txAgeMs: -1,
       rxCount: 0,
       rxAgeMs: -1,
+      ghostState: 'NO_SAMPLE',
       ghostHasTarget: false,
       ghostVisible: false,
-      ghostStale: false,
       ghostSamples: 0,
-      distanceM: null,
-      color: 0x9d8cff
+      distanceM: null
     });
-    expect(noOpponent).toContain('PRESENCE NO');
-    expect(noOpponent).toContain('REMOTE GHOST: HIDDEN // NO SAMPLE');
+    expect(noOpponent).toContain('PRESENCE ABSENT');
+    expect(noOpponent).toContain('REMOTE GHOST STATE: NO SAMPLE');
     expect(noOpponent).toContain('GO not scheduled');
     expect(noOpponent).toContain('age never');
     expect(noOpponent).toContain('DISTANCE TO REMOTE: n/a');
     expect(noOpponent).not.toMatch(/undefined|NaN/);
   });
 
-  it('reports a stale remote and solo mode without a race', () => {
+  it('reports a transient reconnect as RECONNECTING, not gone', () => {
+    const reconnecting = raceGhostDiagnosticsLine({
+      ...baseRaceDiagnostics(),
+      friendRace: true,
+      remotePresent: true,
+      remoteConnected: false,
+      remoteName: 'RIVAL',
+      ghostState: 'STALE_HOLD',
+      ghostHasTarget: true,
+      ghostVisible: true
+    });
+    expect(reconnecting).toContain('PRESENCE RECONNECTING');
+    expect(reconnecting).toContain('REMOTE GHOST STATE: STALE HOLD');
+  });
+
+  it('reports a disconnected remote and solo mode without a race', () => {
     const stale = raceGhostDiagnosticsLine({
+      ...baseRaceDiagnostics(),
       friendRace: false,
-      raceActive: false,
-      raceStartAtMs: null,
       soloGhostsDisabled: false,
       recordedGhostArmed: true,
       remoteConnected: false,
       remotePresent: false,
       remoteName: 'none',
-      txCount: 0,
-      txAgeMs: -1,
       rxCount: 9,
       rxAgeMs: 4000,
+      ghostState: 'DISCONNECTED',
       ghostHasTarget: true,
       ghostVisible: false,
-      ghostStale: true,
       ghostSamples: 9,
       distanceM: 300.5,
       color: 0x00f0ff
@@ -820,7 +918,7 @@ describe('Friend race — diagnostics', () => {
     expect(stale).toContain('RACE MODE: SOLO');
     expect(stale).toContain('SOLO GHOSTS: ENABLED');
     expect(stale).toContain('RECORDED GHOST ARMED');
-    expect(stale).toContain('REMOTE GHOST: STALE');
+    expect(stale).toContain('REMOTE GHOST STATE: DISCONNECTED');
     expect(stale).toContain('#00f0ff');
   });
 
@@ -828,10 +926,450 @@ describe('Friend race — diagnostics', () => {
     expect(raceGhostDiagnosticsLine(undefined)).toContain('REMOTE PLAYER: n/a');
   });
 
-  it('exposes ghost TX/RX counters from the realtime service', () => {
+  it('exposes ghost TX/RX counters and the background counter', () => {
     const src = read('src/online/RaceRoomService.ts');
     expect(src).toMatch(/public getGhostDiagnostics\(\)/);
     expect(src).toMatch(/ghostTxCount\+\+/);
     expect(src).toMatch(/ghostRxCount\+\+/);
+    expect(src).toMatch(/ghostTxBackgroundCount\+\+/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. BACKGROUND THROTTLING - the Alt-Tab failure
+//
+// A background tab throttles requestAnimationFrame to zero and timers to about
+// 1 Hz. The opponent must NOT disappear merely because their transform stream
+// paused: NETWORK STALE != PLAYER GONE.
+// ---------------------------------------------------------------------------
+
+describe('Friend race � background throttling', () => {
+  /** Drive the ghost forward in time without touching real clocks. */
+  function advance(remote: RemoteGhostRenderer, ms: number, local?: THREE.Vector3): void {
+    remote.update(ms / 1000, local);
+  }
+
+  it('A. fresh packets are LIVE', () => {
+    const remote = new RemoteGhostRenderer(new THREE.Scene());
+    remote.setSample(sample({ x: 5, y: 2, z: 5 }));
+    expect(remote.getState()).toBe('LIVE');
+    expect(remote.isShowing()).toBe(true);
+  });
+
+  it('B. no packet for >1200 ms with presence true is STALE_HOLD and stays visible', () => {
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    remote.setSample(sample({ x: 5, y: 2, z: 5 }));
+    remote.setRemotePresent(true);
+
+    // Age the sample past the live threshold by backdating it.
+    const aged = sample({ x: 5, y: 2, z: 5, t: Date.now() - (LIVE_MS + 400) });
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = aged.t;
+
+    expect(remote.getState()).toBe('STALE_HOLD');
+    expect(remote.isShowing()).toBe(true);
+    advance(remote, 16, new THREE.Vector3(0, 0, 0));
+    expect(scene.children.find((c) => c.name === 'RemoteSignalGhost')!.visible).toBe(true);
+  });
+
+  it('C. 10+ seconds of silence still holds the last transform, with no extrapolation', () => {
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    const group = scene.children.find((c) => c.name === 'RemoteSignalGhost')!;
+    const frozen = { x: 42, y: 3, z: -17 };
+    remote.setSample(sample({ ...frozen, yaw: 1.1 }));
+    remote.setRemotePresent(true);
+    advance(remote, 16);
+    const posAfterFirstFrame = { x: group.position.x, y: group.position.y, z: group.position.z };
+
+    // Simulate 10 seconds of background silence.
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = Date.now() - 10_000;
+    for (let i = 0; i < 600; i++) {
+      advance(remote, 16, new THREE.Vector3(0, 0, 0));
+    }
+
+    expect(remote.getState()).toBe('STALE_HOLD');
+    expect(remote.isShowing()).toBe(true);
+    // Frozen exactly where it was: no dead reckoning, no invented velocity.
+    expect(group.position.x).toBeCloseTo(posAfterFirstFrame.x, 6);
+    expect(group.position.y).toBeCloseTo(posAfterFirstFrame.y, 6);
+    expect(group.position.z).toBeCloseTo(posAfterFirstFrame.z, 6);
+    expect(group.position.x).toBeCloseTo(42, 1);
+    expect(group.position.z).toBeCloseTo(-17, 1);
+  });
+
+  it('D. a fresh packet after a hold returns to LIVE and interpolation resumes', () => {
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    const group = scene.children.find((c) => c.name === 'RemoteSignalGhost')!;
+    remote.setSample(sample({ x: 0, y: 0, z: 0 }));
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = Date.now() - 5000;
+    expect(remote.getState()).toBe('STALE_HOLD');
+
+    remote.setSample(sample({ x: 100, y: 0, z: 0 }));
+    expect(remote.getState()).toBe('LIVE');
+    for (let i = 0; i < 120; i++) advance(remote, 16, new THREE.Vector3(0, 0, 0));
+    // Interpolation has carried it towards the new transform.
+    expect(group.position.x).toBeGreaterThan(50);
+  });
+
+  it('E. going hidden publishes one final transform immediately', () => {
+    const src = read('src/online/RaceRoomService.ts');
+    const handler = src.slice(
+      src.indexOf("addEventListener('visibilitychange'"),
+      src.indexOf("addEventListener('visibilitychange'") + 500
+    );
+    expect(handler).toMatch(/document\.hidden/);
+    expect(handler).toMatch(/this\.publishNow\(\)/);
+  });
+
+  it('F. becoming visible publishes immediately and resyncs presence', () => {
+    const src = read('src/online/RaceRoomService.ts');
+    const handler = src.slice(
+      src.indexOf("addEventListener('visibilitychange'"),
+      src.indexOf("addEventListener('visibilitychange'") + 500
+    );
+    expect(handler).toMatch(/this\.resyncRacePresence\(\)/);
+    const resync = src.slice(
+      src.indexOf('public resyncRacePresence('),
+      src.indexOf('public resyncRacePresence(') + 400
+    );
+    expect(resync).toMatch(/this\.publishNow\(\)/);
+    expect(resync).toMatch(/refreshPlayers\(\)/);
+    // Focus and Page Lifecycle resume both resync too.
+    expect(src).toMatch(/addEventListener\('focus'/);
+    expect(src).toMatch(/addEventListener\('resume'/);
+  });
+
+  it('G. a confirmed leave disconnects and removes the ghost immediately', () => {
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    remote.setSample(sample());
+    expect(remote.isShowing()).toBe(true);
+
+    remote.markRemoteLeft();
+    expect(remote.getState()).toBe('DISCONNECTED');
+    expect(remote.isShowing()).toBe(false);
+    remote.update(1 / 60);
+    expect(scene.children.find((c) => c.name === 'RemoteSignalGhost')!.visible).toBe(false);
+  });
+
+  it('H. a transient presence loss holds through a grace period, then disconnects', () => {
+    const remote = new RemoteGhostRenderer(new THREE.Scene());
+    remote.setSample(sample());
+    // Presence signal lost AND the stream has paused: the classic reconnect case.
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = Date.now() - (LIVE_MS + 400);
+    remote.setRemotePresent(false);
+
+    // Immediately: still held, not deleted.
+    expect(remote.getState()).toBe('STALE_HOLD');
+    expect(remote.isShowing()).toBe(true);
+
+    // Inside the grace period: still held.
+    (remote as unknown as { presenceLostAt: number }).presenceLostAt =
+      Date.now() - (PRESENCE_GRACE_MS - 500);
+    expect(remote.getState()).toBe('STALE_HOLD');
+
+    // Past the grace period: gone.
+    (remote as unknown as { presenceLostAt: number }).presenceLostAt =
+      Date.now() - (PRESENCE_GRACE_MS + 500);
+    expect(remote.getState()).toBe('DISCONNECTED');
+    expect(remote.isShowing()).toBe(false);
+  });
+
+  it('a fresh transform outranks a stale presence row: a streaming player is never hidden', () => {
+    const remote = new RemoteGhostRenderer(new THREE.Scene());
+    remote.setSample(sample());
+    remote.setRemotePresent(false);
+    // Packets are still arriving, so the opponent is demonstrably still here.
+    expect(remote.getState()).toBe('LIVE');
+    expect(remote.isShowing()).toBe(true);
+  });
+
+  it('I. the race ending removes the ghost normally', () => {
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    remote.setSample(sample());
+    remote.clear();
+    expect(remote.getState()).toBe('NO_SAMPLE');
+    expect(remote.isShowing()).toBe(false);
+    expect(scene.children.find((c) => c.name === 'RemoteSignalGhost')!.visible).toBe(false);
+  });
+
+  it('J. a confirmed leave in the game marks the ghost left at once', () => {
+    const callback = gameSrc.slice(
+      gameSrc.indexOf('onPlayerLeft:'),
+      gameSrc.indexOf('onPlayerLeft:') + 400
+    );
+    expect(callback).toMatch(/this\.raceGhost\?\.markRemoteLeft\(\)/);
+  });
+
+  it('presence, not packet age, decides whether the opponent exists', () => {
+    const src = read('src/online/RemoteGhostRenderer.ts');
+    // The state machine reads presence for DISCONNECTED...
+    expect(src).toMatch(/remotePresent/);
+    expect(src).toMatch(/PRESENCE_GRACE_MS/);
+    const update = src.slice(src.indexOf('public update('), src.indexOf('public update(') + 1600);
+    // ...and the STALE_HOLD branch freezes at the last received transform.
+    expect(update).toMatch(/state === 'STALE_HOLD'/);
+    expect(update).toMatch(/setTransform\(\s*this\.currentPos\.x/);
+    // No extrapolation anywhere in the render path: currentPos only ever moves
+    // towards a genuinely received target, and never on its own.
+    expect(update).not.toMatch(/currentPos\.addScaledVector|currentPos\.add\(|targetPos\.clone/);
+  });
+
+  it('STALE_HOLD is dimmed but never invisible, and overlap still shows it', () => {
+    expect(STALE_OPACITY_SCALE).toBeGreaterThan(0.5);
+    expect(STALE_OPACITY_SCALE).toBeLessThan(0.8);
+
+    const scene = new THREE.Scene();
+    const remote = new RemoteGhostRenderer(scene);
+    const visual = (remote as unknown as { visual: GhostVisual }).visual;
+    const body = visual.group.children[0] as THREE.Mesh;
+    const material = body.material as THREE.MeshBasicMaterial;
+
+    remote.setSample(sample({ x: 0, y: 1.5, z: 0 }));
+    remote.update(1 / 60);
+    const liveOpacity = material.opacity;
+
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = Date.now() - 5000;
+    remote.update(1 / 60, new THREE.Vector3(0, 1.5, 0));
+    const holdOpacity = material.opacity;
+
+    expect(holdOpacity).toBeLessThan(liveOpacity);
+    expect(holdOpacity).toBeGreaterThan(0);
+    // Same-spawn overlap: double-sided faces keep a held ghost visible.
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(remote.isShowing()).toBe(true);
+  });
+
+  it('the broadcast scheduler is independent of requestAnimationFrame', () => {
+    const src = read('src/online/RaceRoomService.ts');
+    // The cadence is a timer, and the timestamp is stamped at SEND time.
+    expect(src).toMatch(/window\.setInterval\(\(\) => \{\s*this\.publishNow\(\);/);
+    const publish = src.slice(
+      src.indexOf('public publishNow('),
+      src.indexOf('public publishNow(') + 900
+    );
+    expect(publish).toMatch(/t: Date\.now\(\)/);
+    expect(publish).toMatch(/\.\.\.this\.myTransform/);
+    // The game loop only STORES the transform; it does not send.
+    const store = gameSrc.slice(
+      gameSrc.indexOf('private storeLocalTransform('),
+      gameSrc.indexOf('private storeLocalTransform(') + 700
+    );
+    expect(store).toMatch(/raceRoomService\.setLocalTransform\(/);
+    expect(store).not.toMatch(/\.send\(|publishNow/);
+  });
+
+  it('never defeats background throttling with a hack', () => {
+    for (const file of ['src/online/RaceRoomService.ts', 'src/online/RemoteGhostRenderer.ts']) {
+      const src = read(file);
+      expect(src, file).not.toMatch(/Worker\(/);
+      expect(src, file).not.toMatch(/wakeLock|WakeLock/);
+      expect(src, file).not.toMatch(/createElement\('audio'\)|AudioContext/);
+      expect(src, file).not.toMatch(/setInterval\([^,]+,\s*(?:[1-9]\d?|[1-4]\d\d)\)/);
+    }
+  });
+
+  it('a frozen remote transform still reports a valid distance for diagnostics', () => {
+    const remote = new RemoteGhostRenderer(new THREE.Scene());
+    remote.setSample(sample({ x: 3, y: 0, z: 4 }));
+    (remote as unknown as { lastSampleAt: number }).lastSampleAt = Date.now() - 8000;
+    remote.update(1 / 60, new THREE.Vector3(0, 0, 0));
+    const diag = remote.getDiagnostics();
+    expect(diag.state).toBe('STALE_HOLD');
+    expect(diag.distanceM).toBeCloseTo(5, 1);
+    expect(diag.remotePresent).toBe(true);
+  });
+
+  it('a solo run restores normal solo ghost behaviour after a race', () => {
+    const scene = new THREE.Scene();
+    const manager = new GhostManager(scene);
+    const remote = new RemoteGhostRenderer(scene);
+
+    manager.setFriendRaceMode(true);
+    remote.setSample(sample());
+    expect(visibleSoloGhosts(scene)).toEqual([]);
+
+    // Race over.
+    remote.clear();
+    manager.setFriendRaceMode(false);
+    manager.prepareTrack(makeTrack(), 'TEST');
+    manager.update(0.5, new THREE.Vector3(0, 1.5, 0), 0.016);
+    expect(visibleSoloGhosts(scene)).toContain('Ghost_Rival_Echo');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. BROADCAST SCHEDULER - behavioural, against a fake Realtime client
+//
+// This is the precise regression. Measured platform behaviour: a backgrounded
+// tab runs requestAnimationFrame at 0 fps while its timers keep ticking. The old
+// design stamped the packet timestamp inside the rAF-driven game loop, so a
+// backgrounded opponent kept RE-SENDING a packet whose timestamp was frozen, and
+// the receiver rejected every one of them as stale. The opponent vanished even
+// though the network was perfectly healthy.
+// ---------------------------------------------------------------------------
+
+describe('Friend race - broadcast scheduler', () => {
+  interface SentPacket {
+    event: string;
+    payload: GhostSample;
+  }
+
+  function fakeRealtime(): { channel: unknown; sent: SentPacket[] } {
+    const sent: SentPacket[] = [];
+    const channel: Record<string, unknown> = {};
+    channel.on = () => channel;
+    channel.subscribe = (cb?: (s: string) => void) => {
+      cb?.('SUBSCRIBED');
+      return channel;
+    };
+    channel.send = (msg: SentPacket) => {
+      sent.push(msg);
+      return Promise.resolve('ok');
+    };
+    channel.unsubscribe = () => Promise.resolve('ok');
+    return { channel, sent };
+  }
+
+  function makeService(): {
+    service: RaceRoomService;
+    sent: SentPacket[];
+  } {
+    const onlineClient = OnlineClient.__createWithClientForTests(null);
+    const auth = { getUserId: () => 'me' } as unknown as AuthService;
+    const service = new RaceRoomService(onlineClient, auth);
+    const fake = fakeRealtime();
+    (service as unknown as { channel: unknown }).channel = fake.channel;
+    return { service, sent: fake.sent };
+  }
+
+  const transform = {
+    x: 11,
+    y: 2.5,
+    z: -3,
+    yaw: 0.4,
+    pitch: 0.1,
+    vx: 1,
+    vy: 0,
+    vz: 2,
+    running: true
+  };
+
+  it('storing a transform does NOT send: the scheduler owns the cadence', () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+    expect(sent).toHaveLength(0);
+    expect(service.getGhostDiagnostics().hasLocalSample).toBe(true);
+  });
+
+  it('publishing sends exactly one packet with the stored transform', () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+    service.publishNow();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].event).toBe('ghost');
+    expect(sent[0].payload.x).toBe(11);
+    expect(sent[0].payload.userId).toBe('me');
+  });
+
+  it('REGRESSION: the timestamp is stamped at SEND time, never frozen', async () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+
+    service.publishNow();
+    const first = sent[0].payload.t;
+
+    // Simulate rAF stopping (the tab is backgrounded): the game loop never calls
+    // setLocalTransform again, but the timer keeps firing.
+    await new Promise((r) => setTimeout(r, 60));
+    service.publishNow();
+    service.publishNow();
+
+    expect(sent).toHaveLength(3);
+    const second = sent[1].payload.t;
+    const third = sent[2].payload.t;
+    // Every packet carries a FRESH timestamp, so a backgrounded sender is never
+    // rejected as stale by the receiver.
+    expect(second).toBeGreaterThan(first);
+    expect(third).toBeGreaterThanOrEqual(second);
+    // And it still carries the last known position.
+    expect(sent[2].payload.x).toBe(11);
+    expect(sent[2].payload.z).toBe(-3);
+  });
+
+  it('a frozen sender stays acceptable to the receiver filter', async () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+    // Ten seconds of "backgrounded": no game loop, but the timer still fires.
+    service.publishNow();
+    await new Promise((r) => setTimeout(r, 100));
+    service.publishNow();
+    const packet = sent[sent.length - 1].payload;
+    // The receiver's own staleness filter would accept this packet.
+    expect(shouldAcceptRemoteGhost(packet, 'them')).toBe(true);
+  });
+
+  it('publishing is a safe no-op without a channel', () => {
+    const onlineClient = OnlineClient.__createWithClientForTests(null);
+    const auth = { getUserId: () => 'me' } as unknown as AuthService;
+    const service = new RaceRoomService(onlineClient, auth);
+    service.setLocalTransform(transform);
+    expect(() => service.publishNow()).not.toThrow();
+    expect(service.getGhostDiagnostics().txCount).toBe(0);
+  });
+
+  it('counts packets published while the document is hidden', () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+    const originalDocument = (globalThis as { document?: unknown }).document;
+    try {
+      (globalThis as { document?: unknown }).document = { hidden: true };
+      service.publishNow();
+      service.publishNow();
+      expect(sent).toHaveLength(2);
+      expect(service.getGhostDiagnostics().txBackgroundCount).toBe(2);
+      (globalThis as { document?: unknown }).document = { hidden: false };
+      service.publishNow();
+      // Foreground publishes are not counted as background.
+      expect(service.getGhostDiagnostics().txBackgroundCount).toBe(2);
+    } finally {
+      (globalThis as { document?: unknown }).document = originalDocument;
+    }
+  });
+
+  it('resync publishes immediately and reconciles presence', () => {
+    const { service, sent } = makeService();
+    service.setLocalTransform(transform);
+    const playersBefore = service.getGhostDiagnostics().rxCount;
+    service.resyncRacePresence();
+    // Published at once, without waiting for the next tick.
+    expect(sent).toHaveLength(1);
+    expect(playersBefore).toBe(0);
+  });
+
+  it('reports document and focus state for the Alt-Tab diagnosis', () => {
+    const { service } = makeService();
+    const diag = service.getGhostDiagnostics();
+    expect(typeof diag.documentVisible).toBe('boolean');
+    expect(typeof diag.windowFocused).toBe('boolean');
+    expect(diag.lastVisibilityChangeAt).toBe(0);
+  });
+
+  it('the game stores every frame and never sends from the render loop', () => {
+    const store = gameSrc.slice(
+      gameSrc.indexOf('private storeLocalTransform('),
+      gameSrc.indexOf('private storeLocalTransform(') + 700
+    );
+    expect(store).toMatch(/raceRoomService\.setLocalTransform\(/);
+    // And updateRace calls it unconditionally for the whole race world.
+    const update = gameSrc.slice(
+      gameSrc.indexOf('private updateRace(frameDelta: number)'),
+      gameSrc.indexOf('private updateRace(frameDelta: number)') + 4200
+    );
+    expect(update).toMatch(/this\.storeLocalTransform\(\)/);
+    expect(update).not.toMatch(/GHOST_BROADCAST_HZ/);
   });
 });

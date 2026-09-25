@@ -53,17 +53,23 @@ export interface RaceGhostDiagnosticState {
   /** Local transform publication. */
   txCount: number;
   txAgeMs: number;
+  /** Transforms published while the document was hidden. */
+  txBackgroundCount: number;
   /** Remote transform reception. */
   rxCount: number;
   rxAgeMs: number;
-  /** Remote ghost renderer state. */
+  /** Remote ghost lifecycle: NO_SAMPLE / LIVE / STALE_HOLD / DISCONNECTED. */
+  ghostState: 'NO_SAMPLE' | 'LIVE' | 'STALE_HOLD' | 'DISCONNECTED';
   ghostHasTarget: boolean;
   ghostVisible: boolean;
-  ghostStale: boolean;
   ghostSamples: number;
   distanceM: number | null;
   /** Current opponent signal colour, as hex. */
   color: number;
+  /** Document visibility + focus, for diagnosing background throttling. */
+  documentVisible: boolean;
+  windowFocused: boolean;
+  lastVisibilityChangeAt: number;
 }
 
 export class DevOverlay {
@@ -349,28 +355,37 @@ function raceLobbyDiagnosticsLine(): string {
  * identical from inside the game. This line separates them: is the race mode
  * even on, are solo ghosts still armed, is the local player publishing, are
  * remote packets arriving, and is the renderer actually drawing?
+ *
+ * It also reports DOCUMENT visibility and WINDOW focus, because background
+ * throttling is the cause that is completely invisible without them.
  */
 export function raceGhostDiagnosticsLine(race?: RaceGhostDiagnosticState): string {
   if (!race) return 'REMOTE PLAYER: n/a (no race diagnostics)';
   const age = (ms: number): string => (ms < 0 ? 'never' : `${ms} ms`);
   const dist = race.distanceM === null ? 'n/a' : `${race.distanceM.toFixed(2)} m`;
-  const ghostState = race.ghostStale
-    ? 'STALE'
-    : race.ghostVisible
-      ? 'SPAWNED // VISIBLE'
-      : race.ghostHasTarget
-        ? 'HIDDEN'
-        : 'HIDDEN // NO SAMPLE';
+  const visChange =
+    race.lastVisibilityChangeAt > 0
+      ? `${Math.round((Date.now() - race.lastVisibilityChangeAt) / 1000)}s ago`
+      : 'none';
+  const presence = !race.remotePresent
+    ? 'ABSENT'
+    : race.remoteConnected
+      ? 'PRESENT'
+      : 'RECONNECTING';
+  const transformState = race.ghostState === 'LIVE' ? 'LIVE' : 'STALE';
   return (
     `REMOTE PLAYER: ${race.remoteName} | CONNECTED ${race.remoteConnected ? 'YES' : 'NO'}` +
-    ` | PRESENCE ${race.remotePresent ? 'YES' : 'NO'}` +
+    ` | PRESENCE ${presence}` +
+    `\n  DOCUMENT ${race.documentVisible ? 'VISIBLE' : 'HIDDEN'}` +
+    ` | WINDOW ${race.windowFocused ? 'FOCUSED' : 'BLURRED'}` +
+    ` | LAST VISIBILITY CHANGE ${visChange}` +
     `\n  RACE MODE: ${race.friendRace ? 'FRIEND' : 'SOLO'} | RACE ACTIVE ${race.raceActive ? 'YES' : 'NO'}` +
     ` | GO ${race.raceStartAtMs === null ? 'not scheduled' : `${Math.round((race.raceStartAtMs - Date.now()) / 1000)}s`}` +
     `\n  SOLO GHOSTS: ${race.soloGhostsDisabled ? 'DISABLED' : 'ENABLED'}` +
     ` | RECORDED GHOST ${race.recordedGhostArmed ? 'ARMED' : 'none'}` +
-    `\n  TRANSFORM TX: ${race.txCount} | age ${age(race.txAgeMs)}` +
-    `\n  TRANSFORM RX: ${race.rxCount} | age ${age(race.rxAgeMs)}` +
-    `\n  REMOTE GHOST: ${ghostState} | samples ${race.ghostSamples}` +
+    `\n  TRANSFORM TX: ${race.txCount} | age ${age(race.txAgeMs)} | background ${race.txBackgroundCount}` +
+    `\n  TRANSFORM RX: ${race.rxCount} | age ${age(race.rxAgeMs)} | ${transformState}` +
+    `\n  REMOTE GHOST STATE: ${race.ghostState.replace('_', ' ')} | samples ${race.ghostSamples}` +
     `\n  DISTANCE TO REMOTE: ${dist} | COLOUR #${race.color.toString(16).padStart(6, '0')}` +
     `\n  PROXIMITY FADE: none (live opponent is never faded out)`
   );

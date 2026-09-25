@@ -27,8 +27,7 @@ import { onlineBootstrap } from '../online/OnlineBootstrap';
 import {
   raceRoomService,
   RaceRoomService,
-  RaceResultRow,
-  GHOST_BROADCAST_HZ
+  RaceResultRow
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
 import type { RunSubmission } from '../online/LeaderboardService';
@@ -171,8 +170,22 @@ export class Game {
   /** Shared session start, as an epoch ms timestamp agreed by all clients. */
   private raceStartAtMs: number | null = null;
   private raceFinishReported = false;
-  private raceGhostAccumulator = 0;
   private raceCurrentRunAccumulator = 0;
+  /**
+   * Reusable local presentation transform. Mutated every frame and handed to the
+   * broadcast scheduler, so the hot path performs no allocation.
+   */
+  private localTransformScratch = {
+    x: 0,
+    y: 0,
+    z: 0,
+    yaw: 0,
+    pitch: 0,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    running: true
+  };
   private raceLastRivalBestUs: number | null = null;
   private raceLastLocalBestUs: number | null = null;
   /** Invite code captured from ?room= before the player reaches the menu. */
@@ -2590,6 +2603,9 @@ export class Game {
         this.ui.raceHud.showNotice(`${player.displayName} // JOINED`);
       },
       onPlayerLeft: () => {
+        // Positive evidence: the opponent left the room. Remove the ghost at
+        // once rather than waiting for the presence grace period.
+        this.raceGhost?.markRemoteLeft();
         this.ui.raceHud.showNotice('PLAYER DISCONNECTED');
       },
       onFinished: (rows) => this.showRaceResults(rows),
@@ -2898,37 +2914,47 @@ export class Game {
       }
     }
 
-    // Ghost sample: presentation only, ~12 Hz. Published for the whole race
-    // world lifetime so the opponent appears on the start platform immediately.
-    this.raceGhostAccumulator += frameDelta;
-    if (this.raceGhostAccumulator >= 1 / GHOST_BROADCAST_HZ) {
-      this.raceGhostAccumulator = 0;
-      this.publishLocalGhostSample();
-    }
+    // Ghost sample: presentation only. The game loop stores the latest local
+    // transform EVERY active frame; RaceRoomService owns the broadcast cadence
+    // and stamps the timestamp at send time. That separation is what keeps the
+    // opponent visible when a background tab's animation loop is throttled.
+    this.storeLocalTransform();
   }
 
   /**
-   * Publishes the local player's current transform to the room.
+   * Stores the local player's current transform for the broadcast scheduler.
    *
-   * Called on the 12 Hz tick AND immediately after map load, spawn and restart,
-   * so the opponent never has to wait for the first movement input to become
-   * visible.
+   * Presentation only. Runs every active frame so the stored transform is always
+   * current; it performs no network work and no allocation on the hot path.
    */
-  private publishLocalGhostSample(): void {
+  private storeLocalTransform(): void {
     if (!this.friendRaceWorld) return;
     const p = this.playerController.position;
     const v = this.playerController.velocity;
-    raceRoomService.updateGhostSample({
-      x: p.x,
-      y: p.y,
-      z: p.z,
-      yaw: this.cameraController.yaw,
-      pitch: this.cameraController.pitch,
-      vx: v.x,
-      vy: v.y,
-      vz: v.z,
-      running: !this.raceFinishReported
-    });
+    // Reused scratch object: the hot path must not allocate.
+    const t = this.localTransformScratch;
+    t.x = p.x;
+    t.y = p.y;
+    t.z = p.z;
+    t.yaw = this.cameraController.yaw;
+    t.pitch = this.cameraController.pitch;
+    t.vx = v.x;
+    t.vy = v.y;
+    t.vz = v.z;
+    t.running = !this.raceFinishReported;
+    raceRoomService.setLocalTransform(t);
+  }
+
+  /**
+   * Stores AND publishes the local transform immediately.
+   *
+   * Used on spawn, on entering the world and on visibility/focus transitions, so
+   * the opponent never has to wait for the next scheduled tick to appear.
+   */
+  private publishLocalGhostSample(): void {
+    if (!this.friendRaceWorld) return;
+    this.storeLocalTransform();
+    raceRoomService.publishNow();
   }
 
   /**
@@ -2973,18 +2999,30 @@ export class Game {
       remoteName: rival?.displayName ?? 'none',
       txCount: net.txCount,
       txAgeMs: net.txAgeMs,
+      txBackgroundCount: net.txBackgroundCount,
       rxCount: net.rxCount,
       rxAgeMs: net.rxAgeMs,
+      ghostState: ghost?.state ?? 'NO_SAMPLE',
       ghostHasTarget: ghost?.hasTarget ?? false,
       ghostVisible: ghost?.visible ?? false,
-      ghostStale: ghost?.stale ?? false,
       ghostSamples: ghost?.samplesReceived ?? 0,
       distanceM: ghost?.distanceM ?? null,
-      color: ghost?.color ?? 0
+      color: ghost?.color ?? 0,
+      documentVisible: net.documentVisible,
+      windowFocused: net.windowFocused,
+      lastVisibilityChangeAt: net.lastVisibilityChangeAt
     };
   }
 
   private updateRaceGhost(frameDelta: number): void {
+    // PRESENCE AUTHORITY: a stale transform is not a departed opponent. The room
+    // tells us whether the rival still exists; only positive evidence removes
+    // the ghost, and a stale stream holds position instead.
+    if (this.raceGhost && this.friendRaceWorld) {
+      const myId = authService.getUserId();
+      const rival = raceRoomService.getPlayers().find((p) => p.userId !== myId) ?? null;
+      this.raceGhost.setRemotePresent(rival !== null && rival.connected);
+    }
     this.raceGhost?.update(frameDelta, this.playerController.position);
   }
 
