@@ -157,14 +157,24 @@
   55%, 100% { opacity: 0; }
 }
 
+/* STICKY GLOBAL NAVIGATION.
+   The screen overlay is the ONE vertical scroll owner in this app (the WebGL
+   canvas sits behind a fixed, viewport-sized overlay). The nav therefore sticks
+   to the top of that scrollport, with an opaque PLAYHEAD background so it never
+   disappears above the page and never lets content show through it. */
 .import-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 40;
   display: flex;
   gap: 3px;
   margin-bottom: 14px;
   border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 6px;
+  padding: 6px 0 0;
   width: 100%;
   justify-content: center;
+  background: linear-gradient(180deg, rgba(3, 7, 12, 0.99) 72%, rgba(3, 7, 12, 0.93));
+  backdrop-filter: blur(10px);
 }
 
 .import-tab-btn {
@@ -180,9 +190,11 @@
   cursor: pointer;
   transition: all var(--motion-fast);
   text-transform: uppercase;
-  margin-bottom: -7px;
+  /* Sits ON the nav's own bottom border. The previous -7px punched the buttons
+     through the sticky background and broke the opaque header. */
+  margin-bottom: -1px;
   white-space: nowrap;
-  /* Six tabs must stay on ONE row: never shrink below content width, or the
+  /* Five tabs must stay on ONE row: never shrink below content width, or the
      labels overlap each other. */
   flex-shrink: 0;
 }
@@ -449,65 +461,8 @@
   gap: 12px;
 }
 
-.armory-decoder {
-  width: 100%;
-  border: 1px solid rgba(0, 240, 255, 0.45);
-  border-left: 4px solid var(--accent-color);
-  background: linear-gradient(105deg, rgba(0, 240, 255, 0.09), rgba(4, 8, 14, 0.96) 58%);
-  box-shadow: inset 0 0 30px rgba(0, 240, 255, 0.03), 0 12px 30px rgba(0, 0, 0, 0.35);
-  text-align: left;
-  margin-bottom: 12px;
-}
-
-.decoder-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid rgba(0, 240, 255, 0.18);
-}
-
-.decoder-kicker,
-.armory-catalog-heading {
-  color: #8092aa;
-  font: 600 0.55rem/1.2 var(--font-mono);
-  letter-spacing: 0.15em;
-}
-
-.decoder-header h2 {
-  margin: 2px 0 0;
-  color: #f4fbff;
-  font: 800 1.2rem/1 var(--font-mono);
-  letter-spacing: 0.13em;
-}
-
-.decoder-counter {
-  display: grid;
-  grid-template-columns: auto auto;
-  align-items: center;
-  gap: 10px;
-  color: #8ca0b8;
-  font: 600 0.58rem/1 var(--font-mono);
-  letter-spacing: 0.1em;
-}
-
-.decoder-counter strong {
-  min-width: 34px;
-  color: var(--accent-color);
-  font-size: 1.35rem;
-  text-align: right;
-  text-shadow: 0 0 12px var(--accent-glow);
-}
-
-.decoder-body {
-  display: grid;
-  grid-template-columns: minmax(170px, 1.2fr) minmax(260px, 1.7fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 14px 12px;
-}
-
+/* Decoder status readout. The full decoder panel no longer exists: the Armory
+   keeps only this compact state line plus the [ DECRYPT ] trigger. */
 .decoder-status {
   color: var(--accent-color);
   font: 800 0.78rem/1.2 var(--font-mono);
@@ -524,90 +479,123 @@
   font: 0.64rem/1.35 var(--font-mono);
 }
 
-.decoder-quality-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px 10px;
-  color: #718096;
-  font: 0.55rem/1.4 var(--font-mono);
-  letter-spacing: 0.055em;
-}
+/* ==========================================================================
+   ARMORY — LOADOUT INVENTORY
+   Compact header, ONE slot browser, dense tiles, ONE detail panel.
+   ========================================================================== */
 
-.decoder-quality-grid b { color: #c6d2e0; }
-.decoder-quality-grid span:last-child b { color: var(--accent-color); }
-
-.decoder-button {
-  min-width: 176px;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.decoder-button:disabled {
-  color: #607084;
-  border-color: #354253;
-  background: rgba(255, 255, 255, 0.025);
-  box-shadow: none;
-  cursor: default;
-}
-
-.armory-catalog-heading {
-  margin-top: 12px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--border-subtle);
+/* The Armory earns a wider console than the single-column reading panels: a
+   collection of 20-30 cosmetics must be scannable at 100% zoom. */
+.import-container.import-container--inventory {
+  max-width: 1240px;
   text-align: left;
 }
 
-/* ==========================================================================
-   ARMORY — compact header, collapsible decoder, sub-nav, responsive grid
-   ========================================================================== */
+/* The Armory starts at the top of the screen. Centred content would float the
+   sticky navigation into the middle of a tall viewport, and a padded scroll
+   container leaves a gap above the pinned nav that content can scroll through. */
+.screen.import-screen--top {
+  justify-content: flex-start;
+  padding-top: 0;
+}
 
+/* The pause-screen Armory is the same inventory in a dialog shell. */
+.armory-modal-console {
+  width: 94%;
+  max-width: 1100px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 18px 20px 14px;
+  background: rgba(8, 12, 18, 0.97);
+  border: 1px solid #1f293d;
+  border-left: 3px solid #00f0ff;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+}
+
+/* --- 1. Compact header: "what am I wearing?" ----------------------------- */
 .armory-header {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   flex-wrap: wrap;
-  padding: 10px 14px;
-  margin-bottom: 10px;
+  padding: 9px 12px;
+  margin-bottom: 8px;
   border: 1px solid var(--border-subtle);
   border-left: 3px solid var(--accent-color);
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.3);
 }
-.armory-header-title { display: flex; flex-direction: column; gap: 2px; }
+.armory-header-title { display: flex; flex-direction: column; gap: 1px; }
 .armory-kicker {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.55rem;
   letter-spacing: 0.16em;
   color: var(--accent-color);
 }
 .armory-title {
   font-family: var(--font-mono);
-  font-size: 1.05rem;
+  font-size: 0.98rem;
   font-weight: 800;
   letter-spacing: 0.16em;
   color: #eaf6ff;
   margin: 0;
 }
-.armory-equipped {
+.armory-loadout {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   margin-left: auto;
 }
-.armory-equipped-slot {
+.armory-loadout-slot {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 5px 10px;
+  gap: 7px;
+  padding: 4px 9px;
   border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.32);
   font-family: var(--font-mono);
 }
-.armory-equipped-slot span { font-size: 0.56rem; letter-spacing: 0.14em; color: #6d7885; }
-.armory-equipped-slot b { font-size: 0.72rem; font-weight: 500; color: #d7e3ef; }
+.armory-loadout-slot span { font-size: 0.53rem; letter-spacing: 0.14em; color: #6d7885; }
+.armory-loadout-slot b { font-size: 0.68rem; font-weight: 500; color: #d7e3ef; }
+
+.armory-drops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.armory-drops-count {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  color: #8fa0b5;
+  white-space: nowrap;
+}
+.armory-drops-count b { color: #4dffb8; font-size: 0.76rem; }
+.armory-decrypt-btn {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 5px 12px;
+  background: rgba(180, 124, 255, 0.1);
+  border: 1px solid #b47cff;
+  color: #d8b4fe;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.armory-decrypt-btn:hover:not(:disabled) {
+  background: #b47cff;
+  color: #0a0710;
+}
+.armory-decrypt-btn:disabled {
+  color: #5c6779;
+  border-color: #333c4b;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: default;
+}
 .armory-dev-toggle {
   display: none;
-  font-size: 0.66rem;
-  padding: 4px 10px;
+  font-size: 0.6rem;
+  padding: 4px 9px;
   background: rgba(0, 240, 255, 0.08);
   border: 1px solid #00f0ff;
   color: #00f0ff;
@@ -615,71 +603,60 @@
   font-family: var(--font-mono);
 }
 
-/* Compact decoder: ONE row by default. Detail is opt-in so the catalog is never
-   pushed off the first screen. */
-.armory-decoder-strip {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-left: 3px solid rgba(0, 240, 255, 0.45);
-  background: rgba(0, 0, 0, 0.3);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-}
-.decoder-strip-main {
+/* --- 2. Decoder state: ONE line, never permanent vertical real estate ---- */
+.armory-decoder-line {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid rgba(0, 240, 255, 0.35);
+  background: rgba(0, 0, 0, 0.24);
 }
-.decoder-strip-kicker {
+.armory-decoder-line .decoder-strip-kicker {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   letter-spacing: 0.16em;
   color: var(--accent-color);
   white-space: nowrap;
 }
-.decoder-strip-status {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  color: #d7e3ef;
-}
-.decoder-strip-pending {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.12em;
-  color: #6d7885;
+.armory-decoder-line .decoder-status {
+  font: 700 0.66rem/1.2 var(--font-mono);
+  letter-spacing: 0.1em;
   white-space: nowrap;
 }
-.decoder-strip-pending b { color: #4dffb8; font-size: 0.78rem; }
-.decoder-strip-main .decoder-button { margin-left: auto; }
-.decoder-toggle { font-size: 0.6rem; padding: 3px 9px; white-space: nowrap; }
-.decoder-strip-detail {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.armory-decoder-line .decoder-detail {
+  margin: 0;
+  color: #8d9db1;
+  font: 0.62rem/1.3 var(--font-mono);
 }
-.decoder-strip-detail.hidden { display: none; }
+.armory-view-reward {
+  margin-left: auto;
+  font-size: 0.58rem;
+  padding: 3px 9px;
+  white-space: nowrap;
+  color: #4dffb8;
+  border: 1px solid rgba(77, 255, 184, 0.5);
+  background: rgba(77, 255, 184, 0.08);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.armory-view-reward.hidden { display: none; }
 
-/* Segmented sub-navigation, shared shape for ARMORY and ONLINE. */
-.armory-subnav,
-.online-subnav {
+/* --- 3. Primary slot navigation ----------------------------------------- */
+.armory-slots {
   display: flex;
   gap: 4px;
-  margin-bottom: 12px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-subtle);
-  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
-.armory-subnav-btn,
-.online-subnav-btn {
+.armory-slot-btn {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  padding: 6px 12px;
+  letter-spacing: 0.12em;
+  padding: 7px 16px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-bottom: 2px solid transparent;
@@ -688,242 +665,344 @@
   white-space: nowrap;
   transition: all var(--motion-fast);
 }
-.armory-subnav-btn:hover,
-.online-subnav-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-}
-.armory-subnav-btn.active,
-.online-subnav-btn.active {
+.armory-slot-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.05); }
+.armory-slot-btn.active {
   color: #ffffff;
   border-color: var(--accent-color);
   border-bottom: 2px solid var(--accent-color);
   background: linear-gradient(180deg, rgba(0, 240, 255, 0.04), rgba(0, 240, 255, 0.12));
 }
 
-.armory-section.hidden { display: none; }
-.armory-subheading {
+/* --- 4. Filter bar ------------------------------------------------------- */
+.armory-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.armory-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.armory-filter-group.hidden { display: none; }
+.armory-filter-label {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.16em;
+  color: #55606e;
+  margin-right: 3px;
+}
+.armory-filter-btn {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  padding: 4px 9px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
+}
+.armory-filter-btn:hover { color: var(--text-primary); border-color: rgba(255, 255, 255, 0.2); }
+.armory-filter-btn.active {
+  color: #04121a;
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  font-weight: 700;
+}
+.armory-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  color: #55606e;
+  white-space: nowrap;
+}
+
+/* --- 5. Compact mastery status (mastery gloves only) -------------------- */
+.armory-mastery-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 2px solid #ffd700;
+  background: rgba(0, 0, 0, 0.24);
+}
+.armory-mastery-status.hidden { display: none; }
+.armory-mastery-rows { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.armory-mastery-chip {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  color: #8fa0b5;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.armory-mastery-chip:first-child { color: var(--accent-color); border-color: rgba(0, 240, 255, 0.3); }
+.armory-mastery-chip b { color: #d7e3ef; font-weight: 700; }
+
+/* --- 6. Two pane: inventory + ONE detail panel -------------------------- */
+.armory-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 14px;
+  align-items: start;
+}
+
+.armory-inventory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 7px;
+  align-content: start;
+}
+.armory-inventory-empty {
+  grid-column: 1 / -1;
+  padding: 26px 12px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  color: #55606e;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* COMPACT TILE — name, rarity, ownership marker, palette swatch.
+   No description, no source, no requirement, no actions: those live ONCE in the
+   detail panel. This is what keeps a 23-item collection scannable. */
+.armory-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 58px;
+  padding: 8px 9px 6px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--font-mono);
+  background: rgba(8, 12, 18, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid var(--tile-accent, #64748b);
+  color: #cbd5e1;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.armory-tile:hover {
+  background: rgba(14, 22, 32, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #cbd5e1;
+}
+.armory-tile.selected {
+  border-color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  background: rgba(18, 28, 40, 0.92);
+}
+.armory-tile.equipped {
+  border-color: var(--accent-color);
+  background: rgba(0, 240, 255, 0.1);
+}
+.armory-tile.locked { border-left-color: rgba(255, 255, 255, 0.13); }
+.armory-tile.locked .armory-tile-name { color: #7c8797; }
+.armory-tile.locked .armory-tile-swatch { opacity: 0.22; }
+
+.armory-tile-swatch {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  background: var(--tile-accent, #64748b);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.armory-tile-name {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+  color: #e2ecf6;
+  padding-right: 16px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.armory-tile-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.armory-tile-rarity {
+  font-size: 0.48rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tile-accent, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.armory-tile-mark { font-size: 0.62rem; line-height: 1; color: #4dffb8; }
+.armory-tile.locked .armory-tile-mark { color: #55606e; }
+
+/* --- 7. The ONE detail panel -------------------------------------------- */
+.armory-detail {
+  position: sticky;
+  top: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 2px solid var(--detail-accent, var(--accent-color));
+  background: rgba(5, 9, 15, 0.92);
+}
+.armory-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border-left: 3px solid var(--detail-accent, var(--accent-color));
+}
+.armory-detail-empty {
+  padding: 26px 12px;
+  text-align: center;
   font-family: var(--font-mono);
   font-size: 0.6rem;
   letter-spacing: 0.16em;
-  color: #7b8794;
-  margin: 10px 0 6px;
+  color: #55606e;
 }
-
-/* RESPONSIVE CARD GRID — explicit breakpoints so the layout is predictable.
-   3 columns on a wide desktop, 2 on a normal laptop, 1 when narrow. Never
-   overflows horizontally and never requires zooming out. */
-.armory-skins-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 8px;
-}
-@media (max-width: 1180px) {
-  .armory-skins-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 720px) {
-  .armory-skins-grid { grid-template-columns: minmax(0, 1fr); }
-}
-
-.signal-program-bars span {
-  flex: 1 1 0;
-  min-width: 1px;
-  height: 100%;
-  background: linear-gradient(180deg, var(--accent-color), rgba(0, 240, 255, 0.28));
-  opacity: var(--signal-level);
-  transform: scaleY(var(--signal-level));
-  transform-origin: center;
-}
-
-.showcase-badge {
+.armory-detail-rarity {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-size: 0.54rem;
   letter-spacing: 0.16em;
-  padding: 3px 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  text-transform: uppercase;
+  color: var(--detail-accent, var(--accent-color));
 }
-
-.showcase-badge.accent {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
-  background: var(--accent-dim);
-}
-
-.showcase-desc {
+.armory-detail-name {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  margin-bottom: 10px;
-  max-width: 98%;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1.15;
+  color: #f4fbff;
 }
-
-.showcase-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
+.armory-detail-codename {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  color: #8899aa;
 }
-
-/* PB GHOST action: only reads as actionable once a recorded replay exists. */
-#btn-showcase-race-pb {
-  border-color: rgba(157, 140, 255, 0.5);
-  color: #b8a8ff;
+.armory-detail-status {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
 }
-#btn-showcase-race-pb.available {
-  border-color: #9d8cff;
-  color: #d8ccff;
+.armory-detail-status.equipped { color: var(--accent-color); }
+.armory-detail-status.owned { color: #4dffb8; }
+.armory-detail-status.locked { color: #6d7885; }
+.armory-detail-desc {
+  font-size: 0.66rem;
+  line-height: 1.4;
+  color: #8a9bb2;
 }
-#btn-showcase-race-pb:disabled {
-  opacity: 0.5;
-  cursor: default;
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #6d7885;
-}
-
-/* Recorded-ghost finish comparison (results screen). */
-.results-ghost-race {
+.armory-detail-rows {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 14px 0 2px;
-  padding: 10px 14px;
-  border: 1px solid rgba(157, 140, 255, 0.32);
-  border-left: 3px solid #9d8cff;
-  background: rgba(20, 14, 34, 0.5);
-  font-family: var(--font-mono);
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-.results-ghost-race.hidden { display: none; }
-.results-ghost-race-head,
-.results-ghost-race-foot {
+.armory-detail-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 16px;
-}
-.results-ghost-race-label {
-  font-size: 0.68rem;
-  letter-spacing: 0.14em;
-  color: #b8a8ff;
-}
-.results-ghost-race-time {
-  font-size: 0.9rem;
-  letter-spacing: 0.06em;
-  color: #e8e2ff;
-}
-.results-ghost-race-delta-label {
-  font-size: 0.62rem;
-  letter-spacing: 0.14em;
-  color: #6d7885;
-}
-.results-ghost-race-delta {
-  font-size: 0.82rem;
-  letter-spacing: 0.06em;
-}
-.results-ghost-race-delta.ahead { color: #00ff88; }
-.results-ghost-race-delta.behind { color: #ff3366; }
-
-/* ==========================================================================
-   MASTERY — proof-of-skill gloves (earned, never random)
-   ========================================================================== */
-
-.mastery-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-/* Signal Pack global progress: raw counts, never an invented XP scalar. */
-.showcase-mastery-strip {
-  display: flex;
-  flex-wrap: wrap;
   gap: 10px;
-  margin-top: 8px;
-}
-.showcase-mastery-chip {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  color: #8fa2b8;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 3px 10px;
-  background: rgba(0, 0, 0, 0.28);
 }
-
-.mastery-summary {
-  font-family: var(--font-mono);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.3);
-  padding: 10px 14px;
-  margin: 10px 0 12px;
-  max-width: 360px;
+.armory-detail-row span {
+  font-size: 0.52rem;
+  letter-spacing: 0.14em;
+  color: #55606e;
+  white-space: nowrap;
 }
-.mastery-summary-title {
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
-  color: var(--accent-color);
-  margin-bottom: 6px;
+.armory-detail-row b {
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: #c6d2e0;
+  text-align: right;
 }
-.mastery-summary-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 0.7rem;
-  padding: 1px 0;
-}
-.mastery-summary-row span { color: #6d7885; letter-spacing: 0.08em; }
-.mastery-summary-row b { color: #d7e3ef; font-weight: 500; }
-.mastery-sync-notice {
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  color: #b8a8ff;
-  border-left: 2px solid #9d8cff;
-  padding: 3px 8px;
-  margin-bottom: 6px;
-}
-
-/* Glove cards share the armory grid; this rule is kept for the standalone
-   modal armory surface. */
-.mastery-gloves-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: 12px;
-  margin-top: 4px;
-}
-
-.mastery-glove-card {
+.armory-detail-actions {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-left: 3px solid #444c5c;
-  background: var(--bg-surface-elevated, rgba(10, 14, 21, 0.6));
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.armory-action-btn {
+  width: 100%;
   font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #c6d2e0;
+  cursor: pointer;
+  transition: all var(--motion-fast);
 }
-.mastery-glove-card[data-state='UNLOCKED'] { border-left-color: var(--accent-color); }
-.mastery-glove-card.equipped { border-color: var(--accent-color); background: var(--accent-dim); }
-.mastery-glove-card.previewing { border-left-color: #ffdd00; }
+.armory-action-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+.armory-action-btn.primary {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+.armory-action-btn.primary:hover:not(:disabled) {
+  background: var(--accent-color);
+  color: #04121a;
+}
+.armory-action-btn:disabled {
+  color: #5c6779;
+  border-color: #333c4b;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: default;
+}
 
-.mastery-glove-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
+/* --- 8. Narrow screens: no squeezed side panel --------------------------- */
+@media (max-width: 1080px) {
+  .armory-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Below the two-pane breakpoint the detail panel leads, so a selection is
+     always immediately visible without hunting for it. */
+  .armory-detail {
+    position: static;
+    order: -1;
+  }
 }
-.mastery-glove-name { font-size: 0.88rem; font-weight: 700; color: #d7e3ef; }
-.mastery-glove-tier { font-size: 0.62rem; color: #6d7885; letter-spacing: 0.1em; }
-.mastery-glove-codename { font-size: 0.66rem; color: #8899aa; letter-spacing: 0.08em; }
-.mastery-glove-req { font-size: 0.68rem; color: #9fb0c8; letter-spacing: 0.06em; }
-.mastery-glove-status { font-size: 0.7rem; letter-spacing: 0.08em; margin-top: 2px; }
-.mastery-glove-status.unlocked { color: #4dffb8; }
-.mastery-glove-status.locked { color: #6d7885; }
-.mastery-glove-action { align-self: flex-start; margin-top: 4px; }
+@media (max-width: 620px) {
+  .armory-inventory {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+  .armory-header { gap: 10px; }
+  .armory-loadout { margin-left: 0; }
+  .armory-count { margin-left: 0; }
+}
 
 /* Results-screen mastery progress + restrained unlock reveal. */
 .results-mastery {
@@ -2161,8 +2240,6 @@ option:hover, option:focus, option:checked {
 @media (max-width: 900px) {
   .screen { padding: 24px; }
   .terminal-top-telemetry { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .decoder-body { grid-template-columns: 1fr 1.2fr; }
-  .decoder-button { grid-column: 1 / -1; width: 100%; }
   .import-tabs { flex-wrap: wrap; }
   .import-tab-btn { flex: 1 1 42%; }
   .analysis-track-title { font-size: clamp(1.65rem, 6vw, 2.35rem); }
@@ -2186,11 +2263,6 @@ option:hover, option:focus, option:checked {
   .brand-secondary { letter-spacing: 0.22em; }
   .system-status-heading { font-size: 0.49rem; letter-spacing: 0.07em; }
   .lab-control-grid { grid-template-columns: 1fr; }
-  .decoder-header { align-items: flex-end; }
-  .decoder-body { grid-template-columns: 1fr; }
-  .decoder-button { grid-column: auto; }
-  .decoder-quality-grid { grid-template-columns: 1fr 1fr; }
-  .armory-skins-grid { grid-template-columns: minmax(0, 1fr); }
   .import-tabs { display: grid; grid-template-columns: 1fr 1fr; }
   .import-tab-btn { padding-inline: 5px; letter-spacing: 0.08em; }
   .showcase-actions,

@@ -494,14 +494,19 @@ describe('Decoder and Armory presentation', () => {
     expect(modal).not.toMatch(/reward\.skin\.(name|codename|rarity)/);
   });
 
-  it('the Armory separates the two glove families with labelled headings', () => {
+  it('the Armory separates the two glove families as filterable sources', () => {
     const screen = read('src/ui/ImportScreen.ts');
-    expect(screen).toMatch(/SIGNAL DROPS \/\/ RANDOM REWARDS/);
-    expect(screen).toMatch(/MASTERY \/\/ EARNED ACHIEVEMENTS/);
-    expect(screen).toMatch(/SOURCE \/\/ SIGNAL DROP/);
-    expect(screen).toMatch(/SOURCE \/\/ MASTERY/);
-    expect(screen).toMatch(/drop-gloves-grid/);
-    expect(screen).toMatch(/mastery-gloves-grid/);
+    const model = read('src/ui/ArmoryInventory.ts');
+    // The glove slot carries an explicit family filter...
+    expect(screen).toMatch(/data-glove-family="drop"/);
+    expect(screen).toMatch(/data-glove-family="mastery"/);
+    // ...and each item states its source honestly, in the model.
+    expect(model).toMatch(/source: 'SIGNAL DROP'/);
+    expect(model).toMatch(/source: 'MASTERY'/);
+    // The detail panel surfaces that source to the player.
+    expect(screen).toMatch(/\['SOURCE', item\.source\]/);
+    expect(screen).toMatch(/id="armory-inventory"/);
+    expect(screen).toMatch(/id="armory-detail"/);
   });
 
   it('does not add a seventh navigation tab', () => {

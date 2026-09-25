@@ -13,6 +13,18 @@ import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { getMasteryGlove } from '../mastery/MasteryLadder';
 import { DROP_GLOVES, getDropGlove, isDropGloveId } from '../viewmodel/DropGloveCatalog';
 import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
+import {
+  ArmoryItem,
+  ArmorySlot,
+  ArmorySort,
+  GloveFamilyFilter,
+  OwnershipFilter,
+  buildArmoryItems,
+  filterArmoryItems,
+  inventoryCountLabel,
+  isEquippable,
+  resolveSelection
+} from './ArmoryInventory';
 
 /** Two-digit zero padding for mastery counters. */
 function pad2(n: number): string {
@@ -93,25 +105,61 @@ export class ImportScreen {
   }
 
   /**
-   * ARMORY internal sub-navigation.
+   * ARMORY primary slot navigation.
    *
-   * Only ONE cosmetic family is expanded at a time, so the page never becomes a
-   * wall of stacked sections.
+   * Exactly ONE equipment slot is browsed at a time. Knives and gloves are
+   * different equipment, so they are different slots — not two sections of one
+   * page. The glove slot carries its own family filter.
    */
-  public switchArmorySection(section: 'knives' | 'drops' | 'mastery'): void {
-    this.armorySection = section;
-    for (const btn of this.armorySubnavBtns) {
-      const active = btn.dataset.armorySection === section;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    }
-    for (const panel of this.armorySectionPanels) {
-      panel.classList.toggle('hidden', panel.dataset.armoryPanel !== section);
-    }
+  public switchArmorySlot(slot: ArmorySlot): void {
+    this.armorySlot = slot;
+    this.armorySelectedId = null;
+    this.renderArmory();
   }
 
-  public getArmorySection(): 'knives' | 'drops' | 'mastery' {
-    return this.armorySection;
+  public getArmorySlot(): ArmorySlot {
+    return this.armorySlot;
+  }
+
+  /** Secondary glove filter: SIGNAL DROP and MASTERY share the glove slot. */
+  public setArmoryGloveFamily(family: GloveFamilyFilter): void {
+    this.armoryGloveFamily = family;
+    this.armorySelectedId = null;
+    this.renderArmory();
+  }
+
+  public getArmoryGloveFamily(): GloveFamilyFilter {
+    return this.armoryGloveFamily;
+  }
+
+  public setArmoryOwnershipFilter(ownership: OwnershipFilter): void {
+    this.armoryOwnership = ownership;
+    this.armorySelectedId = null;
+    this.renderArmory();
+  }
+
+  public getArmoryOwnershipFilter(): OwnershipFilter {
+    return this.armoryOwnership;
+  }
+
+  public setArmorySort(sort: ArmorySort): void {
+    this.armorySort = sort;
+    this.renderArmory();
+  }
+
+  public getArmorySort(): ArmorySort {
+    return this.armorySort;
+  }
+
+  /** The item currently shown in the detail panel, if any. */
+  public getArmorySelectedId(): string | null {
+    return this.armorySelectedId;
+  }
+
+  /** Selects a tile. Selection never equips; it only updates the detail panel. */
+  public selectArmoryItem(id: string): void {
+    this.armorySelectedId = id;
+    this.renderArmorySelection();
   }
 
   private showcasePanel: HTMLElement;
@@ -121,14 +169,18 @@ export class ImportScreen {
   private onlineSubnavLeaderboard: HTMLButtonElement;
   private raceHostElem: HTMLElement;
   private leaderboardHostElem: HTMLElement;
-  /** ARMORY internal sub-nav. */
-  private armorySubnavBtns: HTMLButtonElement[] = [];
-  private armorySectionPanels: HTMLElement[] = [];
-  private armorySection: 'knives' | 'drops' | 'mastery' = 'knives';
+  /** ARMORY inventory: one slot browser, filters, and a single detail panel. */
+  private armorySlotBtns: HTMLButtonElement[] = [];
+  private armoryFilterBtns: HTMLButtonElement[] = [];
+  private armoryGloveFilterGroup: HTMLElement;
+  private armoryInventoryElem: HTMLElement;
+  private armoryDetailElem: HTMLElement;
+  private armoryCountElem: HTMLElement;
+  private armoryMasteryStatusElem: HTMLElement;
+  private armoryMasteryRowsElem: HTMLElement;
+  private armoryViewRewardBtn: HTMLButtonElement;
   private armoryEquippedKnifeElem: HTMLElement;
   private armoryEquippedGloveElem: HTMLElement;
-  private armoryDecoderDetail: HTMLElement;
-  private armoryDecoderToggleBtn: HTMLButtonElement;
   private labPanel: HTMLElement;
   private armoryPanel: HTMLElement;
   private labMusicSelect: HTMLSelectElement;
@@ -156,17 +208,22 @@ export class ImportScreen {
   private browseBtn: HTMLButtonElement;
 
   // Armory Elements
-  private armoryGridElem: HTMLElement;
-  private masterySummaryElem: HTMLElement;
-  private masteryGlovesGridElem: HTMLElement;
   private masteryDevPreviewBtn: HTMLButtonElement;
-  private dropGlovesGridElem: HTMLElement;
   private showcaseMasteryStripElem: HTMLElement;
   private armoryDevToggleBtn: HTMLButtonElement;
   private decoderPendingElem: HTMLElement;
   private decoderStatusElem: HTMLElement;
   private decoderDetailElem: HTMLElement;
   private decoderButton: HTMLButtonElement;
+
+  // Armory browsing state. Exactly one slot is browsed at a time.
+  private armorySlot: ArmorySlot = 'karambit';
+  private armoryGloveFamily: GloveFamilyFilter = 'all';
+  private armoryOwnership: OwnershipFilter = 'all';
+  private armorySort: ArmorySort = 'rarity';
+  private armorySelectedId: string | null = null;
+  /** Built once per render; filtering never re-reads ownership. */
+  private armoryItems: ArmoryItem[] = [];
 
   // State
   private catalog: TrackCatalogEntry[];
@@ -309,75 +366,77 @@ export class ImportScreen {
           </div>
         </div>
 
-        <!-- 04: KARAMBIT ARMORY PANEL -->
+        <!-- 04: ARMORY — LOADOUT INVENTORY.
+             Compact header, ONE equipment slot at a time, a dense tile grid and
+             ONE detail panel. Browsing is metadata-only: no tile ever loads a
+             cosmetic texture or video. -->
         <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
-          <!-- 1. COMPACT HEADER: identity + equipped state, never huge. -->
+          <!-- 1. COMPACT HEADER: what am I wearing + how many drops are waiting. -->
           <div class="armory-header">
             <div class="armory-header-title">
-              <div class="armory-kicker">[ARMORY] COSMETIC CONTROL</div>
+              <div class="armory-kicker">[ARMORY] LOADOUT INVENTORY</div>
               <h2 class="armory-title">ARMORY</h2>
             </div>
-            <div class="armory-equipped" aria-label="Currently equipped">
-              <div class="armory-equipped-slot">
+            <div class="armory-loadout" aria-label="Current loadout">
+              <div class="armory-loadout-slot">
                 <span>KARAMBIT</span><b id="armory-equipped-knife">--</b>
               </div>
-              <div class="armory-equipped-slot">
+              <div class="armory-loadout-slot">
                 <span>GLOVES</span><b id="armory-equipped-glove">--</b>
               </div>
+            </div>
+            <div class="armory-drops">
+              <span class="armory-drops-count">SIGNAL DROPS // <b id="decoder-pending">00</b></span>
+              <button id="btn-decode-signal" class="armory-decrypt-btn" type="button" title="Rank signal quality: BRONZE signal · SILVER enhanced odds · GOLD high-grade · DIAMOND pristine">[ DECRYPT ]</button>
             </div>
             <button id="btn-armory-dev-toggle" class="terminal-btn-subtle armory-dev-toggle" type="button">DEV PREVIEW: OFF</button>
           </div>
 
-          <!-- 2. COMPACT DECODER STRIP: one row by default, detail on demand.
-               It must never push the cosmetic catalog down the page. -->
-          <section class="armory-decoder-strip" aria-labelledby="signal-decoder-title">
-            <div class="decoder-strip-main">
-              <span class="decoder-strip-kicker" id="signal-decoder-title">SIGNAL DECODER</span>
-              <span class="decoder-strip-status" id="decoder-status">NO SIGNAL AVAILABLE</span>
-              <span class="decoder-strip-pending">PENDING <b id="decoder-pending">0</b></span>
-              <button id="btn-decode-signal" class="btn-hero btn-terminal-exec decoder-button" type="button">[ NO SIGNAL AVAILABLE ]</button>
-              <button id="btn-armory-decoder-toggle" class="terminal-btn-subtle decoder-toggle" type="button" aria-expanded="false">DETAIL</button>
-            </div>
-            <div class="decoder-strip-detail hidden" id="armory-decoder-detail">
-              <div id="decoder-detail" class="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</div>
-              <div class="decoder-quality-grid" aria-label="Rank signal quality">
-                <span><b>BRONZE</b> SIGNAL</span>
-                <span><b>SILVER</b> ENHANCED ODDS</span>
-                <span><b>GOLD</b> HIGH-GRADE</span>
-                <span><b>DIAMOND</b> PRISTINE</span>
-              </div>
-            </div>
-          </section>
-
-          <!-- 3. ARMORY SUB-NAV: only one cosmetic family is expanded at a time. -->
-          <div class="armory-subnav" role="tablist" aria-label="Armory sections">
-            <button class="armory-subnav-btn active" type="button" role="tab" aria-selected="true" data-armory-section="knives">[ KNIVES ]</button>
-            <button class="armory-subnav-btn" type="button" role="tab" aria-selected="false" data-armory-section="drops">[ DROP GLOVES ]</button>
-            <button class="armory-subnav-btn" type="button" role="tab" aria-selected="false" data-armory-section="mastery">[ MASTERY GLOVES ]</button>
+          <!-- 2. DECODER STATE: ONE line. The decoder experience itself opens from
+               [ DECRYPT ] and must never consume permanent Armory height. -->
+          <div class="armory-decoder-line" id="armory-decoder-line">
+            <span class="decoder-strip-kicker">SIGNAL DECODER</span>
+            <span class="decoder-status" id="decoder-status">NO SIGNAL AVAILABLE</span>
+            <span class="decoder-detail" id="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</span>
+            <button id="btn-armory-view-reward" class="terminal-btn-subtle armory-view-reward hidden" type="button">[ VIEW IN ARMORY ]</button>
           </div>
 
-          <!-- 4. SECTIONS: responsive card grids, one visible at a time. -->
-          <div class="armory-section" data-armory-panel="knives">
-            <div class="armory-catalog-heading">[KARAMBIT] CHALLENGE UNLOCKS // COSMETIC CATALOG</div>
-            <div id="armory-skins-grid" class="armory-skins-grid">
-              <!-- Populated dynamically via renderArmory() -->
-            </div>
+          <!-- 3. PRIMARY SLOT NAV: exactly one equipment slot is browsed at once. -->
+          <div class="armory-slots" role="tablist" aria-label="Equipment slot">
+            <button class="armory-slot-btn active" type="button" role="tab" aria-selected="true" data-armory-slot="karambit">[ KARAMBIT ]</button>
+            <button class="armory-slot-btn" type="button" role="tab" aria-selected="false" data-armory-slot="gloves">[ GLOVES ]</button>
           </div>
 
-          <div class="armory-section hidden" data-armory-panel="drops">
-            <div class="armory-catalog-heading">
-              <span>[GLOVES] SIGNAL DROPS // RANDOM REWARDS</span>
+          <!-- 4. FILTER BAR: glove family (gloves only) + ownership + sort. -->
+          <div class="armory-filters">
+            <div class="armory-filter-group hidden" id="armory-glove-filters" aria-label="Glove family">
+              <button class="armory-filter-btn active" type="button" data-glove-family="all">ALL</button>
+              <button class="armory-filter-btn" type="button" data-glove-family="drop">SIGNAL DROP</button>
+              <button class="armory-filter-btn" type="button" data-glove-family="mastery">MASTERY</button>
             </div>
-            <div id="drop-gloves-grid" class="armory-skins-grid"></div>
+            <div class="armory-filter-group" aria-label="Ownership filter">
+              <button class="armory-filter-btn active" type="button" data-owned-filter="all">ALL</button>
+              <button class="armory-filter-btn" type="button" data-owned-filter="owned">OWNED</button>
+              <button class="armory-filter-btn" type="button" data-owned-filter="locked">LOCKED</button>
+            </div>
+            <div class="armory-filter-group" aria-label="Sort order">
+              <span class="armory-filter-label">SORT</span>
+              <button class="armory-filter-btn active" type="button" data-armory-sort="rarity">RARITY</button>
+              <button class="armory-filter-btn" type="button" data-armory-sort="name">NAME</button>
+            </div>
+            <span class="armory-count" id="armory-count">00 ITEMS</span>
           </div>
 
-          <div class="armory-section hidden" data-armory-panel="mastery">
-            <div class="armory-catalog-heading">
-              <span>[GLOVES] MASTERY // EARNED ACHIEVEMENTS</span>
-              <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
-            </div>
-            <div class="mastery-summary" id="mastery-summary"></div>
-            <div id="mastery-gloves-grid" class="armory-skins-grid"></div>
+          <!-- 5. MASTERY STATUS: compact, and only while browsing mastery gloves. -->
+          <div class="armory-mastery-status hidden" id="armory-mastery-status">
+            <div class="armory-mastery-rows" id="armory-mastery-rows"></div>
+            <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
+          </div>
+
+          <!-- 6. TWO PANE: dense inventory + ONE detail panel. -->
+          <div class="armory-body">
+            <div id="armory-inventory" class="armory-inventory" role="listbox" aria-label="Cosmetics"></div>
+            <aside class="armory-detail" id="armory-detail" aria-live="polite"></aside>
           </div>
         </div>
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
@@ -428,30 +487,43 @@ export class ImportScreen {
       this.switchOnlineSection('leaderboard')
     );
 
-    // ARMORY internal sub-nav + compact header + collapsible decoder detail.
-    this.armorySubnavBtns = [
-      ...this.element.querySelectorAll<HTMLButtonElement>('.armory-subnav-btn')
+    // ARMORY: slot nav, filters, inventory grid and the single detail panel.
+    this.armorySlotBtns = [
+      ...this.element.querySelectorAll<HTMLButtonElement>('.armory-slot-btn')
     ];
-    this.armorySectionPanels = [
-      ...this.element.querySelectorAll<HTMLElement>('[data-armory-panel]')
-    ];
-    for (const btn of this.armorySubnavBtns) {
+    for (const btn of this.armorySlotBtns) {
       btn.addEventListener('click', () => {
-        const section = btn.dataset.armorySection as 'knives' | 'drops' | 'mastery';
-        this.switchArmorySection(section);
+        this.switchArmorySlot(btn.dataset.armorySlot as ArmorySlot);
+      });
+    }
+    this.armoryFilterBtns = [
+      ...this.element.querySelectorAll<HTMLButtonElement>('.armory-filter-btn')
+    ];
+    for (const btn of this.armoryFilterBtns) {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.gloveFamily) {
+          this.setArmoryGloveFamily(btn.dataset.gloveFamily as GloveFamilyFilter);
+        } else if (btn.dataset.ownedFilter) {
+          this.setArmoryOwnershipFilter(btn.dataset.ownedFilter as OwnershipFilter);
+        } else if (btn.dataset.armorySort) {
+          this.setArmorySort(btn.dataset.armorySort as ArmorySort);
+        }
       });
     }
     this.armoryEquippedKnifeElem = this.element.querySelector('#armory-equipped-knife') as HTMLElement;
     this.armoryEquippedGloveElem = this.element.querySelector('#armory-equipped-glove') as HTMLElement;
-    this.armoryDecoderDetail = this.element.querySelector('#armory-decoder-detail') as HTMLElement;
-    this.armoryDecoderToggleBtn = this.element.querySelector(
-      '#btn-armory-decoder-toggle'
+    this.armoryGloveFilterGroup = this.element.querySelector('#armory-glove-filters') as HTMLElement;
+    this.armoryInventoryElem = this.element.querySelector('#armory-inventory') as HTMLElement;
+    this.armoryDetailElem = this.element.querySelector('#armory-detail') as HTMLElement;
+    this.armoryCountElem = this.element.querySelector('#armory-count') as HTMLElement;
+    this.armoryMasteryStatusElem = this.element.querySelector(
+      '#armory-mastery-status'
+    ) as HTMLElement;
+    this.armoryMasteryRowsElem = this.element.querySelector('#armory-mastery-rows') as HTMLElement;
+    this.armoryViewRewardBtn = this.element.querySelector(
+      '#btn-armory-view-reward'
     ) as HTMLButtonElement;
-    this.armoryDecoderToggleBtn.addEventListener('click', () => {
-      const open = this.armoryDecoderDetail.classList.toggle('hidden') === false;
-      this.armoryDecoderToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      this.armoryDecoderToggleBtn.textContent = open ? 'HIDE' : 'DETAIL';
-    });
+    this.armoryViewRewardBtn.addEventListener('click', () => this.viewDecoderRewardInArmory());
 
     const catalogEntries = this.catalog.map((t) => ({
       id: t.id,
@@ -491,11 +563,7 @@ export class ImportScreen {
     this.browseBtn = this.element.querySelector('#btn-browse-file') as HTMLButtonElement;
 
     // Armory elements
-    this.armoryGridElem = this.element.querySelector('#armory-skins-grid') as HTMLElement;
-    this.masterySummaryElem = this.element.querySelector('#mastery-summary') as HTMLElement;
-    this.masteryGlovesGridElem = this.element.querySelector('#mastery-gloves-grid') as HTMLElement;
     this.masteryDevPreviewBtn = this.element.querySelector('#btn-mastery-dev-preview') as HTMLButtonElement;
-    this.dropGlovesGridElem = this.element.querySelector('#drop-gloves-grid') as HTMLElement;
     this.showcaseMasteryStripElem = this.element.querySelector('#showcase-mastery-strip') as HTMLElement;
     this.armoryDevToggleBtn = this.element.querySelector('#btn-armory-dev-toggle') as HTMLButtonElement;
     this.decoderPendingElem = this.element.querySelector('#decoder-pending') as HTMLElement;
@@ -687,200 +755,85 @@ export class ImportScreen {
    * Raw accomplishment counts, not an invented XP scalar. A Diamond track counts
    * toward every lower tier, so these numbers only ever go up.
    */
+  /**
+   * Showcase mastery chips (Signal Pack tab only).
+   *
+   * The full mastery breakdown is no longer permanent Armory furniture: it
+   * appears in the Armory only while browsing MASTERY gloves.
+   */
   public renderMasterySummary(): void {
-    const evaluation = masteryGloveSystem.evaluate();
-    const s = evaluation.summary;
-
-    if (this.showcaseMasteryStripElem) {
-      const parts = [
-        `FULL SIGNAL PACK // ${pad2(s.cleared)} / ${pad2(s.total)} CLEARED`,
-        `GOLD MASTERY // ${pad2(s.goldPlus)} / ${pad2(s.total)}`,
-        `DIAMOND MASTERY // ${pad2(s.diamond)} / ${pad2(s.total)}`
-      ];
-      this.showcaseMasteryStripElem.innerHTML = parts
-        .map((p) => `<span class="showcase-mastery-chip">${p}</span>`)
-        .join('');
-    }
-
-    if (this.masterySummaryElem) {
-      const rows: Array<[string, number]> = [
-        ['CLEARED', s.cleared],
-        ['BRONZE+', s.bronzePlus],
-        ['SILVER+', s.silverPlus],
-        ['GOLD+', s.goldPlus],
-        ['DIAMOND', s.diamond]
-      ];
-      // First launch after mastery shipped: report historical recognition in ONE
-      // compact line rather than firing a burst of reveals.
-      const reconcile = masteryGloveSystem.getLastReconcile();
-      const syncNotice =
-        reconcile && reconcile.firstRecognition && reconcile.newlyRecognized.length > 1
-          ? `<div class="mastery-sync-notice">MASTERY SYNC // ${reconcile.newlyRecognized.length} ACHIEVEMENTS RECOGNIZED</div>`
-          : '';
-      this.masterySummaryElem.innerHTML =
-        `<div class="mastery-summary-title">SIGNAL MASTERY</div>` +
-        syncNotice +
-        rows
-          .map(
-            ([label, value]) =>
-              `<div class="mastery-summary-row"><span>${label}</span><b>${pad2(value)} / ${pad2(
-                s.total
-              )}</b></div>`
-          )
-          .join('');
-    }
+    if (!this.showcaseMasteryStripElem) return;
+    const s = masteryGloveSystem.evaluate().summary;
+    const parts = [
+      `FULL SIGNAL PACK // ${pad2(s.cleared)} / ${pad2(s.total)} CLEARED`,
+      `GOLD MASTERY // ${pad2(s.goldPlus)} / ${pad2(s.total)}`,
+      `DIAMOND MASTERY // ${pad2(s.diamond)} / ${pad2(s.total)}`
+    ];
+    this.showcaseMasteryStripElem.innerHTML = parts
+      .map((p) => `<span class="showcase-mastery-chip">${p}</span>`)
+      .join('');
   }
 
+  // =========================================================================
+  // ARMORY — LOADOUT INVENTORY
+  // =========================================================================
+
   /**
-   * SIGNAL DROP GLOVES.
+   * Rebuild the browsable item list from authoritative ownership.
    *
-   * Clearly labelled as random rewards and kept SEPARATE from the mastery list.
-   * Ownership comes from the drop ledger; nothing here can affect mastery
-   * eligibility. Locked entries are still previewable so the player can see what
-   * exists.
+   * This is the ONLY place the Armory reads ownership, and it reads METADATA
+   * only: no cosmetic texture, video or preview handle is touched. Loading a
+   * real asset stays a PREVIEW / EQUIP-time concern.
    */
-  public renderDropGloves(): void {
-    if (!this.dropGlovesGridElem) return;
-    const equippedId = masteryGloveSystem.getEquippedGloveId();
-    const previewId = masteryGloveSystem.getDevPreviewGloveId();
-    this.dropGlovesGridElem.innerHTML = '';
+  private buildArmoryItems(): ArmoryItem[] {
+    return buildArmoryItems({
+      skins: this.skinSystem.getSkins(),
+      skinOwned: (id) => this.skinSystem.isSkinUnlocked(id),
+      skinProgress: (id) => this.skinSystem.getSkinProgress(id).label,
+      equippedKnifeId: this.skinSystem.getEquippedSkinId(),
+      dropGloves: DROP_GLOVES,
+      dropOwned: (id) => this.skinSystem.isDropGloveOwned(id),
+      masteryGloves: masteryGloveSystem.evaluate().gloves,
+      equippedGloveId: masteryGloveSystem.getEquippedGloveId()
+    });
+  }
 
-    for (const glove of DROP_GLOVES) {
-      const owned = this.skinSystem.isDropGloveOwned(glove.id);
-      const isEquipped = glove.id === equippedId;
-      const isPreview = glove.id === previewId;
+  private visibleArmoryItems(): ArmoryItem[] {
+    return filterArmoryItems(this.armoryItems, {
+      slot: this.armorySlot,
+      gloveFamily: this.armoryGloveFamily,
+      ownership: this.armoryOwnership,
+      sort: this.armorySort
+    });
+  }
 
-      const card = document.createElement('div');
-      card.className = 'mastery-glove-card';
-      card.dataset.gloveId = glove.id;
-      card.dataset.state = owned ? 'UNLOCKED' : 'LOCKED';
-      if (isEquipped) card.classList.add('equipped');
-      if (isPreview) card.classList.add('previewing');
+  /** Full Armory render: header, chrome, inventory and detail. */
+  public renderArmory(): void {
+    this.armoryItems = this.buildArmoryItems();
+    this.renderArmoryHeader();
+    this.renderArmorySelection();
+    this.renderSignalDecoder();
+  }
 
-      const status = isEquipped
-        ? 'EQUIPPED'
-        : owned
-          ? 'UNLOCKED'
-          : 'LOCKED // SIGNAL DROP';
-
-      card.innerHTML =
-        `<div class="mastery-glove-head">` +
-        `<span class="mastery-glove-name">${glove.name}</span>` +
-        `<span class="mastery-glove-tier">${glove.rarity}</span>` +
-        `</div>` +
-        `<div class="mastery-glove-codename">${glove.codename}</div>` +
-        `<div class="mastery-glove-req">SOURCE // SIGNAL DROP</div>` +
-        `<div class="mastery-glove-status ${owned ? 'unlocked' : 'locked'}">${status}</div>`;
-
-      const action = document.createElement('button');
-      action.className = 'terminal-btn-subtle mastery-glove-action';
-      if (isEquipped) {
-        action.textContent = '[ EQUIPPED ]';
-        action.disabled = true;
-      } else if (owned) {
-        action.textContent = '[ EQUIP ]';
-        action.addEventListener('click', () => {
-          masteryGloveSystem.equipAnyGlove(glove.id);
-          this.renderArmory();
-        });
-      } else {
-        action.textContent = '[ PREVIEW ]';
-        action.addEventListener('click', () => {
-          masteryGloveSystem.setDevPreview(isPreview ? null : glove.id);
-          this.renderArmory();
-        });
-      }
-      card.appendChild(action);
-      this.dropGlovesGridElem.appendChild(card);
-    }
+  /** Re-render the browsing surface WITHOUT re-reading ownership. */
+  private renderArmorySelection(): void {
+    const visible = this.visibleArmoryItems();
+    this.renderArmoryChrome(visible);
+    this.renderArmoryInventory(visible);
+    this.renderArmoryDetail(visible);
   }
 
   /**
-   * MASTERY GLOVES.
+   * COMPACT HEADER — "what am I currently wearing?"
    *
-   * Locked gloves are always previewable and their requirement is never hidden,
-   * so a player always understands exactly what they need to accomplish. Gloves
-   * are never random and never appear in the Signal Decoder.
-   */
-  public renderMasteryGloves(): void {
-    if (!this.masteryGlovesGridElem) return;
-    const evaluation = masteryGloveSystem.evaluate();
-    const equippedId = masteryGloveSystem.getEquippedGloveId();
-    const previewId = masteryGloveSystem.getDevPreviewGloveId();
-
-    this.masteryDevPreviewBtn.textContent = previewId
-      ? `DEV PREVIEW: ${previewId}`
-      : 'DEV // PREVIEW GLOVE';
-    this.masteryDevPreviewBtn.style.color = previewId ? '#ffdd00' : '#00f0ff';
-    this.masteryDevPreviewBtn.style.borderColor = previewId ? '#ffdd00' : '#00f0ff';
-
-    this.masteryGlovesGridElem.innerHTML = '';
-
-    for (const status of evaluation.gloves) {
-      const d = status.definition;
-      const isEquipped = d.id === equippedId;
-      const isPreview = d.id === previewId;
-      const unlocked = status.satisfied;
-
-      const card = document.createElement('div');
-      card.className = 'mastery-glove-card';
-      card.dataset.gloveId = d.id;
-      card.dataset.state = unlocked ? 'UNLOCKED' : 'LOCKED';
-      if (isEquipped) card.classList.add('equipped');
-      if (isPreview) card.classList.add('previewing');
-
-      const statusLine = isEquipped
-        ? 'EQUIPPED'
-        : unlocked
-          ? 'UNLOCKED'
-          : `LOCKED // ${status.progressLabel}`;
-
-      card.innerHTML =
-        `<div class="mastery-glove-head">` +
-        `<span class="mastery-glove-name">${d.name}</span>` +
-        `<span class="mastery-glove-tier">T${d.tier}</span>` +
-        `</div>` +
-        `<div class="mastery-glove-codename">${d.codename}</div>` +
-        `<div class="mastery-glove-req">SOURCE // MASTERY</div>` +
-        `<div class="mastery-glove-req">${d.requirementLabel}</div>` +
-        `<div class="mastery-glove-status ${unlocked ? 'unlocked' : 'locked'}">${statusLine}</div>`;
-
-      const action = document.createElement('button');
-      action.className = 'terminal-btn-subtle mastery-glove-action';
-      if (isEquipped) {
-        action.textContent = '[ EQUIPPED ]';
-        action.disabled = true;
-      } else if (unlocked) {
-        action.textContent = '[ EQUIP ]';
-        action.addEventListener('click', () => {
-          masteryGloveSystem.equipGlove(d.id);
-          this.renderMasteryGloves();
-        });
-      } else {
-        action.textContent = '[ PREVIEW ]';
-        action.addEventListener('click', () => {
-          masteryGloveSystem.setDevPreview(isPreview ? null : d.id);
-          this.renderMasteryGloves();
-        });
-      }
-      card.appendChild(action);
-      this.masteryGlovesGridElem.appendChild(card);
-    }
-  }
-
-  /**
-   * COMPACT ARMORY HEADER.
-   *
-   * Shows the equipped identity in one line so the player always knows what they
-   * are wearing without scrolling. Deliberately small: this is orientation, not
-   * a showcase.
+   * Orientation only; it must never grow into a showcase. The glove family is
+   * stated because a SIGNAL DROP glove and a MASTERY glove must never blur.
    */
   public renderArmoryHeader(): void {
     if (this.armoryEquippedKnifeElem) {
-      const skinId = this.skinSystem.getEquippedSkinId();
       let name = '--';
       try {
-        name = this.skinSystem.getSkin(skinId).name;
+        name = this.skinSystem.getSkin(this.skinSystem.getEquippedSkinId()).name;
       } catch {
         name = '--';
       }
@@ -897,101 +850,262 @@ export class ImportScreen {
     }
   }
 
-  public renderArmory(): void {
-    this.renderSignalDecoder();
-    this.renderArmoryHeader();
-    this.renderMasterySummary();
-    this.renderDropGloves();
-    this.renderMasteryGloves();
-    const isDev = this.skinSystem.isDevPreview();
-    this.armoryDevToggleBtn.textContent = `DEV PREVIEW: ${isDev ? 'ACTIVE' : 'OFF'}`;
-    this.armoryDevToggleBtn.style.color = isDev ? '#ffdd00' : '#00f0ff';
-    this.armoryDevToggleBtn.style.borderColor = isDev ? '#ffdd00' : '#00f0ff';
+  /** Slot nav, family/ownership/sort filters, counter and mastery status. */
+  private renderArmoryChrome(visible: readonly ArmoryItem[]): void {
+    for (const btn of this.armorySlotBtns) {
+      const active = btn.dataset.armorySlot === this.armorySlot;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
 
-    const equippedId = this.skinSystem.getEquippedSkinId();
-    const skins = this.skinSystem.getSkins();
+    // The family filter only means anything for the glove slot: knives have no
+    // second acquisition family.
+    this.armoryGloveFilterGroup.classList.toggle('hidden', this.armorySlot !== 'gloves');
 
-    this.armoryGridElem.innerHTML = '';
-    skins.forEach((skin) => {
-      const isEquipped = skin.id === equippedId;
-      const isUnlocked = this.skinSystem.isSkinUnlocked(skin.id);
-      const progress = this.skinSystem.getSkinProgress(skin.id);
-
-      const card = document.createElement('div');
-      card.className = 'terminal-card';
-      card.style.padding = '10px 12px';
-      card.style.background = isEquipped ? 'rgba(0, 240, 255, 0.08)' : 'var(--bg-surface-elevated)';
-      card.style.border = `1px solid ${isEquipped ? '#00f0ff' : 'var(--border-subtle)'}`;
-      card.style.borderLeft = `4px solid ${isEquipped ? '#00f0ff' : (isUnlocked ? '#ffffff' : '#444c5c')}`;
-      card.style.display = 'flex';
-      card.style.flexDirection = 'column';
-      card.style.justifyContent = 'space-between';
-      card.style.gap = '8px';
-
-      card.innerHTML = `
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-            <div>
-              <div style="font-family: var(--font-mono); font-size: 0.88rem; font-weight: 700; color: ${isEquipped ? '#00f0ff' : (isUnlocked ? 'var(--text-primary)' : '#78889e')};">${skin.name}</div>
-              <div style="font-size: 0.68rem; color: #8899aa; font-family: var(--font-mono); margin-top: 2px;">${skin.codename}</div>
-            </div>
-            <span style="font-size: 0.65rem; font-family: var(--font-mono); color: #00f0ff; border: 1px solid rgba(0,240,255,0.3); padding: 2px 6px;">${skin.paletteTag}</span>
-          </div>
-          <div style="font-size: 0.7rem; color: #8a9bb2; margin-top: 5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${skin.description}</div>
-        </div>
-
-        <div style="margin-top: 5px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,0.06);">
-          <div style="font-size: 0.68rem; color: ${isUnlocked ? '#00e5a3' : '#a855f7'}; font-family: var(--font-mono); margin-bottom: 6px;">
-            ${isUnlocked ? `[READY // ${skin.shortRequirement}]` : `[REQUIREMENT: ${skin.unlockRequirement} · PROGRESS: ${progress.label}]`}
-          </div>
-          <div class="armory-action-slot"></div>
-        </div>
-      `;
-
-      const actionSlot = card.querySelector('.armory-action-slot') as HTMLElement;
-      if (isEquipped) {
-        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.74rem; font-weight: 700; color: #00f0ff; background: rgba(0, 240, 255, 0.15); padding: 5px 10px; border: 1px solid #00f0ff; cursor: default;">[EQUIPPED IN LOADOUT]</button>`;
-      } else if (isUnlocked) {
-        const btn = document.createElement('button');
-        btn.textContent = '[▶ EQUIP // DEPLOY TO LOADOUT]';
-        btn.style.width = '100%';
-        btn.style.fontFamily = 'var(--font-mono)';
-        btn.style.fontSize = '0.74rem';
-        btn.style.padding = '5px 10px';
-        btn.style.background = 'transparent';
-        btn.style.border = '1px solid #00f0ff';
-        btn.style.color = '#00f0ff';
-        btn.style.cursor = 'pointer';
-        btn.addEventListener('mouseenter', () => {
-          btn.style.background = '#00f0ff';
-          btn.style.color = '#000000';
-        });
-        btn.addEventListener('mouseleave', () => {
-          btn.style.background = 'transparent';
-          btn.style.color = '#00f0ff';
-        });
-        btn.addEventListener('click', () => {
-          this.skinSystem.equipSkin(skin.id);
-          this.renderArmory();
-        });
-        actionSlot.appendChild(btn);
-      } else {
-        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.72rem; color: #5a6678; background: rgba(255,255,255,0.02); border: 1px solid #333a46; padding: 5px 10px; cursor: not-allowed;">[LOCKED // ACCESS RESTRICTED]</button>`;
+    for (const btn of this.armoryFilterBtns) {
+      if (btn.dataset.gloveFamily) {
+        btn.classList.toggle('active', btn.dataset.gloveFamily === this.armoryGloveFamily);
+      } else if (btn.dataset.ownedFilter) {
+        btn.classList.toggle('active', btn.dataset.ownedFilter === this.armoryOwnership);
+      } else if (btn.dataset.armorySort) {
+        btn.classList.toggle('active', btn.dataset.armorySort === this.armorySort);
       }
+    }
 
-      this.armoryGridElem.appendChild(card);
-    });
+    if (this.armoryCountElem) {
+      this.armoryCountElem.textContent = inventoryCountLabel(visible.length);
+    }
+
+    this.renderArmoryMasteryStatus();
   }
 
+  /**
+   * MASTERY STATUS — compact, and ONLY while browsing mastery gloves.
+   *
+   * Browsing knives must never be crowded by glove achievement data.
+   */
+  private renderArmoryMasteryStatus(): void {
+    if (!this.armoryMasteryStatusElem) return;
+    const show = this.armorySlot === 'gloves' && this.armoryGloveFamily === 'mastery';
+    this.armoryMasteryStatusElem.classList.toggle('hidden', !show);
+    if (!show) return;
+    const s = masteryGloveSystem.evaluate().summary;
+    this.armoryMasteryRowsElem.innerHTML =
+      `<span class="armory-mastery-chip">SIGNAL MASTERY</span>` +
+      `<span class="armory-mastery-chip">GOLD+ <b>${pad2(s.goldPlus)}/${pad2(s.total)}</b></span>` +
+      `<span class="armory-mastery-chip">DIAMOND <b>${pad2(s.diamond)}/${pad2(s.total)}</b></span>`;
+  }
+
+  private renderArmoryInventory(visible: readonly ArmoryItem[]): void {
+    if (!this.armoryInventoryElem) return;
+    this.armorySelectedId = resolveSelection(visible, this.armorySelectedId)?.id ?? null;
+    this.armoryInventoryElem.innerHTML = '';
+
+    if (visible.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'armory-inventory-empty';
+      empty.textContent = 'NO ITEMS MATCH THE CURRENT FILTER';
+      this.armoryInventoryElem.appendChild(empty);
+      return;
+    }
+
+    for (const item of visible) {
+      this.armoryInventoryElem.appendChild(this.buildArmoryTile(item));
+    }
+  }
+
+  /**
+   * COMPACT INVENTORY TILE.
+   *
+   * Name, rarity, ownership/equipped marker, and a zero-asset palette swatch.
+   * Description, source, requirement and actions deliberately live in the detail
+   * panel instead of being repeated on every tile.
+   */
+  private buildArmoryTile(item: ArmoryItem): HTMLElement {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'armory-tile';
+    tile.dataset.itemId = item.id;
+    tile.dataset.family = item.family;
+    tile.dataset.rarity = item.rarity;
+    tile.dataset.state = item.owned ? 'OWNED' : 'LOCKED';
+    tile.setAttribute('role', 'option');
+    tile.setAttribute('aria-selected', item.id === this.armorySelectedId ? 'true' : 'false');
+    tile.setAttribute(
+      'aria-label',
+      `${item.name} // ${item.rarity}${
+        item.equipped ? ' // EQUIPPED' : item.owned ? ' // OWNED' : ' // LOCKED'
+      }`
+    );
+    tile.style.setProperty('--tile-accent', item.swatch);
+    if (item.id === this.armorySelectedId) tile.classList.add('selected');
+    if (item.equipped) tile.classList.add('equipped');
+    if (!item.owned) tile.classList.add('locked');
+
+    const mark = item.equipped ? '✓' : item.owned ? '·' : '⊘';
+    tile.innerHTML =
+      `<span class="armory-tile-swatch" aria-hidden="true"></span>` +
+      `<span class="armory-tile-name">${item.name}</span>` +
+      `<span class="armory-tile-foot">` +
+      `<span class="armory-tile-rarity">${item.rarity}</span>` +
+      `<span class="armory-tile-mark" aria-hidden="true">${mark}</span>` +
+      `</span>`;
+
+    tile.addEventListener('click', () => this.selectArmoryItem(item.id));
+    return tile;
+  }
+
+  /**
+   * THE SINGLE DETAIL PANEL.
+   *
+   * Everything long lives here exactly ONCE: description, source, requirement,
+   * progress and the actions. This is what keeps the grid scannable.
+   */
+  private renderArmoryDetail(visible: readonly ArmoryItem[]): void {
+    if (!this.armoryDetailElem) return;
+    const item = resolveSelection(visible, this.armorySelectedId);
+    this.armorySelectedId = item?.id ?? null;
+
+    if (!item) {
+      this.armoryDetailElem.innerHTML =
+        `<div class="armory-detail-empty">SELECT AN ITEM TO INSPECT</div>`;
+      return;
+    }
+
+    const statusLabel = item.equipped ? 'EQUIPPED' : item.owned ? 'OWNED' : 'LOCKED';
+    const statusClass = item.equipped ? 'equipped' : item.owned ? 'owned' : 'locked';
+
+    const rows: Array<[string, string]> = [
+      ['SOURCE', item.source],
+      ['REQUIREMENT', item.requirement]
+    ];
+    if (item.progress) rows.push(['PROGRESS', item.progress]);
+
+    this.armoryDetailElem.innerHTML =
+      `<div class="armory-detail-inner" style="--detail-accent: ${item.swatch};">` +
+      `<div class="armory-detail-rarity">${item.rarity}${
+        item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
+      }</div>` +
+      `<div class="armory-detail-name">${item.name}</div>` +
+      `<div class="armory-detail-codename">${item.codename}</div>` +
+      `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +
+      `<div class="armory-detail-desc">${item.description}</div>` +
+      `<div class="armory-detail-rows">` +
+      rows
+        .map(
+          ([k, v]) => `<div class="armory-detail-row"><span>${k}</span><b>${v}</b></div>`
+        )
+        .join('') +
+      `</div>` +
+      `<div class="armory-detail-actions"></div>` +
+      `</div>`;
+
+    this.renderArmoryDetailActions(item);
+  }
+
+  /**
+   * Detail actions.
+   *
+   * The preview architecture is UNCHANGED: the app has exactly one viewmodel, so
+   * a cosmetic is previewed by being worn — no second scene, no eager asset load.
+   * Locked gloves keep the existing DEV-preview affordance; locked knives cannot
+   * be worn and say so rather than offering a fake action.
+   */
+  private renderArmoryDetailActions(item: ArmoryItem): void {
+    const slot = this.armoryDetailElem?.querySelector('.armory-detail-actions') as HTMLElement;
+    if (!slot) return;
+    slot.innerHTML = '';
+
+    if (item.equipped) {
+      slot.appendChild(
+        this.buildArmoryAction('[ EQUIPPED ]', true, () => undefined, 'primary')
+      );
+      return;
+    }
+
+    if (isEquippable(item)) {
+      slot.appendChild(
+        this.buildArmoryAction('[ EQUIP ]', false, () => this.equipArmoryItem(item), 'primary')
+      );
+      return;
+    }
+
+    if (item.family === 'karambit') {
+      slot.appendChild(
+        this.buildArmoryAction('[ LOCKED // COMPLETE TO UNLOCK ]', true, () => undefined)
+      );
+      return;
+    }
+
+    // Locked gloves remain previewable, exactly as before.
+    const previewId = masteryGloveSystem.getDevPreviewGloveId();
+    const isPreviewing = previewId === item.id;
+    slot.appendChild(
+      this.buildArmoryAction(isPreviewing ? '[ STOP PREVIEW ]' : '[ PREVIEW ]', false, () => {
+        masteryGloveSystem.setDevPreview(isPreviewing ? null : item.id);
+        this.renderArmorySelection();
+      })
+    );
+  }
+
+  private buildArmoryAction(
+    label: string,
+    disabled: boolean,
+    onClick: () => void,
+    variant?: 'primary'
+  ): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `armory-action-btn${variant ? ` ${variant}` : ''}`;
+    btn.textContent = label;
+    btn.disabled = disabled;
+    if (!disabled) btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  /** Equip a cosmetic. Knives and gloves have separate equip paths. */
+  private equipArmoryItem(item: ArmoryItem): void {
+    if (item.family === 'karambit') {
+      this.skinSystem.equipSkin(item.id);
+    } else {
+      masteryGloveSystem.equipAnyGlove(item.id);
+    }
+    this.renderArmory();
+  }
+
+  /**
+   * Jump to the cosmetic that was just decoded: correct slot, correct family
+   * filter, selected in the detail panel.
+   */
+  public viewDecoderRewardInArmory(): void {
+    const reward = this.lastDecoderReward;
+    if (!reward) return;
+    const item = this.armoryItems.find((i) => i.id === reward.item.id);
+    if (!item) return;
+    this.armorySlot = item.slot;
+    if (item.slot === 'gloves') this.armoryGloveFamily = 'all';
+    this.armoryOwnership = 'all';
+    this.armorySelectedId = item.id;
+    this.renderArmory();
+  }
+
+  /**
+   * COMPACT DECODER STATE.
+   *
+   * ONE line of state plus the [ DECRYPT ] trigger in the header. The decoder
+   * experience itself is the existing modal; this only reports availability, so
+   * the decoder never consumes permanent Armory height.
+   */
   private renderSignalDecoder(): void {
     const pending = this.skinSystem.getPendingDropCount();
-    this.decoderPendingElem.textContent = pending.toString();
+    this.decoderPendingElem.textContent = pad2(pending);
 
     if (this.decoderBusy) {
       this.decoderStatusElem.textContent = 'DECODING...';
-      this.decoderDetailElem.textContent = 'Interpreting packet signature // resolving Armory payload.';
-      this.decoderButton.textContent = '[ DECODING SIGNAL ]';
+      this.decoderDetailElem.textContent =
+        'Interpreting packet signature // resolving Armory payload.';
       this.decoderButton.disabled = true;
+      this.armoryViewRewardBtn.classList.add('hidden');
       return;
     }
 
@@ -999,17 +1113,21 @@ export class ImportScreen {
       const reward = this.lastDecoderReward;
       this.decoderStatusElem.textContent = 'ARMORY SIGNAL FOUND';
       this.decoderStatusElem.dataset.rarity = reward.rarity;
-      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.rarity} // ${cosmeticKindLabel(reward.kind)} // ${reward.name}`;
+      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.rarity} // ${cosmeticKindLabel(
+        reward.kind
+      )} // ${reward.name}`;
+      this.armoryViewRewardBtn.classList.remove('hidden');
     } else {
       this.decoderStatusElem.textContent = pending > 0 ? 'SIGNAL ACQUIRED' : 'NO SIGNAL AVAILABLE';
       this.decoderStatusElem.removeAttribute('data-rarity');
-      this.decoderDetailElem.textContent = pending > 0
-        ? 'Packet ready. Decode to register one permanent Armory cosmetic.'
-        : 'Complete official Signal Pack runs to acquire Armory signals.';
+      this.decoderDetailElem.textContent =
+        pending > 0
+          ? 'Packet ready. Decode to register one permanent Armory cosmetic.'
+          : 'Complete official Signal Pack runs to acquire Armory signals.';
+      this.armoryViewRewardBtn.classList.add('hidden');
     }
 
     this.decoderButton.disabled = pending === 0;
-    this.decoderButton.textContent = pending > 0 ? '[ DECODE SIGNAL ]' : '[ NO SIGNAL AVAILABLE ]';
   }
 
   /**
@@ -1220,7 +1338,7 @@ export class ImportScreen {
       const index = gloves.findIndex((g) => g.definition.id === current);
       const next = index < 0 ? gloves[0] : gloves[(index + 1) % gloves.length];
       masteryGloveSystem.setDevPreview(index >= gloves.length - 1 ? null : next.definition.id);
-      this.renderMasteryGloves();
+      this.renderArmorySelection();
     });
 
     this.showcasePreviewBtn.addEventListener('click', () => {
@@ -1280,6 +1398,14 @@ export class ImportScreen {
       panels[index].classList.toggle('hidden', !active);
       panels[index].setAttribute('aria-hidden', active ? 'false' : 'true');
     });
+
+    // The Armory is a dense inventory: it earns a wider console than the
+    // single-column reading panels, and it starts at the top of the screen so
+    // the sticky navigation is pinned where the player expects it.
+    this.element
+      .querySelector('.import-container')
+      ?.classList.toggle('import-container--inventory', activeIndex === 3);
+    this.element.classList.toggle('import-screen--top', activeIndex === 3);
 
     if (activeIndex === 3) this.renderArmory();
   }
