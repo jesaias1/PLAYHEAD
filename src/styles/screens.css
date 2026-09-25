@@ -557,14 +557,173 @@
   text-align: left;
 }
 
+/* ==========================================================================
+   ARMORY — compact header, collapsible decoder, sub-nav, responsive grid
+   ========================================================================== */
+
+.armory-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-color);
+  background: rgba(0, 0, 0, 0.28);
+}
+.armory-header-title { display: flex; flex-direction: column; gap: 2px; }
+.armory-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  color: var(--accent-color);
+}
+.armory-title {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #eaf6ff;
+  margin: 0;
+}
+.armory-equipped {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.armory-equipped-slot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.3);
+  font-family: var(--font-mono);
+}
+.armory-equipped-slot span { font-size: 0.56rem; letter-spacing: 0.14em; color: #6d7885; }
+.armory-equipped-slot b { font-size: 0.72rem; font-weight: 500; color: #d7e3ef; }
+.armory-dev-toggle {
+  display: none;
+  font-size: 0.66rem;
+  padding: 4px 10px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid #00f0ff;
+  color: #00f0ff;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+/* Compact decoder: ONE row by default. Detail is opt-in so the catalog is never
+   pushed off the first screen. */
+.armory-decoder-strip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(0, 240, 255, 0.45);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.decoder-strip-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.decoder-strip-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: var(--accent-color);
+  white-space: nowrap;
+}
+.decoder-strip-status {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: #d7e3ef;
+}
+.decoder-strip-pending {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  color: #6d7885;
+  white-space: nowrap;
+}
+.decoder-strip-pending b { color: #4dffb8; font-size: 0.78rem; }
+.decoder-strip-main .decoder-button { margin-left: auto; }
+.decoder-toggle { font-size: 0.6rem; padding: 3px 9px; white-space: nowrap; }
+.decoder-strip-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decoder-strip-detail.hidden { display: none; }
+
+/* Segmented sub-navigation, shared shape for ARMORY and ONLINE. */
+.armory-subnav,
+.online-subnav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.armory-subnav-btn,
+.online-subnav-btn {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 2px solid transparent;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
+}
+.armory-subnav-btn:hover,
+.online-subnav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+.armory-subnav-btn.active,
+.online-subnav-btn.active {
+  color: #ffffff;
+  border-color: var(--accent-color);
+  border-bottom: 2px solid var(--accent-color);
+  background: linear-gradient(180deg, rgba(0, 240, 255, 0.04), rgba(0, 240, 255, 0.12));
+}
+
+.armory-section.hidden { display: none; }
+.armory-subheading {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: #7b8794;
+  margin: 10px 0 6px;
+}
+
+/* RESPONSIVE CARD GRID — explicit breakpoints so the layout is predictable.
+   3 columns on a wide desktop, 2 on a normal laptop, 1 when narrow. Never
+   overflows horizontally and never requires zooming out. */
 .armory-skins-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-top: 8px;
-  max-height: 365px;
-  overflow-y: auto;
-  padding-right: 4px;
+}
+@media (max-width: 1180px) {
+  .armory-skins-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .armory-skins-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .signal-program-bars span {
@@ -728,9 +887,11 @@
   margin-bottom: 6px;
 }
 
+/* Glove cards share the armory grid; this rule is kept for the standalone
+   modal armory surface. */
 .mastery-gloves-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 12px;
   margin-top: 4px;
 }
@@ -738,8 +899,8 @@
 .mastery-glove-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 5px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-left: 3px solid #444c5c;
   background: var(--bg-surface-elevated, rgba(10, 14, 21, 0.6));
@@ -2063,7 +2224,7 @@ option:hover, option:focus, option:checked {
   .results-header { margin-bottom: 14px; padding-bottom: 10px; }
   .results-title { font-size: 2.65rem; }
   .signal-drop-panel { margin: -4px 0 14px; }
-  .armory-skins-grid { max-height: 260px; }
+  /* No inner scroll cap: the armory page scrolls naturally as one surface. */
 }
 
 /* ==========================================================================

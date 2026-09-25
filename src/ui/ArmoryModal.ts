@@ -5,12 +5,14 @@
 
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { DROP_GLOVES } from '../viewmodel/DropGloveCatalog';
 import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 
 export class ArmoryModal {
   public element: HTMLElement;
   private skinsContainer: HTMLElement;
   private glovesContainer: HTMLElement;
+  private dropGlovesContainer: HTMLElement;
   private devToggleBtn: HTMLButtonElement;
   private dropCount: HTMLElement;
   private dropOpenBtn: HTMLButtonElement;
@@ -43,15 +45,23 @@ export class ArmoryModal {
 
         <div id="armory-drop-reveal" class="hidden" aria-live="polite" style="margin: 0 0 12px; padding: 8px 12px; border: 1px solid rgba(180,124,255,0.45); border-left: 3px solid #b47cff; background: rgba(13,8,24,0.78); font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;"></div>
 
-        <div id="armory-modal-skins-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; max-height: 480px; overflow-y: auto; padding-right: 6px;">
+        <div id="armory-modal-skins-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; max-height: 480px; overflow-y: auto; padding-right: 6px;">
           <!-- Dynamically populated -->
         </div>
 
         <!-- MASTERY GLOVES: earned, never random, never in the decoder. -->
         <div class="armory-catalog-heading mastery-heading" style="margin-top: 18px;">
-          <span>[MASTERY] GLOVES // PROOF OF SKILL</span>
+          <span>[GLOVES] MASTERY // EARNED ACHIEVEMENTS</span>
         </div>
         <div id="armory-modal-gloves" class="mastery-gloves-grid">
+          <!-- Dynamically populated -->
+        </div>
+
+        <!-- SIGNAL DROP GLOVES: kept clearly separate from mastery. -->
+        <div class="armory-catalog-heading" style="margin-top: 14px;">
+          <span>[GLOVES] SIGNAL DROPS // RANDOM REWARDS</span>
+        </div>
+        <div id="armory-modal-drop-gloves" class="mastery-gloves-grid">
           <!-- Dynamically populated -->
         </div>
 
@@ -64,6 +74,7 @@ export class ArmoryModal {
 
     this.skinsContainer = this.element.querySelector('#armory-modal-skins-grid') as HTMLElement;
     this.glovesContainer = this.element.querySelector('#armory-modal-gloves') as HTMLElement;
+    this.dropGlovesContainer = this.element.querySelector('#armory-modal-drop-gloves') as HTMLElement;
     this.devToggleBtn = this.element.querySelector('#btn-armory-modal-dev-toggle') as HTMLButtonElement;
     this.dropCount = this.element.querySelector('#armory-drop-count') as HTMLElement;
     this.dropOpenBtn = this.element.querySelector('#btn-armory-open-drop') as HTMLButtonElement;
@@ -79,9 +90,64 @@ export class ArmoryModal {
 
   public show(): void {
     this.renderSkins();
+    this.renderDropGloves();
     this.renderGloves();
     this.element.classList.remove('hidden');
     this.closeBtn.focus();
+  }
+
+  /**
+   * SIGNAL DROP GLOVES.
+   *
+   * Clearly labelled as random rewards and kept separate from the mastery list.
+   */
+  private renderDropGloves(): void {
+    if (!this.dropGlovesContainer) return;
+    const equippedId = masteryGloveSystem.getEquippedGloveId();
+    this.dropGlovesContainer.innerHTML = '';
+
+    for (const glove of DROP_GLOVES) {
+      const owned = this.skinSystem.isDropGloveOwned(glove.id);
+      const isEquipped = glove.id === equippedId;
+      const card = document.createElement('div');
+      card.className = 'mastery-glove-card';
+      card.dataset.gloveId = glove.id;
+      card.dataset.state = owned ? 'UNLOCKED' : 'LOCKED';
+      if (isEquipped) card.classList.add('equipped');
+
+      card.innerHTML =
+        `<div class="mastery-glove-head">` +
+        `<span class="mastery-glove-name">${glove.name}</span>` +
+        `<span class="mastery-glove-tier">${glove.rarity}</span>` +
+        `</div>` +
+        `<div class="mastery-glove-codename">${glove.codename}</div>` +
+        `<div class="mastery-glove-req">SOURCE // SIGNAL DROP</div>` +
+        `<div class="mastery-glove-status ${owned ? 'unlocked' : 'locked'}">` +
+        `${isEquipped ? 'EQUIPPED' : owned ? 'UNLOCKED' : 'LOCKED // SIGNAL DROP'}</div>`;
+
+      const action = document.createElement('button');
+      action.className = 'terminal-btn-subtle mastery-glove-action';
+      if (isEquipped) {
+        action.textContent = '[ EQUIPPED ]';
+        action.disabled = true;
+      } else if (owned) {
+        action.textContent = '[ EQUIP ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.equipAnyGlove(glove.id);
+          this.renderDropGloves();
+        });
+      } else {
+        action.textContent = '[ PREVIEW ]';
+        action.addEventListener('click', () => {
+          masteryGloveSystem.setDevPreview(
+            masteryGloveSystem.getDevPreviewGloveId() === glove.id ? null : glove.id
+          );
+          this.renderDropGloves();
+        });
+      }
+      card.appendChild(action);
+      this.dropGlovesContainer.appendChild(card);
+    }
   }
 
   /**
@@ -112,6 +178,7 @@ export class ArmoryModal {
         `<span class="mastery-glove-tier">T${d.tier}</span>` +
         `</div>` +
         `<div class="mastery-glove-codename">${d.codename}</div>` +
+        `<div class="mastery-glove-req">SOURCE // MASTERY</div>` +
         `<div class="mastery-glove-req">${d.requirementLabel}</div>` +
         `<div class="mastery-glove-status ${status.satisfied ? 'unlocked' : 'locked'}">` +
         `${isEquipped ? 'EQUIPPED' : status.satisfied ? 'UNLOCKED' : `LOCKED // ${status.progressLabel}`}</div>`;

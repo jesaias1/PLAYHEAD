@@ -10,7 +10,8 @@ import { AudioLoader } from '../audio/AudioLoader';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
-import { DROP_GLOVES } from '../viewmodel/DropGloveCatalog';
+import { getMasteryGlove } from '../mastery/MasteryLadder';
+import { DROP_GLOVES, getDropGlove, isDropGloveId } from '../viewmodel/DropGloveCatalog';
 import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 
 /** Two-digit zero padding for mastery counters. */
@@ -33,8 +34,7 @@ export class ImportScreen {
   private tabCustomBtn: HTMLButtonElement;
   private tabLabBtn: HTMLButtonElement;
   private tabArmoryBtn: HTMLButtonElement;
-  private tabRaceBtn: HTMLButtonElement;
-  private tabLeaderboardBtn: HTMLButtonElement;
+  private tabOnlineBtn: HTMLButtonElement;
 
   /** 05 // RACE WITH FRIENDS � multiplayer session only. */
   public racePanel: RacePanel = new RacePanel();
@@ -61,18 +61,74 @@ export class ImportScreen {
   /** Called when the leaderboard tab is opened (used to refresh the board). */
   public onLeaderboardTabOpened?: () => void;
 
-  /** Opens 05 // RACE WITH FRIENDS (e.g. from an invite URL). */
+  /** Opens 05 // ONLINE on the RACE subsection (e.g. from an invite URL). */
   public openRaceTab(): void {
     this.switchModule(4);
+    this.switchOnlineSection('race');
   }
 
-  /** Opens 06 // WORLD LEADERBOARD. */
+  /** Opens 05 // ONLINE on the LEADERBOARD subsection. */
   public openLeaderboardTab(): void {
-    this.switchModule(5);
+    this.switchModule(4);
+    this.switchOnlineSection('leaderboard');
+  }
+
+  /**
+   * ONLINE internal sub-navigation.
+   *
+   * RACE and LEADERBOARD are subsections of one top-level tab, not separate
+   * destinations, so the main menu stays clean without losing any functionality.
+   */
+  public switchOnlineSection(section: 'race' | 'leaderboard'): void {
+    const race = section === 'race';
+    this.onlineSubnavRace.classList.toggle('active', race);
+    this.onlineSubnavLeaderboard.classList.toggle('active', !race);
+    this.onlineSubnavRace.setAttribute('aria-selected', race ? 'true' : 'false');
+    this.onlineSubnavLeaderboard.setAttribute('aria-selected', race ? 'false' : 'true');
+    // Toggle the HOST containers: the panels themselves stay mounted, so no
+    // online state is ever torn down by switching sections.
+    this.raceHostElem.classList.toggle('hidden', !race);
+    this.leaderboardHostElem.classList.toggle('hidden', race);
+    if (!race) this.onLeaderboardTabOpened?.();
+  }
+
+  /**
+   * ARMORY internal sub-navigation.
+   *
+   * Only ONE cosmetic family is expanded at a time, so the page never becomes a
+   * wall of stacked sections.
+   */
+  public switchArmorySection(section: 'knives' | 'drops' | 'mastery'): void {
+    this.armorySection = section;
+    for (const btn of this.armorySubnavBtns) {
+      const active = btn.dataset.armorySection === section;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+    for (const panel of this.armorySectionPanels) {
+      panel.classList.toggle('hidden', panel.dataset.armoryPanel !== section);
+    }
+  }
+
+  public getArmorySection(): 'knives' | 'drops' | 'mastery' {
+    return this.armorySection;
   }
 
   private showcasePanel: HTMLElement;
   private customPanel: HTMLElement;
+  /** ONLINE internal sub-nav. */
+  private onlineSubnavRace: HTMLButtonElement;
+  private onlineSubnavLeaderboard: HTMLButtonElement;
+  private raceHostElem: HTMLElement;
+  private leaderboardHostElem: HTMLElement;
+  /** ARMORY internal sub-nav. */
+  private armorySubnavBtns: HTMLButtonElement[] = [];
+  private armorySectionPanels: HTMLElement[] = [];
+  private armorySection: 'knives' | 'drops' | 'mastery' = 'knives';
+  private armoryEquippedKnifeElem: HTMLElement;
+  private armoryEquippedGloveElem: HTMLElement;
+  private armoryDecoderDetail: HTMLElement;
+  private armoryDecoderToggleBtn: HTMLButtonElement;
   private labPanel: HTMLElement;
   private armoryPanel: HTMLElement;
   private labMusicSelect: HTMLSelectElement;
@@ -151,9 +207,8 @@ export class ImportScreen {
           <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">[ 01 // SIGNAL PACK ]</button>
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
-          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // KARAMBIT ARMORY ]</button>
-          <button class="import-tab-btn" id="tab-btn-race" type="button" role="tab" aria-selected="false" aria-controls="panel-race" tabindex="-1" title="RACE WITH FRIENDS">[ 05 // RACE ]</button>
-          <button class="import-tab-btn" id="tab-btn-leaderboard" type="button" role="tab" aria-selected="false" aria-controls="panel-leaderboard" tabindex="-1" title="WORLD LEADERBOARD">[ 06 // LEADERBOARD ]</button>
+          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // ARMORY ]</button>
+        <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL -->
@@ -256,59 +311,88 @@ export class ImportScreen {
 
         <!-- 04: KARAMBIT ARMORY PANEL -->
         <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
-          <div class="terminal-panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>[ARMORY] KARAMBIT COSMETIC CONTROL</span>
-            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle" style="display: none; font-size: 0.7rem; padding: 3px 8px; background: rgba(0, 240, 255, 0.08); border: 1px solid #00f0ff; color: #00f0ff; cursor: pointer; font-family: var(--font-mono);">
-              DEV PREVIEW: OFF
-            </button>
-          </div>
-          <section class="armory-decoder" aria-labelledby="signal-decoder-title">
-            <div class="decoder-header">
-              <div>
-                <div class="decoder-kicker">[SIGNAL] COSMETIC ACQUISITION BUS</div>
-                <h2 id="signal-decoder-title">SIGNAL DECODER</h2>
-              </div>
-              <div class="decoder-counter"><span>PENDING SIGNALS</span><strong id="decoder-pending">0</strong></div>
+          <!-- 1. COMPACT HEADER: identity + equipped state, never huge. -->
+          <div class="armory-header">
+            <div class="armory-header-title">
+              <div class="armory-kicker">[ARMORY] COSMETIC CONTROL</div>
+              <h2 class="armory-title">ARMORY</h2>
             </div>
-            <div class="decoder-body">
-              <div class="decoder-copy">
-                <div id="decoder-status" class="decoder-status">NO SIGNAL AVAILABLE</div>
-                <div id="decoder-detail" class="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</div>
+            <div class="armory-equipped" aria-label="Currently equipped">
+              <div class="armory-equipped-slot">
+                <span>KARAMBIT</span><b id="armory-equipped-knife">--</b>
               </div>
+              <div class="armory-equipped-slot">
+                <span>GLOVES</span><b id="armory-equipped-glove">--</b>
+              </div>
+            </div>
+            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle armory-dev-toggle" type="button">DEV PREVIEW: OFF</button>
+          </div>
+
+          <!-- 2. COMPACT DECODER STRIP: one row by default, detail on demand.
+               It must never push the cosmetic catalog down the page. -->
+          <section class="armory-decoder-strip" aria-labelledby="signal-decoder-title">
+            <div class="decoder-strip-main">
+              <span class="decoder-strip-kicker" id="signal-decoder-title">SIGNAL DECODER</span>
+              <span class="decoder-strip-status" id="decoder-status">NO SIGNAL AVAILABLE</span>
+              <span class="decoder-strip-pending">PENDING <b id="decoder-pending">0</b></span>
+              <button id="btn-decode-signal" class="btn-hero btn-terminal-exec decoder-button" type="button">[ NO SIGNAL AVAILABLE ]</button>
+              <button id="btn-armory-decoder-toggle" class="terminal-btn-subtle decoder-toggle" type="button" aria-expanded="false">DETAIL</button>
+            </div>
+            <div class="decoder-strip-detail hidden" id="armory-decoder-detail">
+              <div id="decoder-detail" class="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</div>
               <div class="decoder-quality-grid" aria-label="Rank signal quality">
                 <span><b>BRONZE</b> SIGNAL</span>
                 <span><b>SILVER</b> ENHANCED ODDS</span>
                 <span><b>GOLD</b> HIGH-GRADE</span>
                 <span><b>DIAMOND</b> PRISTINE</span>
               </div>
-              <button id="btn-decode-signal" class="btn-hero btn-terminal-exec decoder-button" type="button">[ NO SIGNAL AVAILABLE ]</button>
             </div>
           </section>
-          <div class="armory-catalog-heading">[ARMORY] CHALLENGE UNLOCKS // COSMETIC CATALOG</div>
-          <div id="armory-skins-grid" class="armory-skins-grid">
-            <!-- Populated dynamically via renderArmory() -->
+
+          <!-- 3. ARMORY SUB-NAV: only one cosmetic family is expanded at a time. -->
+          <div class="armory-subnav" role="tablist" aria-label="Armory sections">
+            <button class="armory-subnav-btn active" type="button" role="tab" aria-selected="true" data-armory-section="knives">[ KNIVES ]</button>
+            <button class="armory-subnav-btn" type="button" role="tab" aria-selected="false" data-armory-section="drops">[ DROP GLOVES ]</button>
+            <button class="armory-subnav-btn" type="button" role="tab" aria-selected="false" data-armory-section="mastery">[ MASTERY GLOVES ]</button>
           </div>
 
-          <!-- GLOVES: two clearly separated families. A random drop glove must
-               never sit in an unlabelled list beside an earned mastery glove. -->
-          <div class="armory-catalog-heading mastery-heading">
-            <span>[GLOVES] SIGNAL DROPS // MASTERY</span>
-            <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
+          <!-- 4. SECTIONS: responsive card grids, one visible at a time. -->
+          <div class="armory-section" data-armory-panel="knives">
+            <div class="armory-catalog-heading">[KARAMBIT] CHALLENGE UNLOCKS // COSMETIC CATALOG</div>
+            <div id="armory-skins-grid" class="armory-skins-grid">
+              <!-- Populated dynamically via renderArmory() -->
+            </div>
           </div>
-          <div class="mastery-summary" id="mastery-summary"></div>
 
-          <div class="armory-subheading">SIGNAL DROPS // RANDOM REWARDS</div>
-          <div id="drop-gloves-grid" class="mastery-gloves-grid"></div>
+          <div class="armory-section hidden" data-armory-panel="drops">
+            <div class="armory-catalog-heading">
+              <span>[GLOVES] SIGNAL DROPS // RANDOM REWARDS</span>
+            </div>
+            <div id="drop-gloves-grid" class="armory-skins-grid"></div>
+          </div>
 
-          <div class="armory-subheading">MASTERY // EARNED ACHIEVEMENTS</div>
-          <div id="mastery-gloves-grid" class="mastery-gloves-grid"></div>
+          <div class="armory-section hidden" data-armory-panel="mastery">
+            <div class="armory-catalog-heading">
+              <span>[GLOVES] MASTERY // EARNED ACHIEVEMENTS</span>
+              <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
+            </div>
+            <div class="mastery-summary" id="mastery-summary"></div>
+            <div id="mastery-gloves-grid" class="armory-skins-grid"></div>
+          </div>
         </div>
-
         <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
 
-        <!-- 05 / 06: ONLINE PANELS (mounted by RacePanel + LeaderboardPanel) -->
-        <div id="race-panel-host"></div>
-        <div id="leaderboard-panel-host"></div>
+        <!-- 05: ONLINE — RACE and LEADERBOARD are INTERNAL subsections, not
+             top-level tabs. The main menu stays clean; the two live panels keep
+             their own modules and are mounted into these host slots. -->
+        <div class="showcase-container showcase-panel hidden" id="panel-online" role="tabpanel" aria-labelledby="tab-btn-online" aria-hidden="true">
+          <div class="online-subnav" role="tablist" aria-label="Online sections">
+            <button class="online-subnav-btn active" id="online-subnav-race" type="button" role="tab" aria-selected="true">[ RACE ]</button>
+            <button class="online-subnav-btn" id="online-subnav-leaderboard" type="button" role="tab" aria-selected="false">[ LEADERBOARD ]</button>
+          </div>
+          <div id="race-panel-host"></div>
+          <div id="leaderboard-panel-host" class="hidden"></div>
+        </div>
 
         <div class="privacy-notice terminal-footer-status">
           [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
@@ -320,14 +404,54 @@ export class ImportScreen {
     this.tabCustomBtn = this.element.querySelector('#tab-btn-custom') as HTMLButtonElement;
     this.tabLabBtn = this.element.querySelector('#tab-btn-lab') as HTMLButtonElement;
     this.tabArmoryBtn = this.element.querySelector('#tab-btn-armory') as HTMLButtonElement;
-    this.tabRaceBtn = this.element.querySelector('#tab-btn-race') as HTMLButtonElement;
-    this.tabLeaderboardBtn = this.element.querySelector('#tab-btn-leaderboard') as HTMLButtonElement;
+    this.tabOnlineBtn = this.element.querySelector('#tab-btn-online') as HTMLButtonElement;
 
     // ONLINE panels (each owned by its own module; mounted into host slots).
     const raceHost = this.element.querySelector('#race-panel-host') as HTMLElement;
     if (raceHost) raceHost.appendChild(this.racePanel.element);
     const leaderboardHost = this.element.querySelector('#leaderboard-panel-host') as HTMLElement;
     if (leaderboardHost) leaderboardHost.appendChild(this.leaderboardPanel.element);
+    this.raceHostElem = raceHost;
+    this.leaderboardHostElem = leaderboardHost;
+    // The panels ship hidden (they used to be top-level tabs). Now the HOST slots
+    // own section visibility, so the panels themselves stay mounted and visible.
+    this.racePanel.element.classList.remove('hidden');
+    this.leaderboardPanel.element.classList.remove('hidden');
+
+    // ONLINE internal sub-nav.
+    this.onlineSubnavRace = this.element.querySelector('#online-subnav-race') as HTMLButtonElement;
+    this.onlineSubnavLeaderboard = this.element.querySelector(
+      '#online-subnav-leaderboard'
+    ) as HTMLButtonElement;
+    this.onlineSubnavRace.addEventListener('click', () => this.switchOnlineSection('race'));
+    this.onlineSubnavLeaderboard.addEventListener('click', () =>
+      this.switchOnlineSection('leaderboard')
+    );
+
+    // ARMORY internal sub-nav + compact header + collapsible decoder detail.
+    this.armorySubnavBtns = [
+      ...this.element.querySelectorAll<HTMLButtonElement>('.armory-subnav-btn')
+    ];
+    this.armorySectionPanels = [
+      ...this.element.querySelectorAll<HTMLElement>('[data-armory-panel]')
+    ];
+    for (const btn of this.armorySubnavBtns) {
+      btn.addEventListener('click', () => {
+        const section = btn.dataset.armorySection as 'knives' | 'drops' | 'mastery';
+        this.switchArmorySection(section);
+      });
+    }
+    this.armoryEquippedKnifeElem = this.element.querySelector('#armory-equipped-knife') as HTMLElement;
+    this.armoryEquippedGloveElem = this.element.querySelector('#armory-equipped-glove') as HTMLElement;
+    this.armoryDecoderDetail = this.element.querySelector('#armory-decoder-detail') as HTMLElement;
+    this.armoryDecoderToggleBtn = this.element.querySelector(
+      '#btn-armory-decoder-toggle'
+    ) as HTMLButtonElement;
+    this.armoryDecoderToggleBtn.addEventListener('click', () => {
+      const open = this.armoryDecoderDetail.classList.toggle('hidden') === false;
+      this.armoryDecoderToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      this.armoryDecoderToggleBtn.textContent = open ? 'HIDE' : 'DETAIL';
+    });
 
     const catalogEntries = this.catalog.map((t) => ({
       id: t.id,
@@ -744,8 +868,38 @@ export class ImportScreen {
     }
   }
 
+  /**
+   * COMPACT ARMORY HEADER.
+   *
+   * Shows the equipped identity in one line so the player always knows what they
+   * are wearing without scrolling. Deliberately small: this is orientation, not
+   * a showcase.
+   */
+  public renderArmoryHeader(): void {
+    if (this.armoryEquippedKnifeElem) {
+      const skinId = this.skinSystem.getEquippedSkinId();
+      let name = '--';
+      try {
+        name = this.skinSystem.getSkin(skinId).name;
+      } catch {
+        name = '--';
+      }
+      this.armoryEquippedKnifeElem.textContent = name;
+    }
+    if (this.armoryEquippedGloveElem) {
+      const gloveId = masteryGloveSystem.getEquippedGloveId();
+      if (isDropGloveId(gloveId)) {
+        const drop = getDropGlove(gloveId);
+        this.armoryEquippedGloveElem.textContent = drop ? `${drop.name} // DROP` : '--';
+      } else {
+        this.armoryEquippedGloveElem.textContent = `${getMasteryGlove(gloveId).name} // MASTERY`;
+      }
+    }
+  }
+
   public renderArmory(): void {
     this.renderSignalDecoder();
+    this.renderArmoryHeader();
     this.renderMasterySummary();
     this.renderDropGloves();
     this.renderMasteryGloves();
@@ -765,14 +919,14 @@ export class ImportScreen {
 
       const card = document.createElement('div');
       card.className = 'terminal-card';
-      card.style.padding = '12px 14px';
+      card.style.padding = '10px 12px';
       card.style.background = isEquipped ? 'rgba(0, 240, 255, 0.08)' : 'var(--bg-surface-elevated)';
       card.style.border = `1px solid ${isEquipped ? '#00f0ff' : 'var(--border-subtle)'}`;
       card.style.borderLeft = `4px solid ${isEquipped ? '#00f0ff' : (isUnlocked ? '#ffffff' : '#444c5c')}`;
       card.style.display = 'flex';
       card.style.flexDirection = 'column';
       card.style.justifyContent = 'space-between';
-      card.style.gap = '10px';
+      card.style.gap = '8px';
 
       card.innerHTML = `
         <div>
@@ -783,11 +937,11 @@ export class ImportScreen {
             </div>
             <span style="font-size: 0.65rem; font-family: var(--font-mono); color: #00f0ff; border: 1px solid rgba(0,240,255,0.3); padding: 2px 6px;">${skin.paletteTag}</span>
           </div>
-          <div style="font-size: 0.72rem; color: #8a9bb2; margin-top: 8px; line-height: 1.35;">${skin.description}</div>
+          <div style="font-size: 0.7rem; color: #8a9bb2; margin-top: 5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${skin.description}</div>
         </div>
 
-        <div style="margin-top: 6px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-          <div style="font-size: 0.68rem; color: ${isUnlocked ? '#00e5a3' : '#a855f7'}; font-family: var(--font-mono); margin-bottom: 8px;">
+        <div style="margin-top: 5px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,0.06);">
+          <div style="font-size: 0.68rem; color: ${isUnlocked ? '#00e5a3' : '#a855f7'}; font-family: var(--font-mono); margin-bottom: 6px;">
             ${isUnlocked ? `[READY // ${skin.shortRequirement}]` : `[REQUIREMENT: ${skin.unlockRequirement} · PROGRESS: ${progress.label}]`}
           </div>
           <div class="armory-action-slot"></div>
@@ -796,14 +950,14 @@ export class ImportScreen {
 
       const actionSlot = card.querySelector('.armory-action-slot') as HTMLElement;
       if (isEquipped) {
-        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #00f0ff; background: rgba(0, 240, 255, 0.15); padding: 6px 10px; border: 1px solid #00f0ff; cursor: default;">[EQUIPPED IN LOADOUT]</button>`;
+        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.74rem; font-weight: 700; color: #00f0ff; background: rgba(0, 240, 255, 0.15); padding: 5px 10px; border: 1px solid #00f0ff; cursor: default;">[EQUIPPED IN LOADOUT]</button>`;
       } else if (isUnlocked) {
         const btn = document.createElement('button');
         btn.textContent = '[▶ EQUIP // DEPLOY TO LOADOUT]';
         btn.style.width = '100%';
         btn.style.fontFamily = 'var(--font-mono)';
-        btn.style.fontSize = '0.78rem';
-        btn.style.padding = '6px 10px';
+        btn.style.fontSize = '0.74rem';
+        btn.style.padding = '5px 10px';
         btn.style.background = 'transparent';
         btn.style.border = '1px solid #00f0ff';
         btn.style.color = '#00f0ff';
@@ -822,7 +976,7 @@ export class ImportScreen {
         });
         actionSlot.appendChild(btn);
       } else {
-        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.75rem; color: #5a6678; background: rgba(255,255,255,0.02); border: 1px solid #333a46; padding: 6px 10px; cursor: not-allowed;">[LOCKED // ACCESS RESTRICTED]</button>`;
+        actionSlot.innerHTML = `<button disabled style="width: 100%; font-family: var(--font-mono); font-size: 0.72rem; color: #5a6678; background: rgba(255,255,255,0.02); border: 1px solid #333a46; padding: 5px 10px; cursor: not-allowed;">[LOCKED // ACCESS RESTRICTED]</button>`;
       }
 
       this.armoryGridElem.appendChild(card);
@@ -987,10 +1141,10 @@ export class ImportScreen {
   }
 
   private initEvents(): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabRaceBtn, this.tabLeaderboardBtn];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
     tabs.forEach((tab, index) => {
       tab.addEventListener('click', () => this.switchModule(index));
-      tab.addEventListener('keydown', (event) => {
+      tab.addEventListener('keydown', (event: KeyboardEvent) => {
         let nextIndex = index;
         if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
         else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
@@ -1108,14 +1262,13 @@ export class ImportScreen {
   }
 
   private switchModule(activeIndex: number): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabRaceBtn, this.tabLeaderboardBtn];
+    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
     const panels = [
       this.showcasePanel,
       this.customPanel,
       this.labPanel,
       this.armoryPanel,
-      this.racePanel.element,
-      this.leaderboardPanel.element
+      this.element.querySelector('#panel-online') as HTMLElement
     ];
     if (activeIndex !== 0) this.stopPreview();
 
@@ -1129,6 +1282,5 @@ export class ImportScreen {
     });
 
     if (activeIndex === 3) this.renderArmory();
-    if (activeIndex === 5) this.onLeaderboardTabOpened?.();
   }
 }
