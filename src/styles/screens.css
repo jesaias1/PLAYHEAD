@@ -815,6 +815,169 @@
 .results-mastery-unlock-req { font-size: 0.66rem; color: #9fb0c8; letter-spacing: 0.08em; }
 .results-mastery-unlock button { margin-top: 6px; }
 
+/* ==========================================================================
+   PLAYER IDENTITY — profile modal + clickable player names
+   ========================================================================== */
+
+/* The local identity in the footer. The NAME opens the profile. */
+.online-status-identity {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  color: #d7e3ef;
+  cursor: pointer;
+}
+.online-status-identity:hover { color: var(--accent-color); text-decoration: underline; }
+.online-status-sep { color: #45505f; margin: 0 4px; }
+
+.profile-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 8, 0.72);
+}
+.profile-screen.hidden { display: none; }
+
+.profile-container {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  background: var(--bg-surface, #080c12);
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  border-left: 3px solid var(--accent-color);
+  font-family: var(--font-mono);
+}
+
+.profile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.profile-kicker { font-size: 0.6rem; letter-spacing: 0.18em; color: var(--accent-color); }
+.profile-title { margin: 4px 0 2px; font-size: 1.3rem; letter-spacing: 0.06em; color: #eaf6ff; }
+.profile-status { font-size: 0.62rem; letter-spacing: 0.14em; color: #6d7885; }
+
+.profile-rename {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+.profile-rename.hidden { display: none; }
+.profile-label { font-size: 0.62rem; letter-spacing: 0.12em; color: #6d7885; white-space: nowrap; }
+.profile-rename-hint { font-size: 0.62rem; letter-spacing: 0.08em; color: #4dffb8; }
+.profile-rename-hint.error { color: #ffb020; }
+
+.profile-section { margin-top: 16px; }
+.profile-section-title {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--accent-color);
+  margin-bottom: 8px;
+}
+
+.profile-equipped { display: flex; flex-direction: column; gap: 8px; }
+.profile-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.28);
+}
+.profile-item-label { font-size: 0.6rem; letter-spacing: 0.14em; color: #6d7885; min-width: 78px; }
+.profile-item-value { font-size: 0.82rem; color: #d7e3ef; }
+.profile-item-req { font-size: 0.62rem; letter-spacing: 0.08em; color: #b8a8ff; margin-left: auto; }
+
+.profile-mastery {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+.profile-mastery-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.72rem;
+}
+.profile-mastery-row span { color: #6d7885; letter-spacing: 0.1em; }
+.profile-mastery-row b { color: #d7e3ef; font-weight: 500; }
+.profile-mastery-row.profile-world b { color: var(--accent-color); }
+
+.profile-tracks { display: flex; flex-direction: column; gap: 3px; }
+.profile-track-row {
+  display: grid;
+  grid-template-columns: 30px 1fr 78px 84px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 0.72rem;
+}
+.profile-track-index { color: #566170; font-size: 0.64rem; }
+.profile-track-name { color: #d7e3ef; }
+.profile-track-rank { font-size: 0.64rem; letter-spacing: 0.08em; color: #7b8794; text-align: right; }
+.profile-track-rank.rank-bronze { color: #cd7f32; }
+.profile-track-rank.rank-silver { color: #c0c8d4; }
+.profile-track-rank.rank-gold { color: #ffd166; }
+.profile-track-rank.rank-diamond { color: #7fe7ff; }
+.profile-track-time { color: #9fb0c8; text-align: right; }
+.profile-track-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.profile-watch, .profile-race { font-size: 0.58rem; padding: 2px 7px; }
+.profile-empty {
+  padding: 10px 12px;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: #566170;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Clickable player names: the name itself is the profile interaction target. */
+.online-lb-name-btn,
+.online-player-name-btn,
+.online-result-name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.online-lb-name-btn:hover,
+.online-player-name-btn:hover,
+.online-result-name-btn:hover {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+
+/* Compact identity line in the race lobby / results: glove, then knife. */
+.online-player-identity,
+.online-result-identity {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  color: #b8a8ff;
+}
+
 /* Command Buttons */
 .btn-hero {
   font-family: var(--font-mono);

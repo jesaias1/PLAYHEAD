@@ -33,6 +33,7 @@ import {
 import { leaderboardService } from '../online/LeaderboardService';
 import type { RunSubmission } from '../online/LeaderboardService';
 import { authService } from '../online/AuthService';
+import { validateDisplayName } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
 import type { MapIdentity } from '../online/MapIdentity';
 import { OFFICIAL_MAP_REGISTRY } from '../online/OfficialMapRegistry';
@@ -75,6 +76,8 @@ import {
   newlySatisfiedGloves
 } from '../mastery/MasteryLadder';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
+import { getMasteryGlove } from '../mastery/MasteryLadder';
+import { playerProfileService } from '../online/PlayerProfileService';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
@@ -136,6 +139,11 @@ export class Game {
   private pendingGhostRun: GhostRaceRun | null = null;
   /** Comparison captured at finish, for the results screen. */
   private lastGhostComparison: GhostFinishComparison | null = null;
+  /**
+   * Public identity for the players currently in a lobby / results screen.
+   * Text metadata only — never a knife texture, glove asset or video.
+   */
+  private raceIdentities = new Map<string, { gloveName: string; knifeName: string }>();
   /** Result of the most recent official submission attempt, for the results UI. */
   private lastSubmissionState: SubmissionFeedback | null = null;
   /**
@@ -2498,7 +2506,8 @@ export class Game {
         });
       },
       onStartSession: () => void this.startRaceSession(),
-      onLeaveRoom: () => void this.leaveRaceRoom()
+      onLeaveRoom: () => void this.leaveRaceRoom(),
+      onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
 
     leaderboardPanel.setCallbacks({
@@ -2518,7 +2527,8 @@ export class Game {
       onRetryConnection: () => {
         onlineBootstrap.retry();
         void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
-      }
+      },
+      onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
 
     this.ui.importScreen.onLeaderboardTabOpened = () => {
@@ -2531,15 +2541,19 @@ export class Game {
       const tag = onlineBootstrap.getClient().getStatusLabel();
       const detail = `${status.state} // ${status.detail}`;
       this.ui.importScreen.setOnlineStatus(tag, detail);
+      this.refreshLocalIdentity();
     });
     this.refreshOnlineStatus();
+    this.refreshLocalIdentity();
 
     // Race room callbacks.
     raceRoomService.setCallbacks({
       onRoomUpdate: (room, players) => {
         const panelRef = this.ui.importScreen.racePanel;
         panelRef.setHost(raceRoomService.isHost());
-        panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId());
+        panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId(), this.raceIdentities);
+    // Identity is fetched lazily and only while a lobby is actually open.
+    void this.refreshRaceIdentities();
         // A scheduled start drives the local countdown → session.
         if (room.state === 'COUNTDOWN' && room.startAtMs !== null && !this.raceActive) {
           this.beginRaceFromSchedule(room.startAtMs);
@@ -2643,8 +2657,10 @@ export class Game {
       result.room,
       raceRoomService.getPlayers(),
       raceRoomService.getInviteUrl() ?? '',
-      authService.getUserId()
+      authService.getUserId(),
+      this.raceIdentities
     );
+    void this.refreshRaceIdentities();
   }
 
   private async joinRaceRoom(code: string): Promise<void> {
@@ -2682,8 +2698,10 @@ export class Game {
       result.room,
       raceRoomService.getPlayers(),
       raceRoomService.getInviteUrl() ?? '',
-      authService.getUserId()
+      authService.getUserId(),
+      this.raceIdentities
     );
+    void this.refreshRaceIdentities();
   }
 
   private async startRaceSession(): Promise<void> {
@@ -2749,10 +2767,12 @@ export class Game {
 
   private showRaceResults(rows: readonly RaceResultRow[]): void {
     const panel = this.ui.importScreen.racePanel;
-    panel.renderResults(rows, authService.getUserId());
+    panel.renderResults(rows, authService.getUserId(), this.raceIdentities);
     panel.showResults();
     this.ui.importScreen.show();
     this.ui.importScreen.openRaceTab();
+    // Identity is fetched lazily, only when results are actually shown.
+    void this.refreshRaceIdentities(() => panel.renderResults(rows, authService.getUserId(), this.raceIdentities));
   }
 
   private async leaveRaceRoom(): Promise<void> {
@@ -3137,6 +3157,111 @@ export class Game {
       mapFingerprint: identity.mapFingerprint,
       movementVersion: identity.movementVersion
     };
+  }
+
+  /**
+   * The local player's identity in the menu footer.
+   *
+   * The NAME is the interaction target for the player's own profile, so there is
+   * no duplicate profile button anywhere. A missing or blank name falls back to
+   * the generated PLAYHEAD style, never a UUID.
+   */
+  public refreshLocalIdentity(): void {
+    const name = authService.getProfile()?.displayName;
+    this.ui.importScreen.setPlayerIdentity(name ?? 'PLAYER', () => this.openOwnProfile());
+  }
+
+  /**
+   * Opens the local player's own profile.
+   *
+   * Built entirely from local authoritative state, so it works offline. The name
+   * is the only identity string rendered — never a UUID.
+   */
+  public openOwnProfile(): void {
+    const modal = this.ui.profileModal;
+    modal.setCallbacks({
+      onWatchLocalPb: (trackId) => void this.watchOwnPb(trackId),
+      onRaceLocalPb: (trackId) => void this.racePbGhost(trackId),
+      onRename: (name) => {
+        // Validation is synchronous; the SAVE outcome is reported separately via
+        // setRenameResult, so the modal never claims a save the server has not
+        // confirmed.
+        const local = validateDisplayName(name);
+        if (!local.ok) return { ok: false, detail: local.detail };
+        void authService.setDisplayName(name).then((r) => {
+          modal.setRenameResult(r.ok, r.ok ? 'saved' : r.detail);
+          if (r.ok) {
+            this.ui.importScreen.setPlayerIdentity(r.value, () => this.openOwnProfile());
+          }
+        });
+        return { ok: true, detail: '' };
+      }
+    });
+    modal.render(playerProfileService.buildLocalProfile(), true);
+  }
+
+  /**
+   * Opens another player's PUBLIC profile.
+   *
+   * Identity comes from the narrow `public_profiles` projection; the record comes
+   * from the already-public accepted leaderboard runs. No private table is read,
+   * and no UUID is ever rendered.
+   */
+  public async openPlayerProfile(userId: string, displayName: string): Promise<void> {
+    const modal = this.ui.profileModal;
+    modal.setCallbacks({
+      onWatchRemoteRun: (runId) => void this.watchLeaderboardRun(runId),
+      onRaceRemoteRun: (runId) => void this.raceLeaderboardGhost(runId)
+    });
+    // Show the honest offline state immediately, then replace it if the fetch
+    // succeeds. Never fabricate profile data.
+    modal.render(playerProfileService.offlineProfile(displayName));
+
+    const view = await playerProfileService.fetchPublicProfile(userId);
+    if (!view) {
+      modal.render(playerProfileService.offlineProfile(displayName));
+      return;
+    }
+    modal.render(view);
+  }
+
+  /** Watches the local player's own PB for a track, when a replay exists. */
+  public async watchOwnPb(trackId: string): Promise<{ ok: boolean; detail: string }> {
+    const manager = LeaderboardManager.getInstance();
+    const pbTimeUs = manager.getPbTimeUs(trackId);
+    if (pbTimeUs === null) return { ok: false, detail: 'NO PERSONAL BEST ON THIS TRACK' };
+
+    const payload = replayStorageService.getLocal(trackId, pbTimeUs);
+    if (!payload) return { ok: false, detail: 'NO LOCAL REPLAY FOR THIS PB' };
+
+    const expected = await this.canonicalIdentityFor(trackId);
+    if (!expected) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
+
+    return this.enterPovReplay(payload, expected, trackId, pbTimeUs);
+  }
+
+  /**
+   * Fetches public identity for the players currently in a lobby / results.
+   *
+   * LAZY: only called while a lobby or results screen is actually open, and it
+   * loads text metadata only — never a knife texture, glove asset or video.
+   */
+  private async refreshRaceIdentities(after?: () => void): Promise<void> {
+    const players = raceRoomService.getPlayers();
+    if (players.length === 0) return;
+    const ids = players.map((p) => p.userId);
+    const identities = await playerProfileService.fetchPublicIdentities(ids);
+    if (identities.size === 0) return;
+
+    const next = new Map(this.raceIdentities);
+    for (const [id, identity] of identities) {
+      next.set(id, {
+        gloveName: getMasteryGlove(identity.equippedGloveId).name,
+        knifeName: KarambitSkinSystem.getInstance().getSkin(identity.equippedKnifeId).name
+      });
+    }
+    this.raceIdentities = next;
+    after?.();
   }
 
   /**

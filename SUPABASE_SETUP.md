@@ -67,6 +67,10 @@ Open **SQL Editor**, paste the entire contents of each file in
 - `20260925000000_mastery_equipped_glove.sql` — **required for mastery glove
   carry-over across devices.** It adds `player_progress.equipped_glove` and lets
   `sync_progression` carry it.
+- `20260926000000_public_player_profile.sql` — **required for public player
+  profiles.** It adds ONE narrow `SECURITY DEFINER` read
+  (`public_profiles(uuid[])`) that projects only display name, equipped knife and
+  equipped glove. No RLS policy is changed and no private table becomes readable.
 
 > Without the second migration the lobby still lets players see each other on
 > join, but `postgres_changes` events are never delivered — so a READY change is
@@ -75,6 +79,10 @@ Open **SQL Editor**, paste the entire contents of each file in
 > Without the third migration the equipped mastery glove persists locally only:
 > it will not follow the player to another device. Nothing breaks either way —
 > the client treats the field as optional.
+>
+> Without the fourth migration your OWN profile still works fully (it is built
+> from local state), but opening ANOTHER player's profile shows
+> `PROFILE // OFFLINE`.
 
 This creates: `profiles`, `player_progress`, `cosmetic_ownership`,
 `track_progress`, `custom_signal_claims`, `leaderboard_runs`, `race_rooms`,

@@ -28,6 +28,8 @@ export interface RacePanelCallbacks {
   onSetReady: (ready: boolean) => void;
   onStartSession: () => void;
   onLeaveRoom: () => void;
+  /** The player NAME is the interaction target for opening a profile. */
+  onOpenProfile: (userId: string, displayName: string) => void;
 }
 
 export class RacePanel {
@@ -273,7 +275,8 @@ export class RacePanel {
     room: RaceRoom,
     players: readonly RacePlayer[],
     inviteUrl: string,
-    myUserId: string | null
+    myUserId: string | null,
+    identities?: Map<string, { gloveName: string; knifeName: string }>
   ): void {
     this.lobbyCodeElem.textContent = room.inviteCode;
     this.lobbyTitleElem.textContent = room.trackTitle || room.trackId;
@@ -322,13 +325,35 @@ export class RacePanel {
           stateClass = 'online-player-state-notready';
         }
 
+        const identity = identities?.get(player.userId);
+        const identityLine = identity
+          ? `<span class="online-player-identity">${this.escape(identity.gloveName)}${
+              identity.knifeName ? ` // ${this.escape(identity.knifeName)}` : ''
+            }</span>`
+          : '';
+
         row.innerHTML =
           `<span class="online-player-index">PLAYER ${i + 1}</span>` +
-          `<span class="online-player-name">${this.escape(player.displayName)}${isMe ? ' (YOU)' : ''}</span>` +
+          `<span class="online-player-name">` +
+          `<button class="online-player-name-btn" type="button"` +
+          ` data-user-id="${this.escape(player.userId)}"` +
+          ` data-display-name="${this.escape(player.displayName)}"` +
+          ` title="Open player profile">${this.escape(player.displayName)}${isMe ? ' (YOU)' : ''}</button>` +
+          identityLine +
+          `</span>` +
           `<span class="online-player-state ${stateClass}">${state}</span>`;
       }
       this.lobbyPlayersElem.appendChild(row);
     }
+
+    // Player names open a profile. READY / START / LEAVE are separate controls.
+    this.lobbyPlayersElem.querySelectorAll<HTMLButtonElement>('.online-player-name-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const userId = btn.dataset.userId;
+        const displayName = btn.dataset.displayName ?? 'PLAYER';
+        if (userId) this.callbacks?.onOpenProfile(userId, displayName);
+      });
+    });
 
     const me = players.find((p) => p.userId === myUserId);
     this.readyState = me?.ready ?? false;
@@ -409,7 +434,11 @@ export class RacePanel {
     this.renderReadyButton();
   }
 
-  public renderResults(rows: readonly RaceResultRow[], myUserId: string | null): void {
+  public renderResults(
+    rows: readonly RaceResultRow[],
+    myUserId: string | null,
+    identities?: Map<string, { gloveName: string; knifeName: string }>
+  ): void {
     const finishers = rows.filter((r) => r.sessionBestUs !== null);
     this.resultsTitleElem.textContent = finishers.length === 0 ? 'NO FINISH' : 'RACE COMPLETE';
 
@@ -427,12 +456,32 @@ export class RacePanel {
           ? ''
           : `GAP ${row.gapUs > 0 ? '+' : '-'}${formatRaceTime(Math.abs(row.gapUs))}`;
 
+      // Identity line: the achievement behind the glove, not just a skin name.
+      const identity = identities?.get(row.userId);
+      const identityLine = identity?.gloveName
+        ? `<span class="online-result-identity">${this.escape(identity.gloveName)}</span>`
+        : '';
+
       line.innerHTML =
         `<span class="online-result-place">${place}</span>` +
-        `<span class="online-result-name">${this.escape(row.displayName)}${isMe ? ' (YOU)' : ''}</span>` +
+        `<span class="online-result-name">` +
+        `<button class="online-result-name-btn" type="button"` +
+        ` data-user-id="${this.escape(row.userId)}"` +
+        ` data-display-name="${this.escape(row.displayName)}"` +
+        ` title="Open player profile">${this.escape(row.displayName)}${isMe ? ' (YOU)' : ''}</button>` +
+        identityLine +
+        `</span>` +
         `<span class="online-result-time">${formatRaceTime(row.sessionBestUs)}</span>` +
         `<span class="online-result-meta">${outcome}${gap ? ' // ' + gap : ''}</span>`;
       this.resultsElem.appendChild(line);
+    });
+
+    this.resultsElem.querySelectorAll<HTMLButtonElement>('.online-result-name-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const userId = btn.dataset.userId;
+        const displayName = btn.dataset.displayName ?? 'PLAYER';
+        if (userId) this.callbacks?.onOpenProfile(userId, displayName);
+      });
     });
 
     const meta = document.createElement('div');

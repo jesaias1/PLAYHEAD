@@ -12,6 +12,7 @@ import { SettingsModal } from './SettingsModal';
 import { ArmoryModal } from './ArmoryModal';
 import { MovementLabSongModal } from './MovementLabSongModal';
 import { SignalDecodeModal } from './SignalDecodeModal';
+import { ProfileModal } from './ProfileModal';
 import { RaceHud } from './RaceHud';
 import { ReplayOverlay } from './ReplayOverlay';
 import { VisualAccent } from '../audio/AudioFeatures';
@@ -27,6 +28,8 @@ export class UIManager {
   public armoryModal: ArmoryModal;
   public movementLabSongModal: MovementLabSongModal;
   public decodeModal: SignalDecodeModal;
+  /** Player identity surface. A modal, not a navigation tab. */
+  public profileModal: ProfileModal;
   /** Shared best-time session overlay (hidden outside a race). */
   public raceHud: RaceHud;
   /** Minimal first-person replay controls (POV Replay V1). */
@@ -47,6 +50,7 @@ export class UIManager {
     this.armoryModal = new ArmoryModal();
     this.movementLabSongModal = new MovementLabSongModal();
     this.decodeModal = new SignalDecodeModal();
+    this.profileModal = new ProfileModal();
     this.raceHud = new RaceHud();
     this.replayOverlay = new ReplayOverlay();
 
@@ -64,6 +68,7 @@ export class UIManager {
     this.root.appendChild(this.armoryModal.element);
     this.root.appendChild(this.movementLabSongModal.element);
     this.root.appendChild(this.decodeModal.element);
+    this.root.appendChild(this.profileModal.element);
     this.root.appendChild(this.raceHud.element);
     this.root.appendChild(this.replayOverlay.element);
   }
@@ -86,5 +91,6 @@ export class UIManager {
     this.armoryModal.hide();
     this.movementLabSongModal.hide();
     this.decodeModal.hide();
+    this.profileModal.hide();
   }
 }

@@ -52,7 +52,10 @@ describe('Mastery cloud migration — shape', () => {
   it('is a new, ordered migration file', () => {
     const files = fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
     expect(files).toContain(migrationName);
-    expect(files[files.length - 1]).toBe(migrationName);
+    // Ordered AFTER the base schema, and named with a timestamp so `db push`
+    // applies it in the right sequence.
+    expect(files.indexOf(migrationName)).toBeGreaterThan(files.indexOf('20260922000000_online_v1.sql'));
+    expect(migrationName).toMatch(/^\d{14}_/);
   });
 
   it('adds the column additively with a safe default', () => {

@@ -25,6 +25,8 @@ export interface LeaderboardPanelCallbacks {
   onPlaySignal: (trackId: string) => void;
   onWatchRun: (runId: string) => void;
   onRaceRun: (runId: string) => void;
+  /** The player NAME is the interaction target for opening a public profile. */
+  onOpenProfile: (userId: string, displayName: string) => void;
   onRetryConnection: () => void;
 }
 
@@ -141,7 +143,12 @@ export class LeaderboardPanel {
           return (
             `<div class="online-lb-row">` +
             `<span class="online-lb-rank">${e.rankPosition}</span>` +
-            `<span class="online-lb-name">${this.escape(e.displayName)}</span>` +
+            `<span class="online-lb-name">` +
+            `<button class="online-lb-name-btn" type="button"` +
+            ` data-user-id="${this.escape(e.userId)}"` +
+            ` data-display-name="${this.escape(e.displayName)}"` +
+            ` title="Open player profile">${this.escape(e.displayName)}</button>` +
+            `</span>` +
             `<span class="online-lb-time">${formatRaceTime(e.timeUs)}</span>` +
             `<span class="online-lb-watch">${actions}</span>` +
             `</div>`
@@ -161,6 +168,15 @@ export class LeaderboardPanel {
         btn.addEventListener('click', () => {
           const runId = btn.dataset.runId;
           if (runId) this.callbacks?.onRaceRun(runId);
+        });
+      });
+      // Names open a public profile. WATCH / RACE GHOST are separate controls and
+      // are never triggered by a name click.
+      this.tableElem.querySelectorAll<HTMLButtonElement>('.online-lb-name-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const userId = btn.dataset.userId;
+          const displayName = btn.dataset.displayName ?? 'PLAYER';
+          if (userId) this.callbacks?.onOpenProfile(userId, displayName);
         });
       });
     }

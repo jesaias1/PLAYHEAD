@@ -51,6 +51,11 @@ export class ImportScreen {
     this.onlineStatusBar.setStatus(tag, detail);
   }
 
+  /** Local player identity in the footer; the name opens the player's profile. */
+  public setPlayerIdentity(displayName: string, onOpenProfile: () => void): void {
+    this.onlineStatusBar.setIdentity(displayName, onOpenProfile);
+  }
+
   /** Called when the leaderboard tab is opened (used to refresh the board). */
   public onLeaderboardTabOpened?: () => void;
 
