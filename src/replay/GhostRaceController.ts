@@ -40,8 +40,26 @@ export class GhostRaceController {
   private effectScale = 1;
   private proximityScale = 1;
   private visible = false;
+  /**
+   * FRIEND RACE world mode. A live 1v1 race must never render a recorded solo
+   * ghost, so loading and updating are both refused while this is set.
+   */
+  private friendRaceMode = false;
 
   constructor(private readonly scene: THREE.Scene) {}
+
+  /**
+   * Enables or disables friend-race mode. Enabling RELEASES any loaded ghost, so
+   * a race can never inherit a PB / WORLD / BEST RECORDED trajectory.
+   */
+  public setFriendRaceMode(enabled: boolean): void {
+    this.friendRaceMode = enabled;
+    if (enabled) this.clear();
+  }
+
+  public isFriendRaceMode(): boolean {
+    return this.friendRaceMode;
+  }
 
   /** True when a ghost is loaded and being driven. */
   public isActive(): boolean {
@@ -57,6 +75,9 @@ export class GhostRaceController {
    * Only ever one solo ghost exists, so the previous visual is disposed first.
    */
   public load(run: GhostRaceRun): void {
+    // A friend race must never arm a recorded ghost, no matter which code path
+    // asks for one.
+    if (this.friendRaceMode) return;
     this.clear();
     this.run = run;
     this.visual = new GhostVisual(this.scene, {
@@ -73,6 +94,7 @@ export class GhostRaceController {
    * restore, which must not rewind the authoritative timeline.
    */
   public start(): void {
+    if (this.friendRaceMode) return;
     this.proximityScale = 1;
     this.visible = false;
     this.visual?.setVisible(false);
@@ -87,6 +109,7 @@ export class GhostRaceController {
    * @param playerPosition    used only for a proximity fade
    */
   public update(runElapsedSeconds: number, playerPosition: THREE.Vector3): void {
+    if (this.friendRaceMode) return;
     if (!this.run || !this.visual) return;
 
     const runElapsedMs = Math.max(0, runElapsedSeconds) * 1000;

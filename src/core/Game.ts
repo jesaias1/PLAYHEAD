@@ -37,7 +37,11 @@ import { validateDisplayName } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
 import type { MapIdentity } from '../online/MapIdentity';
 import { OFFICIAL_MAP_REGISTRY } from '../online/OfficialMapRegistry';
-import { RemoteGhostRenderer } from '../online/RemoteGhostRenderer';
+import {
+  RemoteGhostRenderer,
+  GUEST_SIGNAL_COLOR,
+  HOST_SIGNAL_COLOR
+} from '../online/RemoteGhostRenderer';
 import { formatRaceTime } from '../ui/RaceHud';
 import { PovReplayRecorder } from '../replay/pov/PovReplayRecorder';
 import { PovReplayPlayer } from '../replay/pov/PovReplayPlayer';
@@ -81,7 +85,7 @@ import { playerProfileService } from '../online/PlayerProfileService';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
-import { GateDiagnosticState } from '../ui/DevOverlay';
+import { GateDiagnosticState, RaceGhostDiagnosticState } from '../ui/DevOverlay';
 import { MovementSfx } from '../audio/MovementSfx';
 
 /**
@@ -153,6 +157,17 @@ export class Game {
   private pendingReplayUpload: Promise<{ ok: boolean; path?: string; hash?: string } | null> | null =
     null;
   private raceActive = false;
+  /**
+   * FRIEND RACE WORLD MODE — the authoritative switch for ghost presentation.
+   *
+   * True from the moment the race map starts loading until the session ends or
+   * the player leaves the room. While it is true:
+   *   - every SOLO ghost (PB, BEST RECORDED, WORLD, ECHO) is disabled
+   *   - the ONLY gameplay-world ghost is the remote human opponent
+   *   - the local player publishes live transforms continuously, including
+   *     before the shared timer starts
+   */
+  private friendRaceWorld = false;
   /** Shared session start, as an epoch ms timestamp agreed by all clients. */
   private raceStartAtMs: number | null = null;
   private raceFinishReported = false;
@@ -610,6 +625,10 @@ export class Game {
           this.ui.armoryModal.hide();
           this.ui.hud.show();
           this.cameraController.lock();
+          // FRIEND RACE: the world is live again. Republish immediately so the
+          // opponent reappears on the start platform at once, rather than after
+          // the countdown samples have aged out.
+          this.publishLocalGhostSample();
           if (prevState === GameState.PAUSED && !this.isQuickRestarting) {
             this.audioEngine.resume();
           } else if (!this.isQuickRestarting) {
@@ -1022,6 +1041,10 @@ export class Game {
     this.finishGateDetector.reset(spawnPos);
     this.syncAuthoritativeVoidBoundary();
     this.playerController.lastTouchedSurfaceType = 'PLATFORM';
+    // FRIEND RACE: publish the spawn transform immediately. A hold-R restart
+    // lands here, so the opponent sees the reset on the start platform at once
+    // instead of waiting for the next 12 Hz tick.
+    this.publishLocalGhostSample();
     // Re-arm the camera-translation monitor for the new track.
     this.diagSettleFrames = 0;
     this.diagHasPrev = false;
@@ -1726,6 +1749,9 @@ export class Game {
   private returnToImport(): void {
     this.audioEngine.stop();
     this.world.dispose();
+    // Leaving the world ALWAYS ends friend-race ghost mode, so a race can never
+    // leak "solo ghosts disabled" into the next solo Signal.
+    this.setFriendRaceWorld(false);
     this.ghostManager.dispose();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
@@ -2281,7 +2307,7 @@ export class Game {
       this.movementSfx.setWindLevel(speedFeel * 0.55);
 
       // Dev Diagnostics update
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics());
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
 
       // Checkpoint passing check
       if (this.currentTrack) {
@@ -2343,7 +2369,7 @@ export class Game {
       const labReduceMotion = SettingsManager.getInstance().settings.reduceMotion;
       this.environment.setSpeedStreak(labSpeedFeel * 0.42, labReduceMotion);
       this.movementSfx.setWindLevel(labSpeedFeel * 0.55);
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics());
+      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       if (this.replayMode === 'POV') {
         // True first-person replay: the camera, audio and music-reactive world
@@ -2744,6 +2770,11 @@ export class Game {
     this.raceLastRivalBestUs = null;
     this.raceLastLocalBestUs = null;
 
+    // FRIEND RACE WORLD MODE: from here until the session ends, the remote human
+    // opponent is the ONLY gameplay-world ghost. This also releases any armed
+    // recorded solo ghost and publishes the local spawn transform immediately.
+    this.setFriendRaceWorld(true);
+
     this.ui.hideAllScreens();
     this.ui.raceHud.show();
     this.ui.raceHud.showNotice('SESSION STARTING');
@@ -2751,9 +2782,15 @@ export class Game {
     // Enter the normal track flow; the shared clock starts at startAtMs.
     await this.loadPresetTrack(room.trackId);
 
-    // Give the friend's ghost a distinct palette accent.
-    this.raceGhost?.setColor(0x9d8cff);
-    this.raceGhost?.clear();
+    // Deterministic opponent identity: each client sees the REMOTE player in the
+    // REMOTE player's colour. The host is cyan, the guest is violet, so the two
+    // players are never the same colour on screen.
+    this.raceGhost?.setColor(
+      raceRoomService.isHost() ? GUEST_SIGNAL_COLOR : HOST_SIGNAL_COLOR
+    );
+    // The map load replaced the world: republish the spawn transform so the
+    // opponent is visible on the start platform without moving.
+    this.publishLocalGhostSample();
   }
 
   private endRaceSession(): void {
@@ -2762,6 +2799,7 @@ export class Game {
     this.raceStartAtMs = null;
     this.ui.raceHud.hide();
     this.raceGhost?.clear();
+    this.setFriendRaceWorld(false);
     void raceRoomService.finishSession();
   }
 
@@ -2780,6 +2818,8 @@ export class Game {
     this.raceStartAtMs = null;
     this.ui.raceHud.hide();
     this.raceGhost?.clear();
+    // Leaving the race world restores normal solo ghost eligibility.
+    this.setFriendRaceWorld(false);
     await raceRoomService.leaveRoom();
     this.ui.importScreen.racePanel.showSelect();
   }
@@ -2787,92 +2827,165 @@ export class Game {
   /**
    * Per-frame race presentation. Throttled: the ghost broadcasts at ~12 Hz and
    * the live attempt time at ~1 Hz. No per-frame network, no DB writes.
+   *
+   * Runs for the WHOLE friend-race world lifetime, not only while the shared
+   * timer is running: the opponent must be visible on the start platform before
+   * the countdown finishes.
    */
   private updateRace(frameDelta: number): void {
-    if (!this.raceActive || this.raceStartAtMs === null) return;
+    if (!this.friendRaceWorld) return;
 
     const room = raceRoomService.getRoom();
-    if (!room) return;
+    if (room) {
+      const now = Date.now();
+      const remainingMs = room.startAtMs !== null
+        ? Math.max(0, room.startAtMs + room.sessionSeconds * 1000 - now)
+        : room.sessionSeconds * 1000;
 
-    const now = Date.now();
-    const remainingMs = room.startAtMs !== null
-      ? Math.max(0, room.startAtMs + room.sessionSeconds * 1000 - now)
-      : room.sessionSeconds * 1000;
+      const players = raceRoomService.getPlayers();
+      const myId = authService.getUserId();
+      const me = players.find((p) => p.userId === myId) ?? null;
+      const rival = players.find((p) => p.userId !== myId) ?? null;
 
-    const players = raceRoomService.getPlayers();
-    const myId = authService.getUserId();
-    const me = players.find((p) => p.userId === myId) ?? null;
-    const rival = players.find((p) => p.userId !== myId) ?? null;
+      // Local live values come from the authoritative run timer, not the network.
+      const currentRunUs = Math.round(this.runElapsedTime * 1_000_000);
 
-    // Local live values come from the authoritative run timer, not the network.
-    const currentRunUs = Math.round(this.runElapsedTime * 1_000_000);
+      this.ui.raceHud.update({
+        remainingMs,
+        you: {
+          displayName: me?.displayName ?? 'YOU',
+          currentRunUs: this.raceFinishReported ? 0 : currentRunUs,
+          sessionBestUs: me?.sessionBestUs ?? this.raceLastLocalBestUs,
+          attemptCount: me?.attemptCount ?? 0,
+          finishCount: me?.finishCount ?? 0,
+          connected: true
+        },
+        rival: rival
+          ? {
+              displayName: rival.displayName,
+              currentRunUs: rival.currentRunUs,
+              sessionBestUs: rival.sessionBestUs,
+              attemptCount: rival.attemptCount,
+              finishCount: rival.finishCount,
+              connected: rival.connected
+            }
+          : null
+      });
 
-    this.ui.raceHud.update({
-      remainingMs,
-      you: {
-        displayName: me?.displayName ?? 'YOU',
-        currentRunUs: this.raceFinishReported ? 0 : currentRunUs,
-        sessionBestUs: me?.sessionBestUs ?? this.raceLastLocalBestUs,
-        attemptCount: me?.attemptCount ?? 0,
-        finishCount: me?.finishCount ?? 0,
-        connected: true
-      },
-      rival: rival
-        ? {
-            displayName: rival.displayName,
-            currentRunUs: rival.currentRunUs,
-            sessionBestUs: rival.sessionBestUs,
-            attemptCount: rival.attemptCount,
-            finishCount: rival.finishCount,
-            connected: rival.connected
-          }
-        : null
-    });
+      // Rival improvement notice (non-blocking).
+      if (rival && rival.sessionBestUs !== null && rival.sessionBestUs !== this.raceLastRivalBestUs) {
+        const previous = this.raceLastRivalBestUs;
+        this.raceLastRivalBestUs = rival.sessionBestUs;
+        if (previous !== null && rival.sessionBestUs < previous) {
+          // Small, non-blocking. Names the rival AND states the role, so the
+          // notification is unambiguous without a large popup.
+          this.ui.raceHud.showNotice(
+            `RIVAL ${rival.displayName} // NEW BEST ${formatRaceTime(rival.sessionBestUs)}`
+          );
+        }
+      }
 
-    // Rival improvement notice (non-blocking).
-    if (rival && rival.sessionBestUs !== null && rival.sessionBestUs !== this.raceLastRivalBestUs) {
-      const previous = this.raceLastRivalBestUs;
-      this.raceLastRivalBestUs = rival.sessionBestUs;
-      if (previous !== null && rival.sessionBestUs < previous) {
-        // Small, non-blocking. Names the rival AND states the role, so the
-        // notification is unambiguous without a large popup.
-        this.ui.raceHud.showNotice(
-          `RIVAL ${rival.displayName} // NEW BEST ${formatRaceTime(rival.sessionBestUs)}`
-        );
+      // Live attempt time for the rival's HUD: ~1 Hz, never per frame.
+      this.raceCurrentRunAccumulator += frameDelta;
+      if (this.raceCurrentRunAccumulator >= 1) {
+        this.raceCurrentRunAccumulator = 0;
+        void raceRoomService.reportCurrentRun(this.raceFinishReported ? 0 : currentRunUs);
+      }
+
+      if (remainingMs <= 0) {
+        this.endRaceSession();
+        return;
       }
     }
 
-    // Ghost sample: presentation only, ~12 Hz.
+    // Ghost sample: presentation only, ~12 Hz. Published for the whole race
+    // world lifetime so the opponent appears on the start platform immediately.
     this.raceGhostAccumulator += frameDelta;
     if (this.raceGhostAccumulator >= 1 / GHOST_BROADCAST_HZ) {
       this.raceGhostAccumulator = 0;
-      const p = this.playerController.position;
-      const v = this.playerController.velocity;
-      raceRoomService.updateGhostSample({
-        x: p.x,
-        y: p.y,
-        z: p.z,
-        yaw: this.cameraController.yaw,
-        pitch: this.cameraController.pitch,
-        vx: v.x,
-        vy: v.y,
-        vz: v.z,
-        running: !this.raceFinishReported
-      });
+      this.publishLocalGhostSample();
     }
+  }
 
-    // Live attempt time for the rival's HUD: ~1 Hz, never per frame.
-    this.raceCurrentRunAccumulator += frameDelta;
-    if (this.raceCurrentRunAccumulator >= 1) {
-      this.raceCurrentRunAccumulator = 0;
-      void raceRoomService.reportCurrentRun(this.raceFinishReported ? 0 : currentRunUs);
+  /**
+   * Publishes the local player's current transform to the room.
+   *
+   * Called on the 12 Hz tick AND immediately after map load, spawn and restart,
+   * so the opponent never has to wait for the first movement input to become
+   * visible.
+   */
+  private publishLocalGhostSample(): void {
+    if (!this.friendRaceWorld) return;
+    const p = this.playerController.position;
+    const v = this.playerController.velocity;
+    raceRoomService.updateGhostSample({
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      yaw: this.cameraController.yaw,
+      pitch: this.cameraController.pitch,
+      vx: v.x,
+      vy: v.y,
+      vz: v.z,
+      running: !this.raceFinishReported
+    });
+  }
+
+  /**
+   * The ONE authoritative switch for friend-race world mode.
+   *
+   * Entering: disables every solo ghost source and releases any armed recorded
+   * ghost, so the remote opponent is the only ghost in the world.
+   * Leaving: restores normal solo ghost behaviour.
+   */
+  private setFriendRaceWorld(enabled: boolean): void {
+    this.friendRaceWorld = enabled;
+    this.ghostManager.setFriendRaceMode(enabled);
+    this.ghostRace.setFriendRaceMode(enabled);
+    if (enabled) {
+      // Release any armed recorded solo ghost: the remote opponent is the only
+      // ghost that may appear in a friend race world.
+      this.clearGhostRace();
+      // NOTE: the local spawn transform is NOT published here. This runs before
+      // the race map loads, so the player is still at their previous position.
+      // The spawn publish happens in prepareTrackForRun() and on entering
+      // PLAYING, and the 12 Hz tick continues from there.
     }
+  }
 
-    if (remainingMs <= 0) this.endRaceSession();
+  /**
+   * DEV snapshot of the friend-race ghost pipeline. Read-only.
+   */
+  private raceGhostDiagnostics(): RaceGhostDiagnosticState {
+    const ghost = this.raceGhost?.getDiagnostics() ?? null;
+    const net = raceRoomService.getGhostDiagnostics();
+    const myId = authService.getUserId();
+    const players = raceRoomService.getPlayers();
+    const rival = players.find((p) => p.userId !== myId) ?? null;
+    return {
+      friendRace: this.friendRaceWorld,
+      raceActive: this.raceActive,
+      raceStartAtMs: this.raceStartAtMs,
+      soloGhostsDisabled: this.ghostManager.isFriendRaceMode(),
+      recordedGhostArmed: this.ghostRace.isActive(),
+      remoteConnected: rival?.connected ?? false,
+      remotePresent: rival !== null,
+      remoteName: rival?.displayName ?? 'none',
+      txCount: net.txCount,
+      txAgeMs: net.txAgeMs,
+      rxCount: net.rxCount,
+      rxAgeMs: net.rxAgeMs,
+      ghostHasTarget: ghost?.hasTarget ?? false,
+      ghostVisible: ghost?.visible ?? false,
+      ghostStale: ghost?.stale ?? false,
+      ghostSamples: ghost?.samplesReceived ?? 0,
+      distanceM: ghost?.distanceM ?? null,
+      color: ghost?.color ?? 0
+    };
   }
 
   private updateRaceGhost(frameDelta: number): void {
-    this.raceGhost?.update(frameDelta);
+    this.raceGhost?.update(frameDelta, this.playerController.position);
   }
 
   // ==========================================================================
@@ -3111,6 +3224,12 @@ export class Game {
 
   /** Arms the ghost for the next run start and resets it to t=0. */
   private armPendingGhostRun(): void {
+    // FRIEND RACE: a live multiplayer session never arms a recorded solo ghost,
+    // on map load or on a hold-R restart.
+    if (this.friendRaceWorld) {
+      this.clearGhostRace();
+      return;
+    }
     if (this.pendingGhostRun) {
       this.ghostRace.load(this.pendingGhostRun);
       this.ghostRace.setEffectScale(this.environment.effectProfile.additiveScale);
@@ -3498,7 +3617,9 @@ export class Game {
   private onRaceAttemptRestart(): void {
     if (!this.raceActive) return;
     this.raceFinishReported = false;
-    this.raceGhost?.clear();
+    // NOTE: the REMOTE ghost is deliberately NOT cleared here. It is driven by
+    // the opponent's live transforms, so a local restart must not affect it. The
+    // local spawn transform is republished by prepareTrackForRun() instead.
     void raceRoomService.reportAttemptStart();
   }
 

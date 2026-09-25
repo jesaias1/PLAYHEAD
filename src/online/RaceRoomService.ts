@@ -187,6 +187,31 @@ export interface RaceRoomCallbacks {
   onError?: (detail: string) => void;
 }
 
+/**
+ * Whether an inbound ghost packet may drive the remote opponent ghost.
+ *
+ * Three rules, all load-bearing:
+ *   1. The local player's OWN transform must never be rendered as a remote
+ *      ghost. `broadcast: { self: false }` already prevents the echo, and this
+ *      is the second, independent guard.
+ *   2. Stale packets are dropped: a frozen ghost is worse than none.
+ *   3. A sample with no local identity cannot be attributed, so it is refused.
+ *
+ * Pure, so the rule is unit-testable without a live Realtime channel.
+ */
+export function shouldAcceptRemoteGhost(
+  sample: GhostSample | undefined,
+  localUserId: string | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (!sample) return false;
+  if (!localUserId) return false;
+  if (sample.userId === localUserId) return false;
+  if (!Number.isFinite(sample.t)) return false;
+  if (Math.abs(nowMs - sample.t) > 1000) return false;
+  return true;
+}
+
 export class RaceRoomService {
   private channel: RealtimeChannel | null = null;
   private room: RaceRoom | null = null;
@@ -200,6 +225,12 @@ export class RaceRoomService {
   private lobbySyncTimer: number | null = null;
   private realtimePlayerEvents = 0;
   private lastReadyUpdate: ReadyUpdateResult | null = null;
+  /** DEV ghost-pipeline diagnostics (presentation only). */
+  private ghostTxCount = 0;
+  private ghostTxAt = 0;
+  private ghostRxCount = 0;
+  private ghostRxAt = 0;
+  private ghostRxUserId: string | null = null;
 
   constructor(
     private readonly onlineClient: OnlineClient = online,
@@ -595,9 +626,12 @@ export class RaceRoomService {
 
     channel.on('broadcast', { event: 'ghost' }, (payload) => {
       const sample = payload?.payload as GhostSample | undefined;
-      if (!sample || sample.userId === this.auth.getUserId()) return;
-      // Drop stale packets: the ghost is presentation only.
-      if (Math.abs(Date.now() - sample.t) > 1000) return;
+      // Never render our own transform; drop stale packets. Presentation only.
+      if (!sample) return;
+      if (!shouldAcceptRemoteGhost(sample, this.auth.getUserId())) return;
+      this.ghostRxCount++;
+      this.ghostRxAt = Date.now();
+      this.ghostRxUserId = sample.userId;
       this.callbacks.onGhost?.(sample);
     });
 
@@ -625,6 +659,12 @@ export class RaceRoomService {
     });
 
     this.channel = channel;
+    // Fresh session: ghost pipeline counters start clean.
+    this.ghostTxCount = 0;
+    this.ghostTxAt = 0;
+    this.ghostRxCount = 0;
+    this.ghostRxAt = 0;
+    this.ghostRxUserId = null;
     this.startGhostBroadcast();
   }
 
@@ -654,6 +694,36 @@ export class RaceRoomService {
     const userId = this.auth.getUserId();
     if (!userId) return;
     this.myGhost = { ...sample, userId, t: Date.now(), attempt: this.attemptIndex };
+    this.ghostTxCount++;
+    this.ghostTxAt = Date.now();
+  }
+
+  /**
+   * DEV diagnostics for the live ghost pipeline.
+   *
+   * Reports BOTH directions, because "the opponent is invisible" has two very
+   * different causes: nothing is being published, or nothing is being received.
+   * Presentation only — never used by gameplay.
+   */
+  public getGhostDiagnostics(): {
+    txCount: number;
+    txAgeMs: number;
+    rxCount: number;
+    rxAgeMs: number;
+    rxUserId: string | null;
+    hasLocalSample: boolean;
+    roomState: RoomState | null;
+  } {
+    const now = Date.now();
+    return {
+      txCount: this.ghostTxCount,
+      txAgeMs: this.ghostTxAt > 0 ? now - this.ghostTxAt : -1,
+      rxCount: this.ghostRxCount,
+      rxAgeMs: this.ghostRxAt > 0 ? now - this.ghostRxAt : -1,
+      rxUserId: this.ghostRxUserId,
+      hasLocalSample: this.myGhost !== null,
+      roomState: this.room?.state ?? null
+    };
   }
 
   private async refreshPlayers(): Promise<void> {

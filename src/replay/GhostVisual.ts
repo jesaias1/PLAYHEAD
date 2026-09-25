@@ -32,6 +32,16 @@ export interface GhostVisualOptions {
   color: number;
   bodyOpacity?: number;
   traceOpacity?: number;
+  /**
+   * Render both faces.
+   *
+   * MINIMUM VISIBILITY CORRECTION, not a design change. A capsule is culled
+   * from the inside with the default front-face culling, so a LIVE opponent
+   * standing on the exact same spawn point as the local player would be
+   * invisible. Recorded solo ghosts keep front faces (they fade out at close
+   * range instead, so they are never viewed from inside).
+   */
+  doubleSided?: boolean;
 }
 
 export class GhostVisual {
@@ -47,6 +57,7 @@ export class GhostVisual {
   constructor(scene: THREE.Scene, options: GhostVisualOptions) {
     this.baseBodyOpacity = options.bodyOpacity ?? GHOST_BODY_OPACITY;
     this.baseTraceOpacity = options.traceOpacity ?? GHOST_TRACE_OPACITY;
+    const side = options.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
 
     this.group = new THREE.Group();
     this.group.visible = false;
@@ -62,6 +73,7 @@ export class GhostVisual {
       // Normal blending on purpose: the body must never ADD light, so it can
       // never blind the player or wash out a bright section.
       blending: THREE.NormalBlending,
+      side,
       depthWrite: false
     });
     this.body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.1, 4, 8), this.bodyMaterial);
@@ -75,6 +87,7 @@ export class GhostVisual {
       opacity: this.baseTraceOpacity,
       wireframe: true,
       blending: THREE.AdditiveBlending,
+      side,
       depthWrite: false
     });
     this.trace = new THREE.Mesh(new THREE.CapsuleGeometry(0.46, 1.3, 4, 10), this.traceMaterial);

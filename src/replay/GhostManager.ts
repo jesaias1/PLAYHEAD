@@ -31,6 +31,16 @@ export class GhostManager {
   private activePBData: SavedGhostRun | null = null;
   private activeRivalData: AuthorGhostRun | null = null;
 
+  /**
+   * FRIEND RACE world mode.
+   *
+   * During a live 1v1 friend race the ONLY gameplay-world ghost is the remote
+   * human opponent. Every solo source — PB, BEST RECORDED and the synthetic
+   * ECHO/RIVAL — is disabled. Nothing is destroyed: the data is kept and the
+   * normal solo behaviour returns the moment the player leaves the race.
+   */
+  private friendRaceMode = false;
+
   public playerCheckpointTimes: number[] = [];
   public currentTrackTitle = '';
 
@@ -39,10 +49,29 @@ export class GhostManager {
   }
 
   /**
-   * Initializes or refreshes ghosts for the specified track
+   * Enables or disables friend-race ghost mode.
+   *
+   * This is the SINGLE authority for solo-ghost visibility during a race, and
+   * it is applied on every path that can show a solo ghost: track preparation,
+   * settings changes and the per-frame update.
+   */
+  public setFriendRaceMode(enabled: boolean): void {
+    this.friendRaceMode = enabled;
+    this.applySettingsVisibility();
+  }
+
+  public isFriendRaceMode(): boolean {
+    return this.friendRaceMode;
+  }
+
+  /**
+   * Initializes or refreshes ghosts for the specified track.
+   *
+   * Releases the previous ghosts but deliberately KEEPS the friend-race mode: a
+   * race map load must not silently re-enable the solo ghosts it just disabled.
    */
   public prepareTrack(track: GeneratedTrack, trackTitle?: string): void {
-    this.dispose();
+    this.releaseGhosts();
 
     this.currentTrackTitle = trackTitle || 'PLAYHEAD TRACK';
     this.playerCheckpointTimes = [];
@@ -76,9 +105,19 @@ export class GhostManager {
   }
 
   /**
-   * Updates visibility based on user settings
+   * Updates visibility based on user settings.
+   *
+   * FRIEND RACE overrides every setting: the solo ghosts stay hidden regardless
+   * of what the player selected, because the remote opponent is the only ghost
+   * that may appear in the world during a race.
    */
   public applySettingsVisibility(): void {
+    if (this.friendRaceMode) {
+      this.pbGhost?.hide();
+      this.rivalGhost?.hide();
+      return;
+    }
+
     const settings = SettingsManager.getInstance().settings;
     const mode: GhostMode = settings.ghostMode || 'ALL';
 
@@ -109,9 +148,13 @@ export class GhostManager {
   }
 
   /**
-   * Updates both ghost positions and alpha fades in the 3D scene
+   * Updates both ghost positions and alpha fades in the 3D scene.
+   *
+   * During a friend race this is a hard no-op: not merely hidden, but never
+   * driven, so a solo ghost cannot be resurrected by any state change.
    */
   public update(runElapsedTime: number, playerPos: THREE.Vector3, dt: number): void {
+    if (this.friendRaceMode) return;
     this.pbGhost?.update(runElapsedTime, playerPos, dt);
     this.rivalGhost?.update(runElapsedTime, playerPos, dt);
   }
@@ -178,7 +221,11 @@ export class GhostManager {
     return this.activeRivalData ? this.activeRivalData.completionTime : null;
   }
 
-  public dispose(): void {
+  /**
+   * Releases the ghost objects and their data. Does NOT change the race mode:
+   * `prepareTrack` relies on that, and the mode is owned by the session.
+   */
+  private releaseGhosts(): void {
     if (this.pbGhost) {
       this.pbGhost.dispose();
       this.pbGhost = null;
@@ -189,5 +236,11 @@ export class GhostManager {
     }
     this.activePBData = null;
     this.activeRivalData = null;
+  }
+
+  public dispose(): void {
+    this.releaseGhosts();
+    // Never leave friend-race mode latched on a fully disposed manager.
+    this.friendRaceMode = false;
   }
 }

@@ -35,6 +35,37 @@ export interface GateDiagnosticState {
   lastAlignment: number;
 }
 
+/** DEV-only friend-race ghost pipeline diagnostics. */
+export interface RaceGhostDiagnosticState {
+  /** True while the authoritative friend-race world mode is active. */
+  friendRace: boolean;
+  /** True while the shared session timer is running. */
+  raceActive: boolean;
+  /** Epoch ms of the synchronized GO, or null before it is scheduled. */
+  raceStartAtMs: number | null;
+  /** Solo ghost sources are disabled by friend-race mode. */
+  soloGhostsDisabled: boolean;
+  /** A recorded solo ghost is currently armed. */
+  recordedGhostArmed: boolean;
+  remoteConnected: boolean;
+  remotePresent: boolean;
+  remoteName: string;
+  /** Local transform publication. */
+  txCount: number;
+  txAgeMs: number;
+  /** Remote transform reception. */
+  rxCount: number;
+  rxAgeMs: number;
+  /** Remote ghost renderer state. */
+  ghostHasTarget: boolean;
+  ghostVisible: boolean;
+  ghostStale: boolean;
+  ghostSamples: number;
+  distanceM: number | null;
+  /** Current opponent signal colour, as hex. */
+  color: number;
+}
+
 export class DevOverlay {
   public element: HTMLElement;
   private isVisible = false;
@@ -156,7 +187,8 @@ export class DevOverlay {
     environment?: Environment,
     fps = 0,
     feedback?: MovementFeedbackState,
-    gates?: GateDiagnosticState
+    gates?: GateDiagnosticState,
+    race?: RaceGhostDiagnosticState
   ): void {
     if (!this.isVisible) return;
 
@@ -224,6 +256,7 @@ export class DevOverlay {
       worldSafetyDiagnosticsLine(world),
       onlineDiagnosticsLine(),
       raceLobbyDiagnosticsLine(),
+      raceGhostDiagnosticsLine(race),
       assetDiagnosticsLine(),
       gates
         ? `SIGNAL GATES: ${gates.sequenceId} | progress ${gates.progress}/${gates.total} | ` +
@@ -306,6 +339,40 @@ function raceLobbyDiagnosticsLine(): string {
     }` +
     `\n  CONNECTED ${d.connected} | sync ${d.lobbySyncActive ? 'polling' : 'off'} | realtime player events ${d.realtimePlayerEvents}` +
     `\n  LAST READY: ${last ? `${last.ok ? 'ok' : 'FAIL'} rows=${last.rows} ${last.detail}` : 'none'}`
+  );
+}
+
+/**
+ * DEV: friend-race remote-opponent pipeline.
+ *
+ * "The opponent is invisible" has several distinct causes, and they look
+ * identical from inside the game. This line separates them: is the race mode
+ * even on, are solo ghosts still armed, is the local player publishing, are
+ * remote packets arriving, and is the renderer actually drawing?
+ */
+export function raceGhostDiagnosticsLine(race?: RaceGhostDiagnosticState): string {
+  if (!race) return 'REMOTE PLAYER: n/a (no race diagnostics)';
+  const age = (ms: number): string => (ms < 0 ? 'never' : `${ms} ms`);
+  const dist = race.distanceM === null ? 'n/a' : `${race.distanceM.toFixed(2)} m`;
+  const ghostState = race.ghostStale
+    ? 'STALE'
+    : race.ghostVisible
+      ? 'SPAWNED // VISIBLE'
+      : race.ghostHasTarget
+        ? 'HIDDEN'
+        : 'HIDDEN // NO SAMPLE';
+  return (
+    `REMOTE PLAYER: ${race.remoteName} | CONNECTED ${race.remoteConnected ? 'YES' : 'NO'}` +
+    ` | PRESENCE ${race.remotePresent ? 'YES' : 'NO'}` +
+    `\n  RACE MODE: ${race.friendRace ? 'FRIEND' : 'SOLO'} | RACE ACTIVE ${race.raceActive ? 'YES' : 'NO'}` +
+    ` | GO ${race.raceStartAtMs === null ? 'not scheduled' : `${Math.round((race.raceStartAtMs - Date.now()) / 1000)}s`}` +
+    `\n  SOLO GHOSTS: ${race.soloGhostsDisabled ? 'DISABLED' : 'ENABLED'}` +
+    ` | RECORDED GHOST ${race.recordedGhostArmed ? 'ARMED' : 'none'}` +
+    `\n  TRANSFORM TX: ${race.txCount} | age ${age(race.txAgeMs)}` +
+    `\n  TRANSFORM RX: ${race.rxCount} | age ${age(race.rxAgeMs)}` +
+    `\n  REMOTE GHOST: ${ghostState} | samples ${race.ghostSamples}` +
+    `\n  DISTANCE TO REMOTE: ${dist} | COLOUR #${race.color.toString(16).padStart(6, '0')}` +
+    `\n  PROXIMITY FADE: none (live opponent is never faded out)`
   );
 }
 
