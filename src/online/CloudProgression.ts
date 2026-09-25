@@ -34,7 +34,7 @@ export interface LocalProgressionSnapshot {
   equippedSkinId: string;
   /**
    * Equipped mastery glove. Captured in the snapshot (and therefore in the
-   * pre-migration backup) so a future backend field can carry it across devices.
+   * pre-migration backup) and synced through `p_equipped_glove`.
    */
   equippedGloveId: string;
   awardedRankKeys: string[];
@@ -60,12 +60,12 @@ export interface CloudProgressionRow {
   pending_drop_ranks: string[] | null;
   reward_owned_skin_ids: string[] | null;
   /**
-   * Optional mastery glove field.
+   * Equipped mastery glove.
    *
-   * FORWARD COMPATIBLE: this milestone adds no backend migration, so the current
-   * RPC does not return it. When the backend gains the column, cloud carry-over
-   * of the equipped mastery glove activates automatically with no client change.
-   * Local persistence already works today.
+   * Added by `20260925000000_mastery_equipped_glove.sql`. Kept optional so the
+   * client degrades gracefully against a backend that has not been migrated yet:
+   * local persistence works either way, and cloud carry-over activates once the
+   * column and the RPC parameter exist.
    */
   equipped_glove?: string | null;
 }
@@ -240,7 +240,11 @@ export class CloudProgression {
         p_pending_drop_ranks: firstMigration ? snapshot.pendingDropRanks : [],
         p_reward_owned_skin_ids: snapshot.rewardOwnedSkinIds,
         p_custom_claims: snapshot.customClaimFingerprints,
-        p_first_migration: firstMigration
+        p_first_migration: firstMigration,
+        // MASTERY: the equipped glove is the ONLY mastery value that persists.
+        // Ownership is derived client-side, so there is nothing else to sync and
+        // nothing to duplicate on reconnect.
+        p_equipped_glove: snapshot.equippedGloveId
       });
 
       if (error) {
