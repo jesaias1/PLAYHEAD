@@ -11,6 +11,8 @@
     "test": "vitest run",
     "precompute-presets": "node scripts/precompute_presets.mjs",
     "minify-presets": "node scripts/minify_presets.mjs",
+    "signalpack:report": "vitest run tests/SignalPackAuthoring.test.ts --reporter=basic",
+    "signalpack:validate": "vitest run tests/SignalPackAuthoring.test.ts",
     "encode-karambit-videos": "node scripts/encode_karambit_videos.mjs"
   },
   "dependencies": {
