@@ -13,6 +13,8 @@
     "minify-presets": "node scripts/minify_presets.mjs",
     "signalpack:report": "vitest run tests/SignalPackAuthoring.test.ts --reporter=basic",
     "signalpack:validate": "vitest run tests/SignalPackAuthoring.test.ts",
+    "smoke": "npm run typecheck && vitest run tests/LifecycleHardening.test.ts tests/SignalPackAuthoring.test.ts tests/VoidRestorePolicy.test.ts tests/MovementRegression.test.ts tests/SurfPhysics.test.ts tests/PresetRouteVersion.test.ts",
+    "validate": "npm run typecheck && vitest run && npm run build",
     "encode-karambit-videos": "node scripts/encode_karambit_videos.mjs"
   },
   "dependencies": {
