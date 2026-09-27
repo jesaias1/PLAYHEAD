@@ -25,8 +25,21 @@ import {
 
 export type CosmeticRarity = 'STANDARD' | 'RARE' | 'RELIC' | 'ARTIFACT' | 'OVERCLOCKED';
 
-interface SignalDropProgressionV2 {
-  version: 2;
+/**
+ * SIGNAL DROP PROGRESSION LEDGER.
+ *
+ * v3 adds `bankedDrops`: drops that were earned but could not be spent because
+ * every eligible cosmetic was already owned. They are never discarded, so a
+ * future content drop can still honour them.
+ *
+ * v2 -> v3 is a NON-DESTRUCTIVE migration. Every v2 field is carried forward
+ * unchanged; the only new work is a one-time retroactive back-fill of rank
+ * entitlements from the stored official track records (see
+ * `migrateEarnedDrops`), so a player who earned Diamonds before the Signal Drop
+ * economy existed is not punished for it.
+ */
+interface SignalDropProgression {
+  version: 3;
   awardedRankKeys: string[];
   pendingDropRanks: RunRank[];
   rewardOwnedSkinIds: string[];
@@ -45,6 +58,8 @@ interface SignalDropProgressionV2 {
   gloveRewardBags?: Record<RunRank, string[]>;
   gloveRewardBagCursors?: Record<RunRank, number>;
   lastRewardGloveId?: string;
+  /** Earned drops with nothing left to spend them on. Never discarded. */
+  bankedDrops?: number;
 }
 
 export interface TrackCompletionReward {
@@ -75,7 +90,13 @@ export interface OpenedSignalDrop {
   isCollectionComplete?: boolean;
 }
 
-const SIGNAL_DROP_PROGRESSION_VERSION = 2 as const;
+const SIGNAL_DROP_PROGRESSION_VERSION = 3 as const;
+/**
+ * Versions this build can read. An older ledger is migrated FORWARD, never
+ * discarded: dropping a v2 save would silently delete a player's pending drops,
+ * owned cosmetics and bag cursors.
+ */
+const READABLE_PROGRESSION_VERSIONS: readonly number[] = [2, 3];
 export const SIGNAL_DROP_STORAGE_KEY = 'playhead.armory.signalDrops';
 const DEFAULT_REWARD_RNG_STATE = 0x504c4159;
 const RANK_THRESHOLDS: RunRank[] = ['BRONZE', 'SILVER', 'GOLD', 'DIAMOND'];
@@ -123,7 +144,20 @@ export interface KarambitSkin {
   dropWeight: number;
   paletteTag: string;
   profile: SkinMaterialProfile;
+  /**
+   * How a LOCKED skin presents itself in the Armory.
+   *
+   *   'SHOW'    (default) the real name is visible before it is owned.
+   *   'UNKNOWN' the name is withheld as `UNKNOWN ARTIFACT` until discovered, so
+   *             an exceptional reward is not spoiled by browsing the catalog.
+   *
+   * Data-driven on purpose: the Armory never special-cases a skin id.
+   */
+  lockedNameBehavior?: 'SHOW' | 'UNKNOWN';
 }
+
+/** The name a locked, name-withheld cosmetic presents in the Armory. */
+export const UNKNOWN_ARTIFACT_LABEL = 'UNKNOWN ARTIFACT';
 
 export const KARAMBIT_SKINS: KarambitSkin[] = [
   {
@@ -361,19 +395,23 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     profile: {
       baseColor: new THREE.Color(0x252a31),
       nebulaPrimary: new THREE.Color(0xdde7ef),
-      nebulaSecondary: new THREE.Color(0x465363),
-      starColor: new THREE.Color(0xffffff),
-      rimColor: new THREE.Color(0xc9d8e5),
-      parallaxDepth: 0.11,
-      layer2Scale: 1.9,
+      // Pearlescent variation: a pale ice-cyan secondary and a pink-white rim
+      // read as iridescent nacre rather than flat white plastic.
+      nebulaSecondary: new THREE.Color(0x9fd8e8),
+      starColor: new THREE.Color(0xcdf3ff),
+      rimColor: new THREE.Color(0xf0dce6),
+      // Clouded cosmic depth: a touch more parallax, a finer secondary layer.
+      parallaxDepth: 0.16,
+      layer2Scale: 2.1,
       flowSpeed: 0.03,
-      sparkleRate: 1.0,
-      fresnelPower: 3.2,
+      // Very faint stars: fewer than the other statics on purpose.
+      sparkleRate: 0.7,
+      fresnelPower: 3.0,
       audioReactivity: 0.12,
       isCanonical: false,
-      exposure: 0.9,
-      contrast: 1.12,
-      emission: 0.88,
+      exposure: 0.95,
+      contrast: 1.06,
+      emission: 0.94,
       uvScale: 1.0
     }
   },
@@ -389,6 +427,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'LIVE SIGNAL // CYAN',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x101820),
       nebulaPrimary: new THREE.Color(0x19e6ee),
@@ -422,6 +462,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'LIVE SIGNAL // EMBER',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x1b1214),
       nebulaPrimary: new THREE.Color(0xff6b2b),
@@ -455,6 +497,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'LIVE SIGNAL // PRISM',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x171923),
       nebulaPrimary: new THREE.Color(0x63d8ff),
@@ -488,6 +532,10 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'OVERCLOCKED // #00FF88',
+    // Exceptional reward: withhold the name until it is discovered. Keyed on
+    // being a video artifact, not on the rarity LABEL — the apex skin carries
+    // OVERCLOCKED, which sits above ARTIFACT.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x0a1410),
       nebulaPrimary: new THREE.Color(0x00ff88),
@@ -521,6 +569,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'RADIO // #FFAA00',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x1a1205),
       nebulaPrimary: new THREE.Color(0xffaa00),
@@ -554,6 +604,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'ABYSS // #FF0044',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x16050a),
       nebulaPrimary: new THREE.Color(0xff0044),
@@ -587,6 +639,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'SYNTH // #C026D3',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x180820),
       nebulaPrimary: new THREE.Color(0xc026d3),
@@ -620,6 +674,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'HELIX // #06B6D4',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x06141a),
       nebulaPrimary: new THREE.Color(0x06b6d4),
@@ -653,6 +709,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'MIRROR // #CBD5E1',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x181c24),
       nebulaPrimary: new THREE.Color(0xcbd5e1),
@@ -686,6 +744,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'VAPOR // #EC4899',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x1a0814),
       nebulaPrimary: new THREE.Color(0xec4899),
@@ -719,6 +779,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'MIST // #38BDF8',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x081420),
       nebulaPrimary: new THREE.Color(0x38bdf8),
@@ -752,6 +814,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'AETHER // #F8FAFC',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x181c22),
       nebulaPrimary: new THREE.Color(0xf8fafc),
@@ -785,6 +849,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'ORBIT // #2563EB',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x0a1428),
       nebulaPrimary: new THREE.Color(0x2563eb),
@@ -818,6 +884,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'ACID // #84CC16',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x0e1806),
       nebulaPrimary: new THREE.Color(0x84cc16),
@@ -851,6 +919,8 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     dropEligible: true,
     dropWeight: 1,
     paletteTag: 'VORTEX // #A855F7',
+    // Exceptional reward: withhold the name until it is discovered.
+    lockedNameBehavior: 'UNKNOWN',
     profile: {
       baseColor: new THREE.Color(0x140a20),
       nebulaPrimary: new THREE.Color(0xa855f7),
@@ -927,7 +997,7 @@ export class KarambitSkinSystem {
   private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
   /** Which animated-cosmetic encode to decode. Presentation only. */
   private videoQuality: 'STANDARD' | 'LOW' = 'STANDARD';
-  private progression: SignalDropProgressionV2 = this.createDefaultProgression();
+  private progression: SignalDropProgression = this.createDefaultProgression();
 
   private readonly STORAGE_KEY_RECORDS = 'playhead.karambit.trackRecords';
   private readonly STORAGE_KEY_EQUIPPED = 'playhead.karambit.equippedSkin';
@@ -1141,7 +1211,7 @@ export class KarambitSkinSystem {
     return { BRONZE: 0, SILVER: 0, GOLD: 0, DIAMOND: 0 };
   }
 
-  private createDefaultProgression(): SignalDropProgressionV2 {
+  private createDefaultProgression(): SignalDropProgression {
     return {
       version: SIGNAL_DROP_PROGRESSION_VERSION,
       awardedRankKeys: [],
@@ -1149,7 +1219,8 @@ export class KarambitSkinSystem {
       rewardOwnedSkinIds: [],
       rewardBags: this.createEmptyRewardBags(),
       rewardBagCursors: this.createEmptyRewardBagCursors(),
-      rngState: DEFAULT_REWARD_RNG_STATE
+      rngState: DEFAULT_REWARD_RNG_STATE,
+      bankedDrops: 0
     };
   }
 
@@ -1161,8 +1232,11 @@ export class KarambitSkinSystem {
     this.progression = this.createDefaultProgression();
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as Partial<SignalDropProgressionV2>;
-      if (parsed.version !== SIGNAL_DROP_PROGRESSION_VERSION) return;
+      const parsed = JSON.parse(raw) as Partial<SignalDropProgression>;
+      // An older ledger is migrated FORWARD, never dropped. Discarding a v2 save
+      // would silently delete pending drops, owned cosmetics and bag cursors.
+      const version = typeof parsed.version === 'number' ? parsed.version : 0;
+      if (!READABLE_PROGRESSION_VERSIONS.includes(version)) return;
 
       const officialIds = SignalPackCatalog.getTracks().map(track => track.id);
       const validRankKeys = new Set(
@@ -1225,7 +1299,11 @@ export class KarambitSkinSystem {
         lastRewardGloveId:
           typeof parsed.lastRewardGloveId === 'string' && gloveIds.has(parsed.lastRewardGloveId)
             ? parsed.lastRewardGloveId
-            : undefined
+            : undefined,
+        // Earned-but-unspendable drops. Additive: a v2 save has none.
+        bankedDrops: Number.isFinite(parsed.bankedDrops)
+          ? Math.max(0, Math.floor(parsed.bankedDrops as number))
+          : 0
       };
     } catch {
       this.progression = this.createDefaultProgression();
@@ -1265,6 +1343,24 @@ export class KarambitSkinSystem {
       }
     } catch (e) {
       console.warn('[KarambitSkinSystem] Failed to load equipped skin state:', e);
+    }
+
+    // ONE-TIME RETROACTIVE BACK-FILL.
+    //
+    // Runs after BOTH the records and the drop ledger are loaded, because it
+    // reconciles one against the other. Idempotent: `awardedRankKeys` is the
+    // ledger, so every later boot is a no-op. It only ever creates entitlements,
+    // so it cannot damage an existing save.
+    try {
+      const created = this.migrateEarnedDrops();
+      if (created > 0) {
+        console.info(
+          `[Armory] Retroactive Signal Drop migration granted ${created} entitlement(s) ` +
+            'from existing official track ranks.'
+        );
+      }
+    } catch (e) {
+      console.warn('[KarambitSkinSystem] Retroactive drop migration failed (ignored):', e);
     }
   }
 
@@ -1429,6 +1525,84 @@ export class KarambitSkinSystem {
 
   public getAwardedRankKeys(): string[] {
     return [...this.progression.awardedRankKeys];
+  }
+
+  /**
+   * RETROACTIVE RANK ENTITLEMENT MIGRATION.
+   *
+   * The Signal Drop economy was added to a game that already had official track
+   * records. A player who earned Diamonds BEFORE it shipped has the ranks stored
+   * but no corresponding `awardedRankKeys` entry, so those runs would never
+   * produce a drop.
+   *
+   * This walks the stored official records once and back-fills every rank
+   * threshold that was actually reached but never claimed. It is:
+   *
+   *   - IDEMPOTENT: `awardedRankKeys` is the ledger, so a second run is a no-op.
+   *   - ADDITIVE: it only ever pushes entitlements, never removes or rewrites.
+   *   - SCOPED: only canonical Signal Pack ids qualify. Custom Audio and the
+   *     Movement Lab never wrote a record keyed by an official id, so they cannot
+   *     be rewarded retroactively.
+   *
+   * Returns the number of entitlements created, for diagnostics and tests.
+   */
+  public migrateEarnedDrops(): number {
+    const awarded = new Set(this.progression.awardedRankKeys);
+    let created = 0;
+
+    for (const [levelId, rank] of Object.entries(this.trackRecords)) {
+      // Official Signal Pack only. A legacy custom-audio key is ignored.
+      if (!SignalPackCatalog.getTrackById(levelId)) continue;
+      const reached = this.rankToValue(rank);
+      if (reached <= 0) continue;
+
+      for (const threshold of RANK_THRESHOLDS) {
+        if (this.rankToValue(threshold) > reached) continue;
+        const key = `${levelId}:${threshold}`;
+        if (awarded.has(key)) continue;
+        awarded.add(key);
+        this.progression.awardedRankKeys.push(key);
+        this.progression.pendingDropRanks.push(threshold);
+        created++;
+      }
+    }
+
+    if (created > 0) {
+      this.saveState();
+      this.notifyListeners();
+    }
+    return created;
+  }
+
+  /**
+   * Earned drops that could not be spent because every eligible cosmetic was
+   * already owned. They are never discarded and never faked into a filler
+   * reward; they simply wait for future content.
+   */
+  public getBankedDropCount(): number {
+    return Math.max(0, Math.floor(this.progression.bankedDrops ?? 0));
+  }
+
+  /** Total unopened drops, including banked ones, for the Armory indicator. */
+  public getTotalUnownedDropCount(): number {
+    return this.progression.pendingDropRanks.length + this.getBankedDropCount();
+  }
+
+  /**
+   * Collection progress across BOTH cosmetic families.
+   *
+   * The decoder is unified, so completion must be too: reporting only knives
+   * made the Armory claim the collection was finished while gloves were still
+   * unowned, and blocked those gloves from ever being awarded.
+   */
+  public getCollectionProgress(): { owned: number; total: number; complete: boolean } {
+    const knives = KARAMBIT_SKINS.filter((s) => s.dropEligible);
+    const gloves = dropEligibleGloves();
+    const total = knives.length + gloves.length;
+    const owned =
+      knives.filter((s) => this.isSkinUnlockedWithoutDev(s.id)).length +
+      gloves.filter((g) => this.isDropGloveOwned(g.id)).length;
+    return { owned, total, complete: total > 0 && owned >= total };
   }
 
   /**
@@ -1798,27 +1972,41 @@ export class KarambitSkinSystem {
   }
 
   public isCollectionComplete(): boolean {
-    const eligible = KARAMBIT_SKINS.filter(skin => skin.dropEligible);
-    return eligible.length > 0 && eligible.every(skin => this.isSkinUnlockedWithoutDev(skin.id));
+    // BOTH families: the decoder is unified, so a completed knife set must not
+    // block an unowned glove from ever being awarded.
+    return this.getCollectionProgress().complete;
   }
 
   public openSignalDrop(): OpenedSignalDrop | null {
     const sourceRank = this.progression.pendingDropRanks[0];
     if (!sourceRank) return null;
 
-    const exhausted = (): OpenedSignalDrop => ({
-      kind: 'KNIFE',
-      item: this.knifeDropItem(this.getEquippedSkin()),
-      name: this.getEquippedSkin().name,
-      codename: this.getEquippedSkin().codename,
-      rarity: this.getEquippedSkin().rarity,
-      accentTag: this.getEquippedSkin().paletteTag,
-      isLive: !!this.getEquippedSkin().profile.isVideoArtifact,
-      skin: this.getEquippedSkin(),
-      sourceRank,
-      qualityLabel: this.getQualityLabel(sourceRank),
-      isCollectionComplete: true
-    });
+    /**
+     * POOL EXHAUSTED.
+     *
+     * Every eligible cosmetic is owned. The drop is NOT thrown away and NOT
+     * replaced with filler: it is moved to `bankedDrops`, where it stays until
+     * future content gives it somewhere to go.
+     */
+    const exhausted = (): OpenedSignalDrop => {
+      this.progression.pendingDropRanks.shift();
+      this.progression.bankedDrops = this.getBankedDropCount() + 1;
+      this.saveState();
+      this.notifyListeners();
+      return {
+        kind: 'KNIFE',
+        item: this.knifeDropItem(this.getEquippedSkin()),
+        name: this.getEquippedSkin().name,
+        codename: this.getEquippedSkin().codename,
+        rarity: this.getEquippedSkin().rarity,
+        accentTag: this.getEquippedSkin().paletteTag,
+        isLive: !!this.getEquippedSkin().profile.isVideoArtifact,
+        skin: this.getEquippedSkin(),
+        sourceRank,
+        qualityLabel: this.getQualityLabel(sourceRank),
+        isCollectionComplete: true
+      };
+    };
 
     // 1. Category roll (single named weighting), then duplicate protection.
     const availability = this.unownedAvailability();

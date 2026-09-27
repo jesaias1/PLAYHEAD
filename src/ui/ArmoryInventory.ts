@@ -19,6 +19,7 @@
  * Pure: no DOM, no THREE, no storage.
  */
 
+import { UNKNOWN_ARTIFACT_LABEL } from '../viewmodel/KarambitSkinSystem';
 import type { CosmeticRarity, KarambitSkin } from '../viewmodel/KarambitSkinSystem';
 import type { DropGlove } from '../viewmodel/DropGloveCatalog';
 import type { MasteryGloveStatus } from '../mastery/MasteryLadder';
@@ -49,6 +50,14 @@ export type ArmorySort = 'rarity' | 'name';
 export interface ArmoryItem {
   id: string;
   name: string;
+  /**
+   * What the Armory may DISPLAY. Identical to `name` unless the cosmetic is
+   * locked and its definition withholds the name, in which case it reads
+   * `UNKNOWN ARTIFACT`. Driven by `lockedNameBehavior`, never by a skin id.
+   */
+  displayName: string;
+  /** True when `displayName` is withholding the real name. */
+  nameHidden: boolean;
   codename: string;
   description: string;
   rarity: CosmeticRarity;
@@ -150,9 +159,14 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
 
   for (const skin of input.skins) {
     const owned = input.skinOwned(skin.id);
+    // A locked, name-withheld cosmetic reads as UNKNOWN ARTIFACT. Once owned,
+    // the real name is permanent. Data-driven via the skin definition.
+    const nameHidden = !owned && skin.lockedNameBehavior === 'UNKNOWN';
     items.push({
       id: skin.id,
       name: skin.name,
+      displayName: nameHidden ? UNKNOWN_ARTIFACT_LABEL : skin.name,
+      nameHidden,
       codename: skin.codename,
       description: skin.description,
       rarity: skin.rarity,
@@ -175,6 +189,8 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
     items.push({
       id: glove.id,
       name: glove.name,
+      displayName: glove.name,
+      nameHidden: false,
       codename: glove.codename,
       description:
         'Rolled from the Signal Decoder. Random reward, permanently owned once decoded.',
@@ -196,6 +212,8 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
     items.push({
       id: d.id,
       name: d.name,
+      displayName: d.name,
+      nameHidden: false,
       codename: d.codename,
       description: d.description,
       rarity: masteryRarity(d.tier),

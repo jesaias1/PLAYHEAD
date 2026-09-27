@@ -245,7 +245,7 @@ export class ArmoryModal {
       tile.setAttribute('aria-selected', item.id === this.selectedId ? 'true' : 'false');
       tile.setAttribute(
         'aria-label',
-        `${item.name} // ${item.rarity}${
+        `${item.displayName} // ${item.rarity}${
           item.equipped ? ' // EQUIPPED' : item.owned ? ' // OWNED' : ' // LOCKED'
         }`
       );
@@ -257,7 +257,7 @@ export class ArmoryModal {
       const mark = item.equipped ? '✓' : item.owned ? '·' : '⊘';
       tile.innerHTML =
         `<span class="armory-tile-swatch" aria-hidden="true"></span>` +
-        `<span class="armory-tile-name">${item.name}</span>` +
+        `<span class="armory-tile-name">${item.displayName}</span>` +
         `<span class="armory-tile-foot">` +
         `<span class="armory-tile-rarity">${item.rarity}</span>` +
         `<span class="armory-tile-mark" aria-hidden="true">${mark}</span>` +
@@ -295,7 +295,7 @@ export class ArmoryModal {
       `<div class="armory-detail-rarity">${item.rarity}${
         item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
       }</div>` +
-      `<div class="armory-detail-name">${item.name}</div>` +
+      `<div class="armory-detail-name">${item.displayName}</div>` +
       `<div class="armory-detail-codename">${item.codename}</div>` +
       `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +
       `<div class="armory-detail-desc">${item.description}</div>` +

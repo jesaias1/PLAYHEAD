@@ -176,6 +176,7 @@ export class ImportScreen {
   private armoryInventoryElem: HTMLElement;
   private armoryDetailElem: HTMLElement;
   private armoryCountElem: HTMLElement;
+  private armoryCollectionElem: HTMLElement;
   private armoryMasteryStatusElem: HTMLElement;
   private armoryMasteryRowsElem: HTMLElement;
   private armoryViewRewardBtn: HTMLButtonElement;
@@ -424,6 +425,7 @@ export class ImportScreen {
               <button class="armory-filter-btn active" type="button" data-armory-sort="rarity">RARITY</button>
               <button class="armory-filter-btn" type="button" data-armory-sort="name">NAME</button>
             </div>
+            <span class="armory-collection" id="armory-collection">ARMORY // 00 / 00 RECOVERED</span>
             <span class="armory-count" id="armory-count">00 ITEMS</span>
           </div>
 
@@ -516,6 +518,7 @@ export class ImportScreen {
     this.armoryInventoryElem = this.element.querySelector('#armory-inventory') as HTMLElement;
     this.armoryDetailElem = this.element.querySelector('#armory-detail') as HTMLElement;
     this.armoryCountElem = this.element.querySelector('#armory-count') as HTMLElement;
+    this.armoryCollectionElem = this.element.querySelector('#armory-collection') as HTMLElement;
     this.armoryMasteryStatusElem = this.element.querySelector(
       '#armory-mastery-status'
     ) as HTMLElement;
@@ -876,7 +879,38 @@ export class ImportScreen {
       this.armoryCountElem.textContent = inventoryCountLabel(visible.length);
     }
 
+    this.renderArmoryCollection();
+
     this.renderArmoryMasteryStatus();
+  }
+
+  /**
+   * COMPACT COLLECTION INDICATOR.
+   *
+   * One line, no XP bar, no battle-pass language, no currency. It answers the
+   * only question that matters: how much of the Signal archive is recovered.
+   *
+   * When the archive is finished, any drops that had nothing left to spend on
+   * are reported as BANKED rather than silently discarded.
+   */
+  private renderArmoryCollection(): void {
+    if (!this.armoryCollectionElem) return;
+    const progress = this.skinSystem.getCollectionProgress();
+    const banked = this.skinSystem.getBankedDropCount();
+
+    if (progress.complete) {
+      this.armoryCollectionElem.textContent =
+        banked > 0
+          ? `ARMORY COMPLETE // ${banked} SIGNAL DROP${banked === 1 ? '' : 'S'} BANKED`
+          : 'ARMORY COMPLETE';
+      this.armoryCollectionElem.classList.add('complete');
+      return;
+    }
+
+    this.armoryCollectionElem.classList.remove('complete');
+    this.armoryCollectionElem.textContent =
+      `ARMORY // ${progress.owned} / ${progress.total} SIGNALS RECOVERED` +
+      (banked > 0 ? ` // ${banked} BANKED` : '');
   }
 
   /**
@@ -933,7 +967,7 @@ export class ImportScreen {
     tile.setAttribute('aria-selected', item.id === this.armorySelectedId ? 'true' : 'false');
     tile.setAttribute(
       'aria-label',
-      `${item.name} // ${item.rarity}${
+      `${item.displayName} // ${item.rarity}${
         item.equipped ? ' // EQUIPPED' : item.owned ? ' // OWNED' : ' // LOCKED'
       }`
     );
@@ -945,7 +979,7 @@ export class ImportScreen {
     const mark = item.equipped ? '✓' : item.owned ? '·' : '⊘';
     tile.innerHTML =
       `<span class="armory-tile-swatch" aria-hidden="true"></span>` +
-      `<span class="armory-tile-name">${item.name}</span>` +
+      `<span class="armory-tile-name">${item.displayName}</span>` +
       `<span class="armory-tile-foot">` +
       `<span class="armory-tile-rarity">${item.rarity}</span>` +
       `<span class="armory-tile-mark" aria-hidden="true">${mark}</span>` +
@@ -986,7 +1020,7 @@ export class ImportScreen {
       `<div class="armory-detail-rarity">${item.rarity}${
         item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
       }</div>` +
-      `<div class="armory-detail-name">${item.name}</div>` +
+      `<div class="armory-detail-name">${item.displayName}</div>` +
       `<div class="armory-detail-codename">${item.codename}</div>` +
       `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +
       `<div class="armory-detail-desc">${item.description}</div>` +

@@ -296,6 +296,23 @@ export class SignalDecodeModal {
     }, 200);
   }
 
+  /**
+   * A brief, restrained interference beat for an exceptional reward.
+   *
+   * Two short flickers over ~420 ms, then clean. Deliberately NOT a strobe: no
+   * rapid flashing, no full-screen white, nothing that could read as an
+   * accessibility hazard. Presentation only — the reward is already persisted.
+   */
+  private flashInterference(): void {
+    const dialog = this.element.querySelector('.decode-modal-dialog') as HTMLElement | null;
+    if (!dialog) return;
+    dialog.classList.remove('decode-interference');
+    // Force a reflow so the animation restarts on a repeat reveal.
+    void dialog.offsetWidth;
+    dialog.classList.add('decode-interference');
+    window.setTimeout(() => dialog.classList.remove('decode-interference'), 460);
+  }
+
   private revealAward(reward: OpenedSignalDrop): void {
     this.decoderAudio.playRevealAccent(reward.rarity);
     this.skipBtn.style.display = 'none';
@@ -309,6 +326,12 @@ export class SignalDecodeModal {
     if (isOverclocked) {
       this.titleElem.textContent = 'SYSTEM LIMIT EXCEEDED // OVERCLOCKED SIGNAL ACQUIRED';
       this.kickerElem.textContent = '// APEX SIGNAL EXTRACTION';
+    } else if (reward.rarity === 'ARTIFACT') {
+      // An exceptional reward gets a brief interference beat before it resolves.
+      // Presentation only: the reward was already determined and persisted.
+      this.titleElem.textContent = '[ARM] UNKNOWN ARTIFACT RESOLVED';
+      this.kickerElem.textContent = '// [WARN] ANOMALOUS SIGNAL DETECTED';
+      this.flashInterference();
     } else {
       this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
       this.kickerElem.textContent = '// SIGNAL RECOVERY BUS';

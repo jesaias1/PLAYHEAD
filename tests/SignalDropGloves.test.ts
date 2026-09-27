@@ -303,7 +303,10 @@ describe('Unified duplicate protection', () => {
   it('a full knife pool falls through to gloves instead of blocking', () => {
     const knifeIds = KARAMBIT_SKINS.filter((s) => s.dropEligible).map((s) => s.id);
     skinSystem.applyCloudProgression({ rewardOwnedSkinIds: knifeIds });
-    expect(skinSystem.isCollectionComplete()).toBe(true);
+    // A completed KNIFE set is not a completed collection: the decoder is
+    // unified, so unowned gloves must still be awardable.
+    expect(skinSystem.isCollectionComplete()).toBe(false);
+    expect(skinSystem.isGloveCollectionComplete()).toBe(false);
     skinSystem.grantDevPendingSignals(20, 'GOLD');
 
     for (let i = 0; i < 5; i++) {
@@ -316,7 +319,7 @@ describe('Unified duplicate protection', () => {
   it('reports collection complete only when BOTH pools are exhausted', () => {
     const knifeIds = KARAMBIT_SKINS.filter((s) => s.dropEligible).map((s) => s.id);
     skinSystem.applyCloudProgression({ rewardOwnedSkinIds: knifeIds });
-    expect(skinSystem.isCollectionComplete()).toBe(true);
+    expect(skinSystem.isCollectionComplete()).toBe(false);
     expect(skinSystem.isGloveCollectionComplete()).toBe(false);
 
     skinSystem.grantDevPendingSignals(60, 'DIAMOND');

@@ -724,6 +724,18 @@
   white-space: nowrap;
 }
 
+/* Compact archive progress. Deliberately understated: no XP bar, no currency. */
+.armory-collection {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  color: #7b8794;
+  white-space: nowrap;
+}
+.armory-collection.complete { color: #4dffb8; }
+.armory-count { margin-left: 12px; }
+
 /* --- 5. Compact mastery status (mastery gloves only) -------------------- */
 .armory-mastery-status {
   display: flex;
@@ -2531,3 +2543,17 @@ option:hover, option:focus, option:checked {
   cursor: pointer;
 }
 .online-lb-race-btn:hover { background: rgba(157, 140, 255, 0.14); }
+
+/* ARTIFACT reveal interference: two short flickers, then clean. Never a strobe. */
+@keyframes decode-interference-flicker {
+  0%, 100% { filter: none; opacity: 1; }
+  12% { filter: hue-rotate(28deg) contrast(1.25); opacity: 0.86; }
+  22% { filter: none; opacity: 1; }
+  38% { filter: hue-rotate(-24deg) brightness(1.12); opacity: 0.9; }
+  52% { filter: none; opacity: 1; }
+}
+.decode-interference { animation: decode-interference-flicker 460ms steps(1, end) 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .decode-interference { animation: none; }
+}
