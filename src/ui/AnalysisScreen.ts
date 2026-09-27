@@ -79,7 +79,7 @@ export class AnalysisScreen {
         </div>
 
         <div class="analysis-footer">
-          <button class="btn-hero" id="btn-enter-track" disabled>[SYS] ENTER WORLD</button>
+          <button class="btn-hero" id="btn-enter-track" disabled>map.exec</button>
         </div>
       </div>
     `;
@@ -177,7 +177,7 @@ export class AnalysisScreen {
     this.element.classList.remove('hidden');
     this.element.classList.remove('contracting');
     this.enterBtn.disabled = true;
-    this.enterBtn.textContent = '[SYS] ENTER WORLD';
+    this.enterBtn.textContent = 'map.exec';
     if (this.logElem) {
       this.logElem.innerHTML = '';
     }

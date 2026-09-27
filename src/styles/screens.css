@@ -64,7 +64,7 @@
 
 .import-container.terminal-console::before {
   inset: -1px auto auto -1px;
-  border-top: 2px solid var(--accent-color);
+  border-top: 1px solid var(--accent-color);
   border-left: 2px solid var(--accent-color);
 }
 
@@ -81,7 +81,7 @@
 
 .brand-eyebrow {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   font-weight: 700;
   letter-spacing: 0.3em;
   color: var(--accent-color);
@@ -136,7 +136,7 @@
   margin: 0;
   color: var(--accent-color);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   font-weight: 700;
   letter-spacing: 0.32em;
 }
@@ -179,7 +179,7 @@
 
 .import-tab-btn {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.7155rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 8px 8px;
@@ -233,7 +233,7 @@
   justify-content: stretch;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   letter-spacing: 0.08em;
   color: var(--text-muted);
   text-align: left;
@@ -317,7 +317,7 @@
   flex-direction: column;
   background: var(--bg-surface-translucent);
   border: 1px solid var(--border-medium);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   padding: 12px 20px;
   width: 100%;
   margin-bottom: 8px;
@@ -346,7 +346,7 @@
 
 .showcase-artist {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.22em;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -391,7 +391,7 @@
 .signal-program-label {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   letter-spacing: 0.16em;
 }
 
@@ -424,7 +424,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  border-left: 4px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   text-align: left;
 }
 
@@ -476,7 +476,7 @@
 .decoder-detail {
   margin-top: 4px;
   color: #8d9db1;
-  font: 0.64rem/1.35 var(--font-mono);
+  font: 0.6875rem/1.35 var(--font-mono);
 }
 
 /* ==========================================================================
@@ -508,7 +508,7 @@
   padding: 18px 20px 14px;
   background: rgba(8, 12, 18, 0.97);
   border: 1px solid #1f293d;
-  border-left: 3px solid #00f0ff;
+  border-left: 1px solid #00f0ff;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
 }
 
@@ -521,13 +521,13 @@
   padding: 9px 12px;
   margin-bottom: 8px;
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background: rgba(0, 0, 0, 0.3);
 }
 .armory-header-title { display: flex; flex-direction: column; gap: 1px; }
 .armory-kicker {
   font-family: var(--font-mono);
-  font-size: 0.55rem;
+  font-size: 0.712rem;
   letter-spacing: 0.16em;
   color: var(--accent-color);
 }
@@ -554,8 +554,8 @@
   background: rgba(0, 0, 0, 0.32);
   font-family: var(--font-mono);
 }
-.armory-loadout-slot span { font-size: 0.53rem; letter-spacing: 0.14em; color: #6d7885; }
-.armory-loadout-slot b { font-size: 0.68rem; font-weight: 500; color: #d7e3ef; }
+.armory-loadout-slot span { font-size: 0.705rem; letter-spacing: 0.14em; color: #6d7885; }
+.armory-loadout-slot b { font-size: 0.7575rem; font-weight: 500; color: #d7e3ef; }
 
 .armory-drops {
   display: flex;
@@ -564,7 +564,7 @@
 }
 .armory-drops-count {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   letter-spacing: 0.12em;
   color: #8fa0b5;
   white-space: nowrap;
@@ -572,7 +572,7 @@
 .armory-drops-count b { color: #4dffb8; font-size: 0.76rem; }
 .armory-decrypt-btn {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   padding: 5px 12px;
@@ -594,7 +594,7 @@
 }
 .armory-dev-toggle {
   display: none;
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   padding: 4px 9px;
   background: rgba(0, 240, 255, 0.08);
   border: 1px solid #00f0ff;
@@ -617,24 +617,24 @@
 }
 .armory-decoder-line .decoder-strip-kicker {
   font-family: var(--font-mono);
-  font-size: 0.55rem;
+  font-size: 0.712rem;
   letter-spacing: 0.16em;
   color: var(--accent-color);
   white-space: nowrap;
 }
 .armory-decoder-line .decoder-status {
-  font: 700 0.66rem/1.2 var(--font-mono);
+  font: 700 0.75rem/1.2 var(--font-mono);
   letter-spacing: 0.1em;
   white-space: nowrap;
 }
 .armory-decoder-line .decoder-detail {
   margin: 0;
   color: #8d9db1;
-  font: 0.62rem/1.3 var(--font-mono);
+  font: 0.6875rem/1.3 var(--font-mono);
 }
 .armory-view-reward {
   margin-left: auto;
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   padding: 3px 9px;
   white-space: nowrap;
   color: #4dffb8;
@@ -653,7 +653,7 @@
 }
 .armory-slot-btn {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   padding: 7px 16px;
@@ -691,14 +691,14 @@
 .armory-filter-group.hidden { display: none; }
 .armory-filter-label {
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.7015rem;
   letter-spacing: 0.16em;
   color: #55606e;
   margin-right: 3px;
 }
 .armory-filter-btn {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.7155rem;
   letter-spacing: 0.1em;
   padding: 4px 9px;
   background: transparent;
@@ -718,7 +718,7 @@
 .armory-count {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.7155rem;
   letter-spacing: 0.14em;
   color: #55606e;
   white-space: nowrap;
@@ -728,7 +728,7 @@
 .armory-collection {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.7155rem;
   letter-spacing: 0.14em;
   color: #7b8794;
   white-space: nowrap;
@@ -752,7 +752,7 @@
 .armory-mastery-rows { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .armory-mastery-chip {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   letter-spacing: 0.12em;
   color: #8fa0b5;
   padding: 2px 7px;
@@ -780,7 +780,7 @@
   padding: 26px 12px;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   letter-spacing: 0.16em;
   color: #55606e;
   border: 1px dashed rgba(255, 255, 255, 0.1);
@@ -803,7 +803,7 @@
   font-family: var(--font-mono);
   background: rgba(8, 12, 18, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-left: 3px solid var(--tile-accent, #64748b);
+  border-left: 1px solid var(--tile-accent, #64748b);
   color: #cbd5e1;
   cursor: pointer;
   overflow: hidden;
@@ -839,7 +839,7 @@
   pointer-events: none;
 }
 .armory-tile-name {
-  font-size: 0.67rem;
+  font-size: 0.754rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   line-height: 1.15;
@@ -857,7 +857,7 @@
   gap: 6px;
 }
 .armory-tile-rarity {
-  font-size: 0.48rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--tile-accent, #64748b);
@@ -865,7 +865,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.armory-tile-mark { font-size: 0.62rem; line-height: 1; color: #4dffb8; }
+.armory-tile-mark { font-size: 0.7365rem; line-height: 1; color: #4dffb8; }
 .armory-tile.locked .armory-tile-mark { color: #55606e; }
 
 /* --- 7. The ONE detail panel -------------------------------------------- */
@@ -873,7 +873,7 @@
   position: sticky;
   top: 44px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: 2px solid var(--detail-accent, var(--accent-color));
+  border-top: 1px solid var(--detail-accent, var(--accent-color));
   background: rgba(5, 9, 15, 0.92);
 }
 .armory-detail-inner {
@@ -881,19 +881,19 @@
   flex-direction: column;
   gap: 7px;
   padding: 12px;
-  border-left: 3px solid var(--detail-accent, var(--accent-color));
+  border-left: 1px solid var(--detail-accent, var(--accent-color));
 }
 .armory-detail-empty {
   padding: 26px 12px;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.16em;
   color: #55606e;
 }
 .armory-detail-rarity {
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.7085rem;
   letter-spacing: 0.16em;
   color: var(--detail-accent, var(--accent-color));
 }
@@ -907,14 +907,14 @@
 }
 .armory-detail-codename {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.1em;
   color: #8899aa;
 }
 .armory-detail-status {
   align-self: flex-start;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.7155rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   padding: 2px 8px;
@@ -924,7 +924,7 @@
 .armory-detail-status.owned { color: #4dffb8; }
 .armory-detail-status.locked { color: #6d7885; }
 .armory-detail-desc {
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   line-height: 1.4;
   color: #8a9bb2;
 }
@@ -944,13 +944,13 @@
   font-family: var(--font-mono);
 }
 .armory-detail-row span {
-  font-size: 0.52rem;
+  font-size: 0.7015rem;
   letter-spacing: 0.14em;
   color: #55606e;
   white-space: nowrap;
 }
 .armory-detail-row b {
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   font-weight: 500;
   color: #c6d2e0;
   text-align: right;
@@ -966,7 +966,7 @@
 .armory-action-btn {
   width: 100%;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   padding: 7px 10px;
@@ -1027,7 +1027,7 @@
 .results-mastery-progress {
   font-family: var(--font-mono);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background: rgba(0, 0, 0, 0.3);
   padding: 10px 14px;
 }
@@ -1044,7 +1044,7 @@
 .results-mastery-unlock {
   font-family: var(--font-mono);
   border: 1px solid rgba(0, 240, 255, 0.35);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background: rgba(6, 20, 26, 0.6);
   padding: 12px 16px;
   display: flex;
@@ -1054,17 +1054,17 @@
 }
 .results-mastery-unlock.hidden { display: none; }
 .results-mastery-unlock-kicker {
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   letter-spacing: 0.16em;
   color: var(--accent-color);
 }
 .results-mastery-unlock-name { font-size: 1.05rem; font-weight: 700; color: #eaf6ff; }
 .results-mastery-unlock-status {
-  font-size: 0.68rem;
+  font-size: 0.7575rem;
   letter-spacing: 0.14em;
   color: #4dffb8;
 }
-.results-mastery-unlock-req { font-size: 0.66rem; color: #9fb0c8; letter-spacing: 0.08em; }
+.results-mastery-unlock-req { font-size: 0.7505rem; color: #9fb0c8; letter-spacing: 0.08em; }
 .results-mastery-unlock button { margin-top: 6px; }
 
 /* ==========================================================================
@@ -1077,7 +1077,7 @@
   border: none;
   padding: 0;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   letter-spacing: 0.08em;
   color: #d7e3ef;
   cursor: pointer;
@@ -1103,7 +1103,7 @@
   padding: 20px 24px 24px;
   background: var(--bg-surface, #080c12);
   border: 1px solid rgba(0, 240, 255, 0.22);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   font-family: var(--font-mono);
 }
 
@@ -1114,9 +1114,9 @@
   gap: 16px;
   margin-bottom: 14px;
 }
-.profile-kicker { font-size: 0.6rem; letter-spacing: 0.18em; color: var(--accent-color); }
+.profile-kicker { font-size: 0.7295rem; letter-spacing: 0.18em; color: var(--accent-color); }
 .profile-title { margin: 4px 0 2px; font-size: 1.3rem; letter-spacing: 0.06em; color: #eaf6ff; }
-.profile-status { font-size: 0.62rem; letter-spacing: 0.14em; color: #6d7885; }
+.profile-status { font-size: 0.7365rem; letter-spacing: 0.14em; color: #6d7885; }
 
 .profile-rename {
   display: flex;
@@ -1128,13 +1128,13 @@
   background: rgba(0, 0, 0, 0.3);
 }
 .profile-rename.hidden { display: none; }
-.profile-label { font-size: 0.62rem; letter-spacing: 0.12em; color: #6d7885; white-space: nowrap; }
-.profile-rename-hint { font-size: 0.62rem; letter-spacing: 0.08em; color: #4dffb8; }
+.profile-label { font-size: 0.7365rem; letter-spacing: 0.12em; color: #6d7885; white-space: nowrap; }
+.profile-rename-hint { font-size: 0.7365rem; letter-spacing: 0.08em; color: #4dffb8; }
 .profile-rename-hint.error { color: #ffb020; }
 
 .profile-section { margin-top: 16px; }
 .profile-section-title {
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   letter-spacing: 0.18em;
   color: var(--accent-color);
   margin-bottom: 8px;
@@ -1150,9 +1150,9 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: rgba(0, 0, 0, 0.28);
 }
-.profile-item-label { font-size: 0.6rem; letter-spacing: 0.14em; color: #6d7885; min-width: 78px; }
+.profile-item-label { font-size: 0.7295rem; letter-spacing: 0.14em; color: #6d7885; min-width: 78px; }
 .profile-item-value { font-size: 0.82rem; color: #d7e3ef; }
-.profile-item-req { font-size: 0.62rem; letter-spacing: 0.08em; color: #b8a8ff; margin-left: auto; }
+.profile-item-req { font-size: 0.7365rem; letter-spacing: 0.08em; color: #b8a8ff; margin-left: auto; }
 
 .profile-mastery {
   display: flex;
@@ -1183,19 +1183,19 @@
   background: rgba(0, 0, 0, 0.24);
   font-size: 0.72rem;
 }
-.profile-track-index { color: #566170; font-size: 0.64rem; }
+.profile-track-index { color: #566170; font-size: 0.7435rem; }
 .profile-track-name { color: #d7e3ef; }
-.profile-track-rank { font-size: 0.64rem; letter-spacing: 0.08em; color: #7b8794; text-align: right; }
+.profile-track-rank { font-size: 0.7435rem; letter-spacing: 0.08em; color: #7b8794; text-align: right; }
 .profile-track-rank.rank-bronze { color: #cd7f32; }
 .profile-track-rank.rank-silver { color: #c0c8d4; }
 .profile-track-rank.rank-gold { color: #ffd166; }
 .profile-track-rank.rank-diamond { color: #7fe7ff; }
 .profile-track-time { color: #9fb0c8; text-align: right; }
 .profile-track-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.profile-watch, .profile-race { font-size: 0.58rem; padding: 2px 7px; }
+.profile-watch, .profile-race { font-size: 0.7225rem; padding: 2px 7px; }
 .profile-empty {
   padding: 10px 12px;
-  font-size: 0.68rem;
+  font-size: 0.7575rem;
   letter-spacing: 0.1em;
   color: #566170;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1225,7 +1225,7 @@
 .online-result-identity {
   display: block;
   margin-top: 2px;
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.08em;
   color: #b8a8ff;
 }
@@ -1340,7 +1340,7 @@
 
 .strip-item.active {
   border-color: rgba(0, 240, 255, 0.6);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(13, 17, 24, 0.92));
   box-shadow: 0 0 12px rgba(0, 240, 255, 0.22);
   transform: translateY(-1px);
@@ -1355,7 +1355,7 @@
 
 .strip-item-rank {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7225rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   padding: 1px 4px;
@@ -1397,7 +1397,7 @@
   padding: 8px 12px;
   background: rgba(8, 12, 18, 0.9);
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
 }
 
 .showcase-record-pill {
@@ -1429,7 +1429,7 @@
 
 .strip-item-num {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   color: var(--text-muted);
   letter-spacing: 0.15em;
 }
@@ -1474,7 +1474,7 @@
 .strip-item-bpm,
 .strip-item-meta {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   color: var(--text-secondary);
   letter-spacing: 0.1em;
   line-height: 1.25;
@@ -1501,7 +1501,7 @@
   gap: 6px;
   cursor: pointer;
   border: 1px solid var(--border-medium);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background:
     linear-gradient(90deg, rgba(0, 240, 255, 0.05), transparent 42%),
     rgba(8, 12, 18, 0.9);
@@ -1532,7 +1532,7 @@
 .drop-meta {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.7575rem;
   letter-spacing: 0.14em;
 }
 
@@ -1644,7 +1644,7 @@
 
 .privacy-notice {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.28em;
   color: var(--text-muted);
   border-top: 1px solid var(--border-subtle);
@@ -1674,7 +1674,7 @@
   margin-bottom: 5px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.7435rem;
   font-weight: 700;
   letter-spacing: 0.22em;
 }
@@ -1712,7 +1712,7 @@
 .analysis-progress-readout {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.7575rem;
   letter-spacing: 0.14em;
 }
 
@@ -1756,12 +1756,15 @@
   border: 1px solid var(--border-medium);
   margin-bottom: 24px;
   display: block;
-  transition: height var(--motion-cinematic), border-color var(--motion-normal);
+  /* Transform, not height: animating height thrashes layout every frame.
+     The contract-into-game effect scales the axis instead. */
+  transform-origin: center;
+  transition: transform var(--motion-cinematic), border-color var(--motion-normal);
 }
 
 /* Contracting transition into game */
 .analysis-screen.contracting .waveform-canvas {
-  height: 2px;
+  transform: scaleY(0.02);
   border-color: var(--accent-color);
   box-shadow: 0 0 20px var(--accent-color);
 }
@@ -1789,7 +1792,7 @@
 
 .stat-label {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.22em;
   color: var(--text-muted);
   margin-bottom: 4px;
@@ -1860,7 +1863,7 @@
 
 .key-desc {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.16em;
   color: var(--text-muted);
 }
@@ -1891,7 +1894,7 @@
   gap: 10px;
   background: var(--bg-surface-translucent);
   border: 1px solid var(--border-medium);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   padding: 40px 36px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
 }
@@ -1963,7 +1966,7 @@ button.secondary:hover {
   width: 100%;
   background: var(--bg-surface-translucent);
   border: 1px solid var(--border-medium);
-  border-left: 3px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   padding: 36px 40px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
 }
@@ -2061,7 +2064,7 @@ button.secondary:hover {
   color: var(--accent-color);
   background: rgba(0, 240, 255, 0.07);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-shadow: 0 0 10px var(--accent-glow);
@@ -2082,7 +2085,7 @@ button.secondary:hover {
 
 .rank-tier-sub {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.2em;
   color: var(--text-muted);
   margin-top: 4px;
@@ -2105,7 +2108,7 @@ button.secondary:hover {
   background:
     linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, rgba(4, 10, 18, 0.96) 60%);
   border: 1px solid rgba(0, 240, 255, 0.45);
-  border-left: 3px solid #00f0ff;
+  border-left: 1px solid #00f0ff;
   box-shadow:
     0 0 16px rgba(0, 240, 255, 0.07),
     inset 0 0 20px rgba(0, 240, 255, 0.03);
@@ -2135,7 +2138,7 @@ button.secondary:hover {
   margin: -14px 0 24px;
   padding: 13px 16px;
   border: 1px solid rgba(0, 240, 255, 0.42);
-  border-left: 4px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
   background:
     linear-gradient(90deg, rgba(0, 240, 255, 0.09), transparent 52%),
     rgba(4, 8, 14, 0.92);
@@ -2149,7 +2152,7 @@ button.secondary:hover {
 
 .signal-drop-kicker {
   color: var(--accent-color);
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   font-weight: 800;
   letter-spacing: 0.24em;
 }
@@ -2165,7 +2168,7 @@ button.secondary:hover {
 .signal-drop-count {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.14em;
 }
 
@@ -2215,7 +2218,7 @@ button.secondary:hover {
   color: #00f0ff;
   background: rgba(0, 240, 255, 0.08);
   border: 1px solid rgba(0, 240, 255, 0.4);
-  border-left: 3px solid #00f0ff;
+  border-left: 1px solid #00f0ff;
 }
 
 .results-actions {
@@ -2273,7 +2276,7 @@ option:hover, option:focus, option:checked {
   .brand-logo-text { max-width: 72vw; }
   .brand-tagline { letter-spacing: 0.13em; }
   .brand-secondary { letter-spacing: 0.22em; }
-  .system-status-heading { font-size: 0.49rem; letter-spacing: 0.07em; }
+  .system-status-heading { font-size: 0.691rem; letter-spacing: 0.07em; }
   .lab-control-grid { grid-template-columns: 1fr; }
   .import-tabs { display: grid; grid-template-columns: 1fr 1fr; }
   .import-tab-btn { padding-inline: 5px; letter-spacing: 0.08em; }
@@ -2328,7 +2331,7 @@ option:hover, option:focus, option:checked {
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.7505rem;
   letter-spacing: 0.08em;
 }
 
@@ -2340,7 +2343,7 @@ option:hover, option:focus, option:checked {
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: #7b8794;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.08em;
   padding: 1px 5px;
   cursor: pointer;
@@ -2387,7 +2390,7 @@ option:hover, option:focus, option:checked {
 
 .online-hint {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.7575rem;
   line-height: 1.5;
   color: #6d7885;
   margin: 4px 0 10px;
@@ -2422,7 +2425,7 @@ option:hover, option:focus, option:checked {
   padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
-.online-lb-row.online-lb-head { color: #6d7885; font-size: 0.68rem; letter-spacing: 0.12em; }
+.online-lb-row.online-lb-head { color: #6d7885; font-size: 0.7575rem; letter-spacing: 0.12em; }
 .online-lb-rank { color: #7b8794; }
 .online-lb-name { color: #d7e3ef; }
 .online-lb-time { text-align: right; color: var(--accent-color); }
@@ -2435,7 +2438,7 @@ option:hover, option:focus, option:checked {
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
-.online-lb-you-label { color: #6d7885; font-size: 0.68rem; letter-spacing: 0.12em; align-self: center; }
+.online-lb-you-label { color: #6d7885; font-size: 0.7575rem; letter-spacing: 0.12em; align-self: center; }
 .online-lb-you-time, .online-lb-you-pos { color: var(--accent-color); }
 
 /* ---- race ---- */
@@ -2454,12 +2457,12 @@ option:hover, option:focus, option:checked {
 .online-lobby-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .online-lobby-code { font-family: var(--font-mono); font-size: 1.25rem; color: var(--accent-color); letter-spacing: 0.18em; }
 .online-lobby-title { font-family: var(--font-mono); font-size: 0.82rem; color: #d7e3ef; }
-.online-lobby-clock { font-family: var(--font-mono); font-size: 0.68rem; color: #6d7885; letter-spacing: 0.1em; }
+.online-lobby-clock { font-family: var(--font-mono); font-size: 0.7575rem; color: #6d7885; letter-spacing: 0.1em; }
 
 .online-invite-row { display: flex; gap: 10px; margin: 12px 0; align-items: center; }
 .online-invite-label {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.7365rem;
   letter-spacing: 0.14em;
   color: #6d7885;
   white-space: nowrap;
@@ -2475,7 +2478,7 @@ option:hover, option:focus, option:checked {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.3);
 }
-.online-player-index { color: #6d7885; font-size: 0.68rem; letter-spacing: 0.1em; align-self: center; }
+.online-player-index { color: #6d7885; font-size: 0.7575rem; letter-spacing: 0.1em; align-self: center; }
 .online-player-name { color: #d7e3ef; }
 .online-player-state { text-align: right; font-size: 0.72rem; letter-spacing: 0.08em; }
 /* State colour semantics: a healthy READY must never look like a blocker. */
@@ -2514,7 +2517,7 @@ option:hover, option:focus, option:checked {
 .online-result-name { color: #d7e3ef; }
 .online-result-time { text-align: right; color: var(--accent-color); }
 .online-result-meta { text-align: right; color: #6d7885; font-size: 0.7rem; letter-spacing: 0.08em; }
-.online-result-attempts { font-size: 0.68rem; color: #6d7885; margin-top: 10px; letter-spacing: 0.06em; }
+.online-result-attempts { font-size: 0.7575rem; color: #6d7885; margin-top: 10px; letter-spacing: 0.06em; }
 
 /* WATCH RUN / RACE GHOST actions inside the world leaderboard table. */
 .online-lb-row { grid-template-columns: 42px 1fr 110px 170px; }
@@ -2524,7 +2527,7 @@ option:hover, option:focus, option:checked {
   border: 1px solid var(--accent-color);
   color: var(--accent-color);
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.1em;
   padding: 2px 8px;
   cursor: pointer;
@@ -2537,7 +2540,7 @@ option:hover, option:focus, option:checked {
   border: 1px solid rgba(157, 140, 255, 0.55);
   color: #b8a8ff;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.1em;
   padding: 2px 8px;
   cursor: pointer;
@@ -2556,4 +2559,827 @@ option:hover, option:focus, option:checked {
 
 @media (prefers-reduced-motion: reduce) {
   .decode-interference { animation: none; }
+}
+
+/* ==========================================================================
+   PLAYHEAD SIGNAL OS — SHELL
+   ==========================================================================
+
+   A fictional operating environment, not a web page.
+
+   Composition rules that make it read as software rather than a dashboard:
+
+     - The shell is TOP-ALIGNED and left-weighted. There is no centered hero,
+       no logo floating above a tagline, no symmetrical dashboard.
+     - Regions are separated by HAIRLINE RULES and alignment, not by boxes.
+       A container only appears where a real surface boundary exists.
+     - The registry is dense and scannable; the inspector is large and calm.
+       That asymmetry is deliberate.
+     - Colour is a role. Most of the shell is cold off-white on near-black.
+   ========================================================================== */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
+  text-align: left;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* The shell is an operating environment: it starts at the top of the viewport
+   and fills downward. Vertically centring it would read as a web page. */
+.screen.import-screen {
+  justify-content: flex-start;
+  padding-top: 0;
+}
+
+/* The workspace fills the viewport; the status rail sits at the bottom. */
+.shell {
+  min-height: calc(100vh - 56px);
+}
+
+.shell-rail {
+  margin-top: auto;
+}
+
+.import-container.import-container--inventory {
+  max-width: 1460px;
+  text-align: left;
+}
+
+/* --- 1. SYSTEM STRIP ----------------------------------------------------- */
+.shell-strip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shell-mark {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-shrink: 0;
+}
+
+.shell-mark-logo {
+  height: 19px;
+  width: auto;
+  display: block;
+  /* The mark is a system signature, not a marketing logo: no glow, no shadow. */
+  opacity: 1;
+}
+
+.shell-mark-suffix {
+  font-family: var(--font-mono);
+  font-size: var(--type-micro);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.shell-strip-readout {
+  display: flex;
+  gap: var(--space-6);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.shell-stat {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.shell-stat b {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-stat.pending b,
+.shell-stat.pending {
+  color: var(--verified);
+}
+
+/* --- 2. WORKSPACE NAV ---------------------------------------------------- */
+.shell-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: var(--space-6);
+  /* Sticky so the system nav survives long inventories. */
+  position: sticky;
+  top: 0;
+  z-index: var(--z-shell);
+  background: var(--bg-primary);
+  flex-wrap: wrap;
+}
+
+.shell-nav-btn {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color var(--motion-fast),
+    border-color var(--motion-fast),
+    background var(--motion-fast);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--type-data);
+}
+
+.shell-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+.shell-nav-btn.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--signal);
+  background: transparent;
+}
+
+.shell-nav-num {
+  font-size: var(--type-micro);
+  font-weight: 600;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-nav-btn.active .shell-nav-num {
+  color: var(--signal);
+}
+
+.shell-nav-name {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.shell-nav-verb {
+  font-size: var(--type-micro);
+  color: var(--text-dim);
+}
+
+.shell-nav-btn.active .shell-nav-verb {
+  color: var(--text-muted);
+}
+
+/* --- 3. WORKSPACE ------------------------------------------------------- */
+.shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.ws-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: var(--space-6);
+}
+
+.ws-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--type-workspace);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+.ws-note {
+  font-size: var(--type-micro);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* --- 4. REGISTRY + INSPECTOR -------------------------------------------- */
+.ws-split {
+  display: grid;
+  /* Deliberately asymmetric: the registry is the working surface, the
+     inspector is a fixed instrument panel. */
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: var(--space-7);
+  align-items: start;
+  min-width: 0;
+}
+
+.ws-registry {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.registry-head,
+.strip-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 56px 62px 92px;
+  align-items: baseline;
+  gap: var(--space-4);
+  text-align: left;
+  width: 100%;
+}
+
+.registry-head {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--rule-strong);
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-dim);
+}
+
+.registry-head .rh-bpm,
+.registry-head .rh-len,
+.registry-head .rh-rank {
+  text-align: right;
+}
+
+.registry-rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* The registry fills the workspace and scrolls internally, so a long catalog
+     never becomes a giant scrolling page. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(58vh, 620px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+.strip-item {
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule-faint);
+  border-radius: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--type-data);
+  transition: background var(--motion-instant), color var(--motion-instant);
+}
+
+.strip-item:hover {
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-primary);
+  border-color: var(--rule-faint);
+}
+
+/* Selection is an INVERSE BLOCK plus a cursor mark — terminal selection, not
+   a glowing card. */
+.strip-item.active {
+  background: var(--bg-selected);
+  color: var(--text-primary);
+  border-bottom-color: var(--rule);
+}
+
+.strip-item.active .row-num::before {
+  content: '>';
+  color: var(--signal);
+  margin-right: 4px;
+}
+
+.row-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: var(--type-micro);
+}
+
+.strip-item.active .row-num {
+  color: var(--signal);
+}
+
+.row-name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-tag {
+  margin-left: var(--space-4);
+  font-style: normal;
+  font-size: var(--type-micro);
+  color: var(--text-muted);
+}
+
+.row-bpm,
+.row-len {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.row-rank {
+  text-align: right;
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-dim);
+}
+
+.row-rank.rank-bronze { color: #cd7f32; }
+.row-rank.rank-silver { color: #c3ccd8; }
+.row-rank.rank-gold { color: var(--warning); }
+.row-rank.rank-diamond { color: var(--signal); }
+
+.registry-foot {
+  display: flex;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-4) 0;
+  font-size: var(--type-micro);
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.showcase-mastery-chip {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A rule between chips, so the mastery line reads as columns rather than a
+   run-on sentence. */
+.showcase-mastery-chip + .showcase-mastery-chip {
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--rule-faint);
+}
+
+/* --- 5. INSPECTOR ------------------------------------------------------- */
+.ws-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+  position: sticky;
+  top: 68px;
+}
+
+.insp-kicker {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.insp-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--type-signal);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+.insp-spec,
+.insp-records {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.insp-spec {
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--rule-faint);
+}
+
+.insp-records {
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--rule-faint);
+}
+
+.spec-row,
+.record-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-5);
+  font-size: var(--type-data);
+}
+
+.spec-row span,
+.record-row span {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.spec-row b,
+.record-row b {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.insp-desc {
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: var(--leading-body);
+  color: var(--text-secondary);
+}
+
+.insp-trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.trace-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.trace-state {
+  color: var(--text-dim);
+}
+
+.trace-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 34px;
+}
+
+/* The fingerprint spans are created without a class by renderFingerprint, so the
+   trace is styled by position within the rail. */
+.trace-bars span {
+  flex: 1 1 0;
+  min-width: 0;
+  height: calc(var(--signal-level, 0.5) * 100%);
+  min-height: 2px;
+  background: var(--signal);
+  opacity: 0.45;
+}
+
+/* --- 6. COMMAND RAIL ---------------------------------------------------- */
+.cmd-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin-top: var(--space-7);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--rule);
+}
+
+.cmd-prompt {
+  font-size: var(--type-data);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.cmd-prompt::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 5px;
+  background: var(--signal);
+  vertical-align: -2px;
+  animation: shell-caret 1.05s steps(1, end) infinite;
+}
+
+@keyframes shell-caret {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+
+.cmd-exec {
+  font-size: var(--type-command);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 11px 22px;
+  color: var(--signal);
+  border: 1px solid var(--signal);
+  background: transparent;
+  text-transform: none;
+}
+
+.cmd-exec:hover:not(:disabled) {
+  background: var(--signal);
+  color: var(--text-inverse);
+  border-color: var(--signal);
+}
+
+.cmd-sub {
+  font-size: var(--type-data);
+  letter-spacing: 0.04em;
+  padding: 9px 14px;
+  color: var(--text-secondary);
+  border: 1px solid var(--rule);
+  background: transparent;
+  text-transform: none;
+}
+
+.cmd-sub:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--rule-strong);
+}
+
+.cmd-sub:disabled {
+  color: var(--text-dim);
+  border-color: var(--rule-faint);
+}
+
+/* --- 7. STATUS RAIL ----------------------------------------------------- */
+.shell-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  margin-top: var(--space-7);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--type-micro);
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.rail-item::before {
+  content: '[';
+  color: var(--text-dim);
+}
+.rail-item::after {
+  content: ']';
+  color: var(--text-dim);
+}
+
+/* --- 8. SIGNAL INJECTION (Custom Audio) --------------------------------- */
+.inject-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.inject-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-7);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-1);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.inject-zone:hover,
+.inject-zone:focus-visible,
+.inject-zone.dragover {
+  border-color: var(--signal);
+  background: rgba(77, 227, 255, 0.03);
+}
+
+.inject-prompt {
+  font-size: var(--type-body);
+  color: var(--text-secondary);
+}
+
+.inject-formats {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.inject-browse {
+  font-size: var(--type-data);
+  padding: 8px 16px;
+  color: var(--text-primary);
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  text-transform: none;
+}
+
+.inject-stages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--rule);
+}
+
+.stages-head {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-data);
+  color: var(--text-secondary);
+}
+
+.stage-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.stage-tag {
+  font-size: var(--type-micro);
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  white-space: pre;
+}
+
+/* --- 9. MOVEMENT LAB ---------------------------------------------------- */
+.lab-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.lab-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 460px;
+}
+
+.lab-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.lab-label {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+
+.lab-signal-select {
+  font-family: var(--font-mono);
+  font-size: var(--type-data);
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-1);
+  padding: 9px 12px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.lab-signal-select option,
+.lab-signal-select optgroup {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.lab-readout {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--rule-faint);
+}
+
+.lab-readout > div {
+  display: flex;
+  gap: var(--space-5);
+  align-items: baseline;
+}
+
+.lab-readout dt {
+  font-size: var(--type-micro);
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+  min-width: 96px;
+}
+
+.lab-readout dd {
+  margin: 0;
+  font-size: var(--type-data);
+  color: var(--text-secondary);
+}
+
+/* --- 10. RESPONSIVE: collapse secondary panes, never shrink the type ----- */
+@media (max-width: 1180px) {
+  .ws-split,
+  .inject-cols,
+  .lab-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-inspector {
+    position: static;
+    padding-left: 0;
+    border-left: none;
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--rule);
+  }
+  .inject-stages {
+    padding-left: 0;
+    border-left: none;
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--rule);
+  }
+}
+
+@media (max-width: 760px) {
+  .registry-head,
+  .strip-item {
+    grid-template-columns: 32px minmax(0, 1fr) 52px 74px;
+  }
+  .registry-head .rh-len,
+  .row-len {
+    display: none;
+  }
+  .shell-nav-verb {
+    display: none;
+  }
+}
+
+
+/* ==========================================================================
+   COMPILE / ANALYSIS — the real PLAYHEAD boot
+   ==========================================================================
+
+   Every stage shown here is a real product system (AUDIO / DSP / MAP / ROUTE /
+   WORLD). There is no invented telemetry, and the stage list is the actual
+   pipeline order, so the screen doubles as a boot log.
+   ========================================================================== */
+.analysis-screen .analysis-stage {
+  font-size: var(--type-command);
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+}
+
+.analysis-screen .terminal-stage-log {
+  font-size: var(--type-data);
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.btn-hero {
+  font-family: var(--font-mono);
+  font-size: var(--type-command);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  padding: 12px 26px;
+  background: transparent;
+  color: var(--signal);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-1);
+}
+
+.btn-hero:hover:not(:disabled) {
+  background: var(--signal);
+  color: var(--text-inverse);
+  border-color: var(--signal);
+}
+
+.btn-hero:disabled {
+  color: var(--text-dim);
+  border-color: var(--rule-faint);
+  background: transparent;
 }

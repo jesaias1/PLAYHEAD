@@ -100,7 +100,7 @@ export class ArmoryModal {
         </div>
 
         <div style="margin-top: 16px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-family: var(--font-mono); font-size: 0.62rem; color: #5a6678;">[ESC / BUTTON] RETURN TO PAUSE</span>
+          <span style="font-family: var(--font-mono); font-size: 0.7365rem; color: #5a6678;">[ESC / BUTTON] RETURN TO PAUSE</span>
           <button class="primary" id="btn-armory-modal-close" style="padding: 8px 24px; font-size: 0.78rem;">[ < BACK TO PAUSE ]</button>
         </div>
       </div>

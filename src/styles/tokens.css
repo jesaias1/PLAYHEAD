@@ -1,32 +1,128 @@
+/* ==========================================================================
+   PLAYHEAD SIGNAL OS — DESIGN TOKENS
+   ==========================================================================
+
+   Role-based tokens for a fictional operating environment. Not an enterprise
+   design system: every token here exists because a PLAYHEAD surface needs it.
+
+   The two rules that shape everything:
+
+     1. TYPE HAS REAL STEPS. "Terminal" does not mean "tiny". The smallest role
+        is 11px and is reserved for column headers and status flags. Data sits at
+        12.5px, body at 13px, commands at 14px, and titles are genuinely large.
+
+     2. COLOUR IS A ROLE, NOT DECORATION. Cyan is the SIGNAL role, not the
+        "everything is active" colour. Most of the interface is cold off-white on
+        near-black; colour appears only when a state actually means something.
+   ========================================================================== */
+
 :root {
-  --bg-primary: #07080a;
-  --bg-secondary: #0a0c10;
-  --bg-surface: #10141c;
-  --bg-surface-translucent: rgba(10, 12, 16, 0.90);
-  --bg-scrim: rgba(5, 7, 10, 0.75);
+  /* --- Surfaces: near-black with a cold navy cast ------------------------- */
+  --bg-void: #05070b;
+  --bg-primary: #070a10;
+  --bg-raised: #0b0f17;
+  --bg-inset: #04060a;
+  --bg-scrim: rgba(4, 6, 10, 0.82);
+  --bg-selected: #12202e;
 
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.16);
-  --border-strong: rgba(255, 255, 255, 0.32);
+  /* --- Rules: hairlines, not borders ------------------------------------- */
+  --rule: rgba(150, 178, 210, 0.14);
+  --rule-strong: rgba(150, 178, 210, 0.30);
+  --rule-faint: rgba(150, 178, 210, 0.07);
 
-  --text-primary: #f2f4f7;
-  --text-secondary: #8c939e;
-  --text-muted: #505661;
-  --text-dim: #252a33;
+  /* --- Text -------------------------------------------------------------- */
+  --text-primary: #e6edf5;
+  --text-secondary: #93a3b6;
+  --text-muted: #64748b;
+  --text-dim: #3b4757;
+  --text-inverse: #05070b;
 
-  /* Dynamic Track Accent (overwritten per song) */
-  --accent-color: #00f0ff;
-  --accent-rgb: 0, 240, 255;
-  --accent-glow: rgba(0, 240, 255, 0.25);
-  --accent-dim: rgba(0, 240, 255, 0.08);
+  /* --- Role colours. Restrained on purpose. ------------------------------ */
+  --signal: #4de3ff; /* PLAYHEAD cyan: the active signal / selection */
+  --signal-dim: rgba(77, 227, 255, 0.14);
+  --signal-glow: rgba(77, 227, 255, 0.22);
+  --verified: #9bf24d; /* controlled acid lime: success / verified */
+  --verified-dim: rgba(155, 242, 77, 0.12);
+  --warning: #ffb347; /* amber: caution, banked, degraded */
+  --warning-dim: rgba(255, 179, 71, 0.12);
+  --error: #ff3b5c; /* hot red: signal lost, failure */
+  --error-dim: rgba(255, 59, 92, 0.12);
+  --artifact: #c77dff; /* rare violet: abnormal / artifact states only */
+  --artifact-dim: rgba(199, 125, 255, 0.12);
 
-  --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'Space Mono', 'SF Mono', Consolas, monospace;
+  /* --- Live track accent. Contaminates the OS, never repaints it. -------- */
+  --accent-color: var(--signal);
+  --accent-rgb: 77, 227, 255;
+  --accent-glow: var(--signal-glow);
+  --accent-dim: var(--signal-dim);
 
-  /* Centralized Motion Language */
+  /* --- Type -------------------------------------------------------------- */
+  --font-display: 'Archivo', 'Arial Narrow', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+
+  /* One scale, seven roles, real separation. Nothing below 11px. */
+  --type-mark: 1.375rem; /* 22px  product mark */
+  --type-workspace: 1.75rem; /* 28px  workspace / major title */
+  --type-signal: 1.375rem; /* 22px  selected signal title */
+  --type-command: 0.875rem; /* 14px  primary command text */
+  --type-body: 0.8125rem; /* 13px  system output, descriptions */
+  --type-data: 0.78125rem; /* 12.5px tabular data */
+  --type-micro: 0.6875rem; /* 11px  column headers, status flags. FLOOR. */
+
+  --leading-tight: 1.15;
+  --leading-body: 1.5;
+  --tracking-label: 0.09em; /* labels only, never body text */
+
+  /* --- Spacing: a real scale, used asymmetrically ------------------------ */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 48px;
+
+  /* --- Shape: hard corners. ---------------------------------------------- */
+  --radius-0: 0;
+  --radius-1: 2px;
+  --radius-2: 3px;
+
+  /* --- Motion: fast and precise, matching PLAYHEAD movement. ------------- */
   --ease-sharp: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-expo: cubic-bezier(0.19, 1, 0.22, 1);
-  --motion-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
-  --motion-normal: 300ms cubic-bezier(0.16, 1, 0.3, 1);
-  --motion-cinematic: 700ms cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-linear: linear;
+  --motion-instant: 60ms linear;
+  --motion-fast: 110ms cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-normal: 190ms cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-slow: 320ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* --- Layering ---------------------------------------------------------- */
+  --z-shell: 40;
+  --z-overlay: 60;
+
+  /* --- Compatibility aliases ---------------------------------------------
+     The previous palette used these names throughout. They are mapped onto the
+     new roles so every existing surface picks up the corrected colour and type
+     without a risky big-bang rewrite. New work should use the role tokens. */
+  --bg-secondary: var(--bg-raised);
+  --bg-surface: var(--bg-raised);
+  --bg-surface-elevated: var(--bg-raised);
+  --bg-surface-translucent: rgba(7, 10, 16, 0.9);
+  --border-subtle: var(--rule-faint);
+  --border-medium: var(--rule);
+  --border-strong: var(--rule-strong);
+  --ease-expo: var(--ease-sharp);
+  --motion-cinematic: var(--motion-slow);
+  --font-sans: var(--font-display);
+}
+
+/* Reduced motion: collapse every duration to a state change. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 1ms;
+    --motion-fast: 1ms;
+    --motion-normal: 1ms;
+    --motion-slow: 1ms;
+  }
 }

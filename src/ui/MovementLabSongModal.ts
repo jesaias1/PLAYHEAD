@@ -18,13 +18,13 @@ export class MovementLabSongModal {
     this.element = document.createElement('div');
     this.element.className = 'screen movement-lab-song-screen hidden';
     this.element.innerHTML = `
-      <div class="settings-container terminal-console" style="max-height: 84vh; width: 90%; max-width: 680px; overflow-y: auto; padding: 20px 24px; background: rgba(8, 12, 18, 0.96); border: 1px solid #1f293d; border-left: 3px solid #00f0ff; box-shadow: 0 16px 48px rgba(0,0,0,0.85);">
+      <div class="settings-container terminal-console" style="max-height: 84vh; width: 90%; max-width: 680px; overflow-y: auto; padding: 20px 24px; background: rgba(8, 12, 18, 0.96); border: 1px solid #1f293d; border-left: 1px solid #00f0ff; box-shadow: 0 16px 48px rgba(0,0,0,0.85);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
           <div>
-            <div style="font-family: var(--font-mono); font-size: 0.65rem; color: #00f0ff; letter-spacing: 0.25em;">// AUDIO KERNEL</div>
+            <div style="font-family: var(--font-mono); font-size: 0.747rem; color: #00f0ff; letter-spacing: 0.25em;">// AUDIO KERNEL</div>
             <h2 class="pause-title" style="margin: 0; font-size: 1.6rem; text-align: left; letter-spacing: 0.1em;">MOVEMENT LAB // AUDIO FREQUENCY</h2>
           </div>
-          <span style="font-family: var(--font-mono); font-size: 0.68rem; color: #5a6678;">HOTKEY [M] / [ESC]</span>
+          <span style="font-family: var(--font-mono); font-size: 0.7575rem; color: #5a6678;">HOTKEY [M] / [ESC]</span>
         </div>
 
         <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #8899aa; margin-bottom: 12px;">
@@ -86,7 +86,7 @@ export class MovementLabSongModal {
           <span style="font-family: var(--font-mono); font-size: 0.7rem; color: #00f0ff;">[${(idx + 1).toString().padStart(2, '0')}]</span>
           <div>
             <div style="font-family: var(--font-sans); font-size: 0.88rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.05em;">${t.title}</div>
-            <div style="font-family: var(--font-mono); font-size: 0.65rem; color: #8899aa;">${t.genre} · ${t.difficultyLabel}</div>
+            <div style="font-family: var(--font-mono); font-size: 0.747rem; color: #8899aa;">${t.genre} · ${t.difficultyLabel}</div>
           </div>
         </div>
         <div style="display: flex; align-items: center; gap: 12px;">

@@ -220,7 +220,9 @@ export class Hud {
     }
 
     const pct = Math.min(100, Math.max(0, progressRatio * 100));
-    this.progressBarFill.style.width = `${pct.toFixed(1)}%`;
+    // Scale, not width: the bar's width is fixed at 100% and the transform does
+    // the work, so the HUD never triggers a layout pass while running.
+    this.progressBarFill.style.transform = `scaleX(${(pct / 100).toFixed(4)})`;
   }
 
   public showSurfTutorialHint(durationMs = 3000): void {

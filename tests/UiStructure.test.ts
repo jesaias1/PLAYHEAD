@@ -47,12 +47,20 @@ describe('Top navigation', () => {
     ]);
   });
 
-  it('uses the required labels', () => {
-    expect(importScreen).toMatch(/\[ 01 \/\/ SIGNAL PACK \]/);
-    expect(importScreen).toMatch(/\[ 02 \/\/ CUSTOM AUDIO \]/);
-    expect(importScreen).toMatch(/\[ 03 \/\/ MOVEMENT LAB \]/);
-    expect(importScreen).toMatch(/\[ 04 \/\/ ARMORY \]/);
-    expect(importScreen).toMatch(/\[ 05 \/\/ ONLINE \]/);
+  it('uses the required workspace labels', () => {
+    expect(importScreen).toMatch(/shell-nav-name">SIGNAL PACK</);
+    expect(importScreen).toMatch(/shell-nav-name">CUSTOM AUDIO</);
+    expect(importScreen).toMatch(/shell-nav-name">MOVEMENT LAB</);
+    expect(importScreen).toMatch(/shell-nav-name">ARMORY</);
+    expect(importScreen).toMatch(/shell-nav-name">ONLINE</);
+  });
+
+  it('exposes a real command verb for each workspace', () => {
+    // The terminal grammar is not decoration: every verb maps to the action the
+    // workspace actually performs.
+    for (const verb of ['signal.list', 'signal.inject', 'lab.configure', 'armory.open', 'net.session']) {
+      expect(importScreen, verb).toContain(verb);
+    }
   });
 
   it('no longer has RACE or LEADERBOARD as top-level tabs', () => {
@@ -74,20 +82,15 @@ describe('Top navigation', () => {
 
 describe('Sticky global navigation', () => {
   it('is position: sticky at the top of the scroll owner', () => {
-    const rule = (screens.match(/\.import-tabs\s*\{[^}]*\}/) ?? [])[0] ?? '';
+    const rule = (screens.match(/\.shell-nav\s*\{[^}]*\}/) ?? [])[0] ?? '';
     expect(rule).toMatch(/position:\s*sticky/);
     expect(rule).toMatch(/top:\s*0/);
-    expect(rule).toMatch(/z-index:\s*\d+/);
+    expect(rule).toMatch(/z-index:\s*var\(--z-shell\)/);
   });
 
   it('has an opaque PLAYHEAD background so content cannot show through', () => {
-    const rule = (screens.match(/\.import-tabs\s*\{[^}]*\}/) ?? [])[0] ?? '';
-    expect(rule).toMatch(/background:/);
-    // The tab buttons must not punch through the sticky background.
-    const btn = (screens.match(/\.import-tab-btn\s*\{[^}]*\}/) ?? [])[0] ?? '';
-    const margin = /margin-bottom:\s*(-?\d+)px/.exec(btn);
-    expect(margin).toBeTruthy();
-    expect(Number(margin![1])).toBeGreaterThanOrEqual(-1);
+    const rule = (screens.match(/\.shell-nav\s*\{[^}]*\}/) ?? [])[0] ?? '';
+    expect(rule).toMatch(/background:\s*var\(--bg-primary\)/);
   });
 
   it('the nav lives inside the single scroll owner, not a nested box', () => {
@@ -95,7 +98,7 @@ describe('Sticky global navigation', () => {
     const screenRule = (screens.match(/^\.screen\s*\{[^}]*\}/m) ?? [])[0] ?? '';
     expect(screenRule).toMatch(/overflow-y:\s*auto/);
     // And the nav is not wrapped in its own overflow box.
-    const tabsIndex = importScreen.indexOf('class="import-tabs');
+    const tabsIndex = importScreen.indexOf('class="shell-nav');
     const before = importScreen.slice(Math.max(0, tabsIndex - 400), tabsIndex);
     expect(before).not.toMatch(/overflow/i);
   });
@@ -108,8 +111,8 @@ describe('Sticky global navigation', () => {
 describe('Online section', () => {
   it('contains an internal RACE / LEADERBOARD segmented control', () => {
     expect(importScreen).toMatch(/class="online-subnav"/);
-    expect(importScreen).toMatch(/id="online-subnav-race"[^>]*>\[ RACE \]/);
-    expect(importScreen).toMatch(/id="online-subnav-leaderboard"[^>]*>\[ LEADERBOARD \]/);
+    expect(importScreen).toMatch(/id="online-subnav-race"[^>]*>RACE</);
+    expect(importScreen).toMatch(/id="online-subnav-leaderboard"[^>]*>LEADERBOARD</);
   });
 
   it('mounts both live panels inside the ONLINE panel', () => {
@@ -178,7 +181,7 @@ describe('Armory header', () => {
   it('shows signal drops compactly with a DECRYPT trigger', () => {
     expect(importScreen).toMatch(/class="armory-drops"/);
     expect(importScreen).toMatch(/SIGNAL DROPS \/\/ <b id="decoder-pending">/);
-    expect(importScreen).toMatch(/id="btn-decode-signal"[^>]*>\[ DECRYPT \]/);
+    expect(importScreen).toMatch(/id="btn-decode-signal"[^>]*>decode</);
   });
 
   it('the header never embeds the decoder experience itself', () => {
@@ -195,8 +198,8 @@ describe('Armory slot navigation', () => {
   it('browses exactly two equipment slots', () => {
     const slots = importScreen.match(/data-armory-slot="([a-z]+)"/g) ?? [];
     expect(slots).toEqual(['data-armory-slot="karambit"', 'data-armory-slot="gloves"']);
-    expect(importScreen).toMatch(/\[ KARAMBIT \]/);
-    expect(importScreen).toMatch(/\[ GLOVES \]/);
+    expect(importScreen).toMatch(/data-armory-slot="karambit">KARAMBIT</);
+    expect(importScreen).toMatch(/data-armory-slot="gloves">GLOVES</);
   });
 
   it('the glove slot carries a family filter, and only the glove slot', () => {

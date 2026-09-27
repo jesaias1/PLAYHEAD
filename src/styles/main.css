@@ -46,52 +46,80 @@ html, body {
   pointer-events: none;
 }
 
-/* Button & Action Primitives */
+/* ==========================================================================
+   CONTROL PRIMITIVES — terminal software, not styled HTML
+   ==========================================================================
+
+   Interaction is communicated by STATE, not by lift and glow:
+     rest      flat, hairline rule, secondary text
+     hover     inverse block (foreground/background swap)
+     focus     bracket markers + hard outline
+     active    signal-coloured rule
+
+   No translateY, no scale, no box-shadow bloom, no rounded pills.
+   ========================================================================== */
+
 button {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border: 1px solid var(--border-medium);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-1);
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  letter-spacing: 0.12em;
+  font-size: var(--type-command);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
-  padding: 12px 24px;
+  padding: 9px 16px;
   cursor: pointer;
-  transition: all 0.2s var(--ease-sharp);
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast),
+    border-color var(--motion-fast);
   pointer-events: auto;
   position: relative;
   overflow: hidden;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background: var(--text-primary);
-  color: var(--bg-primary);
+  color: var(--text-inverse);
   border-color: var(--text-primary);
 }
 
+button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  color: var(--text-dim);
+  border-color: var(--rule-faint);
+  cursor: not-allowed;
+}
+
 button.primary {
-  background: var(--accent-color);
-  color: #000;
-  border-color: var(--accent-color);
+  background: transparent;
+  color: var(--signal);
+  border-color: var(--signal);
   font-weight: 700;
 }
 
-button.primary:hover {
-  background: #fff;
-  color: #000;
-  border-color: #fff;
-  box-shadow: 0 0 20px var(--accent-glow);
+button.primary:hover:not(:disabled) {
+  background: var(--signal);
+  color: var(--text-inverse);
+  border-color: var(--signal);
 }
 
 button.secondary {
   background: transparent;
-  border-color: var(--border-subtle);
+  border-color: var(--rule);
   color: var(--text-secondary);
 }
 
-button.secondary:hover {
-  border-color: var(--border-strong);
+button.secondary:hover:not(:disabled) {
+  border-color: var(--text-primary);
   color: var(--text-primary);
+  background: transparent;
 }
 
 .mono {

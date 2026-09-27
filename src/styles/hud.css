@@ -218,7 +218,7 @@
 
 .hud-split-header {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.22em;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -268,7 +268,7 @@
 
 .hud-sync-label {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.2em;
   color: var(--text-muted);
 }
@@ -319,7 +319,7 @@
 
 .hud-ghost-label {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.7295rem;
   letter-spacing: 0.12em;
   color: #b8a8ff;
 }
@@ -333,7 +333,7 @@
 
 .hud-split-badge-label {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.747rem;
   letter-spacing: 0.2em;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -364,10 +364,12 @@
 
 .hud-progress-bar-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
   background: var(--accent-color);
-  box-shadow: 0 0 8px var(--accent-color);
-  transition: width 0.1s linear;
+  /* Transform, not width: animating width relayouts every frame. */
+  transition: transform 0.1s linear;
 }
 
 /* ==========================================================================
@@ -396,7 +398,7 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.45);
 }
-.race-hud-clock-label { font-size: 0.62rem; letter-spacing: 0.16em; color: #6d7885; }
+.race-hud-clock-label { font-size: 0.7365rem; letter-spacing: 0.16em; color: #6d7885; }
 .race-hud-clock-val { font-size: 1rem; letter-spacing: 0.08em; color: var(--accent-color); }
 .race-hud-clock-low { color: #ffb020; }
 
@@ -409,10 +411,10 @@
 }
 .race-hud-rival { border-color: rgba(255, 255, 255, 0.06); }
 .race-hud-disconnected { opacity: 0.55; }
-.race-hud-name { font-size: 0.66rem; letter-spacing: 0.14em; color: var(--accent-color); margin-bottom: 4px; }
+.race-hud-name { font-size: 0.7505rem; letter-spacing: 0.14em; color: var(--accent-color); margin-bottom: 4px; }
 .race-hud-rival .race-hud-name { color: #9d8cff; }
 .race-hud-row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.74rem; }
-.race-hud-row span { color: #6d7885; font-size: 0.64rem; letter-spacing: 0.1em; align-self: center; }
+.race-hud-row span { color: #6d7885; font-size: 0.7435rem; letter-spacing: 0.1em; align-self: center; }
 .race-hud-row b { color: #d7e3ef; font-weight: 500; }
 
 .race-hud-notice {
@@ -445,14 +447,14 @@
 }
 
 .replay-head { display: flex; align-items: baseline; gap: 14px; }
-.replay-title { font-size: 0.68rem; letter-spacing: 0.16em; color: #6d7885; }
+.replay-title { font-size: 0.7575rem; letter-spacing: 0.16em; color: #6d7885; }
 .replay-player { font-size: 0.82rem; color: #d7e3ef; flex: 1; }
 .replay-finish { font-size: 0.82rem; color: var(--accent-color); }
 
 .replay-timeline { display: flex; flex-direction: column; gap: 4px; }
 .replay-timeline-track { height: 3px; background: rgba(255, 255, 255, 0.1); }
 .replay-timeline-fill { height: 100%; background: var(--accent-color); width: 0%; }
-.replay-timeline-text { font-size: 0.68rem; letter-spacing: 0.08em; color: #7b8794; }
+.replay-timeline-text { font-size: 0.7575rem; letter-spacing: 0.08em; color: #7b8794; }
 
 .replay-actions { display: flex; align-items: center; gap: 10px; }
-.replay-hint { margin-left: auto; font-size: 0.62rem; letter-spacing: 0.12em; color: #566170; }
+.replay-hint { margin-left: auto; font-size: 0.7365rem; letter-spacing: 0.12em; color: #566170; }

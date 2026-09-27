@@ -202,6 +202,9 @@ export class ImportScreen {
   private previewIconElem: HTMLElement;
   private previewTextElem: HTMLElement;
   private selectorStripElem: HTMLElement;
+  private shellStatSignalsElem: HTMLElement;
+  private shellStatRecoveredElem: HTMLElement;
+  private shellStatDropsElem: HTMLElement;
 
   // Custom Drop Elements
   private dropZone: HTMLElement;
@@ -251,213 +254,254 @@ export class ImportScreen {
     this.element = document.createElement('div');
     this.element.className = 'screen import-screen';
     this.element.innerHTML = `
-      <div class="import-container terminal-console">
-        <div class="brand-header">
-          <div class="brand-title-wrap">
-            <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
-            <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
-          </div>
-          <p class="brand-tagline">ENTER THE SIGNAL.<span class="terminal-cursor" aria-hidden="true"></span></p>
-          <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
-        </div>
+        <div class="shell import-container">
+          <!-- ============================================================
+               SYSTEM STRIP
+               The shell signature. Left-aligned process header, NOT a
+               centered hero: PLAYHEAD is software you booted, not a page.
+               ============================================================ -->
+          <header class="shell-strip">
+            <div class="shell-mark">
+              <img src="/assets/brand/playhead_logo_text.png" class="shell-mark-logo" alt="PLAYHEAD" />
+              <span class="shell-mark-suffix">SIGNAL&nbsp;OS</span>
+            </div>
+            <div class="shell-strip-readout" aria-label="System readout">
+              <span class="shell-stat"><b id="shell-stat-signals">14</b> SIGNALS</span>
+              <span class="shell-stat"><b id="shell-stat-recovered">00</b> RECOVERED</span>
+              <span class="shell-stat" id="shell-stat-drops">DROPS 00</span>
+            </div>
+          </header>
 
-        <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
-          <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">[ 01 // SIGNAL PACK ]</button>
-          <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
-          <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
-          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // ARMORY ]</button>
-        <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
-        </div>
+          <!-- ============================================================
+               WORKSPACE NAV
+               Numbered process list with its real command verb. Left-aligned
+               and ruled, not centered pills.
+               ============================================================ -->
+          <nav class="shell-nav terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
+            <button class="shell-nav-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">
+              <span class="shell-nav-num">01</span><span class="shell-nav-name">SIGNAL PACK</span><span class="shell-nav-verb">signal.list</span>
+            </button>
+            <button class="shell-nav-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">
+              <span class="shell-nav-num">02</span><span class="shell-nav-name">CUSTOM AUDIO</span><span class="shell-nav-verb">signal.inject</span>
+            </button>
+            <button class="shell-nav-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">
+              <span class="shell-nav-num">03</span><span class="shell-nav-name">MOVEMENT LAB</span><span class="shell-nav-verb">lab.configure</span>
+            </button>
+            <button class="shell-nav-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">
+              <span class="shell-nav-num">04</span><span class="shell-nav-name">ARMORY</span><span class="shell-nav-verb">armory.open</span>
+            </button>
+            <button class="shell-nav-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">
+              <span class="shell-nav-num">05</span><span class="shell-nav-name">ONLINE</span><span class="shell-nav-verb">net.session</span>
+            </button>
+          </nav>
 
-        <!-- 01: THE SIGNAL PACK PANEL -->
-        <div class="showcase-container showcase-panel" id="panel-showcase" role="tabpanel" aria-labelledby="tab-btn-showcase">
-          <div class="terminal-panel-header">// SELECTED SIGNAL TELEMETRY</div>
-          <div class="showcase-card terminal-card" id="showcase-card">
-            <div class="showcase-header">
-              <div class="showcase-title-group">
-                <div class="showcase-artist" id="showcase-artist">SIGNAL ARCHIVES</div>
-                <div class="showcase-track-title" id="showcase-title">FLOW STATE</div>
+          <main class="shell-main">
+            <!-- 01 // SIGNAL PACK — registry + inspector + command rail -->
+            <section class="workspace showcase-panel" id="panel-showcase" role="tabpanel" aria-labelledby="tab-btn-showcase">
+              <div class="ws-split">
+                <div class="ws-registry">
+                  <div class="registry-head" role="row">
+                    <span class="rh-num">#</span>
+                    <span class="rh-name">SIGNAL</span>
+                    <span class="rh-bpm">BPM</span>
+                    <span class="rh-len">LEN</span>
+                    <span class="rh-rank">RANK</span>
+                  </div>
+                  <div class="registry-rows terminal-selector-strip" id="showcase-strip" role="listbox" aria-label="Signal Pack registry">
+                    <!-- Populated dynamically via buildStrip() -->
+                  </div>
+                  <div class="registry-foot" id="showcase-mastery-strip"></div>
+                </div>
+
+                <aside class="ws-inspector" aria-label="Selected signal">
+                  <div class="insp-kicker" id="showcase-artist">SIGNAL ARCHIVES</div>
+                  <h1 class="insp-title" id="showcase-title">FLOW STATE</h1>
+
+                  <div class="insp-spec">
+                    <div class="spec-row"><span>CLASS</span><b id="showcase-genre">CHILLWAVE // FLOW</b></div>
+                    <div class="spec-row"><span>TEMPO</span><b id="showcase-bpm">110 BPM</b></div>
+                    <div class="spec-row"><span>LENGTH</span><b id="showcase-duration">01:12</b></div>
+                    <div class="spec-row"><span>TIER</span><b id="showcase-diff">TIER I · FLOW</b></div>
+                  </div>
+
+                  <div class="insp-records" id="showcase-records-strip">
+                    <div class="record-row"><span>BEST RANK</span><b id="showcase-best-rank">—</b></div>
+                    <div class="record-row"><span>PERSONAL BEST</span><b id="showcase-pb-time">—</b></div>
+                    <div class="record-row"><span>LOCAL FIRST</span><b id="showcase-local-first">—</b></div>
+                  </div>
+
+                  <p class="insp-desc" id="showcase-desc">
+                    Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
+                  </p>
+
+                  <div class="insp-trace" aria-label="Deterministic signal program identity">
+                    <div class="trace-head">
+                      <span>SIGNAL TRACE</span>
+                      <span class="trace-state">DETERMINISTIC</span>
+                    </div>
+                    <div class="trace-bars signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
+                  </div>
+                </aside>
               </div>
-            </div>
 
-            <div class="showcase-meta-row">
-              <span class="showcase-badge accent" id="showcase-genre">CHILLWAVE // FLOW</span>
-              <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
-              <span class="showcase-badge" id="showcase-duration">01:12</span>
-              <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
-            </div>
+              <!-- COMMAND RAIL: one unmistakable execute. -->
+              <div class="cmd-rail">
+                <span class="cmd-prompt" id="showcase-card">ph://signal$</span>
+                <button class="cmd-exec btn-terminal-exec" id="btn-showcase-enter">signal.exec</button>
+                <button class="cmd-sub btn-terminal-action" id="btn-showcase-preview">
+                  <span id="preview-icon">▶</span><span id="preview-text">audition</span>
+                </button>
+                <button class="cmd-sub btn-terminal-action" id="btn-showcase-race-pb" title="Race your personal best as a recorded ghost.">
+                  ghost.load
+                </button>              </div>
+            </section>
 
-            <div class="showcase-records-strip" id="showcase-records-strip">
-              <div class="showcase-record-pill rank">
-                <span class="record-label">BEST //</span>
-                <span class="record-val" id="showcase-best-rank">—</span>
+            <!-- 02 // CUSTOM AUDIO — signal injection -->
+            <section class="workspace terminal-panel custom-panel hidden" id="panel-custom" role="tabpanel" aria-labelledby="tab-btn-custom" aria-hidden="true">
+              <div class="ws-head">
+                <h2 class="ws-title">SIGNAL INJECTION</h2>
+                <span class="ws-note">External audio is analysed locally. Nothing is uploaded.</span>
               </div>
-              <div class="showcase-record-pill pb">
-                <span class="record-label">PB //</span>
-                <span class="record-val" id="showcase-pb-time">—</span>
+
+              <div class="inject-cols">
+                <div class="inject-zone import-drop-zone terminal-drop-zone" id="import-drop-zone" role="button" tabindex="0" aria-label="Choose or drop an audio file">
+                  <div class="inject-prompt">awaiting external audio stream<span class="terminal-cursor" aria-hidden="true"></span></div>
+                  <div class="inject-formats">DROP&nbsp;.MP3&nbsp;&nbsp;/&nbsp;&nbsp;.WAV&nbsp;&nbsp;/&nbsp;&nbsp;.OGG&nbsp;&nbsp;/&nbsp;&nbsp;.FLAC&nbsp;&nbsp;/&nbsp;&nbsp;.M4A</div>
+                  <button class="inject-browse btn-terminal-exec" id="btn-browse-file" type="button">browse</button>
+                </div>
+
+                <div class="inject-stages" aria-label="Analysis pipeline">
+                  <div class="stages-head">PIPELINE</div>
+                  <ol class="stage-list">
+                    <li><span class="stage-tag">FILE</span>decode</li>
+                    <li><span class="stage-tag">DSP&nbsp;</span>waveform</li>
+                    <li><span class="stage-tag">DSP&nbsp;</span>transients</li>
+                    <li><span class="stage-tag">DSP&nbsp;</span>structure</li>
+                    <li><span class="stage-tag">MAP&nbsp;</span>route</li>
+                    <li><span class="stage-tag">SURF</span>phrases</li>
+                    <li><span class="stage-tag">VAL&nbsp;</span>validation</li>
+                    <li><span class="stage-tag">VIS&nbsp;</span>bind</li>
+                  </ol>
+                </div>
               </div>
-              <div class="showcase-record-pill local-first">
-                <span class="record-label">LOCAL #1 //</span>
-                <span class="record-val" id="showcase-local-first">—</span>
+            </section>
+
+            <!-- 03 // MOVEMENT LAB — a process launch, not a card page -->
+            <section class="workspace showcase-panel hidden" id="panel-lab" role="tabpanel" aria-labelledby="tab-btn-lab" aria-hidden="true">
+              <div class="ws-head">
+                <h2 class="ws-title">MOVEMENT LAB</h2>
+                <span class="ws-note">Isolated physics sandbox. No rank, no PB, no drops.</span>
               </div>
-            </div>
 
-            <div class="showcase-desc" id="showcase-desc">
-              Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
-            </div>
-
-            <div class="signal-program-readout" aria-label="Deterministic signal program identity">
-              <div class="signal-program-header">
-                <span class="signal-program-label">[SIGNAL] PROGRAM FINGERPRINT</span>
-                <span class="signal-program-state">LOCKED // DETERMINISTIC</span>
+              <div class="lab-grid">
+                <div class="lab-config">
+                  <div class="lab-row">
+                    <label class="lab-label" for="lab-music-select">SOUNDTRACK</label>
+                    <select class="lab-signal-select" id="lab-music-select">
+                      <option value="NONE">NONE // SILENT SANDBOX</option>
+                    </select>
+                  </div>
+                  <dl class="lab-readout">
+                    <div><dt>BUNNY-HOP</dt><dd>practice timing and landing cadence</dd></div>
+                    <div><dt>AIR-STRAFE</dt><dd>turn while airborne to build speed</dd></div>
+                    <div><dt>SURF</dt><dd>ramp control at high velocity</dd></div>
+                  </dl>
+                </div>
               </div>
-              <div class="signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
-            </div>
 
-            <div class="showcase-actions">
-              <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter">> EXEC TRACK</button>
-              <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
-                <span id="preview-icon">▶</span>
-                <span id="preview-text">> AUDITION // PREVIEW</span>
-              </button>
-              <button class="btn-preview btn-terminal-action" id="btn-showcase-race-pb" title="Race your personal best as a recorded ghost.">
-                PB GHOST // UNAVAILABLE
-              </button>
-            </div>
-          </div>
+              <div class="cmd-rail">
+                <span class="cmd-prompt">ph://lab$</span>
+                <button class="cmd-exec btn-terminal-exec" id="btn-lab-enter">lab.exec</button>
+              </div>
+            </section>
 
-          <div class="terminal-panel-header" style="margin-top: 8px;">// SYSTEM CATALOG MATRIX · 14 SIGNALS LOADED</div>
-          <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
-            <!-- Populated dynamically via buildStrip() -->
-          </div>
-          <div class="showcase-mastery-strip" id="showcase-mastery-strip"></div>
+            <!-- 04 // ARMORY — loadout inventory (structure unchanged) -->
+            <section class="workspace showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
+              <div class="armory-header">
+                <div class="armory-header-title">
+                  <h2 class="ws-title">ARMORY</h2>
+                  <div class="armory-kicker">LOADOUT INVENTORY</div>
+                </div>
+                <div class="armory-loadout" aria-label="Current loadout">
+                  <div class="armory-loadout-slot">
+                    <span>KARAMBIT</span><b id="armory-equipped-knife">--</b>
+                  </div>
+                  <div class="armory-loadout-slot">
+                    <span>GLOVES</span><b id="armory-equipped-glove">--</b>
+                  </div>
+                </div>
+                <div class="armory-drops">
+                  <span class="armory-drops-count">SIGNAL DROPS // <b id="decoder-pending">00</b></span>
+                  <button id="btn-decode-signal" class="armory-decrypt-btn" type="button" title="Rank signal quality: BRONZE signal · SILVER enhanced odds · GOLD high-grade · DIAMOND pristine">decode</button>
+                </div>
+                <button id="btn-armory-dev-toggle" class="terminal-btn-subtle armory-dev-toggle" type="button">DEV PREVIEW: OFF</button>
+              </div>
+
+              <div class="armory-decoder-line" id="armory-decoder-line">
+                <span class="decoder-strip-kicker">DECODER</span>
+                <span class="decoder-status" id="decoder-status">NO SIGNAL AVAILABLE</span>
+                <span class="decoder-detail" id="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</span>
+                <button id="btn-armory-view-reward" class="terminal-btn-subtle armory-view-reward hidden" type="button">view in armory</button>
+              </div>
+
+              <div class="armory-slots" role="tablist" aria-label="Equipment slot">
+                <button class="armory-slot-btn active" type="button" role="tab" aria-selected="true" data-armory-slot="karambit">KARAMBIT</button>
+                <button class="armory-slot-btn" type="button" role="tab" aria-selected="false" data-armory-slot="gloves">GLOVES</button>
+              </div>
+
+              <div class="armory-filters">
+                <div class="armory-filter-group hidden" id="armory-glove-filters" aria-label="Glove family">
+                  <button class="armory-filter-btn active" type="button" data-glove-family="all">ALL</button>
+                  <button class="armory-filter-btn" type="button" data-glove-family="drop">DROP</button>
+                  <button class="armory-filter-btn" type="button" data-glove-family="mastery">MASTERY</button>
+                </div>
+                <div class="armory-filter-group" aria-label="Ownership filter">
+                  <button class="armory-filter-btn active" type="button" data-owned-filter="all">ALL</button>
+                  <button class="armory-filter-btn" type="button" data-owned-filter="owned">OWNED</button>
+                  <button class="armory-filter-btn" type="button" data-owned-filter="locked">LOCKED</button>
+                </div>
+                <div class="armory-filter-group" aria-label="Sort order">
+                  <span class="armory-filter-label">SORT</span>
+                  <button class="armory-filter-btn active" type="button" data-armory-sort="rarity">RARITY</button>
+                  <button class="armory-filter-btn" type="button" data-armory-sort="name">NAME</button>
+                </div>
+                <span class="armory-collection" id="armory-collection">ARMORY // 00 / 00 RECOVERED</span>
+                <span class="armory-count" id="armory-count">00 ITEMS</span>
+              </div>
+
+              <div class="armory-mastery-status hidden" id="armory-mastery-status">
+                <div class="armory-mastery-rows" id="armory-mastery-rows"></div>
+                <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
+              </div>
+
+              <div class="armory-body">
+                <div id="armory-inventory" class="armory-inventory" role="listbox" aria-label="Cosmetics"></div>
+                <aside class="armory-detail" id="armory-detail" aria-live="polite"></aside>
+              </div>
+            </section>
+
+            <!-- 05 // ONLINE — race + leaderboard subsections -->
+            <section class="workspace showcase-panel hidden" id="panel-online" role="tabpanel" aria-labelledby="tab-btn-online" aria-hidden="true">
+              <div class="online-subnav" role="tablist" aria-label="Online sections">
+                <button class="online-subnav-btn active" id="online-subnav-race" type="button" role="tab" aria-selected="true">RACE</button>
+                <button class="online-subnav-btn" id="online-subnav-leaderboard" type="button" role="tab" aria-selected="false">LEADERBOARD</button>
+              </div>
+              <div id="race-panel-host"></div>
+              <div id="leaderboard-panel-host" class="hidden"></div>
+            </section>
+          </main>
+
+          <!-- Hidden native input behind the injection zone. -->
+          <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
+
+          <!-- ============================================================
+               STATUS RAIL
+               ============================================================ -->
+          <footer class="shell-rail terminal-footer-status">
+            <span class="rail-item">CLIENT-SIDE DSP</span>
+            <span class="rail-item">PROCEDURAL ROUTE</span>
+          </footer>
         </div>
-
-        <!-- 02: CUSTOM AUDIO PANEL -->
-        <div class="custom-panel terminal-panel hidden" id="panel-custom" role="tabpanel" aria-labelledby="tab-btn-custom" aria-hidden="true">
-          <div class="terminal-panel-header">// EXTERNAL SIGNAL INJECTION</div>
-          <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone" role="button" tabindex="0" aria-label="Choose or drop an audio file">
-            <div class="drop-icon terminal-glow-icon">⤓</div>
-            <div class="drop-title">INITIALIZE AUDIO STREAM</div>
-            <div class="drop-subtitle">> DRAG & DROP TRACK OR CLICK TO BROWSE</div>
-            <div class="drop-meta">[ FLAC / WAV / MP3 / OGG ]</div>
-          </div>
-
-          <div class="custom-actions">
-            <button class="btn-hero btn-terminal-exec" id="btn-browse-file">[ BROWSE AUDIO FILE ]</button>
-          </div>
-        </div>
-
-        <!-- 03: MOVEMENT LAB SETUP PANEL -->
-        <div class="showcase-container showcase-panel hidden" id="panel-lab" role="tabpanel" aria-labelledby="tab-btn-lab" aria-hidden="true">
-          <div class="terminal-panel-header">// MOVEMENT LAB · KINETIC CALIBRATION & SANDBOX</div>
-          <div class="terminal-card lab-console-card">
-            <div class="lab-console-copy">
-              Dedicated isolated physics sandbox for practicing bunny-hop timing, Source-inspired air strafing, and high-velocity surf ramp control.
-            </div>
-            <div class="lab-control-grid">
-              <label class="settings-label" for="lab-music-select">[SIGNAL] SOUNDTRACK</label>
-              <select class="settings-select lab-signal-select" id="lab-music-select">
-                <option value="NONE">NONE // SILENT SANDBOX</option>
-              </select>
-            </div>
-            <div class="lab-actions">
-              <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">> ENTER MOVEMENT LAB</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 04: ARMORY — LOADOUT INVENTORY.
-             Compact header, ONE equipment slot at a time, a dense tile grid and
-             ONE detail panel. Browsing is metadata-only: no tile ever loads a
-             cosmetic texture or video. -->
-        <div class="showcase-container showcase-panel hidden" id="panel-armory" role="tabpanel" aria-labelledby="tab-btn-armory" aria-hidden="true">
-          <!-- 1. COMPACT HEADER: what am I wearing + how many drops are waiting. -->
-          <div class="armory-header">
-            <div class="armory-header-title">
-              <div class="armory-kicker">[ARMORY] LOADOUT INVENTORY</div>
-              <h2 class="armory-title">ARMORY</h2>
-            </div>
-            <div class="armory-loadout" aria-label="Current loadout">
-              <div class="armory-loadout-slot">
-                <span>KARAMBIT</span><b id="armory-equipped-knife">--</b>
-              </div>
-              <div class="armory-loadout-slot">
-                <span>GLOVES</span><b id="armory-equipped-glove">--</b>
-              </div>
-            </div>
-            <div class="armory-drops">
-              <span class="armory-drops-count">SIGNAL DROPS // <b id="decoder-pending">00</b></span>
-              <button id="btn-decode-signal" class="armory-decrypt-btn" type="button" title="Rank signal quality: BRONZE signal · SILVER enhanced odds · GOLD high-grade · DIAMOND pristine">[ DECRYPT ]</button>
-            </div>
-            <button id="btn-armory-dev-toggle" class="terminal-btn-subtle armory-dev-toggle" type="button">DEV PREVIEW: OFF</button>
-          </div>
-
-          <!-- 2. DECODER STATE: ONE line. The decoder experience itself opens from
-               [ DECRYPT ] and must never consume permanent Armory height. -->
-          <div class="armory-decoder-line" id="armory-decoder-line">
-            <span class="decoder-strip-kicker">SIGNAL DECODER</span>
-            <span class="decoder-status" id="decoder-status">NO SIGNAL AVAILABLE</span>
-            <span class="decoder-detail" id="decoder-detail">Complete official Signal Pack runs to acquire Armory signals.</span>
-            <button id="btn-armory-view-reward" class="terminal-btn-subtle armory-view-reward hidden" type="button">[ VIEW IN ARMORY ]</button>
-          </div>
-
-          <!-- 3. PRIMARY SLOT NAV: exactly one equipment slot is browsed at once. -->
-          <div class="armory-slots" role="tablist" aria-label="Equipment slot">
-            <button class="armory-slot-btn active" type="button" role="tab" aria-selected="true" data-armory-slot="karambit">[ KARAMBIT ]</button>
-            <button class="armory-slot-btn" type="button" role="tab" aria-selected="false" data-armory-slot="gloves">[ GLOVES ]</button>
-          </div>
-
-          <!-- 4. FILTER BAR: glove family (gloves only) + ownership + sort. -->
-          <div class="armory-filters">
-            <div class="armory-filter-group hidden" id="armory-glove-filters" aria-label="Glove family">
-              <button class="armory-filter-btn active" type="button" data-glove-family="all">ALL</button>
-              <button class="armory-filter-btn" type="button" data-glove-family="drop">SIGNAL DROP</button>
-              <button class="armory-filter-btn" type="button" data-glove-family="mastery">MASTERY</button>
-            </div>
-            <div class="armory-filter-group" aria-label="Ownership filter">
-              <button class="armory-filter-btn active" type="button" data-owned-filter="all">ALL</button>
-              <button class="armory-filter-btn" type="button" data-owned-filter="owned">OWNED</button>
-              <button class="armory-filter-btn" type="button" data-owned-filter="locked">LOCKED</button>
-            </div>
-            <div class="armory-filter-group" aria-label="Sort order">
-              <span class="armory-filter-label">SORT</span>
-              <button class="armory-filter-btn active" type="button" data-armory-sort="rarity">RARITY</button>
-              <button class="armory-filter-btn" type="button" data-armory-sort="name">NAME</button>
-            </div>
-            <span class="armory-collection" id="armory-collection">ARMORY // 00 / 00 RECOVERED</span>
-            <span class="armory-count" id="armory-count">00 ITEMS</span>
-          </div>
-
-          <!-- 5. MASTERY STATUS: compact, and only while browsing mastery gloves. -->
-          <div class="armory-mastery-status hidden" id="armory-mastery-status">
-            <div class="armory-mastery-rows" id="armory-mastery-rows"></div>
-            <button id="btn-mastery-dev-preview" class="terminal-btn-subtle" type="button">DEV // PREVIEW GLOVE</button>
-          </div>
-
-          <!-- 6. TWO PANE: dense inventory + ONE detail panel. -->
-          <div class="armory-body">
-            <div id="armory-inventory" class="armory-inventory" role="listbox" aria-label="Cosmetics"></div>
-            <aside class="armory-detail" id="armory-detail" aria-live="polite"></aside>
-          </div>
-        </div>
-        <input type="file" id="import-file-input" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" style="display:none;" />
-
-        <!-- 05: ONLINE — RACE and LEADERBOARD are INTERNAL subsections, not
-             top-level tabs. The main menu stays clean; the two live panels keep
-             their own modules and are mounted into these host slots. -->
-        <div class="showcase-container showcase-panel hidden" id="panel-online" role="tabpanel" aria-labelledby="tab-btn-online" aria-hidden="true">
-          <div class="online-subnav" role="tablist" aria-label="Online sections">
-            <button class="online-subnav-btn active" id="online-subnav-race" type="button" role="tab" aria-selected="true">[ RACE ]</button>
-            <button class="online-subnav-btn" id="online-subnav-leaderboard" type="button" role="tab" aria-selected="false">[ LEADERBOARD ]</button>
-          </div>
-          <div id="race-panel-host"></div>
-          <div id="leaderboard-panel-host" class="hidden"></div>
-        </div>
-
-        <div class="privacy-notice terminal-footer-status">
-          [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
-        </div>      </div>
     `;
 
     // Tab buttons
@@ -560,6 +604,11 @@ export class ImportScreen {
     this.previewTextElem = this.element.querySelector('#preview-text') as HTMLElement;
     this.selectorStripElem = this.element.querySelector('#showcase-strip') as HTMLElement;
 
+    // Shell strip readout: three real system numbers, nothing decorative.
+    this.shellStatSignalsElem = this.element.querySelector('#shell-stat-signals') as HTMLElement;
+    this.shellStatRecoveredElem = this.element.querySelector('#shell-stat-recovered') as HTMLElement;
+    this.shellStatDropsElem = this.element.querySelector('#shell-stat-drops') as HTMLElement;
+
     // Custom drop elements
     this.dropZone = this.element.querySelector('#import-drop-zone') as HTMLElement;
     this.fileInput = this.element.querySelector('#import-file-input') as HTMLInputElement;
@@ -591,6 +640,7 @@ export class ImportScreen {
     // than on markup order, so a non-default panel can never render below the
     // default tab.
     this.switchModule(0);
+    this.renderShellReadout();
   }
 
   private buildLabSelect(): void {
@@ -638,28 +688,24 @@ export class ImportScreen {
 
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = `strip-item terminal-strip-item ${rankClass} ${t.id === this.selectedTrack.id ? 'active' : ''}`;
+      item.className = `strip-item ${rankClass} ${t.id === this.selectedTrack.id ? 'active' : ''}`;
       item.dataset.trackId = t.id;
-      item.setAttribute('aria-pressed', t.id === this.selectedTrack.id ? 'true' : 'false');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', t.id === this.selectedTrack.id ? 'true' : 'false');
 
       const mins = Math.floor(t.duration / 60);
       const secs = Math.floor(t.duration % 60);
       const duration = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
+      // A registry LINE, not a card. Fixed columns, tabular figures, one row per
+      // signal. The inspector beside it carries the depth.
       item.innerHTML = `
-        <div class="strip-item-inner">
-          <div class="strip-item-header">
-            <span class="strip-item-num">[${displayIndex}] // ${isTutorial ? 'CALIBRATION // TUTORIAL' : t.difficultyLabel}</span>
-            ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
-          </div>
-          <div class="strip-item-title">${t.title}</div>
-          <div class="strip-signal-bars" aria-hidden="true"></div>
-          <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
-        </div>
+        <span class="row-num">${displayIndex}</span>
+        <span class="row-name">${t.title}${isTutorial ? '<em class="row-tag">CALIBRATION</em>' : ''}</span>
+        <span class="row-bpm">${t.bpm}</span>
+        <span class="row-len">${duration}</span>
+        <span class="row-rank ${rankClass}">${bestRank ?? '—'}</span>
       `;
-
-      const bars = item.querySelector('.strip-signal-bars') as HTMLElement;
-      this.renderFingerprint(bars, t, 12);
 
       item.addEventListener('click', () => {
         this.selectTrack(t);
@@ -679,10 +725,10 @@ export class ImportScreen {
     items.forEach((elem) => {
       if ((elem as HTMLElement).dataset.trackId === track.id) {
         elem.classList.add('active');
-        elem.setAttribute('aria-pressed', 'true');
+        elem.setAttribute('aria-selected', 'true');
       } else {
         elem.classList.remove('active');
-        elem.setAttribute('aria-pressed', 'false');
+        elem.setAttribute('aria-selected', 'false');
       }
     });
   }
@@ -811,11 +857,33 @@ export class ImportScreen {
   }
 
   /** Full Armory render: header, chrome, inventory and detail. */
+  /**
+   * SYSTEM STRIP READOUT.
+   *
+   * Three real numbers about the actual system state. No decorative telemetry:
+   * every value here is something the player can act on.
+   */
+  public renderShellReadout(): void {
+    if (this.shellStatSignalsElem) {
+      this.shellStatSignalsElem.textContent = this.catalog.length.toString().padStart(2, '0');
+    }
+    if (this.shellStatRecoveredElem) {
+      const progress = this.skinSystem.getCollectionProgress();
+      this.shellStatRecoveredElem.textContent = progress.owned.toString().padStart(2, '0');
+    }
+    if (this.shellStatDropsElem) {
+      const open = this.skinSystem.getTotalUnownedDropCount();
+      this.shellStatDropsElem.textContent = `DROPS ${open.toString().padStart(2, '0')}`;
+      this.shellStatDropsElem.classList.toggle('pending', open > 0);
+    }
+  }
+
   public renderArmory(): void {
     this.armoryItems = this.buildArmoryItems();
     this.renderArmoryHeader();
     this.renderArmorySelection();
     this.renderSignalDecoder();
+    this.renderShellReadout();
   }
 
   /** Re-render the browsing surface WITHOUT re-reading ownership. */
@@ -1181,13 +1249,13 @@ export class ImportScreen {
     if (!this.showcaseRacePbBtn) return;
     if (state.available) {
       this.showcaseRacePbBtn.disabled = false;
-      this.showcaseRacePbBtn.textContent = state.actionText ?? '> RACE PB GHOST';
+      this.showcaseRacePbBtn.textContent = state.actionText ?? 'ghost.load';
       this.showcaseRacePbBtn.classList.add('available');
     } else {
       this.showcaseRacePbBtn.disabled = true;
       this.showcaseRacePbBtn.textContent =
         state.actionText ??
-        (state.pbTimeSeconds ? 'PB GHOST // NO REPLAY' : 'PB GHOST // NO PERSONAL BEST');
+        (state.pbTimeSeconds ? 'ghost.load // no replay' : 'ghost.load // no PB');
       this.showcaseRacePbBtn.classList.remove('available');
     }
     this.showcaseRacePbBtn.dataset.ghostState = state.state ?? '';
@@ -1238,7 +1306,7 @@ export class ImportScreen {
     }
 
     try {
-      this.previewTextElem.textContent = '[ SYNTHESIZING... ]';
+      this.previewTextElem.textContent = 'audition // decoding...';
       this.showcasePreviewBtn.classList.add('playing');
 
       if (!this.previewCtx) {
@@ -1269,7 +1337,7 @@ export class ImportScreen {
       this.currentPreviewSource.start(0);
       this.isPreviewPlaying = true;
       this.previewIconElem.textContent = '■';
-      this.previewTextElem.textContent = '[ STOP PREVIEW ]';
+      this.previewTextElem.textContent = 'audition // stop';
     } catch (e) {
       console.warn('[ImportScreen] Failed to play preview:', e);
       this.stopPreview();
@@ -1288,7 +1356,7 @@ export class ImportScreen {
     }
     this.isPreviewPlaying = false;
     this.previewIconElem.textContent = '▶';
-    this.previewTextElem.textContent = '[ AUDITION // PREVIEW ]';
+    this.previewTextElem.textContent = 'audition';
     this.showcasePreviewBtn?.classList.remove('playing');
   }
 

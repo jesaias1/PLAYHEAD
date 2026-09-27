@@ -36,10 +36,10 @@ export class SignalDecodeModal {
       <div class="decode-modal-dialog terminal-console" style="position: relative; z-index: 2; width: min(92vw, 780px); padding: 24px 28px; background: rgba(8, 14, 22, 0.98); border: 1px solid #1f2f45; border-top: 3px solid #00f0ff; box-shadow: 0 20px 60px rgba(0,0,0,0.85); text-align: center;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 16px;">
           <div style="text-align: left;">
-            <div id="decode-modal-kicker" style="font-family: var(--font-mono); font-size: 0.65rem; color: #00f0ff; letter-spacing: 0.25em;">// SIGNAL RECOVERY BUS</div>
+            <div id="decode-modal-kicker" style="font-family: var(--font-mono); font-size: 0.747rem; color: #00f0ff; letter-spacing: 0.25em;">// SIGNAL RECOVERY BUS</div>
             <h2 id="decode-modal-title" style="margin: 2px 0 0; font-size: 1.4rem; font-family: var(--font-mono); letter-spacing: 0.12em; color: #f4fbff;">DECODING SIGNAL TRANSMISSION</h2>
           </div>
-          <span id="decode-modal-status" style="font-family: var(--font-mono); font-size: 0.65rem; color: #8fa0b5; border: 1px solid rgba(255,255,255,0.12); padding: 3px 8px;">ACQUIRING TELEMETRY</span>
+          <span id="decode-modal-status" style="font-family: var(--font-mono); font-size: 0.747rem; color: #8fa0b5; border: 1px solid rgba(255,255,255,0.12); padding: 3px 8px;">ACQUIRING TELEMETRY</span>
         </div>
 
         <!-- ROLLING ROULETTE STRIP CONTAINER -->
@@ -56,7 +56,7 @@ export class SignalDecodeModal {
         </div>
 
         <!-- CELEBRATION / REVEAL CARD -->
-        <div id="decode-celebration" class="hidden" style="margin-top: 16px; padding: 18px; border: 1px solid rgba(0, 240, 255, 0.4); border-left: 4px solid #00f0ff; background: rgba(10, 18, 28, 0.85); text-align: left;">
+        <div id="decode-celebration" class="hidden" style="margin-top: 16px; padding: 18px; border: 1px solid rgba(0, 240, 255, 0.4); border-left: 1px solid #00f0ff; background: rgba(10, 18, 28, 0.85); text-align: left;">
           <!-- Populated when animation lands -->
         </div>
 
@@ -203,17 +203,17 @@ export class SignalDecodeModal {
       card.innerHTML = `
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-family: var(--font-mono); font-size: 0.52rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${view.rarity}</span>
-            <span style="font-family: var(--font-mono); font-size: 0.50rem; color: #64748b;">${view.isLive ? 'VIDEO' : 'STATIC'}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.7015rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${view.rarity}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.6945rem; color: #64748b;">${view.isLive ? 'VIDEO' : 'STATIC'}</span>
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.70rem; font-weight: 700; color: #f1f5f9; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
             ${view.name}
           </div>
-          <div style="font-family: var(--font-mono); font-size: 0.56rem; color: #8899aa; margin-top: 2px;">
+          <div style="font-family: var(--font-mono); font-size: 0.7155rem; color: #8899aa; margin-top: 2px;">
             ${view.codename}
           </div>
         </div>
-        <div style="font-family: var(--font-mono); font-size: 0.52rem; color: ${view.isLive ? '#00f0ff' : '#475569'};">
+        <div style="font-family: var(--font-mono); font-size: 0.7015rem; color: ${view.isLive ? '#00f0ff' : '#475569'};">
           ${isTarget ? 'TARGET' : ''}
         </div>
       `;
@@ -355,7 +355,7 @@ export class SignalDecodeModal {
     this.celebrationCard.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
         <div>
-          <div style="font-family: var(--font-mono); font-size: 0.62rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
+          <div style="font-family: var(--font-mono); font-size: 0.7365rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
             [${reward.qualityLabel} // ${reward.rarity}] ${isOverclocked ? '★ APEX SYSTEM OVERCLOCK ACHIEVED' : (isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : '')}
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8; margin-top: 8px; letter-spacing: 0.2em;">
@@ -364,12 +364,12 @@ export class SignalDecodeModal {
           <div style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; color: #ffffff; margin-top: 3px; letter-spacing: 0.04em;">
             ${reward.name}
           </div>
-          <div style="font-family: var(--font-mono); font-size: 0.68rem; color: #94a3b8; margin-top: 2px;">
+          <div style="font-family: var(--font-mono); font-size: 0.7575rem; color: #94a3b8; margin-top: 2px;">
             ${reward.codename} · ${reward.accentTag}
           </div>
         </div>
         <div style="text-align: right;">
-          <span style="font-family: var(--font-mono); font-size: 0.60rem; padding: 3px 8px; border: 1px solid ${rarityColor}; color: ${rarityColor}; background: ${rarityColor}18;">
+          <span style="font-family: var(--font-mono); font-size: 0.7295rem; padding: 3px 8px; border: 1px solid ${rarityColor}; color: ${rarityColor}; background: ${rarityColor}18;">
             ${reward.isLive ? 'LIVE VIDEO ARTIFACT' : 'PROFILE TIER'}
           </span>
         </div>
