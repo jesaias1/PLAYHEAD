@@ -894,6 +894,40 @@ export class Game {
     });
   }
 
+  /**
+   * Canonical playback preparation for WATCH.
+   *
+   * Reuses the existing official-track load path (which restores the baked
+   * preset audio buffer + frozen world + route) so the replay is presented
+   * against exactly the map it was recorded on. Idempotent: it is a no-op when
+   * the requested official track is already loaded as the canonical map, so it
+   * never regenerates the level or disturbs an in-progress run.
+   */
+  private async prepareCanonicalPlayback(trackId: string): Promise<boolean> {
+    if (
+      !this.stateMachine.is(GameState.IMPORT) &&
+      this.currentOfficialTrackId === trackId &&
+      this.currentTrackCanonical &&
+      this.currentMapIdentity() !== null
+    ) {
+      return true;
+    }
+
+    const entry = MusicPack.getTrackById(trackId);
+    if (!entry) return false;
+
+    await this.handleCatalogTrackSelected(entry);
+
+    // READY + a matching canonical identity is the evidence that preparation
+    // actually restored the frozen map; anything else is a failed load.
+    return (
+      this.stateMachine.is(GameState.READY) &&
+      this.currentOfficialTrackId === entry.id &&
+      this.currentTrackCanonical &&
+      this.currentMapIdentity() !== null
+    );
+  }
+
   public async loadPresetTrack(trackId: string): Promise<void> {
     const entry = MusicPack.getTrackById(trackId);
     if (entry) {
@@ -2591,6 +2625,9 @@ export class Game {
         mouseDelta.y
       );
       activeVm = this.viewmodelController;
+    } else if (this.stateMachine.is(GameState.REPLAY) && this.replayMode === 'POV') {
+      // updatePovReplay already applied the recorded loadout and pose this frame.
+      activeVm = this.viewmodelController;
     }
 
     // Unified render pass: world -> bloom -> signal style -> viewmodel -> tone map -> grain on top of all
@@ -4162,12 +4199,40 @@ export class Game {
     const loaded = this.povPlayer.load(payload, { identity: expected, finishTimeUs });
     if (!loaded.ok) return { ok: false, detail: `REPLAY REJECTED // ${loaded.reason}` };
 
+    // The replay is only meaningful against its canonical map. Require the
+    // shipped preset, then run the SAME canonical preparation the game uses for
+    // a WATCH/ghost load (baked audio buffer + frozen world/route).
     const level = await PresetLevelCache.loadPreset(trackId);
     if (!level) return { ok: false, detail: 'CANONICAL MAP UNAVAILABLE' };
 
+    const prepared = await this.prepareCanonicalPlayback(trackId);
+    if (!prepared) {
+      this.povPlayer.unload();
+      return { ok: false, detail: 'CANONICAL PLAYBACK PREPARATION FAILED' };
+    }
+
+    // Confirm the loaded map really is the one the replay was recorded against.
+    const loadedIdentity = this.currentMapIdentity();
+    if (
+      !loadedIdentity ||
+      loadedIdentity.trackId !== expected.trackId ||
+      loadedIdentity.mapVersion !== expected.mapVersion ||
+      loadedIdentity.mapFingerprint !== expected.mapFingerprint ||
+      loadedIdentity.movementVersion !== expected.movementVersion
+    ) {
+      this.povPlayer.unload();
+      return { ok: false, detail: 'REPLAY MAP IDENTITY MISMATCH' };
+    }
+
     this.replayMode = 'POV';
     this.povPlayer.restart();
-    this.stateMachine.transitionTo(GameState.REPLAY);
+    // The canonical preparation leaves the machine in READY (or FINISHED for a
+    // local results replay); the transition must be accepted, never assumed.
+    if (!this.stateMachine.transitionTo(GameState.REPLAY)) {
+      this.replayMode = 'NONE';
+      this.povPlayer.unload();
+      return { ok: false, detail: 'REPLAY ENTRY REJECTED' };
+    }
     return { ok: true, detail: 'PLAYING' };
   }
 
