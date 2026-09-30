@@ -78,7 +78,16 @@ void main() {
   float mass = 0.10 + uBassMass * 0.55 + uTransient * 0.45 + uDrop * 0.9;
   float lit = mass + bandPulse * (0.35 + uBassMass * 0.9 + uTransient * 0.7);
   vec3 col = mix(uPrimary, uHighlight, clamp(bandPulse * 0.7 + uDrop * 0.5, 0.0, 1.0));
-  gl_FragColor = vec4(col * lit * uGain, uOpacity);
+
+  // Dark brutalist shaft: lit corner edges, ledges, and ONE recessed slot that
+  // carries the signal. Light is embedded, never painted over the mass.
+  float u = vLandmarkUv.x;
+  float edge = 1.0 - smoothstep(0.0, 0.05, min(u, 1.0 - u));
+  float slot = 1.0 - smoothstep(0.07, 0.11, abs(u - 0.5));
+  float ledge = step(0.965, fract(coord * 9.0));
+  vec3 body = vec3(0.028, 0.034, 0.048) * (1.0 + edge * 1.6 + ledge * 0.9);
+  vec3 signal = col * lit * uGain * slot * 1.4;
+  gl_FragColor = vec4(body * (1.0 - slot * 0.7) + signal, uOpacity);
 }
 `;
 
@@ -114,7 +123,15 @@ void main() {
   float lit = inBar * (0.22 + amp * 1.15 + uMidFlow * 0.35 + uDrop * 0.8)
             + grid * 0.10 * (0.3 + uMidFlow);
   vec3 col = mix(uPrimary, uHighlight, clamp(amp * 1.1 + uDrop * 0.6, 0.0, 1.0));
-  gl_FragColor = vec4(col * lit * uGain, uOpacity);
+
+  // Heavy dark frame around an inset display: the waveform is installed IN the
+  // slab, not drawn across it.
+  vec2 e = min(vLandmarkUv, 1.0 - vLandmarkUv);
+  float frame = 1.0 - step(0.07, min(e.x, e.y));
+  float frameEdge = (1.0 - smoothstep(0.0, 0.01, min(e.x, e.y))) + (1.0 - smoothstep(0.0, 0.006, abs(min(e.x, e.y) - 0.07)));
+  vec3 frameCol = vec3(0.03, 0.036, 0.05) * (1.0 + frameEdge * 2.0);
+  vec3 screen = col * lit * uGain * 0.85 + vec3(0.01, 0.014, 0.02);
+  gl_FragColor = vec4(mix(screen, frameCol, frame), uOpacity);
 }
 `;
 
@@ -146,7 +163,15 @@ void main() {
   float separator = step(0.94, fract(coord * float(${SPECTRAL_BANDS})));
   float lit = 0.08 + energy * 1.25 + separator * 0.06;
   vec3 col = mix(uPrimary, uHighlight, clamp(energy * 1.1, 0.0, 1.0));
-  gl_FragColor = vec4(col * lit * uGain, uOpacity);
+
+  // Dark stacked mass; each band owns a narrow recessed window that lights
+  // with its energy. The rest of the column stays architecture.
+  float bandV = fract(coord * float(${SPECTRAL_BANDS}));
+  float u = vLandmarkUv.x;
+  float window = step(0.18, u) * step(u, 0.82) * step(0.38, bandV) * step(bandV, 0.62);
+  float edge = 1.0 - smoothstep(0.0, 0.05, min(u, 1.0 - u));
+  vec3 body = vec3(0.026, 0.032, 0.046) * (1.0 + edge * 1.5 + separator * 1.2);
+  gl_FragColor = vec4(mix(body, col * lit * uGain * 1.3 + vec3(0.01), window), uOpacity);
 }
 `;
 

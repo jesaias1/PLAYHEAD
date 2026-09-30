@@ -18,6 +18,8 @@ import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { cleanTrackTitle } from '../audio/CleanTitle';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { patchEmbeddedSignal } from './EmbeddedSignal';
 
 export interface MonolithAnchor {
   id: string;
@@ -69,6 +71,7 @@ interface ResolvedFacade {
 interface CullingEntry {
   mesh: THREE.Mesh;
   position: THREE.Vector3;
+  frame?: THREE.Mesh;
 }
 
 interface PlacedSignRecord {
@@ -182,6 +185,41 @@ export class CitySignageSystem {
 
   // Distance culling registration
   private cullingEntries: CullingEntry[] = [];
+  /**
+   * Installed sign frames (backplate + protruding bezel) live in a SIBLING
+   * group mounted by the skyline, so the sign group itself stays one mesh per
+   * sign. Each frame is culled together with its sign.
+   */
+  public readonly frameGroup = new THREE.Group();
+  private frameMaterial: THREE.MeshStandardMaterial | null = null;
+
+  private addFrame(entry: CullingEntry, w: number, h: number): void {
+    if (!this.frameMaterial) return;
+    const bw = 0.8;
+    const parts: THREE.BufferGeometry[] = [];
+    const add = (sx: number, sy: number, sz: number, x: number, y: number, z: number): void => {
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      g.translate(x, y, z);
+      parts.push(g);
+    };
+    add(w + bw * 2, h + bw * 2, 1.0, 0, 0, -0.56);
+    add(w + bw * 2, bw, 0.7, 0, h / 2 + bw / 2, 0.12);
+    add(w + bw * 2, bw, 0.7, 0, -h / 2 - bw / 2, 0.12);
+    add(bw, h, 0.7, -w / 2 - bw / 2, 0, 0.12);
+    add(bw, h, 0.7, w / 2 + bw / 2, 0, 0.12);
+    // Mounting brackets into the wall.
+    add(0.5, 0.5, 1.6, -w * 0.3, -h / 2 - bw, -0.9);
+    add(0.5, 0.5, 1.6, w * 0.3, -h / 2 - bw, -0.9);
+    const merged = mergeGeometries(parts, false);
+    for (const g of parts) g.dispose();
+    if (!merged) return;
+    const frame = new THREE.Mesh(merged, this.frameMaterial);
+    frame.position.copy(entry.mesh.position);
+    frame.rotation.copy(entry.mesh.rotation);
+    frame.name = 'SignFrame';
+    this.frameGroup.add(frame);
+    entry.frame = frame;
+  }
   private cullingActive = false;
 
   constructor(
@@ -240,6 +278,17 @@ export class CitySignageSystem {
     this.highBase.copy(this.highMat.color);
     this.heroBase.copy(this.heroMat.color);
     this.stagedBase = this.stagedWaveMats.map((m) => m.color.clone());
+
+    // Installed frames: dark machined bezel with an inset signal groove.
+    this.frameGroup.name = 'CitySignageFrames';
+    this.frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0b0e15,
+      roughness: 0.45,
+      metalness: 0.65,
+      emissive: accentCol.clone(),
+      emissiveIntensity: 0.6
+    });
+    patchEmbeddedSignal(this.frameMaterial, 0.0);
 
     // 2. Build Sign Geometries & Curate Placements on Towers
     this.buildSignage(analysis, track, corridor, monoliths, stelae);
@@ -307,7 +356,9 @@ export class CitySignageSystem {
     mesh.rotation.set(0, facade.faceYaw, 0);
 
     this.group.add(mesh);
-    this.cullingEntries.push({ mesh, position: signPos.clone() });
+    const signEntry: CullingEntry = { mesh, position: signPos.clone() };
+    this.cullingEntries.push(signEntry);
+    this.addFrame(signEntry, signWidth, signHeight);
     this.placedSigns.push({ center: signPos.clone(), radius: boundingRadius, isHero });
     this.occupiedTowers.add(towerId);
 
@@ -346,7 +397,9 @@ export class CitySignageSystem {
     mesh.rotation.set(0, facade.faceYaw, 0);
 
     this.group.add(mesh);
-    this.cullingEntries.push({ mesh, position: crownPos.clone() });
+    const crownEntry: CullingEntry = { mesh, position: crownPos.clone() };
+    this.cullingEntries.push(crownEntry);
+    this.addFrame(crownEntry, crownWidth, crownHeight);
     this.placedSigns.push({ center: crownPos.clone(), radius, isHero: false });
     this.occupiedTowers.add(towerId);
 
@@ -629,7 +682,9 @@ export class CitySignageSystem {
     // STEP 5: ATMOSPHERIC WINDOW CLUSTERS ON EMPTY MONOLITHS
     // =========================================================================
     let winCount = 0;
-    const maxWindows = 5;
+    // Retired: flat window-cluster panels read as glowing stickers. The
+    // skyline's tower shader now renders its own sparse embedded windows.
+    const maxWindows = 0;
 
     for (let i = 0; i < monoliths.length; i++) {
       if (winCount >= maxWindows) break;
@@ -747,6 +802,7 @@ export class CitySignageSystem {
       if (this.cullingActive) {
         for (const entry of this.cullingEntries) {
           entry.mesh.visible = true;
+          if (entry.frame) entry.frame.visible = true;
         }
         this.cullingActive = false;
       }
@@ -758,6 +814,7 @@ export class CitySignageSystem {
     for (const entry of this.cullingEntries) {
       const far = entry.position.distanceToSquared(cameraPos) > cutoffSq;
       entry.mesh.visible = !far;
+      if (entry.frame) entry.frame.visible = !far;
     }
   }
 
@@ -786,6 +843,10 @@ export class CitySignageSystem {
         }
       }
     });
+    this.frameGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) obj.geometry.dispose();
+    });
+    this.frameMaterial?.dispose();
     this.cullingEntries = [];
     this.placedSigns = [];
     this.occupiedTowers.clear();

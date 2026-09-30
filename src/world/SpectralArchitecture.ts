@@ -8,6 +8,7 @@
  */
 
 import * as THREE from 'three';
+import { patchEmbeddedSignal } from './EmbeddedSignal';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
@@ -58,6 +59,10 @@ export class SpectralArchitecture {
       emissive: accentCol,
       emissiveIntensity: 0.04
     });
+
+    // Signal lives in inset grooves; the fins and walls stay dark mass.
+    patchEmbeddedSignal(this.canyonMaterial);
+    patchEmbeddedSignal(this.canopyMaterial, 0.06);
 
     this.build(analysis, track);
     scene.add(this.group);
@@ -245,6 +250,7 @@ export class SpectralArchitecture {
         roughness: 0.85,
         metalness: 0.25
       });
+      patchEmbeddedSignal(colMat);
       this.frameMaterials.push(colMat);
 
       const lintelMat = new THREE.MeshStandardMaterial({
@@ -254,6 +260,7 @@ export class SpectralArchitecture {
         roughness: 0.4,
         metalness: 0.7
       });
+      patchEmbeddedSignal(lintelMat);
       this.lintelMaterials.push(lintelMat);
 
       // Gate side support columns descending to globalAbyssBottom

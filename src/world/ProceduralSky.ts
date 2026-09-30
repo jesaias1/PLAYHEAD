@@ -96,19 +96,19 @@ vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float s
   float hBright = hash31(gridBright);
   float twinkle = sin(time * 2.5 + hBright * 6.28) * 0.3 + 0.7;
   twinkle += high * 0.5 * sin(time * 7.0 + hBright * 11.0);
-  float bright = (hBright > 0.989) ? (1.0 - smoothstep(0.0, 0.0036, length(dir - (gridBright + 0.5) / 190.0))) * twinkle * 0.9 : 0.0;
+  float bright = (hBright > 0.992) ? (1.0 - smoothstep(0.0, 0.0024, length(dir - (gridBright + 0.5) / 190.0))) * twinkle * 0.75 : 0.0;
 
   // 3. Color Stars (subtle palette secondary stars)
   vec3 gridColor = floor(dir * 140.0);
   float hColor = hash31(gridColor);
-  float colorStar = (hColor > 0.992) ? (1.0 - smoothstep(0.0, 0.0042, length(dir - (gridColor + 0.5) / 140.0))) * 1.1 : 0.0;
+  float colorStar = (hColor > 0.994) ? (1.0 - smoothstep(0.0, 0.0028, length(dir - (gridColor + 0.5) / 140.0))) * 0.9 : 0.0;
 
   // 4. Hero Stars (rare cross beacons with music-reactive transient flares)
   vec3 gridHero = floor(dir * 85.0);
   float hHero = hash31(gridHero);
   float hero = 0.0;
   vec3 heroGlowCol = vec3(0.0);
-  if (hHero > 0.995) {
+  if (hHero > 0.9972) {
     vec3 dHero = dir - (gridHero + 0.5) / 85.0;
     float dist = length(dHero);
 
@@ -118,7 +118,7 @@ vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float s
     float responder = step(0.4, fract(hHero * 173.0));
     float transientEnergy = dropImpact * 1.4 + high * 0.5 + heroFlare * responder * 2.4;
     float heroTwinkle = sin(time * 1.5 + hHero * 6.28) * 0.25 + 0.75;
-    float dynamicRadius = 0.0048 + clamp(transientEnergy * 0.0035, 0.0, 0.008);
+    float dynamicRadius = 0.0026 + clamp(transientEnergy * 0.0012, 0.0, 0.003);
 
     // Core beacon
     float core = (1.0 - smoothstep(0.0, dynamicRadius, dist)) * (1.6 + transientEnergy * 3.2);

@@ -323,8 +323,15 @@ export class Megastructure {
       const t = 36;
       const frame = new THREE.Group();
       frame.name = 'Mega_OrbitFrame';
-      const top = new THREE.Mesh(box(outer, t, t), heroMat);
-      top.position.set(0, outer * 0.5 - t * 0.5, 0);
+      // Broken top span: one long piece, a gap, and a fallen-away fragment
+      // hanging slightly lower and askew.
+      const top = new THREE.Group();
+      const topA = new THREE.Mesh(box(outer * 0.58, t, t), heroMat);
+      topA.position.set(-outer * 0.21, outer * 0.5 - t * 0.5, 0);
+      const topB = new THREE.Mesh(box(outer * 0.22, t, t), heroMat);
+      topB.position.set(outer * 0.39, outer * 0.5 - t * 0.5 - 14, 0);
+      topB.rotation.z = -0.09;
+      top.add(topA, topB);
       const bottom = new THREE.Mesh(box(outer, t, t), heroMat);
       bottom.position.set(0, -outer * 0.5 + t * 0.5, 0);
       const left = new THREE.Mesh(box(t, outer, t), heroMat);

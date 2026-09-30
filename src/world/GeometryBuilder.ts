@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { createPlatformGeometry } from '../generation/PlatformShape';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { patchEmbeddedSignal } from './EmbeddedSignal';
 import { VisualAccent } from '../audio/AudioFeatures';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
@@ -218,6 +219,9 @@ export class GeometryBuilder {
       roughness: 0.15
     });
     reactiveMaterials.push(checkpointMaterial);
+    // Arch body = dark portal architecture with its signal in inset grooves
+    // and edges. The reactive gate lattice (the beacon) is untouched.
+    patchEmbeddedSignal(checkpointMaterial, 0.07);
 
     // 5. Finish Gate Material
     const finishMaterial = new THREE.MeshStandardMaterial({
@@ -1174,7 +1178,22 @@ float archTop = 0.0;`
     diffuseColor.rgb *= (1.0 - groove * 0.7 - joint * 0.4) * mix(0.8, 1.15, field);
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 2.4 + vec3(0.06), rim * 0.7);
     float line = smoothstep(0.96, 0.99, edgeD) * (1.0 - smoothstep(1.06, 1.09, edgeD));
-    archGlow = line * 0.7 + rim * 0.06;
+
+    // Pixel-block wear: restrained aggregate breakup, strongest near edges and
+    // fading out toward the centre of the deck so landings stay clean.
+    vec2 wearCell = floor(meters * 1.5);
+    float wearN = fract(sin(dot(wearCell, vec2(12.9898, 78.233))) * 43758.5453);
+    float wearMask = 1.0 - smoothstep(1.2, 3.5, edgeD);
+    diffuseColor.rgb *= 1.0 - step(0.86, wearN) * 0.22 * wearMask;
+
+    // Stencilled corner brackets at the inset corners.
+    float bracket =
+      (step(1.36, ed.x) * step(ed.x, 1.5) * step(1.36, ed.y) * step(ed.y, 2.4)) +
+      (step(1.36, ed.y) * step(ed.y, 1.5) * step(1.36, ed.x) * step(ed.x, 2.4));
+    bracket = min(bracket, 1.0) * step(4.0, min(vFace.x, vFace.y));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.8 + vec3(0.03), bracket * 0.6);
+
+    archGlow = line * 0.7 + rim * 0.06 + bracket * 0.35;
     archTop = 1.0;
   } else if (vFace.z < 1.5) {
     // SIDES: dark mass, a glowing lip trim just under the deck edge, and a

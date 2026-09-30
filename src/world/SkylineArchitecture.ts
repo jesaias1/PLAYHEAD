@@ -10,80 +10,164 @@ import * as THREE from 'three';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
-import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
 import { tagWorldRole } from './WorldRoles';
 
 /**
- * Patches a standard material with a world-Y "signal band" sweep.
+ * ARCHITECTURAL TOWER SHADER (patched onto the skyline's standard materials).
  *
- * All skyline tiers share the same sweep phase so the city reads as one giant
- * machine processing sound, while each tier owns its own gain/sharpness so the
- * tiers do not all light up together.
+ * The skyline instances are plain boxes; this patch turns each one into a
+ * piece of brutalist architecture without adding geometry:
+ *
+ * - SILHOUETTE: per-instance profiles carve the box with discard — stepped
+ *   setback crowns, through-slot cutouts, split twin prongs — so no two
+ *   neighbours share the same outline. DoubleSide lets a carved opening reveal
+ *   the tower's inner walls, so cutouts read as hollow structure.
+ * - SURFACE: lit corner pilasters, recessed vertical ribs, heavy ledge bands
+ *   every few dozen metres, and a very sparse scatter of lit windows.
+ * - SIGNAL: the music-driven emissive lives ONLY in one recessed vertical
+ *   channel per face (plus the shared scan bands inside it), so the light
+ *   reads as embedded in the structure instead of painted on.
+ * - DEPTH: fog is replaced by a dedicated atmospheric perspective (mass lifts
+ *   toward a cool haze with distance) and towers dissolve into the abyss.
+ *
+ * Per-instance data: aTower = (topY, seed).
  */
-function patchSignalBands(
+function patchArchitecture(
   material: THREE.MeshStandardMaterial,
   uniforms: Record<string, THREE.IUniform>
 ): void {
+  material.fog = false;
+  material.side = THREE.DoubleSide;
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uSignalPhase = uniforms.uSignalPhase;
-    shader.uniforms.uSignalGain = uniforms.uSignalGain;
-    shader.uniforms.uSignalSegCount = uniforms.uSignalSegCount;
-    shader.uniforms.uSignalSegSharp = uniforms.uSignalSegSharp;
-    shader.uniforms.uSignalBandScale = uniforms.uSignalBandScale;
+    for (const key of Object.keys(uniforms)) shader.uniforms[key] = uniforms[key];
 
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nvarying float vSignalWorldY;\nvarying vec2 vSignalWorldXZ;'
+        `#include <common>
+attribute vec2 aTower;
+varying vec3 vArchWorld;
+varying vec2 vArchUv;
+varying float vArchUp;
+varying vec2 vArchTower;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 #ifdef USE_INSTANCING
-  vec4 signalWorld = modelMatrix * instanceMatrix * vec4( transformed, 1.0 );
+  vec4 archWorld = modelMatrix * instanceMatrix * vec4( transformed, 1.0 );
 #else
-  vec4 signalWorld = modelMatrix * vec4( transformed, 1.0 );
+  vec4 archWorld = modelMatrix * vec4( transformed, 1.0 );
 #endif
-  vSignalWorldY = signalWorld.y;
-  vSignalWorldXZ = signalWorld.xz;`
+  vArchWorld = archWorld.xyz;
+  vArchUv = uv;
+  vArchUp = normal.y;
+  vArchTower = aTower;`
       );
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
-varying float vSignalWorldY;
-varying vec2 vSignalWorldXZ;
 uniform float uSignalPhase;
 uniform float uSignalGain;
 uniform float uSignalSegCount;
 uniform float uSignalSegSharp;
-uniform float uSignalBandScale;`
+uniform float uSignalBandScale;
+uniform float uFaceW;
+uniform float uCarve;
+uniform float uDetail;
+uniform vec3 uHaze;
+uniform float uAbyssY;
+varying vec3 vArchWorld;
+varying vec2 vArchUv;
+varying float vArchUp;
+varying vec2 vArchTower;
+float archHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+float archHash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float archChannel = 0.0;
+float archWindow = 0.0;`
+      )
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+{
+  float side = 1.0 - step(0.5, abs(vArchUp));
+  float relTop = vArchTower.x - vArchWorld.y;
+  float seed = vArchTower.y;
+  float u = vArchUv.x;
+  if (uCarve > 0.0 && side > 0.5) {
+    if (seed > 0.35 && seed < 0.6) {
+      // Stepped setback crown.
+      if (relTop < 30.0 * uCarve && (u < 0.17 || u > 0.83)) discard;
+      if (relTop < 13.0 * uCarve && (u < 0.33 || u > 0.67)) discard;
+    } else if (seed >= 0.6 && seed < 0.8) {
+      // Through-slot cut high in the shaft.
+      if (relTop > 34.0 * uCarve && relTop < 58.0 * uCarve && u > 0.3 && u < 0.7) discard;
+    } else if (seed >= 0.8) {
+      // Split twin prongs.
+      if (relTop < 70.0 * uCarve && u > 0.42 && u < 0.58) discard;
+    }
+  }
+}`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+{
+  float side = 1.0 - step(0.5, abs(vArchUp));
+  float seed = vArchTower.y;
+  float mx = vArchUv.x * uFaceW;
+  float edgeM = min(mx, uFaceW - mx);
+  float pilaster = 1.0 - smoothstep(1.0, 1.4, edgeM);
+  float rib = step(fract(mx / 5.0), 0.1) * step(1.4, edgeM) * uDetail;
+  float ledgeY = fract((vArchWorld.y + seed * 97.0) / 28.0);
+  float ledge = step(0.94, ledgeY) * uDetail;
+  float shade = 1.0 - rib * 0.5;
+  shade = mix(shade, 2.0, pilaster * 0.55 * side);
+  shade = mix(shade, 1.7, ledge * side);
+  shade = mix(shade, 1.35, 1.0 - side);
+  diffuseColor.rgb *= shade;
+
+  // One recessed signal channel per face.
+  float chan = 1.0 - smoothstep(0.15, 0.35, abs(mx - uFaceW * 0.5));
+  diffuseColor.rgb *= 1.0 - chan * 0.6 * side;
+  archChannel = chan * side * step(0.3, archHash(seed * 31.0 + floor(vArchUv.x + vArchUp)));
+
+  // Sparse lit windows on a few floors only.
+  vec2 cell = vec2(floor(mx / 2.2), floor(vArchWorld.y / 3.6));
+  vec2 inCell = vec2(fract(mx / 2.2), fract(vArchWorld.y / 3.6));
+  float floorLit = step(0.82, archHash(floor(vArchWorld.y / 28.0) + seed * 57.0));
+  float lit = step(0.9, archHash2(cell + seed * 13.0)) * step(0.25, inCell.x) * step(inCell.x, 0.75) * step(0.3, inCell.y) * step(inCell.y, 0.55);
+  archWindow = lit * floorLit * side * step(1.6, edgeM) * uDetail;
+}`
       )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
 {
-  float signalCoord = vSignalWorldY * uSignalBandScale;
+  float signalCoord = vArchWorld.y * uSignalBandScale;
   float signalSeg = fract( signalCoord * uSignalSegCount - uSignalPhase );
   float signalPulse = pow( 1.0 - abs( signalSeg * 2.0 - 1.0 ), uSignalSegSharp );
-
-  // STRUCTURE MASK: the music-driven emissive no longer floods whole faces.
-  // It lives in thin floor slits and panel seams, strongest around the
-  // player's altitude and dissolving downward into the abyss, so towers read
-  // as colossal dark mass with signal running through it.
-  float relY = vSignalWorldY - cameraPosition.y;
-  float floorSlit = step( 0.86, fract( vSignalWorldY * 0.21 ) );
-  float seam = step( 0.93, fract( ( vSignalWorldXZ.x + vSignalWorldXZ.y ) * 0.11 ) );
-  float structure = 0.14 + floorSlit * 0.86 + seam * 0.35;
+  float relY = vArchWorld.y - cameraPosition.y;
   float abyssFade = smoothstep( -260.0, 10.0, relY );
-  totalEmissiveRadiance *= structure * mix( 0.25, 1.0, abyssFade );
-
-  // Signal bands carry the accent itself (the dark basalt albedo made them
-  // nearly invisible before).
-  totalEmissiveRadiance += emissive * signalPulse * uSignalGain * 1.4 * ( 0.35 + 0.65 * abyssFade );
+  // Emissive is confined to the embedded channel (+ its travelling bands).
+  totalEmissiveRadiance *= archChannel * (0.35 + signalPulse * 1.6) * mix( 0.2, 1.0, abyssFade );
+  totalEmissiveRadiance += emissive * archChannel * signalPulse * uSignalGain * 2.0 * abyssFade;
+  totalEmissiveRadiance += vec3(0.55, 0.62, 0.72) * archWindow * 0.22;
+}`
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `#include <fog_fragment>
+{
+  float dist = length( vArchWorld - cameraPosition );
+  float atmo = smoothstep( 90.0, 900.0, dist );
+  float abyss = smoothstep( uAbyssY - 380.0, uAbyssY + 40.0, vArchWorld.y );
+  gl_FragColor.rgb = mix( uHaze * 0.25, gl_FragColor.rgb, abyss );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, uHaze, atmo * 0.55 );
 }`
       );
   };
@@ -104,6 +188,11 @@ export class SkylineArchitecture {
   // per-tier gains, patched into the three tower materials. This costs three
   // uniform writes per frame and zero extra draw calls.
   private scanPhaseUniform: THREE.IUniform = { value: 0 };
+  private mastUniforms = {
+    uTime: { value: 0 },
+    uAccent: { value: new THREE.Color() },
+    uHaze: { value: new THREE.Color() }
+  };
   private tierSignalUniforms: Array<Record<string, THREE.IUniform>> = [];
 
   // Authored per-instance transforms, retained so distance culling can restore
@@ -131,32 +220,28 @@ export class SkylineArchitecture {
     const accentCol = new THREE.Color(palette.hex);
 
     // Authored pixel textures
-    const basaltTex = PixelTextureGenerator.getBlackBasaltTexture();
-    const concreteTex = PixelTextureGenerator.getDarkConcreteTexture();
 
     // 1. Materials (Dark Basalt & Brutalist Monolithic Concrete)
     const primaryMat = new THREE.MeshStandardMaterial({
-      color: 0x05070a,
-      roughness: 0.94,
-      metalness: 0.12,
-      map: basaltTex,
+      color: 0x0c1018,
+      roughness: 0.9,
+      metalness: 0.18,
       emissive: accentCol,
       emissiveIntensity: 0.03
     });
     this.towerMaterials.push(primaryMat);
 
     const stelaMat = new THREE.MeshStandardMaterial({
-      color: 0x080c14,
-      roughness: 0.88,
-      metalness: 0.2,
-      map: concreteTex,
+      color: 0x0d121b,
+      roughness: 0.86,
+      metalness: 0.22,
       emissive: accentCol,
       emissiveIntensity: 0.04
     });
     this.towerMaterials.push(stelaMat);
 
     const ridgeMat = new THREE.MeshStandardMaterial({
-      color: 0x030406,
+      color: 0x070a10,
       roughness: 0.96,
       metalness: 0.08,
       emissive: accentCol,
@@ -167,23 +252,32 @@ export class SkylineArchitecture {
     // 1b. Patch the three tiers with the shared signal-band sweep. Tier 0
     // (primary monoliths) gets the sharpest, brightest bands; the distant
     // ridge tier gets broad, faint ones.
+    // Per tier: face width (m), silhouette carving strength, surface detail.
     const bandConfigs = [
-      { gain: 0.0, segCount: 22.0, segSharp: 3.4, bandScale: 0.055 },
-      { gain: 0.0, segCount: 15.0, segSharp: 2.6, bandScale: 0.040 },
-      { gain: 0.0, segCount: 9.0, segSharp: 1.9, bandScale: 0.028 }
+      { gain: 0.0, segCount: 22.0, segSharp: 3.4, bandScale: 0.055, faceW: 24.0, carve: 1.0, detail: 1.0 },
+      { gain: 0.0, segCount: 15.0, segSharp: 2.6, bandScale: 0.040, faceW: 11.0, carve: 0.6, detail: 0.8 },
+      { gain: 0.0, segCount: 9.0, segSharp: 1.9, bandScale: 0.028, faceW: 70.0, carve: 0.0, detail: 0.35 }
     ];
+    let routeMinY = 0;
+    for (const n of route) routeMinY = Math.min(routeMinY, n.position.y);
+    const haze = new THREE.Color(0.05, 0.065, 0.1);
     this.tierSignalUniforms = bandConfigs.map((cfg) => {
       const uniforms: Record<string, THREE.IUniform> = {
         uSignalPhase: this.scanPhaseUniform,
         uSignalGain: { value: cfg.gain },
         uSignalSegCount: { value: cfg.segCount },
         uSignalSegSharp: { value: cfg.segSharp },
-        uSignalBandScale: { value: cfg.bandScale }
+        uSignalBandScale: { value: cfg.bandScale },
+        uFaceW: { value: cfg.faceW },
+        uCarve: { value: cfg.carve },
+        uDetail: { value: cfg.detail },
+        uHaze: { value: haze },
+        uAbyssY: { value: routeMinY - 40.0 }
       };
       return uniforms;
     });
     for (let t = 0; t < this.towerMaterials.length && t < this.tierSignalUniforms.length; t++) {
-      patchSignalBands(this.towerMaterials[t], this.tierSignalUniforms[t]);
+      patchArchitecture(this.towerMaterials[t], this.tierSignalUniforms[t]);
     }
 
     // 2. Geometries
@@ -202,6 +296,24 @@ export class SkylineArchitecture {
     this.primaryMonoliths = new THREE.InstancedMesh(monolithGeom, primaryMat, maxInstances);
     this.supportStelae = new THREE.InstancedMesh(stelaGeom, stelaMat, maxInstances * 2);
     this.backgroundRidges = new THREE.InstancedMesh(ridgeGeom, ridgeMat, maxInstances);
+
+    // Per-instance architecture data: (topY, profile seed).
+    const towerData = (count: number): THREE.InstancedBufferAttribute =>
+      new THREE.InstancedBufferAttribute(new Float32Array(count * 2), 2);
+    const pData = towerData(maxInstances);
+    const sData = towerData(maxInstances * 2);
+    const rData = towerData(maxInstances);
+    monolithGeom.setAttribute('aTower', pData);
+    stelaGeom.setAttribute('aTower', sData);
+    ridgeGeom.setAttribute('aTower', rData);
+    const seedOf = (a: number, b: number): number => {
+      const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    // Antenna masts + sky-bridges collected while placing monoliths.
+    const mastMatrices: THREE.Matrix4[] = [];
+    const bridgeMatrices: THREE.Matrix4[] = [];
+    const lastMonolithBySide = new Map<number, { pos: THREE.Vector3; topY: number }>();
 
     const dummy = new THREE.Object3D();
     let pIdx = 0;
@@ -259,7 +371,40 @@ export class SkylineArchitecture {
         const mCandidateBox = mLocalBox.applyMatrix4(dummy.matrix);
 
         if (!corridor.isBoxInsideCorridor(mCandidateBox)) {
+          const pSeed = seedOf(i, side);
+          pData.setXY(pIdx, pTopY, pSeed);
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
+
+          // Masts crown the plain and setback profiles only.
+          if (pSeed < 0.6 && ((i / step) | 0) % 2 === 0) {
+            const mastH = 26 + pSeed * 60;
+            mastMatrices.push(
+              new THREE.Matrix4().compose(
+                new THREE.Vector3(px, pTopY + mastH * 0.5 - 2, pz),
+                new THREE.Quaternion(),
+                new THREE.Vector3(1.4, mastH, 1.4)
+              )
+            );
+          }
+          // Occasional sky-bridge to the previous monolith on the same side.
+          const prev = lastMonolithBySide.get(side);
+          const here = new THREE.Vector3(px, 0, pz);
+          if (prev && ((i / step) | 0) % 3 === 1) {
+            const span = here.distanceTo(prev.pos);
+            if (span > 30 && span < 260) {
+              const y = Math.min(pTopY, prev.topY) - 38;
+              const mid = here.clone().add(prev.pos).multiplyScalar(0.5);
+              const yaw = Math.atan2(here.x - prev.pos.x, here.z - prev.pos.z);
+              bridgeMatrices.push(
+                new THREE.Matrix4().compose(
+                  new THREE.Vector3(mid.x, y, mid.z),
+                  new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)),
+                  new THREE.Vector3(5, 6, span)
+                )
+              );
+            }
+          }
+          lastMonolithBySide.set(side, { pos: here, topY: pTopY });
 
           monolithAnchors.push({
             id: `monolith_${i}_${side}`,
@@ -312,6 +457,7 @@ export class SkylineArchitecture {
           const sCandidateBox = sLocalBox.applyMatrix4(dummy.matrix);
 
           if (!corridor.isBoxInsideCorridor(sCandidateBox)) {
+            sData.setXY(sIdx, sTopY, seedOf(i * 3 + st, side));
             this.supportStelae.setMatrixAt(sIdx++, dummy.matrix);
 
             stelaeAnchors.push({
@@ -357,6 +503,7 @@ export class SkylineArchitecture {
           const rCandidateBox = rLocalBox.applyMatrix4(dummy.matrix);
 
           if (!corridor.isBoxInsideCorridor(rCandidateBox)) {
+            rData.setXY(rIdx, rTopY, seedOf(i * 7, side));
             this.backgroundRidges.setMatrixAt(rIdx++, dummy.matrix);
           }
         }
@@ -391,6 +538,62 @@ export class SkylineArchitecture {
     this.group.add(this.supportStelae);
     this.group.add(this.backgroundRidges);
 
+    // 3b. Antenna masts: thin dark spires with a slow beacon at the tip.
+    if (mastMatrices.length > 0) {
+      const mastGeom = new THREE.BoxGeometry(1, 1, 1);
+      const mastMat = new THREE.ShaderMaterial({
+        uniforms: this.mastUniforms,
+        vertexShader: `
+          varying float vLocalY;
+          varying vec3 vWorld;
+          void main() {
+            vLocalY = position.y;
+            vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0);
+            vWorld = w.xyz;
+            gl_Position = projectionMatrix * viewMatrix * w;
+          }`,
+        fragmentShader: `
+          uniform float uTime;
+          uniform vec3 uAccent;
+          uniform vec3 uHaze;
+          varying float vLocalY;
+          varying vec3 vWorld;
+          void main() {
+            float tip = step(0.47, vLocalY);
+            float blink = step(0.55, fract(uTime * 0.45 + vWorld.x * 0.013));
+            vec3 body = vec3(0.03, 0.035, 0.05);
+            float atmo = smoothstep(90.0, 900.0, length(vWorld - cameraPosition));
+            vec3 col = mix(body, uHaze, atmo * 0.55);
+            col = mix(col, mix(uAccent, vec3(1.0), 0.4) * (0.35 + blink * 1.4), tip);
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+        fog: false
+      });
+      this.mastUniforms.uAccent.value.copy(accentCol);
+      this.mastUniforms.uHaze.value.copy(haze);
+      const masts = new THREE.InstancedMesh(mastGeom, mastMat, mastMatrices.length);
+      mastMatrices.forEach((m, k) => masts.setMatrixAt(k, m));
+      masts.instanceMatrix.needsUpdate = true;
+      masts.name = 'SkylineMasts';
+      masts.frustumCulled = false;
+      this.group.add(masts);
+    }
+
+    // 3c. Sky-bridges between neighbouring monoliths: connective tissue that
+    // makes the skyline read as one structure rather than scattered towers.
+    if (bridgeMatrices.length > 0) {
+      const bridgeGeom = new THREE.BoxGeometry(1, 1, 1);
+      const bData = new THREE.InstancedBufferAttribute(new Float32Array(bridgeMatrices.length * 2), 2);
+      bridgeMatrices.forEach((_, k) => bData.setXY(k, 1e5, 0.1));
+      bridgeGeom.setAttribute('aTower', bData);
+      const bridges = new THREE.InstancedMesh(bridgeGeom, primaryMat, bridgeMatrices.length);
+      bridgeMatrices.forEach((m, k) => bridges.setMatrixAt(k, m));
+      bridges.instanceMatrix.needsUpdate = true;
+      bridges.name = 'SkylineBridges';
+      bridges.frustumCulled = false;
+      this.group.add(bridges);
+    }
+
     // 4. Mount Audio-Reactive City Signage & Facade Displays
     this.signageSystem = new CitySignageSystem(
       analysis,
@@ -400,6 +603,7 @@ export class SkylineArchitecture {
       stelaeAnchors
     );
     this.group.add(this.signageSystem.group);
+    this.group.add(this.signageSystem.frameGroup);
   }
 
   public update(visualState: MusicVisualState, dt = 0, reduceMotion = false): void {
@@ -445,6 +649,7 @@ export class SkylineArchitecture {
     // the sweep right down but keeps the luminance response.
     const motionScale = reduceMotion ? 0.3 : 1.0;
     this.scanPhaseUniform.value = ch.scanPhase * motionScale;
+    this.mastUniforms.uTime.value = visualState.time;
     if (this.tierSignalUniforms.length >= 3) {
       this.tierSignalUniforms[0].uSignalGain.value =
         Math.min(0.9, (0.06 + ch.bassMass * 0.5 + primaryOnset * 0.6 + ch.dropPrimary * 0.9) * react);

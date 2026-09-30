@@ -109,10 +109,23 @@ export const ViewmodelOverlayShader = {
         // The rim lives on the silhouette only, so a strong transient briefly
         // brightens the outline — the illusion of the glowing world catching
         // the edge of the player's hands. The interior is never touched.
+        // Soft two-pixel falloff, added as light rather than painted as a flat
+        // outline: the world catches the edge instead of a sticker border.
+        float aL2 = texture2D(tViewmodel, vUv + vec2(-2.0 * texel.x, 0.0)).a;
+        float aR2 = texture2D(tViewmodel, vUv + vec2(2.0 * texel.x, 0.0)).a;
+        float aU2 = texture2D(tViewmodel, vUv + vec2(0.0, 2.0 * texel.y)).a;
+        float edge2 = clamp((base.a - min(min(aL2, aR2), aU2)) * 1.2, 0.0, 1.0);
+        float softEdge = max(edge, edge2 * 0.45);
         float rimStrength = uSignalEdgeStrength * (1.0 + uAudioPulse);
         vec3 rimColor = uSignalEdgeColor * (1.0 + uAudioPulse * 0.28);
-        col = mix(col, min(rimColor, vec3(1.0)), edge * rimStrength);
+        col += rimColor * softEdge * rimStrength * 0.55 * (0.4 + lum);
       }
+
+      // 4. World grounding: a cool ambient lift in the shadows (the world's
+      // atmosphere reaching the hands) and a depth falloff toward the bottom of
+      // the frame so the viewmodel sits IN the scene rather than over it.
+      col += uSignalEdgeColor * 0.025 * (1.0 - smoothstep(0.0, 0.35, lum));
+      col *= mix(0.7, 1.0, smoothstep(0.0, 0.42, vUv.y));
 
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), base.a);
     }
