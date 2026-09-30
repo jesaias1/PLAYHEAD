@@ -71,6 +71,29 @@ Open **SQL Editor**, paste the entire contents of each file in
   profiles.** It adds ONE narrow `SECURITY DEFINER` read
   (`public_profiles(uuid[])`) that projects only display name, equipped knife and
   equipped glove. No RLS policy is changed and no private table becomes readable.
+- `20260930000000_race_state_machine.sql` — **required for the friend race.**
+   Adds the LOADING / IN_GAME phases, the `loaded` / `in_game_ready` flags and
+   the single authoritative `race_room_players_sync` trigger.
+- `20260930000001_world_record_reward.sql` — WORLD RECORD award table
+   (`player_world_records`), self-only SELECT, no client write policy.
+- `20260930000002_accounts.sql` — username ACCOUNTS (no email): a unique
+   normalized username + the account-auth Edge Function that mints sessions.
+- `20260930000003_authority_and_isolation.sql` — **the authority pass.** It
+   adds the reserved-reward guards (BLACKSTAR / `WR:*`), the per-account
+   pre-migration snapshot, the atomic world-record + PB RPC
+   (`accept_leaderboard_run`), `claim_world_record_award`, the race provenance
+   overrides (loadout lock, COUNTDOWN re-arm, server-only finish time, clamped
+   stale-player grace) and revokes direct client EXECUTE on the internal
+   `*_impl` merge bodies.
+- `20260930000004_claim_conflict_target.sql` — fixes the WR claim's ambiguous
+   `cosmetic_id` conflict target by naming the ownership primary-key constraint.
+
+> ## CRITICAL: apply `20260930000003` BEFORE the functions are exercised
+>
+> It removes the client-controlled `authorized_progress_write` /
+> `authorized_cosmetic_write` flags from `sync_progression` and
+> `grant_progression_events` (they are client-driven saves, not privileged
+> awards). Without it, a crafted client could bypass the reserved-reward guards.
 
 > Without the second migration the lobby still lets players see each other on
 > join, but `postgres_changes` events are never delivered — so a READY change is
@@ -90,6 +113,10 @@ This creates: `profiles`, `player_progress`, `cosmetic_ownership`,
 bucket, and the RPCs `sync_progression`, `my_pending_drop_ranks`, `spend_drop`,
 `grant_progression_events`, `upsert_track_progress`,
 `race_report_attempt_start`, `race_report_finish`, `expire_stale_race_rooms`.
+
+It also creates `accounts` (username accounts, no email), `player_world_records`
+(server-only WORLD RECORD awards) and `pre_migration_cosmetic_snapshot`
+(the historical reserved-ownership ledger).
 
 ---
 
@@ -120,14 +147,61 @@ Every row must be `true`.
 
 ---
 
-## 5. Deploy the submit-run Edge Function
+## 5. Deploy the Edge Functions
 
 ```bash
 supabase functions deploy submit-run
+supabase functions deploy get-replay-url
+supabase functions deploy account-auth
 ```
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the Supabase
 runtime. **Do not** add them to `.env.local` or any `VITE_*` variable.
+
+### Gateway JWT policy (`supabase/config.toml`)
+
+`supabase/config.toml` pins `project_id = "playhead"` and sets
+`verify_jwt = false` for all three functions:
+
+- `account-auth` is the PUBLIC login/register/session endpoint: the caller has
+  no JWT yet, so the gateway must not require one. The `session` action performs
+  its own `auth.getUser()` check when a bearer token is supplied.
+- `submit-run` and `get-replay-url` validate the caller INSIDE the function with
+  `admin.auth.getUser(bearer)` and reject an absent or invalid identity, so the
+  gateway check is redundant and its opaque 401 is replaced by a precise error.
+
+No function trusts the gateway alone; each authenticated path re-checks
+`auth.getUser()` itself.
+
+### Accounts: no email, no recovery
+
+Username accounts are created by `account-auth` via Supabase Auth
+(`createUser` + `signInWithPassword`). There is **NO email** and therefore
+**NO email recovery / password reset**. A lost password is not recoverable; a
+new account must be created. Passwords are hashed and verified by GoTrue — the
+browser never sees or stores a hash, and the function never stores a password.
+
+### Local guest migration and account isolation
+
+- The device's PRE-ACCOUNT guest state is backed up ONCE and unioned into the
+  FIRST registered account only. A SECOND registered account on the same device
+  starts from a clean slate and can never inherit or upload the first account's
+  progression.
+- Account-bound local state (cosmetic ownership, equips, track records, PBs,
+  custom claims) is cleared and REPLACED — never unioned — on every account
+  switch and on sign-out, so account A's state can never leak into account B.
+- The in-memory offline queue, the migration marker, the pre-migration backup
+  and the world-record claim ledger are ALL keyed by `auth.users.id`.
+
+### Anti-cheat limitation (explicit)
+
+Official-run submission is **server-verified for TIME** (the Edge Function
+derives the accepted time and the world-record decision inside one serialized
+service-role RPC), but the submitted run time still originates from the CLIENT
+run timer. At this stage there is **no frame-level replay re-simulation** on the
+server, so a modified client could submit a fabricated completion time. Treat
+leaderboard results as trusted-player data, not adversarially verified. The
+replay artifact is stored for future verification; it is not yet re-simulated.
 
 ---
 
@@ -219,3 +293,8 @@ select cron.schedule('expire-race-rooms', '*/15 * * * *', $$select public.expire
 - [ ] `leaderboard_runs` has **no** client insert policy.
 - [ ] `run-replays` bucket is **private**.
 - [ ] `submit-run` is deployed and rejects `dev: true`.
+- [ ] `20260930000003_authority_and_isolation.sql` is applied (reserved-reward
+      guards active, `sync_progression`/`grant_progression_events` no longer set
+      the authorized-write flags, `*_impl` EXECUTE revoked from clients).
+- [ ] `supabase/config.toml` deployed with `project_id = "playhead"` and
+      `verify_jwt = false` on `account-auth`, `submit-run`, `get-replay-url`.

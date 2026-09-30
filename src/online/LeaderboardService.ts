@@ -64,7 +64,16 @@ export interface RunSubmission {
 }
 
 export type SubmitOutcome =
-  | { ok: true; verificationState: 'accepted' | 'flagged'; runId: string; isPersonalBest: boolean }
+  | {
+      ok: true;
+      verificationState: 'accepted' | 'flagged';
+      runId: string;
+      isPersonalBest: boolean;
+      /** Server verdict: this run is the current world record for the map. */
+      isWorldRecord: boolean;
+      /** The award the server created for this account, if any. */
+      worldRecordAwardId: string | null;
+    }
   | {
       ok: false;
       reason:
@@ -242,6 +251,8 @@ export class LeaderboardService {
         verification_state?: 'accepted' | 'flagged' | 'rejected';
         run_id?: string;
         is_personal_best?: boolean;
+        is_world_record?: boolean;
+        world_record_award_id?: string | null;
         reason?: string;
       } | null;
 
@@ -257,7 +268,10 @@ export class LeaderboardService {
         ok: true,
         verificationState: payload.verification_state === 'flagged' ? 'flagged' : 'accepted',
         runId: payload.run_id ?? '',
-        isPersonalBest: payload.is_personal_best === true
+        isPersonalBest: payload.is_personal_best === true,
+        // The reward is shown ONLY from this server verdict. Never inferred.
+        isWorldRecord: payload.is_world_record === true,
+        worldRecordAwardId: payload.world_record_award_id ?? null
       };
     } catch (err) {
       return { ok: false, reason: 'ERROR', detail: err instanceof Error ? err.message : String(err) };

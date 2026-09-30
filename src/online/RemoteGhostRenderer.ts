@@ -183,6 +183,16 @@ export class RemoteGhostRenderer {
   private debugMarkerOn = false;
   private debugOffsetOn = false;
   private forceVisibleOn = false;
+  /**
+   * COMPETITIVE STAGING OFFSET. When the remote opponent stands on the SAME
+   * spawn point as the local player, two identical capsules overlap and neither
+   * is discernible. In an actual race (not the recorded solo ghost) the remote
+   * capsule is nudged laterally a fixed, deterministic amount so both bodies are
+   * unmistakably visible. Presentation only: the offset is applied at render
+   * time and never leaks into the stored transform, interpolation or network.
+   */
+  private stagingOffsetOn = false;
+  public static readonly STAGING_LATERAL_OFFSET = 1.15;
 
   constructor(scene: THREE.Scene, color = RIVAL_SIGNAL_COLOR) {
     this.color = color;
@@ -334,7 +344,9 @@ export class RemoteGhostRenderer {
    * can never leak into the stored transform, the interpolation or the network.
    */
   private applyRenderPosition(): void {
-    const dx = this.debugOffsetOn ? DEBUG_OFFSET_X : 0;
+    const dx =
+      (this.debugOffsetOn ? DEBUG_OFFSET_X : 0) +
+      (this.stagingOffsetOn ? RemoteGhostRenderer.STAGING_LATERAL_OFFSET : 0);
     this.visual.setTransform(
       this.currentPos.x + dx,
       this.currentPos.y,
@@ -405,6 +417,15 @@ export class RemoteGhostRenderer {
     this.forceVisibleOn = enabled;
   }
 
+  /** Enables the deterministic competitive staging offset (see field docs). */
+  public setStagingOffset(enabled: boolean): void {
+    this.stagingOffsetOn = enabled;
+  }
+
+  public isStagingOffsetEnabled(): boolean {
+    return this.stagingOffsetOn;
+  }
+
   public isDebugMarkerEnabled(): boolean {
     return this.debugMarkerOn;
   }
@@ -424,7 +445,9 @@ export class RemoteGhostRenderer {
       this.debugMarker.visible = false;
       return;
     }
-    const dx = this.debugOffsetOn ? DEBUG_OFFSET_X : 0;
+    const dx =
+      (this.debugOffsetOn ? DEBUG_OFFSET_X : 0) +
+      (this.stagingOffsetOn ? RemoteGhostRenderer.STAGING_LATERAL_OFFSET : 0);
     this.debugMarker.position.set(
       this.targetPos.x + dx,
       this.targetPos.y,

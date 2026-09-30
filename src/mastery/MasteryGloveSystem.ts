@@ -54,6 +54,12 @@ export class MasteryGloveSystem {
   private recognizedIds: MasteryGloveId[] = [];
   private lastReconcile: MasteryReconcileResult | null = null;
   private listeners = new Set<(gloveId: string) => void>();
+  /**
+   * COMMITTED-CHANGE listeners. Fired ONLY on a genuine, persisted equip. They
+   * deliberately exclude parse failures and DEV previews, so a debounce
+   * cloud-save subscriber cannot be re-triggered by its own hydration loop.
+   */
+  private committedListeners = new Set<() => void>();
 
   private constructor() {
     this.loadState();
@@ -155,6 +161,7 @@ export class MasteryGloveSystem {
       this.equippedGloveId = id;
       this.saveState();
       this.notify();
+      this.notifyCommitted();
       return true;
     }
     // A mastery id must be a REAL ladder id: an unknown string must never silently
@@ -182,6 +189,7 @@ export class MasteryGloveSystem {
     this.equippedGloveId = definition.id;
     this.saveState();
     this.notify();
+    this.notifyCommitted();
     return true;
   }
 
@@ -274,6 +282,26 @@ export class MasteryGloveSystem {
   public addListener(fn: (gloveId: string) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /**
+   * Subscribes to GENUINE, PERSISTED equips only. Cloud hydration, unowned id
+   * rejections and DEV previews never fire this, so an auto-save subscriber
+   * cannot be re-triggered by cloud hydration.
+   */
+  public addCommittedListener(fn: () => void): () => void {
+    this.committedListeners.add(fn);
+    return () => this.committedListeners.delete(fn);
+  }
+
+  private notifyCommitted(): void {
+    for (const fn of this.committedListeners) {
+      try {
+        fn();
+      } catch (error) {
+        console.warn('[MasteryGloveSystem] committed listener failed:', error);
+      }
+    }
   }
 
   private notify(): void {

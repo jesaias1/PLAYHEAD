@@ -14,6 +14,7 @@ export type SubmissionState =
   | 'SUBMITTING'
   | 'WORLD_ENTRY_SUBMITTED'
   | 'WORLD_PB_UPDATED'
+  | 'WORLD_RECORD_SET'
   | 'WORLD_ENTRY_QUEUED_OFFLINE'
   | 'WORLD_SUBMISSION_FAILED'
   | 'RUN_INELIGIBLE_NON_CANONICAL'
@@ -31,6 +32,7 @@ export const SUBMISSION_FEEDBACK_TEXT: Record<SubmissionState, string> = {
   SUBMITTING: 'WORLD ENTRY // SUBMITTING...',
   WORLD_ENTRY_SUBMITTED: 'WORLD ENTRY // SUBMITTED',
   WORLD_PB_UPDATED: 'WORLD PB // UPDATED',
+  WORLD_RECORD_SET: 'WORLD RECORD // PRESTIGE AWARDED',
   WORLD_ENTRY_QUEUED_OFFLINE: 'WORLD ENTRY // QUEUED - OFFLINE',
   WORLD_SUBMISSION_FAILED: 'WORLD SUBMISSION // FAILED',
   RUN_INELIGIBLE_NON_CANONICAL: 'RUN INELIGIBLE // NON-CANONICAL MAP',
@@ -46,5 +48,9 @@ export function isRetryableSubmission(state: SubmissionState): boolean {
 
 /** True when the run is on the world board. */
 export function isSubmittedToWorld(state: SubmissionState): boolean {
-  return state === 'WORLD_ENTRY_SUBMITTED' || state === 'WORLD_PB_UPDATED';
+  return (
+    state === 'WORLD_ENTRY_SUBMITTED' ||
+    state === 'WORLD_PB_UPDATED' ||
+    state === 'WORLD_RECORD_SET'
+  );
 }

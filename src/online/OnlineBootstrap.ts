@@ -97,11 +97,22 @@ class OnlineBootstrap {
   }
 
   private async run(): Promise<void> {
+    // Before any account exists, back up this device's PRE-ACCOUNT guest state
+    // exactly once so the first registered account can adopt it safely.
+    cloudProgression.captureGuestStateIfNeeded();
+
     const session = await authService.ensureSession();
     if (!session.ok) {
       this.setStatus('SIGNED_OUT', session.detail);
       return;
     }
+
+    // AUTHORITATIVE IDENTITY FIRST. A reload may have a valid session but no
+    // local username cache, so without this the device would look anonymous and
+    // cloudProgression.sync() would skip the registered-account isolation path
+    // (and never hydrate the account's authoritative cloud state). Await the
+    // authoritative check BEFORE syncing.
+    await authService.refreshAccountIdentity();
 
     this.setStatus('SYNCING', 'reconciling progression');
     const result = await cloudProgression.sync();

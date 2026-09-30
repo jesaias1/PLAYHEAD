@@ -459,7 +459,7 @@ export class ResultsScreen {
   ): void {
     const skinSystem = KarambitSkinSystem.getInstance();
     const pending = skinSystem.getPendingDropCount();
-    const isCollectionComplete = skinSystem.isCollectionComplete();
+    const isCollectionComplete = skinSystem.isDropPoolComplete();
     this.signalDropPanel.className = 'signal-drop-panel';
 
     if (isCollectionComplete) {

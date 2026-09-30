@@ -188,7 +188,9 @@ export class RacePanel {
       this.renderReadyButton();
       this.callbacks?.onSetReady(next);
     });
-    this.lobbyStartBtn.addEventListener('click', () => this.callbacks?.onStartSession());
+    // The obsolete manual START SESSION path is removed: the server state
+    // machine owns the start (LOBBY READY -> LOADING -> IN_GAME -> COUNTDOWN).
+    // The button stays hidden; the RPC guard rejects direct start writes anyway.
     (this.element.querySelector('#race-leave-btn') as HTMLButtonElement).addEventListener('click', () =>
       this.callbacks?.onLeaveRoom()
     );
@@ -268,7 +270,11 @@ export class RacePanel {
 
   public setHost(isHost: boolean): void {
     this.isHost = isHost;
-    this.lobbyStartBtn.classList.toggle('hidden', !isHost);
+    // OBSOLETE HOST START BUTTON: the server state machine owns the start
+    // (LOBBY READY -> LOADING). The button is ALWAYS hidden now, even for the
+    // host, so there is no direct client start path to click.
+    void isHost;
+    this.lobbyStartBtn.classList.add('hidden');
   }
 
   public renderLobby(

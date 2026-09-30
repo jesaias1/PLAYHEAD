@@ -174,6 +174,14 @@ export class PovReplayPlayer {
     return this.replay?.cosmetic.skinId ?? '';
   }
 
+  /**
+   * The runner's equipped glove id, or '' for a replay recorded before this
+   * metadata existed. Callers fall back to the default cosmetic on ''.
+   */
+  public getGloveId(): string {
+    return this.replay?.cosmetic.gloveId ?? '';
+  }
+
   public getStartSongTimeMs(): number {
     return this.replay?.startSongTimeMs ?? 0;
   }

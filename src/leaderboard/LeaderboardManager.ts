@@ -461,4 +461,93 @@ export class LeaderboardManager {
     this.queue = [];
     this.saveState();
   }
+
+  /**
+   * All local official records (PBs + local-first), for the per-account snapshot
+   * backup. Returns copies so a caller can never mutate live state.
+   */
+  public getAllRecords(): OfficialRecordEntry[] {
+    return Object.values(this.records).map((r) => ({ ...r }));
+  }
+
+  /**
+   * Replaces the local official-record ledger from an account snapshot.
+   *
+   * The account snapshot is the WHOLE account state, so this is a REPLACE, not a
+   * merge: restoring account A after account B must never keep B's PBs.
+   */
+  public restoreLocalRecords(entries: readonly (Partial<OfficialRecordEntry> & { trackId: string })[]): void {
+    const next: Record<string, OfficialRecordEntry> = {};
+    for (const e of entries ?? []) {
+      if (!e || typeof e.trackId !== 'string' || e.trackId.length === 0) continue;
+      const pbTime = Number(e.pbTime);
+      if (!Number.isFinite(pbTime)) continue;
+      next[e.trackId] = {
+        trackId: e.trackId,
+        seed: Number(e.seed ?? 0),
+        bestRank: (e.bestRank as RunRank) ?? 'BRONZE',
+        pbTime,
+        pbScore: Number(e.pbScore ?? 0),
+        pbDate: Number(e.pbDate ?? Date.now()),
+        localFirstTime: Number(e.localFirstTime ?? pbTime),
+        localFirstScore: Number(e.localFirstScore ?? e.pbScore ?? 0),
+        localFirstDate: Number(e.localFirstDate ?? Date.now()),
+        ghostReplayPath: e.ghostReplayPath,
+        ghostReplayHash: e.ghostReplayHash,
+        ghostReplayFinishUs: e.ghostReplayFinishUs,
+        ghostReplayMapFingerprint: e.ghostReplayMapFingerprint
+      };
+    }
+    this.records = next;
+    this.saveState();
+  }
+
+  /** Clears ALL local official state: the record ledger AND the submission queue. */
+  public clearAllLocalState(): void {
+    this.records = {};
+    this.queue = [];
+    this.saveState();
+  }
+
+  /**
+   * MERGES server track_progress rows into the local record ledger as PBs.
+   *
+   * Additive only (lower time wins), so this can run on a fresh device without
+   * destroying local/guest data that has not been uploaded yet.
+   */
+  public mergeCloudPBs(
+    rows: readonly { trackId: string; bestTimeUs: number; bestRank: string }[]
+  ): void {
+    let changed = false;
+    for (const row of rows ?? []) {
+      if (!row || typeof row.trackId !== 'string' || row.trackId.length === 0) continue;
+      const timeUs = Number(row.bestTimeUs);
+      if (!Number.isFinite(timeUs) || timeUs <= 0) continue;
+      const time = timeUs / 1_000_000;
+      const rank = (row.bestRank as RunRank) ?? 'BRONZE';
+      const existing = this.records[row.trackId];
+      if (existing && existing.pbTime <= time) continue;
+      const bestRank =
+        existing && this.rankToValue(existing.bestRank) > this.rankToValue(rank)
+          ? existing.bestRank
+          : rank;
+      this.records[row.trackId] = {
+        trackId: row.trackId,
+        seed: existing?.seed ?? 0,
+        bestRank,
+        pbTime: time,
+        pbScore: existing?.pbScore ?? 0,
+        pbDate: existing?.pbDate ?? Date.now(),
+        localFirstTime: existing?.localFirstTime ?? time,
+        localFirstScore: existing?.localFirstScore ?? 0,
+        localFirstDate: existing?.localFirstDate ?? Date.now(),
+        ghostReplayPath: existing?.ghostReplayPath,
+        ghostReplayHash: existing?.ghostReplayHash,
+        ghostReplayFinishUs: existing?.ghostReplayFinishUs,
+        ghostReplayMapFingerprint: existing?.ghostReplayMapFingerprint
+      };
+      changed = true;
+    }
+    if (changed) this.saveState();
+  }
 }

@@ -106,7 +106,8 @@ export class SignalDecodeModal {
       return;
     }
 
-    if (this.skinSystem.isCollectionComplete()) {
+    // Category-aware: a completed KNIFE pool must never block glove drops.
+    if (this.skinSystem.isDropPoolComplete()) {
       this.showCollectionCompleteDialog();
       return;
     }

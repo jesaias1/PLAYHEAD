@@ -46,11 +46,18 @@ export class PovReplayRecorder {
   private lastTimeMs = 0;
   private identity: PovReplayIdentity | null = null;
   private skinId = '';
+  private gloveId = '';
   private fov = 75;
   private startSongTimeMs = 0;
   private finishTimeUs = 0;
 
-  public start(identity: PovReplayIdentity, skinId: string, fov = 75, startSongTimeMs = 0): void {
+  public start(
+    identity: PovReplayIdentity,
+    skinId: string,
+    fov = 75,
+    startSongTimeMs = 0,
+    gloveId = ''
+  ): void {
     this.samples = new Array<number>(INITIAL_CAPACITY_SAMPLES * 10);
     this.samples.length = 0;
     this.events = [];
@@ -59,6 +66,7 @@ export class PovReplayRecorder {
     this.lastTimeMs = 0;
     this.identity = identity;
     this.skinId = skinId;
+    this.gloveId = typeof gloveId === 'string' ? gloveId : '';
     this.fov = Number.isFinite(fov) && fov > 10 && fov < 170 ? fov : 75;
     this.startSongTimeMs = Number.isFinite(startSongTimeMs) && startSongTimeMs >= 0 ? startSongTimeMs : 0;
     this.finishTimeUs = 0;
@@ -150,7 +158,9 @@ export class PovReplayRecorder {
       startSongTimeMs: this.startSongTimeMs,
       s: this.samples,
       events: this.events,
-      cosmetic: { skinId: this.skinId },
+      cosmetic: this.gloveId
+        ? { skinId: this.skinId, gloveId: this.gloveId }
+        : { skinId: this.skinId },
       hash: ''
     };
     draft.hash = computeReplayHash(encodePovReplay(draft));

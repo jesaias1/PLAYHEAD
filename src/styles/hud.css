@@ -424,6 +424,45 @@
   letter-spacing: 0.1em;
 }
 
+/* In-game WAITING / READY stage for ONLINE RACE (the SECOND ready). */
+.race-hud-phase {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.55);
+  font-family: var(--font-mono);
+  text-align: center;
+  pointer-events: none;
+}
+.race-phase-line { font-size: 0.8rem; letter-spacing: 0.12em; color: #6d7885; }
+.race-phase-line.race-phase-ready { color: var(--accent-color); }
+.race-phase-you { color: #d7e3ef; }
+.race-phase-prompt {
+  margin-top: 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: var(--accent-color);
+}
+.race-hud-countdown {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-mono);
+  font-size: 4rem;
+  font-weight: 800;
+  color: var(--accent-color);
+  text-shadow: 0 0 24px rgba(0, 240, 255, 0.6);
+  pointer-events: none;
+}
+
 /* ==========================================================================
    POV REPLAY OVERLAY — minimal first-person replay controls
    ========================================================================== */

@@ -13,6 +13,7 @@ export class OnlineStatusBar {
   private tagElem: HTMLElement;
   private retryBtn: HTMLButtonElement;
   private identityBtn: HTMLButtonElement;
+  private accountBtn: HTMLButtonElement;
 
   constructor(onRetry: () => void) {
     this.element = document.createElement('span');
@@ -20,12 +21,15 @@ export class OnlineStatusBar {
     this.element.innerHTML =
       `<button class="online-status-identity" type="button" title="Open your player profile">PLAYER</button>` +
       `<span class="online-status-sep">//</span>` +
+      `<button class="online-status-account" type="button" title="Create or sign into a username account">SIGN IN</button>` +
+      `<span class="online-status-sep">//</span>` +
       `<span class="online-status-tag">[OFFLINE]</span>` +
       `<button class="online-status-retry" type="button" title="Retry cloud sync">RETRY</button>`;
 
     this.tagElem = this.element.querySelector('.online-status-tag') as HTMLElement;
     this.retryBtn = this.element.querySelector('.online-status-retry') as HTMLButtonElement;
     this.identityBtn = this.element.querySelector('.online-status-identity') as HTMLButtonElement;
+    this.accountBtn = this.element.querySelector('.online-status-account') as HTMLButtonElement;
     this.retryBtn.addEventListener('click', onRetry);
   }
 
@@ -40,6 +44,16 @@ export class OnlineStatusBar {
     const safe = displayName && displayName.trim().length > 0 ? displayName.trim() : 'PLAYER';
     this.identityBtn.textContent = safe;
     this.identityBtn.onclick = onOpenProfile;
+  }
+
+  /**
+   * The account entry point. Shows the registered username, or SIGN IN when the
+   * player is on an anonymous device-bound session.
+   */
+  public setAccount(username: string | null, onOpenAccount: () => void): void {
+    this.accountBtn.textContent = username ? username : 'SIGN IN';
+    this.accountBtn.classList.toggle('online-status-account-registered', !!username);
+    this.accountBtn.onclick = onOpenAccount;
   }
 
   public setStatus(tag: string, detail: string): void {

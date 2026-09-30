@@ -56,6 +56,14 @@ export interface PovReplayIdentity {
 export interface PovReplayCosmetic {
   /** Cosmetic id (stable identifier, not a display name). */
   skinId: string;
+  /**
+   * Equipped glove id for the run (knife-adjacent first-person cosmetic).
+   *
+   * Optional so replays recorded before this field existed decode cleanly and
+   * fall back to the default cosmetic. A replay represents what the runner USED
+   * during that run, so the loadout is recorded ONCE, never per frame.
+   */
+  gloveId?: string;
 }
 
 export interface PovReplay {
@@ -154,7 +162,9 @@ export function encodePovReplay(replay: PovReplay): string {
     startSongTimeMs: replay.startSongTimeMs,
     s: replay.s,
     events: replay.events.map((e) => (e.d === undefined ? { t: e.t, type: e.type } : { t: e.t, type: e.type, d: e.d })),
-    cosmetic: { skinId: replay.cosmetic.skinId }
+    cosmetic: replay.cosmetic.gloveId
+      ? { skinId: replay.cosmetic.skinId, gloveId: replay.cosmetic.gloveId }
+      : { skinId: replay.cosmetic.skinId }
   };
   return JSON.stringify(payload);
 }
@@ -264,7 +274,11 @@ export function decodePovReplay(payload: string): DecodeResult {
     startSongTimeMs,
     s: s as number[],
     events,
-    cosmetic: { skinId: (cosmetic?.skinId as string) ?? '' },
+    cosmetic: {
+      skinId: (cosmetic?.skinId as string) ?? '',
+      // Historical replays predate this field: fall back rather than fail.
+      gloveId: (cosmetic?.gloveId as string) || undefined
+    },
     // Deliberately NOT computed here: the hash is an EXTERNAL expected value
     // (leaderboard_runs.replay_hash). Computing it from the bytes being
     // validated would make the check vacuous.

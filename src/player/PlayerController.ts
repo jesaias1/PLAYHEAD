@@ -53,6 +53,12 @@ export class PlayerController {
 
   public static readonly HOLD_RESTART_SECONDS = 0.6;
 
+  /**
+   * Checkpoint-restore resume speed, in PLAYHEAD display units.
+   * 500 units at speedUnitScale = 40 is ~12.5 m/s horizontal.
+   */
+  public static readonly CHECKPOINT_RESTORE_SPEED_UNITS = 500;
+
   public onFallCallback?: (reason: RestoreReason) => void;
   public onRestoreCallback?: () => void;
   public onFullRestartCallback?: () => void;
@@ -132,6 +138,23 @@ export class PlayerController {
   public setOrientation(yaw: number): void {
     this.cameraController.setOrientation(yaw);
     this.prevYaw = yaw;
+  }
+
+  /**
+   * Applies the checkpoint-restore resume velocity.
+   *
+   * NOT a movement-tuning change: no gravity, friction, acceleration, wish-speed
+   * or cap constant is touched. This is a one-shot INITIAL velocity so a restore
+   * does not feel like a dead stop. Horizontal only, in the route's intended
+   * forward direction, so there is never downward or sideways velocity. Called
+   * exactly once per restore; normal physics owns every frame afterward.
+   */
+  public applyRestoreVelocity(forwardYaw: number, speedUnits: number): void {
+    const mps = speedUnits / this.config.speedUnitScale;
+    // Forward must match CameraController.getForwardVector(), which is
+    // (-sin(yaw), 0, -cos(yaw)). The opposite sign would fire the player
+    // BACKWARD on every restore. Y is deliberately zero: restore is horizontal.
+    this.velocity.set(-Math.sin(forwardYaw) * mps, 0, -Math.cos(forwardYaw) * mps);
   }
 
   public resetKeys(): void {

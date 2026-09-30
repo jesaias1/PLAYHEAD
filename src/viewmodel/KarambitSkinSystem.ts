@@ -291,7 +291,14 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     shortRequirement: 'ALL 14 TRACKS AT DIAMOND',
     tier: 5,
     rarity: 'RELIC',
-    dropEligible: true,
+    // RESERVED PRESTIGE: BLACKSTAR is no longer a random Signal Drop. It is the
+    // deliberate WORLD RECORD reward, granted server-side by the submit-run
+    // Edge Function and claimed once per account. Historical legitimate unlocks
+    // (the 14-diamond achievement, or a drop won before this change) are
+    // preserved through rewardOwnedSkinIds, which is a set union that never
+    // loses a row. Earning it from progress still works; a fresh random roll
+    // does not.
+    dropEligible: false,
     dropWeight: 1,
     paletteTag: 'SINGULARITY // #020306',
     profile: {
@@ -921,7 +928,13 @@ export class KarambitSkinSystem {
   private trackRecords: Record<string, RunRank> = {};
   private equippedSkinId = 'SIGNAL_CYAN';
   private devPreviewEnabled = false;
+  /**
+   * EPHEMERAL replay skin override. NEVER persisted, never the equipped skin.
+   * Set only while a replay/review is on screen and cleared on exit.
+   */
+  private replayPreviewSkinId: string | null = null;
   private listeners: Array<(skinId: string) => void> = [];
+  private committedListeners: Array<() => void> = [];
   private skinTextures: Map<string, THREE.Texture> = new Map();
   private textureLoader = new THREE.TextureLoader();
   private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
@@ -1312,7 +1325,32 @@ export class KarambitSkinSystem {
     this.retainStaticTextureFor(target.id);
     this.saveState();
     this.notifyListeners();
+    this.notifyCommitted();
     return true;
+  }
+
+  /**
+   * Applies a REPLAY-ONLY EPHEMERAL skin for a replay/review WITHOUT
+   * mutating the player's equipped loadout or persisting anything.
+   *
+   * Unlike equipSkin() this never writes localStorage, never notifies the equip
+   * listeners (so an equip-driven save cannot run) and never releases/retains
+   * the static texture registry. Unknown ids fall back to the canonical skin, so
+   * an old replay referencing a removed cosmetic cannot break playback.
+   *
+   * The viewmodel renders this preview until setReplaySkinPreview(null).
+   */
+  public setReplaySkinPreview(id: string | null): void {
+    this.replayPreviewSkinId = id ? this.getSkin(id).id : null;
+  }
+
+  public getReplaySkinPreviewId(): string | null {
+    return this.replayPreviewSkinId;
+  }
+
+  /** The cosmetic the viewmodel should render right now (preview wins). */
+  public getRenderSkinId(): string {
+    return this.replayPreviewSkinId ?? this.equippedSkinId;
   }
 
   public isDevPreview(): boolean {
@@ -1343,6 +1381,30 @@ export class KarambitSkinSystem {
     };
   }
 
+  /**
+   * Subscribes to REAL, PERSISTED player-owned changes only (earned unlock,
+   * completed track, genuine equip, drop award). Cloud hydration, replay
+   * preview, DEV preview and account-switch resets never fire this, so an
+   * auto-save subscriber cannot be re-triggered by its own writes.
+   */
+  public addCommittedListener(fn: () => void): () => void {
+    this.committedListeners.push(fn);
+    return () => {
+      const idx = this.committedListeners.indexOf(fn);
+      if (idx >= 0) this.committedListeners.splice(idx, 1);
+    };
+  }
+
+  private notifyCommitted(): void {
+    for (const fn of this.committedListeners) {
+      try {
+        fn();
+      } catch (err) {
+        console.warn('[KarambitSkinSystem] Committed listener error:', err);
+      }
+    }
+  }
+
   private notifyListeners(): void {
     for (const fn of this.listeners) {
       try {
@@ -1369,6 +1431,24 @@ export class KarambitSkinSystem {
 
   public getTrackRecords(): Record<string, RunRank> {
     return { ...this.trackRecords };
+  }
+
+  /**
+   * Replaces the local track-record ledger from an account snapshot.
+   *
+   * REPLACE, never merge: restoring account A's snapshot after account B must
+   * never leave B's track records in place.
+   */
+  public setTrackRecords(records: Record<string, RunRank> | null | undefined): void {
+    const next: Record<string, RunRank> = {};
+    for (const [k, v] of Object.entries(records ?? {})) {
+      if (typeof k !== 'string' || k.length === 0) continue;
+      if (v !== 'BRONZE' && v !== 'SILVER' && v !== 'GOLD' && v !== 'DIAMOND') continue;
+      next[k] = v;
+    }
+    this.trackRecords = next;
+    this.saveState();
+    this.notifyListeners();
   }
 
   public recordTrackCompletion(
@@ -1405,6 +1485,7 @@ export class KarambitSkinSystem {
 
     if (stateChanged) {
       this.saveState();
+      this.notifyCommitted();
     }
 
     const currentUnlocks = KARAMBIT_SKINS.filter(s => this.isSkinUnlocked(s.id));
@@ -1543,6 +1624,22 @@ export class KarambitSkinSystem {
   }
 
   /**
+   * ACCOUNT SWITCH RESET.
+   *
+   * Clears every LOCAL progression ledger and the equipped selection so a
+   * different registered account can never inherit (or upload) the previous
+   * account's cosmetics, ranks or records.
+   */
+  public resetProgressionForAccountSwitch(): void {
+    this.releaseActiveVideoTexture();
+    this.progression = this.createDefaultProgression();
+    this.trackRecords = {};
+    this.equippedSkinId = 'SIGNAL_CYAN';
+    this.retainStaticTextureFor('SIGNAL_CYAN');
+    this.saveState();
+    this.notifyListeners();
+  }
+  /**
    * DEV testing helper: clears all pending signals.
    */
   public clearDevPendingSignals(): void {
@@ -1648,6 +1745,9 @@ export class KarambitSkinSystem {
     const knives = KARAMBIT_SKINS.filter(
       (s) => s.dropEligible && !this.isSkinUnlockedWithoutDev(s.id)
     ).length;
+    // NOTE: BLACKSTAR is dropEligible=false (reserved WORLD RECORD reward), so it
+    // is already excluded here. It can still be owned by the DIAMOND-ALL unlock
+    // or by a historical drop, and such ownership is preserved by the ledger.
     const gloves = dropEligibleGloves().filter(
       (g) => !this.isDropGloveOwned(g.id)
     ).length;
@@ -1802,6 +1902,18 @@ export class KarambitSkinSystem {
     return eligible.length > 0 && eligible.every(skin => this.isSkinUnlockedWithoutDev(skin.id));
   }
 
+  /**
+   * True only when BOTH Signal Drop categories are exhausted.
+   *
+   * `isCollectionComplete()` answers a KNIFE-only question and must never be
+   * used as the "all signals decoded" gate: a player with every knife but
+   * unowned gloves is NOT finished, and the decoder must keep awarding glove
+   * drops. This is the category-aware gate the UI uses.
+   */
+  public isDropPoolComplete(): boolean {
+    return this.isCollectionComplete() && this.isGloveCollectionComplete();
+  }
+
   public openSignalDrop(): OpenedSignalDrop | null {
     const sourceRank = this.progression.pendingDropRanks[0];
     if (!sourceRank) return null;
@@ -1839,6 +1951,7 @@ export class KarambitSkinSystem {
       this.progression.lastRewardGloveId = glove.id;
       this.saveState();
       this.notifyListeners();
+      this.notifyCommitted();
       return this.buildGloveDrop(glove, sourceRank);
     }
 
@@ -1851,6 +1964,7 @@ export class KarambitSkinSystem {
     this.progression.lastRewardSkinId = skin.id;
     this.saveState();
     this.notifyListeners();
+    this.notifyCommitted();
     return this.buildKnifeDrop(skin, sourceRank);
   }
 
@@ -1987,5 +2101,6 @@ export class KarambitSkinSystem {
     for (const texture of this.skinTextures.values()) texture.dispose();
     this.skinTextures.clear();
     this.listeners = [];
+    this.committedListeners = [];
   }
 }

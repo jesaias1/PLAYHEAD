@@ -1,0 +1,30 @@
+# =============================================================================
+# SUPABASE CLI CONFIG — PLAYHEAD
+# =============================================================================
+# project_id pins the local/remote project this repository deploys to.
+#
+# FUNCTION JWT POLICY
+#   account-auth    verify_jwt = false
+#       It is the PUBLIC login/register/session endpoint: it accepts a plain
+#       username + password, hashes/verifies them via Supabase Auth (GoTrue) and
+#       returns real session tokens. The caller has no JWT yet, so the gateway
+#       must not require one. The `session` action performs its own
+#       auth.getUser() check on the bearer token when one is supplied.
+#   submit-run      verify_jwt = false
+#   get-replay-url  verify_jwt = false
+#       Both validate the caller internally with admin.auth.getUser(bearer) and
+#       reject an absent/invalid identity. Keeping the gateway check off lets the
+#       function return a precise error instead of an opaque 401, and keeps the
+#       gateway configuration compatible with the function's own auth path.
+# =============================================================================
+
+project_id = "playhead"
+
+[functions.account-auth]
+verify_jwt = false
+
+[functions.submit-run]
+verify_jwt = false
+
+[functions.get-replay-url]
+verify_jwt = false

@@ -5,9 +5,16 @@
 
 import { SettingsManager } from '../core/Settings';
 
+/** The camera controller clamps sensitivity to this range; keep the UI identical. */
+export function clampSensitivity(value: number): number {
+  if (!Number.isFinite(value)) return 1.0;
+  return Math.min(3.0, Math.max(0.1, value));
+}
+
 export class SettingsModal {
   public element: HTMLElement;
   private sensInput: HTMLInputElement;
+  private sensNumberInput: HTMLInputElement;
   private fovInput: HTMLInputElement;
   private volInput: HTMLInputElement;
   private motionInput: HTMLInputElement;
@@ -37,7 +44,9 @@ export class SettingsModal {
 
         <div class="settings-row">
           <label class="settings-label">MOUSE SENSITIVITY</label>
-          <input type="range" class="settings-input" id="set-sens" min="0.2" max="3.0" step="0.1" />
+          <input type="range" class="settings-input" id="set-sens" min="0.1" max="3.0" step="0.01" />
+          <input type="number" class="settings-input settings-number" id="set-sens-num"
+                 min="0.1" max="3.0" step="0.01" inputmode="decimal" />
         </div>
 
         <div class="settings-row">
@@ -151,6 +160,7 @@ export class SettingsModal {
     `;
 
     this.sensInput = this.element.querySelector('#set-sens') as HTMLInputElement;
+    this.sensNumberInput = this.element.querySelector('#set-sens-num') as HTMLInputElement;
     this.fovInput = this.element.querySelector('#set-fov') as HTMLInputElement;
     this.volInput = this.element.querySelector('#set-vol') as HTMLInputElement;
     this.motionInput = this.element.querySelector('#set-motion') as HTMLInputElement;
@@ -170,6 +180,11 @@ export class SettingsModal {
 
     this.initValues();
     this.initEvents();
+  }
+
+  /** 2-decimal presentation for the authoritative sensitivity value. */
+  private formatSensitivity(value: number): string {
+    return clampSensitivity(value).toFixed(2);
   }
 
   public setOnClose(cb: () => void): void {
@@ -193,6 +208,7 @@ export class SettingsModal {
   private initValues(): void {
     const s = this.settingsManager.settings;
     this.sensInput.value = s.mouseSensitivity.toString();
+    this.sensNumberInput.value = this.formatSensitivity(s.mouseSensitivity);
     this.fovInput.value = s.fov.toString();
     this.volInput.value = s.masterVolume.toString();
     this.motionInput.checked = s.reduceMotion;
@@ -211,7 +227,32 @@ export class SettingsModal {
 
   private initEvents(): void {
     this.sensInput.addEventListener('input', () => {
-      this.settingsManager.update({ mouseSensitivity: parseFloat(this.sensInput.value) });
+      const value = clampSensitivity(parseFloat(this.sensInput.value));
+      this.sensNumberInput.value = this.formatSensitivity(value);
+      this.settingsManager.update({ mouseSensitivity: value });
+    });
+
+    // The number field and the slider are two views of ONE authoritative value.
+    this.sensNumberInput.addEventListener('input', () => {
+      const parsed = parseFloat(this.sensNumberInput.value);
+      if (!Number.isFinite(parsed)) return;      // mid-edit ("1.", "-"): do not fight the user
+      const value = clampSensitivity(parsed);
+      this.sensInput.value = value.toString();
+      this.settingsManager.update({ mouseSensitivity: value });
+    });
+    // Normalise the typed value on commit so it always reads back as 2 decimals.
+    this.sensNumberInput.addEventListener('change', () => {
+      this.sensNumberInput.value = this.formatSensitivity(
+        this.settingsManager.settings.mouseSensitivity
+      );
+    });
+
+    // Any external change (cloud, another control) keeps BOTH representations
+    // bound. Lifetime is the panel's own, so no teardown is required.
+    this.settingsManager.subscribe((settings, changed) => {
+      if (!changed.has('mouseSensitivity')) return;
+      this.sensInput.value = settings.mouseSensitivity.toString();
+      this.sensNumberInput.value = this.formatSensitivity(settings.mouseSensitivity);
     });
 
     this.fovInput.addEventListener('input', () => {

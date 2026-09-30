@@ -300,7 +300,7 @@ export class ViewmodelController {
 
       this.rigInstance = realRig;
       this.applyRigBaseTransform();
-      this.rigInstance.applySkin(KarambitSkinSystem.getInstance().getEquippedSkinId());
+      this.rigInstance.applySkin(KarambitSkinSystem.getInstance().getRenderSkinId());
       // Re-apply the mastery glove: the real rig replaced the fallback rig.
       this.applyMasteryGlove(true);
       this.actionGroup.add(this.rigInstance.rootGroup);
@@ -775,6 +775,15 @@ export class ViewmodelController {
     if (this.rigInstance) {
       this.rigInstance.applySkin(skinId);
     }
+  }
+
+  /**
+   * Re-applies the exact cosmetic the viewmodel should be rendering. Used after
+   * a replay/review sets or clears an ephemeral skin override: the equip-listener
+   * path only fires on a real equip, so the override must be pushed explicitly.
+   */
+  public refreshRenderedSkin(): void {
+    this.applySkin(KarambitSkinSystem.getInstance().getRenderSkinId());
   }
 
   public getCosmicMaterial(): KarambitCosmicMaterial | null {

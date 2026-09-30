@@ -55,6 +55,11 @@ export class RaceHud {
   private rivalBestElem: HTMLElement;
   private rivalRowElem: HTMLElement;
   private noticeElem: HTMLElement;
+  private phaseElem: HTMLElement;
+  private phaseOpponentElem: HTMLElement;
+  private phaseYouElem: HTMLElement;
+  private phasePromptElem: HTMLElement;
+  private countdownElem: HTMLElement;
   private noticeTimeout: number | null = null;
 
   constructor() {
@@ -82,6 +87,14 @@ export class RaceHud {
       </div>
 
       <div class="race-hud-notice hidden" id="race-notice"></div>
+
+      <!-- SECOND READY / synchronized countdown overlay -->
+      <div class="race-hud-phase hidden" id="race-phase">
+        <div class="race-phase-line" id="race-phase-opponent">OPPONENT: NOT READY</div>
+        <div class="race-phase-line race-phase-you" id="race-phase-you">YOU: NOT READY</div>
+        <div class="race-phase-prompt" id="race-phase-prompt">PRESS [SPACE] TO READY</div>
+      </div>
+      <div class="race-hud-countdown hidden" id="race-countdown">3</div>
     `;
 
     this.clockElem = this.element.querySelector('#race-clock') as HTMLElement;
@@ -92,6 +105,11 @@ export class RaceHud {
     this.rivalNameElem = this.element.querySelector('#race-rival-name') as HTMLElement;
     this.rivalBestElem = this.element.querySelector('#race-rival-best') as HTMLElement;
     this.noticeElem = this.element.querySelector('#race-notice') as HTMLElement;
+    this.phaseElem = this.element.querySelector('#race-phase') as HTMLElement;
+    this.phaseOpponentElem = this.element.querySelector('#race-phase-opponent') as HTMLElement;
+    this.phaseYouElem = this.element.querySelector('#race-phase-you') as HTMLElement;
+    this.phasePromptElem = this.element.querySelector('#race-phase-prompt') as HTMLElement;
+    this.countdownElem = this.element.querySelector('#race-countdown') as HTMLElement;
   }
 
   public show(): void {
@@ -122,6 +140,49 @@ export class RaceHud {
     this.rivalRowElem.classList.remove('race-hud-disconnected');
     this.rivalNameElem.textContent = state.rival.displayName;
     this.rivalBestElem.textContent = formatRaceTime(state.rival.sessionBestUs);
+  }
+
+  /**
+   * In-game WAITING / READY stage. The countdown does not begin until BOTH
+   * players are ready; this makes that state explicit for the local player.
+   */
+  public setPhase(state: {
+    phase: 'WAITING' | 'READY' | 'COUNTDOWN' | 'RACING' | 'FINISHED';
+    youReady: boolean;
+    opponentName: string;
+    opponentReady: boolean;
+  }): void {
+    if (state.phase === 'RACING' || state.phase === 'FINISHED') {
+      this.phaseElem.classList.add('hidden');
+      return;
+    }
+    this.phaseElem.classList.remove('hidden');
+    this.phaseOpponentElem.textContent =
+      `${state.opponentName.toUpperCase()}: ${state.opponentReady ? 'READY' : 'NOT READY'}`;
+    this.phaseOpponentElem.classList.toggle('race-phase-ready', state.opponentReady);
+    this.phaseYouElem.textContent = `YOU: ${state.youReady ? 'READY' : 'NOT READY'}`;
+    this.phaseYouElem.classList.toggle('race-phase-ready', state.youReady);
+
+    if (state.phase === 'COUNTDOWN') {
+      this.phasePromptElem.textContent = 'BOTH READY // STARTING';
+    } else if (state.youReady) {
+      this.phasePromptElem.textContent = 'WAITING FOR OPPONENT';
+    } else if (state.opponentReady) {
+      this.phasePromptElem.textContent = 'OPPONENT READY // PRESS [SPACE]';
+    } else {
+      this.phasePromptElem.textContent = 'PRESS [SPACE] TO READY';
+    }
+  }
+
+  /** Shared 3-2-1-GO derived from the authoritative race start timestamp. */
+  public setCountdown(seconds: number | null): void {
+    if (seconds === null || seconds <= 0) {
+      this.countdownElem.classList.add('hidden');
+      this.countdownElem.textContent = '';
+      return;
+    }
+    this.countdownElem.classList.remove('hidden');
+    this.countdownElem.textContent = String(seconds);
   }
 
   /** Small, non-blocking notification (e.g. a rival improving their best). */

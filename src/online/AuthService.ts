@@ -210,6 +210,16 @@ export class AuthService {
     const validated = validateDisplayName(raw);
     if (!validated.ok) return { ok: false, reason: 'PROFILE_FAILED', detail: validated.detail };
 
+    // A registered USERNAME account owns its name server-side (the
+    // profiles_guard trigger enforces this too). Guest renaming still works.
+    if (this.isRegisteredAccount()) {
+      return {
+        ok: false,
+        reason: 'PROFILE_FAILED',
+        detail: 'registered usernames are server-authoritative'
+      };
+    }
+
     const { error } = await client
       .from('profiles')
       .update({ display_name: validated.value, updated_at: new Date().toISOString() })
@@ -219,6 +229,190 @@ export class AuthService {
 
     this.currentProfile = { ...this.currentProfile, displayName: validated.value };
     return { ok: true, value: validated.value };
+  }
+
+  // -- username accounts (no email) ---------------------------------------
+
+  private static readonly USERNAME_CACHE_PREFIX = 'playhead.account.username';
+
+  /**
+   * The locally cached username for the AUTHENTICATED account.
+   *
+   * The cache is bound to the session user id, never device-global, so account
+   * A's username can never be reported for account B (or for a signed-out
+   * anonymous session).
+   */
+  public getUsername(): string | null {
+    const uid = this.currentProfile?.id ?? null;
+    if (!uid) return null;
+    return this.getCachedUsernameFor(uid);
+  }
+
+  private getCachedUsernameFor(uid: string): string | null {
+    try {
+      return typeof localStorage === 'undefined'
+        ? null
+        : localStorage.getItem(`${AuthService.USERNAME_CACHE_PREFIX}:${uid}`);
+    } catch {
+      return null;
+    }
+  }
+
+  public isRegisteredAccount(): boolean {
+    return this.getUsername() !== null;
+  }
+
+  /** Binds a username to a SPECIFIC uid (or clears that uid's entry). */
+  private cacheUsername(username: string | null, uid: string | null = this.currentProfile?.id ?? null): void {
+    if (!uid) return;
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const key = `${AuthService.USERNAME_CACHE_PREFIX}:${uid}`;
+      if (username) localStorage.setItem(key, username);
+      else localStorage.removeItem(key);
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /**
+   * Creates a durable account from a USERNAME and PASSWORD with NO email.
+   *
+   * Passwords are hashed and verified by Supabase Auth (GoTrue); the browser
+   * never stores or sees a hash. The function returns real session tokens which
+   * are adopted here via setSession(), so all downstream auth (JWT, RLS,
+   * progression sync) is identical to any other Supabase session.
+   */
+  public async registerAccount(
+    rawUsername: string,
+    password: string
+  ): Promise<AuthResult<PlayerProfile>> {
+    return this.authenticateAccount('register', rawUsername, password);
+  }
+
+  /** Signs in an existing username + password account. */
+  public async loginAccount(
+    rawUsername: string,
+    password: string
+  ): Promise<AuthResult<PlayerProfile>> {
+    return this.authenticateAccount('login', rawUsername, password);
+  }
+
+  private async authenticateAccount(
+    action: 'register' | 'login',
+    rawUsername: string,
+    password: string
+  ): Promise<AuthResult<PlayerProfile>> {
+    const client = this.onlineClient.getClient();
+    if (!client) {
+      this.onlineClient.setStatus('OFFLINE');
+      return { ok: false, reason: 'OFFLINE', detail: 'Supabase not configured' };
+    }
+    const username = rawUsername.trim();
+    if (!username || !password) {
+      return { ok: false, reason: 'AUTH_FAILED', detail: 'username and password are required' };
+    }
+
+    this.onlineClient.setStatus('CONNECTING');
+    try {
+      const { data, error } = await client.functions.invoke('account-auth', {
+        body: { action, username, password }
+      });
+      if (error) {
+        this.onlineClient.setStatus('ERROR', error.message);
+        return { ok: false, reason: 'AUTH_FAILED', detail: error.message };
+      }
+      const payload = data as {
+        ok?: boolean;
+        detail?: string;
+        username?: string;
+        display_name?: string;
+        access_token?: string;
+        refresh_token?: string;
+      } | null;
+      if (!payload?.ok || !payload.access_token || !payload.refresh_token) {
+        const detail = payload?.detail ?? 'account request failed';
+        this.onlineClient.setStatus('ERROR', detail);
+        return { ok: false, reason: 'AUTH_FAILED', detail };
+      }
+      const applied = await this.establishSession(payload.access_token, payload.refresh_token);
+      if (!applied.ok) return applied;
+      this.cacheUsername(payload.username ?? username);
+      return applied;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.onlineClient.setStatus('ERROR', detail);
+      return { ok: false, reason: 'AUTH_FAILED', detail };
+    }
+  }
+
+  /** Adopts function-issued tokens as the live session, then ensures the profile. */
+  private async establishSession(
+    accessToken: string,
+    refreshToken: string
+  ): Promise<AuthResult<PlayerProfile>> {
+    const client = this.onlineClient.getClient();
+    if (!client) return { ok: false, reason: 'OFFLINE', detail: 'no client' };
+    const { data, error } = await client.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken
+    });
+    if (error) return { ok: false, reason: 'AUTH_FAILED', detail: error.message };
+    const user = data.user ?? data.session?.user ?? null;
+    if (!user) return { ok: false, reason: 'AUTH_FAILED', detail: 'session contained no user' };
+    const profile = await this.ensureProfile(user);
+    if (!profile.ok) return profile;
+    this.currentProfile = profile.value;
+    this.initialized = true;
+    this.onlineClient.setStatus('ONLINE');
+    return profile;
+  }
+
+  /** Signs out and clears the local username cache. Local progression is kept. */
+  public async logoutAccount(): Promise<void> {
+    const client = this.onlineClient.getClient();
+    // Clear THIS uid's username BEFORE dropping the profile, so the scoped cache
+    // is not left pointing at a signed-out identity.
+    this.cacheUsername(null, this.currentProfile?.id ?? null);
+    this.currentProfile = null;
+    this.initialized = false;
+    if (client) {
+      try {
+        await client.auth.signOut();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.onlineClient.setStatus('OFFLINE');
+  }
+
+  /**
+   * Authoritative check of whether the CURRENT session is a username account.
+   * Used on launch so a device that only has a leftover anonymous session is not
+   * mistaken for a registered one.
+   */
+  public async refreshAccountIdentity(): Promise<string | null> {
+    const client = this.onlineClient.getClient();
+    if (!client) return null;
+    const requestedUid = this.getUserId();
+    try {
+      const { data, error } = await client.functions.invoke('account-auth', {
+        body: { action: 'session' }
+      });
+      if (this.getUserId() !== requestedUid) return this.getUsername();
+      if (error) return this.getUsername();
+      const payload = data as { ok?: boolean; username?: string } | null;
+      if (payload?.ok && typeof payload.username === 'string') {
+        const name = payload.username || null;
+        this.cacheUsername(name);
+        return name;
+      }
+      // Anonymous session: no username account. Clear any stale cache.
+      this.cacheUsername(null);
+      return null;
+    } catch {
+      return this.getUsername();
+    }
   }
 
   public isInitialized(): boolean {

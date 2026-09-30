@@ -24,9 +24,13 @@ import { ReplayPlayer } from '../replay/ReplayPlayer';
 import { GhostManager } from '../replay/GhostManager';
 import { PresetLevelCache } from '../audio/PresetLevelCache';
 import { onlineBootstrap } from '../online/OnlineBootstrap';
+import { online } from '../online/supabaseClient';
+import { cloudProgression } from '../online/CloudProgression';
 import {
   raceRoomService,
   RaceRoomService,
+  RacePlayer,
+  RaceRoom,
   RaceResultRow
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
@@ -156,6 +160,8 @@ export class Game {
   private pendingReplayUpload: Promise<{ ok: boolean; path?: string; hash?: string } | null> | null =
     null;
   private raceActive = false;
+  /** True while the LOADING phase is loading the race map (guards double entry). */
+  private raceLoading = false;
   /**
    * FRIEND RACE WORLD MODE — the authoritative switch for ghost presentation.
    *
@@ -169,6 +175,29 @@ export class Game {
   private friendRaceWorld = false;
   /** Shared session start, as an epoch ms timestamp agreed by all clients. */
   private raceStartAtMs: number | null = null;
+  /** True once this client has reported CLIENT_LOADED for the current race. */
+  private raceLoadReported = false;
+  /**
+   * Load generation. Bumped on every abort / leave / disconnect so an in-flight
+   * async map load from a PREVIOUS race can never publish a stale report or
+   * hydrate a world the player has already left.
+   */
+  private raceLoadGeneration = 0;
+  /** True once this client has pressed the in-game READY stage. */
+  private raceInGameReady = false;
+  /** Ensures the synchronized GO is armed exactly once per race. */
+  private raceGoArmed = false;
+  /** Local mirror of the authoritative race phase, for the in-game HUD. */
+  private racePhase: 'WAITING' | 'READY' | 'COUNTDOWN' | 'RACING' | 'FINISHED' = 'WAITING';
+  /** World song time captured at the synchronized GO. */
+  private raceSongStartSec = 0;
+  /**
+   * Offset from this browser's Date.now() to the AUTHORITATIVE room clock, in
+   * ms. Server `now()` is adopted on every room refresh, so the shared countdown,
+   * timer, song and results are anchored to one authoritative timeline instead
+   * of a local clock that can drift or arrive late.
+   */
+  private raceClockOffsetMs = 0;
   private raceFinishReported = false;
   private raceCurrentRunAccumulator = 0;
   /**
@@ -202,6 +231,8 @@ export class Game {
   public povPlayer = new PovReplayPlayer();
   /** 'NONE' | 'POV' (player-facing) | 'LEGACY' (DEV-only box/chase replay). */
   private replayMode: 'NONE' | 'POV' | 'LEGACY' = 'NONE';
+  /** Glove previewed during POV replay; never the player's equipped glove. */
+  private replayGlovePreviewId: string | null = null;
   private lastFinalizedReplay: PovReplay | null = null;
   public ui: UIManager;
   public devOverlay: DevOverlay;
@@ -626,6 +657,13 @@ export class Game {
           this.prepareTrackForRun();
           this.ui.hideAllScreens();
           this.cameraController.lock();
+          if (this.raceActive) {
+            // ONLINE RACE: no separate local 3-2-1 screen. Enter the staged
+            // gameplay scene; the SHARED in-game READY and the synchronized GO
+            // (from the authoritative race timestamp) own the start.
+            this.stateMachine.transitionTo(GameState.PLAYING);
+            break;
+          }
           this.ui.countdownScreen.start(() => {
             this.stateMachine.transitionTo(GameState.PLAYING);
           });
@@ -642,7 +680,12 @@ export class Game {
           // opponent reappears on the start platform at once, rather than after
           // the countdown samples have aged out.
           this.publishLocalGhostSample();
-          if (prevState === GameState.PAUSED && !this.isQuickRestarting) {
+          if (this.raceActive && this.racePhase !== 'RACING') {
+            // STAGED: the level is loaded and both players are visible, but the
+            // music, run timer and replay recording wait for the synchronized GO.
+            // Persistently zero horizontal velocity so nobody inches forward.
+            this.playerController.velocity.set(0, 0, 0);
+          } else if (prevState === GameState.PAUSED && !this.isQuickRestarting) {
             this.audioEngine.resume();
           } else if (!this.isQuickRestarting) {
             this.isFinished = false;
@@ -1421,6 +1464,15 @@ export class Game {
       return;
     }
     if (!this.stateMachine.is(GameState.PLAYING)) return;
+    // COMPETITIVE: during a friend race, tap-R is a CHECKPOINT RESTORE only. A
+    // full quick-restart would zero the run timer and retry a fresh attempt, and
+    // that attempt must be announced with race_report_attempt_start (only valid
+    // while RUNNING). Rather than start an untracked attempt, the manual restore
+    // is ignored until the race is actually RUNNING.
+    if (this.friendRaceWorld && this.racePhase !== 'RACING') {
+      this.ui.raceHud.showNotice('WAITING FOR SHARED START');
+      return;
+    }
     this.restoreToCheckpoint(RestoreReason.MANUAL_RESTORE, false);
   }
 
@@ -1539,7 +1591,10 @@ export class Game {
           spawnYaw = this.currentCheckpoint.yaw;
         }
 
-        this.audioEngine.seek(this.currentCheckpoint.time);
+        // COMPETITIVE: never rewind the shared audio/timer timeline. The
+        // position-only restore below keeps the race timer and song on the
+        // authoritative epoch; solo runs keep the classic checkpoint seek.
+        if (!this.friendRaceWorld) this.audioEngine.seek(this.currentCheckpoint.time);
       } else {
         // Restore to start platform with runway clearance
         const startNode = this.currentTrack.route[0];
@@ -1558,7 +1613,7 @@ export class Game {
           z: spawnPos.z + Math.cos(startNode.yaw) * 20
         } : targetNode.position;
         spawnYaw = calculateLookYaw(spawnPos, lookTarget);
-        this.audioEngine.seek(0);
+        if (!this.friendRaceWorld) this.audioEngine.seek(0);
       }
 
       this.playerController.setPosition(spawnPos);
@@ -1566,6 +1621,18 @@ export class Game {
       this.playerController.setOrientation(spawnYaw);
       this.playerController.lastTouchedSurfaceType = 'PLATFORM';
       this.playerController.resetKeys();
+
+      // RESET/RESTORE SPEED: resume a CHECKPOINT restore with ~500 displayed
+      // speed units (~12.5 m/s) horizontally, along the route's forward
+      // direction, so recovery flows back into gameplay instead of a dead stop.
+      // Deliberately NOT applied to a level-start restore: an initial race start
+      // must keep zero speed. Applied exactly once; physics owns every frame after.
+      if (hadCheckpoint) {
+        this.playerController.applyRestoreVelocity(
+          spawnYaw,
+          PlayerController.CHECKPOINT_RESTORE_SPEED_UNITS
+        );
+      }
 
       // ==========================================================
       // RESTORE DIAGNOSTICS
@@ -1973,6 +2040,8 @@ export class Game {
     });
 
     window.addEventListener('keydown', (e) => {
+      // In-game race READY consumes SPACE only while the race is staged.
+      if (this.handleRaceReadyKey(e)) return;
       if (e.code === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -2134,7 +2203,19 @@ export class Game {
       }
 
       if (this.stateMachine.is(GameState.PLAYING)) {
-        if (!this.isFinished) {
+        // ONLINE RACE: until GO the player is staged on the start platform and
+        // the run timer does not advance, so both clients start from the same
+        // authoritative zero. Physics owns every frame after GO.
+        if (this.raceActive && this.racePhase !== 'RACING' && !this.isFinished) {
+          this.holdForRaceStart();
+          const songTime = this.audioEngine.getCurrentTime();
+          this.world.update(songTime, this.playerController.position, this.cameraController.yaw, dt, this.environment);
+          this.viewmodelController.setAudioLevels(
+            this.world.visualController.state.energy,
+            this.world.visualController.state.onsetPulse,
+            this.world.visualController.state.bass
+          );
+        } else if (!this.isFinished) {
           const tickStartTime = this.runElapsedTime;
           this.playerController.updateFixed(dt);
 
@@ -2529,6 +2610,10 @@ export class Game {
 
     // Remote ghost: a translucent signal body in the existing scene.
     this.raceGhost = new RemoteGhostRenderer(this.environment.scene);
+    // COMPETITIVE STAGING: because both racers spawn on the SAME start platform
+    // node, the remote capsule is nudged laterally so the two identical capsules
+    // do not overlap indistinguishably. Presentation only.
+    this.raceGhost.setStagingOffset(true);
     this.raceGhost.setEffectScale(this.environment.effectProfile.additiveScale);
 
     // DEV-only remote-opponent probes (F3). They bypass the ghost visual to
@@ -2589,6 +2674,12 @@ export class Game {
       const detail = `${status.state} // ${status.detail}`;
       this.ui.importScreen.setOnlineStatus(tag, detail);
       this.refreshLocalIdentity();
+      // Once a session exists, reconcile account identity and any world-record
+      // prestige award the server created for this account.
+      if (status.state === 'SYNCED' || status.state === 'MIGRATED') {
+        void authService.refreshAccountIdentity().then(() => this.refreshLocalIdentity());
+        void this.refreshWorldRecordRewards();
+      }
     });
     this.refreshOnlineStatus();
     this.refreshLocalIdentity();
@@ -2601,10 +2692,9 @@ export class Game {
         panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId(), this.raceIdentities);
     // Identity is fetched lazily and only while a lobby is actually open.
     void this.refreshRaceIdentities();
-        // A scheduled start drives the local countdown → session.
-        if (room.state === 'COUNTDOWN' && room.startAtMs !== null && !this.raceActive) {
-          this.beginRaceFromSchedule(room.startAtMs);
-        }
+        // AUTHORITATIVE PHASE: both clients react to the SAME room state. No
+        // client self-starts the race and no manual EXEC SONG is involved.
+        this.onRacePhase(room, players);
       },
       onGhost: (sample) => this.raceGhost?.setSample(sample),
       onPlayerJoined: (player) => {
@@ -2754,14 +2844,310 @@ export class Game {
     void this.refreshRaceIdentities();
   }
 
+  /**
+   * Obsolete manual START SESSION path.
+   *
+   * The room state machine owns the start: LOBBY READY -> LOADING -> IN_GAME ->
+   * COUNTDOWN -> RUNNING, driven by the server trigger. There is no client path
+   * that writes state/start_at_ms directly (the guard rejects it), so this is a
+   * NO-OP that only reports the current authoritative phase. The legacy START
+   * SESSION button is hidden by the lobby panel.
+   */
   private async startRaceSession(): Promise<void> {
-    const result = await raceRoomService.startSession();
-    if (!result.ok) {
-      this.ui.importScreen.racePanel.showError(result.detail.toUpperCase());
+    const room = raceRoomService.getRoom();
+    const state = room?.state ?? 'LOBBY';
+    this.ui.importScreen.racePanel.showError(
+      `RACE IS SERVER-AUTHORITATIVE // CURRENT PHASE ${state}`
+    );
+  }
+
+  /**
+   * ONE authoritative phase handler, driven by the room's own state.
+   *
+   * LOADING   -> both clients auto-load the selected track (no EXEC SONG)
+   * IN_GAME   -> the level is loaded; clients report CLIENT_LOADED and show the
+   *              in-game WAITING/READY stage
+   * COUNTDOWN -> the shared GO timestamp is known; the synchronized countdown
+   *              and the single race timeline are armed
+   * RUNNING   -> the race timeline is live
+   */
+  private onRacePhase(room: RaceRoom, players: readonly RacePlayer[]): void {
+    // ADOPT THE AUTHORITATIVE CLOCK. The service derives this offset from the
+    // server now() returned with the room; re-reading it on every room update
+    // keeps the countdown, timer, song and results on ONE shared timeline.
+    this.raceClockOffsetMs = raceRoomService.getServerClockOffsetMs();
+    switch (room.state) {
+      case 'LOADING':
+        if (!this.raceActive && !this.raceLoading) {
+          void this.beginRaceFromSchedule(room.startAtMs ?? this.raceNowMs());
+        }
+        break;
+
+      case 'IN_GAME':
+        // DEFENSIVE: if this client missed the LOADING broadcast (throttled tab,
+        // dropped socket) it still auto-loads here rather than sitting outside
+        // the readiness set forever.
+        if (!this.raceActive && !this.raceLoading) {
+          void this.beginRaceFromSchedule(room.startAtMs ?? this.raceNowMs());
+          break;
+        }
+        if (this.raceActive && !this.raceLoadReported) {
+          this.raceLoadReported = true;
+          // Honest, and self-healing: a failed load report is retried on the
+          // next room update, and an already-pressed in-game READY is re-asserted
+          // so a dropped transition cannot strand the room before COUNTDOWN.
+          void raceRoomService.reportLoaded(true).then((r) => {
+            if (!r.ok) {
+              this.raceLoadReported = false;
+              this.ui.raceHud.showNotice('LOAD REPORT RETRY // ' + r.detail);
+              return;
+            }
+            if (this.raceInGameReady) void raceRoomService.setInGameReady(true);
+          });
+        }
+        if (this.friendRaceWorld) {
+          this.racePhase = this.raceInGameReady ? 'READY' : 'WAITING';
+          this.updateRaceHudPhase();
+        }
+        break;
+
+      case 'COUNTDOWN':
+        if (room.startAtMs !== null) this.armRaceGo(room.startAtMs);
+        break;
+
+      case 'RUNNING':
+        // MISSING-COUNTDOWN SAFETY: if this client never observed the COUNTDOWN
+        // broadcast (dropped/throttled socket) but the room is already RUNNING,
+        // arm the shared start from the authoritative start_at_ms now, so the
+        // song, timer and results still share ONE timeline with the opponent.
+        if (this.raceActive && this.racePhase !== 'RACING' && room.startAtMs !== null) {
+          this.armRaceGo(room.startAtMs);
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    // A disconnect before the race is live reverts the room. Abort cleanly so
+    // the remaining player is never frozen in a broken race state.
+    if (
+      this.raceActive &&
+      this.racePhase !== 'RACING' &&
+      (room.state === 'LOBBY' || room.state === 'EXPIRED')
+    ) {
+      this.abortRaceBeforeStart();
+    }
+
+    // FAILED LOAD / DISCONNECT DURING THE RACE WORLD: if the opponent is gone
+    // while we are still staged (never reached GO), leave the session cleanly so
+    // the remaining player is not frozen in a dead gameplay scene.
+    if (
+      this.raceActive &&
+      this.racePhase !== 'RACING' &&
+      (room.state === 'LOADING' || room.state === 'IN_GAME' || room.state === 'COUNTDOWN')
+    ) {
+      const myId = authService.getUserId();
+      const rival = players.find((p) => p.userId !== myId) ?? null;
+      if (rival && !rival.connected) {
+        this.abortRaceBeforeStart();
+        this.ui.importScreen.racePanel.showError('RACE ABORTED // OPPONENT DISCONNECTED');
+      }
+    }
+    void players;
+  }
+
+  /**
+   * Cleanly abandons a race that never started (an opponent disconnected during
+   * loading or before GO). The remaining player returns to the lobby instead of
+   * being stuck in a dead countdown.
+   */
+  private abortRaceBeforeStart(): void {
+    // Cancel any in-flight load from this race generation.
+    this.raceLoadGeneration++;
+    // Clear this client's own authoritative flags so a re-entry starts clean and
+    // a stale READY/LOADED cannot leak into the next race. The server RPCs set
+    // their own authorized flag, so the direct-write guard never rejects them.
+    void raceRoomService.reportLoaded(false);
+    void raceRoomService.setInGameReady(false);
+    void raceRoomService.abandonSession('ABORTED');
+    this.raceActive = false;
+    this.raceLoading = false;
+    this.raceGoArmed = false;
+    this.raceInGameReady = false;
+    this.raceLoadReported = false;
+    this.racePhase = 'WAITING';
+    this.raceStartAtMs = null;
+    this.ui.raceHud.setCountdown(null);
+    this.ui.raceHud.hide();
+    this.raceGhost?.clear();
+    this.setFriendRaceWorld(false);
+    // STATE MACHINE: the pre-race abort must actually LEAVE the gameplay scene,
+    // not just repaint the lobby over a live PLAYING world.
+    if (this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.PLAYING)) {
+      this.stateMachine.transitionTo(GameState.IMPORT);
+    }
+    this.ui.importScreen.show();
+    this.ui.importScreen.openRaceTab();
+    this.ui.importScreen.racePanel.showError('RACE ABORTED // OPPONENT LEFT');
+  }
+
+  /** Authoritative race time: this browser clock corrected by the server offset. */
+  private raceNowMs(): number {
+    return Date.now() + this.raceClockOffsetMs;
+  }
+
+  /**
+   * Arms the ONE synchronized GO for this race. Every client derives the same
+   * 3-2-1-GO and the same song position from the SAME server timestamp; there
+   * are never two independent local countdowns.
+   */
+  private armRaceGo(startAtMs: number): void {
+    if (!this.raceActive || this.raceGoArmed) return;
+    this.raceGoArmed = true;
+    this.raceStartAtMs = startAtMs;
+    this.racePhase = 'COUNTDOWN';
+
+    if (this.friendRaceWorld) {
+      // COMPETITIVE: the session timeline is the SHARED epoch. Do NOT seek the
+      // audio here - a seek would rewind the shared timeline and desync audio
+      // from the timer and finish result. The song is started at the
+      // epoch-derived position at GO (onRaceGo), so audio/timer/results agree.
+      // COMPETITIVE START IS SONG ZERO: never a checkpoint time, so both clients
+      // begin the shared song from the same origin.
+      this.raceSongStartSec = 0;
+      this.ui.raceHud.showNotice('SYNCHRONIZED START // 2 1 GO');
+    } else {
+      const target = this.currentCheckpoint ? this.currentCheckpoint.time : 0;
+      this.audioEngine.seek(target);
+      this.raceSongStartSec = this.audioEngine.getCurrentTime();
+      this.ui.raceHud.showNotice('SYNCHRONIZED START // 3 2 1 GO');
+    }
+
+    this.updateRaceHudPhase();
+    const tick = (): void => {
+      if (!this.raceActive || this.racePhase === 'RACING') return;
+      // AUTHORITATIVE remaining time, never a raw local Date.now(): a throttled
+      // or late client still counts down to the SAME server instant.
+      const remaining = this.raceStartAtMs! - this.raceNowMs();
+      if (remaining <= 0) {
+        this.onRaceGo();
+        return;
+      }
+      this.ui.raceHud.setCountdown(Math.ceil(remaining / 1000));
+      window.setTimeout(tick, 60);
+    };
+    tick();
+  }
+
+  /**
+   * The shared GO instant. Both players become controllable at the same
+   * authoritative moment and the song/timer start from the same zero.
+   */
+  private onRaceGo(): void {
+    if (!this.raceActive || this.racePhase === 'RACING') return;
+    this.racePhase = 'RACING';
+    this.updateRaceHudPhase();
+    this.ui.raceHud.setCountdown(null);
+
+    // LATE-DELIVERY CORRECTION: how long ago the SHARED GO instant actually
+    // passed. If the rAF loop, the tab or the scheduler did not fire on the
+    // exact millisecond — or this client learned the timestamp late — the race
+    // timer and the song both start already advanced by that amount, so every
+    // client shares ONE elapsed timeline instead of restarting from zero.
+    const lateSec = this.raceStartAtMs !== null
+      ? Math.max(0, (this.raceNowMs() - this.raceStartAtMs) / 1000)
+      : 0;
+    const songTarget = this.raceSongStartSec + lateSec;
+
+    // Song, run timer and replay recording all start from the SAME position.
+    this.runElapsedTime = songTarget;
+    this.audioEngine.play(songTarget);
+    this.replayRecorder.start();
+    this.startPovRecording();
+    this.ghostManager.start();
+
+    this.playerController.isRestoring = false;
+    this.playerController.resetKeys();
+    this.ui.raceHud.showNotice('GO');
+
+    // The RPC sets the server's authorized-write flag itself, so the guard
+    // accepts the COUNTDOWN -> RUNNING transition. Report honestly if it fails.
+    void raceRoomService.markRunning().then((r) => {
+      if (!r.ok) this.ui.raceHud.showNotice(`RUNNING FLAG FAILED // ${r.detail}`);
+    });
+  }
+
+  /** Holds the player staged on the start platform until GO. */
+  private holdForRaceStart(): void {
+    this.playerController.velocity.set(0, 0, 0);
+  }
+
+  /** In-game READY can be pressed with SPACE (or the on-screen HUD prompt). */
+  private handleRaceReadyKey(e: KeyboardEvent): boolean {
+    if (!this.friendRaceWorld || !this.raceActive) return false;
+    if (this.racePhase !== 'WAITING' && this.racePhase !== 'READY') return false;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      void this.signalInGameReady();
+      return true;
+    }
+    return false;
+  }
+
+  /** IN-GAME READY: the SECOND ready stage. */
+  private async signalInGameReady(): Promise<void> {
+    if (!this.raceActive || this.raceInGameReady) return;
+    if (this.racePhase !== 'WAITING' && this.racePhase !== 'READY') return;
+    // SECOND READINESS GATE: the opponent must actually EXIST in the room and
+    // this client must have RECEIVED their spawn transform, otherwise a client
+    // could ready into a countdown with an invisible / absent opponent.
+    const readyGate = this.opponentSpawnReceived();
+    if (!readyGate.ok) {
+      this.ui.raceHud.showNotice(readyGate.detail);
       return;
     }
-    // The scheduled timestamp drives the countdown on every client.
-    if (result.startAtMs) this.beginRaceFromSchedule(result.startAtMs);
+    this.raceInGameReady = true;
+    this.racePhase = 'READY';
+    this.updateRaceHudPhase();
+    const result = await raceRoomService.setInGameReady(true);
+    if (!result.ok) {
+      // Roll the optimistic local READY back: the server did not accept it, and
+      // an unconfirmed READY would make the HUD lie about both players.
+      this.raceInGameReady = false;
+      this.racePhase = 'WAITING';
+      this.updateRaceHudPhase();
+      this.ui.raceHud.showNotice(result.detail);
+    }
+  }
+
+  /** In-game WAITING / READY HUD, showing BOTH players' readiness. */
+  private updateRaceHudPhase(): void {
+    const myId = authService.getUserId();
+    const players = raceRoomService.getPlayers();
+    const rival = players.find((p) => p.userId !== myId) ?? null;
+    const othersReady = players.filter((p) => p.userId !== myId).every((p) => p.inGameReady);
+    this.ui.raceHud.setPhase({
+      phase: this.racePhase,
+      youReady: this.raceInGameReady,
+      opponentName: rival?.displayName ?? 'OPPONENT',
+      opponentReady: othersReady
+    });
+  }
+
+  /**
+   * Whether the opponent is genuinely present and visible: a connected room
+   * member OTHER than us AND a received ghost sample (spawn transform).
+   */
+  private opponentSpawnReceived(): { ok: boolean; detail: string } {
+    const myId = authService.getUserId();
+    const players = raceRoomService.getPlayers();
+    const rival = players.find((p) => p.userId !== myId) ?? null;
+    if (!rival) return { ok: false, detail: 'WAITING FOR OPPONENT // NOT IN ROOM' };
+    if (!rival.connected) return { ok: false, detail: 'WAITING FOR OPPONENT // DISCONNECTED' };
+    const net = raceRoomService.getGhostDiagnostics();
+    if (net.rxCount <= 0) return { ok: false, detail: 'WAITING FOR OPPONENT TRANSFORM' };
+    return { ok: true, detail: 'opponent visible' };
   }
 
   /**
@@ -2769,30 +3155,40 @@ export class Game {
    * shared countdown to the agreed start timestamp.
    */
   private async beginRaceFromSchedule(startAtMs: number): Promise<void> {
-    if (this.raceActive) return;
+    if (this.raceActive || this.raceLoading) return;
+    this.raceLoading = true;
     // FRIEND RACE and GHOST RACE are separate lifecycles. A live multiplayer
     // session must never inherit a recorded solo ghost.
     this.clearGhostRace();
     const room = raceRoomService.getRoom();
-    if (!room) return;
+    if (!room) { this.raceLoading = false; return; }
 
     const level = await PresetLevelCache.loadPreset(room.trackId);
     if (!level) {
       this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE');
+      this.raceLoading = false;
       return;
     }
     const verdict = raceRoomService.verifyLocalMap(level.track);
     if (!verdict.ok) {
       this.ui.importScreen.racePanel.setMapState('MISMATCH', verdict.detail.replace(/\n/g, ' '));
       this.ui.importScreen.racePanel.showError(verdict.detail);
+      this.raceLoading = false;
       return;
     }
 
     this.raceStartAtMs = startAtMs;
     this.raceActive = true;
+    this.raceLoading = false;
     this.raceFinishReported = false;
     this.raceLastRivalBestUs = null;
     this.raceLastLocalBestUs = null;
+    this.raceLoadReported = false;
+    this.raceInGameReady = false;
+    this.raceGoArmed = false;
+    this.racePhase = 'WAITING';
+    this.raceSongStartSec = 0;
+    const loadGeneration = this.raceLoadGeneration;
 
     // FRIEND RACE WORLD MODE: from here until the session ends, the remote human
     // opponent is the ONLY gameplay-world ghost. This also releases any armed
@@ -2806,21 +3202,49 @@ export class Game {
     // Enter the normal track flow; the shared clock starts at startAtMs.
     await this.loadPresetTrack(room.trackId);
 
+    // The map load replaced the world: republish the spawn transform so the
+    // opponent is visible on the start platform without moving.
+    this.publishLocalGhostSample();
+
+    // AUTO-LAUNCH: enter the staged gameplay scene. This replaces the manual
+    // EXEC SONG step entirely — reaching LOADING is the instruction to load.
+    this.stateMachine.transitionTo(GameState.COUNTDOWN);
+
     // Deterministic opponent identity: each client sees the REMOTE player in the
     // REMOTE player's colour. The host is cyan, the guest is violet, so the two
     // players are never the same colour on screen.
     this.raceGhost?.setColor(
       raceRoomService.isHost() ? GUEST_SIGNAL_COLOR : HOST_SIGNAL_COLOR
     );
-    // The map load replaced the world: republish the spawn transform so the
-    // opponent is visible on the start platform without moving.
-    this.publishLocalGhostSample();
+
+    // LOAD GENERATION CHECK: if the race was aborted / left while the map was
+    // loading, do not publish a stale CLIENT_LOADED for a world we have left.
+    if (loadGeneration !== this.raceLoadGeneration) return;
+
+    // CLIENT_LOADED: we are inside the gameplay scene and initialised. The
+    // server requires ALL players loaded and ready before any countdown may
+    // begin, so this report is awaited and a failure aborts instead of leaving
+    // this client silently absent from the readiness set.
+    this.raceLoadReported = true;
+    this.racePhase = 'WAITING';
+    this.updateRaceHudPhase();
+    const loaded = await raceRoomService.reportLoaded(true);
+    if (!loaded.ok) {
+      this.abortRaceBeforeStart();
+      this.ui.importScreen.racePanel.showError('RACE LOAD REPORT FAILED // ' + loaded.detail);
+      return;
+    }
   }
 
   private endRaceSession(): void {
     if (!this.raceActive) return;
     this.raceActive = false;
+    this.raceLoading = false;
+    this.raceGoArmed = false;
+    this.raceInGameReady = false;
+    this.racePhase = 'FINISHED';
     this.raceStartAtMs = null;
+    this.ui.raceHud.setCountdown(null);
     this.ui.raceHud.hide();
     this.raceGhost?.clear();
     this.setFriendRaceWorld(false);
@@ -2839,7 +3263,12 @@ export class Game {
 
   private async leaveRaceRoom(): Promise<void> {
     this.raceActive = false;
+    this.raceLoading = false;
+    this.raceGoArmed = false;
+    this.raceInGameReady = false;
+    this.racePhase = 'WAITING';
     this.raceStartAtMs = null;
+    this.ui.raceHud.setCountdown(null);
     this.ui.raceHud.hide();
     this.raceGhost?.clear();
     // Leaving the race world restores normal solo ghost eligibility.
@@ -2861,9 +3290,9 @@ export class Game {
 
     const room = raceRoomService.getRoom();
     if (room) {
-      const now = Date.now();
+      // Authoritative session remaining: server-anchored, not a local clock.
       const remainingMs = room.startAtMs !== null
-        ? Math.max(0, room.startAtMs + room.sessionSeconds * 1000 - now)
+        ? Math.max(0, room.startAtMs + room.sessionSeconds * 1000 - this.raceNowMs())
         : room.sessionSeconds * 1000;
 
       const players = raceRoomService.getPlayers();
@@ -3040,6 +3469,53 @@ export class Game {
     };
   }
 
+  /**
+   * READ-ONLY harness snapshot of the live race presentation.
+   *
+   * Exposes the REAL observable state (the actual ghost mesh visibility and
+   * transform, the local controller position, the authoritative timer and the
+   * audio clock) so an integration harness can assert on what is DRAWN, not on
+   * callback existence. It performs no mutation.
+   */
+  public getRaceHarnessSnapshot(): {
+    racePhase: string;
+    state: string;
+    raceActive: boolean;
+    friendRace: boolean;
+    raceStartAtMs: number | null;
+    serverOffsetMs: number;
+    runElapsedSec: number;
+    songTimeSec: number;
+    elapsedSec: number;
+    inGameReady: boolean;
+    ghost: ReturnType<RemoteGhostRenderer['getDiagnostics']> | null;
+    ghostStagingOffset: boolean;
+    localPosition: { x: number; y: number; z: number };
+  } {
+    const camera = this.environment.camera;
+    return {
+      racePhase: this.racePhase,
+      state: String(this.stateMachine.getState()),
+      raceActive: this.raceActive,
+      friendRace: this.friendRaceWorld,
+      raceStartAtMs: this.raceStartAtMs,
+      serverOffsetMs: raceRoomService.getServerClockOffsetMs(),
+      runElapsedSec: this.runElapsedTime,
+      songTimeSec: this.audioEngine.getCurrentTime(),
+      elapsedSec: this.raceStartAtMs !== null
+        ? Math.max(0, (Date.now() + this.raceClockOffsetMs - this.raceStartAtMs) / 1000)
+        : 0,
+      inGameReady: this.raceInGameReady,
+      ghost: this.raceGhost?.getDiagnostics(Date.now(), camera) ?? null,
+      ghostStagingOffset: this.raceGhost?.isStagingOffsetEnabled() ?? false,
+      localPosition: {
+        x: this.playerController.position.x,
+        y: this.playerController.position.y,
+        z: this.playerController.position.z
+      }
+    };
+  }
+
   private updateRaceGhost(frameDelta: number): void {
     // PRESENCE AUTHORITY: a stale transform is not a departed opponent. The room
     // tells us whether the rival still exists; only positive evidence removes
@@ -3088,9 +3564,12 @@ export class Game {
       return;
     }
     const skinId = KarambitSkinSystem.getInstance().getEquippedSkinId();
+    // Gloves are a first-person cosmetic. Record which glove the run actually
+    // used so an old replay is unaffected by later loadout changes.
+    const gloveId = masteryGloveSystem.getEquippedGloveId();
     const fov = this.environment.camera.fov;
     const startSongTimeMs = this.audioEngine.getCurrentTime() * 1000;
-    this.povRecorder.start(identity, skinId, fov, startSongTimeMs);
+    this.povRecorder.start(identity, skinId, fov, startSongTimeMs, gloveId);
   }
 
   /** Finalises the replay on run completion and attaches it to the run. */
@@ -3196,6 +3675,17 @@ export class Game {
     const outcome = await leaderboardService.submitRun(submission);
 
     if (outcome.ok) {
+      // WORLD RECORD: the server decides and creates the award. This client only
+      // CLAIMS what the server already made for it, then unions the prestige
+      // cosmetic into local ownership. No client path can mint the provenance.
+      if (outcome.isWorldRecord && outcome.worldRecordAwardId) {
+        const claim = await cloudProgression.claimWorldRecordReward(outcome.worldRecordAwardId);
+        publish(
+          claim.ok ? 'WORLD_RECORD_SET' : 'WORLD_PB_UPDATED',
+          claim.ok ? undefined : claim.detail
+        );
+        return;
+      }
       publish(outcome.isPersonalBest ? 'WORLD_PB_UPDATED' : 'WORLD_ENTRY_SUBMITTED');
       return;
     }
@@ -3352,6 +3842,66 @@ export class Game {
   public refreshLocalIdentity(): void {
     const name = authService.getProfile()?.displayName;
     this.ui.importScreen.setPlayerIdentity(name ?? 'PLAYER', () => this.openOwnProfile());
+    this.ui.importScreen.setAccountState(authService.getUsername(), () => this.openAccountModal());
+    this.ui.loginModal.renderSession(authService.getUsername());
+  }
+
+  /**
+   * Claims any world-record prestige awards the server has created for this
+   * account but that this device has not yet applied locally. Idempotent: the
+   * server grants at most once per account, so re-running this is safe.
+   */
+  private async refreshWorldRecordRewards(): Promise<void> {
+    const client = online.getClient();
+    if (!client || !authService.isSignedIn()) return;
+    try {
+      const { data, error } = await client.rpc('my_world_record_awards');
+      if (error) return;
+      const rows = (Array.isArray(data) ? data : []) as Array<{ award_id?: string }>;
+      for (const row of rows) {
+        const awardId = row.award_id;
+        if (!awardId) continue;
+        if (cloudProgression.hasClaimedWorldRecordAward(awardId)) continue;
+        await cloudProgression.claimWorldRecordReward(awardId);
+      }
+    } catch {
+      /* reward reconciliation is best-effort; never blocks boot */
+    }
+  }
+
+  /**
+   * Opens the username + password account modal (no email). On success the new
+   * session is adopted, then progression is reconciled and the WORLD RECORD
+   * reward table is checked, so an account created on this device immediately
+   * sees everything it is entitled to.
+   */
+  private openAccountModal(): void {
+    const modal = this.ui.loginModal;
+    modal.setCallbacks({
+      onSubmit: async (mode, username, password) => {
+        const result = mode === 'register'
+          ? await authService.registerAccount(username, password)
+          : await authService.loginAccount(username, password);
+        if (!result.ok) return { ok: false, detail: result.detail };
+        this.refreshLocalIdentity();
+        // Account isolation + safe one-time guest adoption are handled in sync().
+        await cloudProgression.sync();
+        await this.refreshWorldRecordRewards();
+        return { ok: true, detail: 'ok' };
+      },
+      onSignOut: async () => {
+        // Real sign-out: end the session, restore the device's GUEST local state
+        // (so the next account cannot inherit this account's progression), then
+        // start a fresh anonymous session so play stays online.
+        await authService.logoutAccount();
+        cloudProgression.signOutLocalState();
+        this.refreshLocalIdentity();
+        await authService.ensureSession();
+        this.refreshLocalIdentity();
+      }
+    });
+    modal.renderSession(authService.getUsername());
+    modal.show();
   }
 
   /**
@@ -3627,6 +4177,17 @@ export class Game {
     this.povPlayer.unload();
     this.ui.replayOverlay.hide();
     this.clearGhostRace();
+    // Drop any replay glove preview so the player's own loadout is unaffected.
+    if (this.replayGlovePreviewId !== null) {
+      masteryGloveSystem.setDevPreview(null);
+      this.replayGlovePreviewId = null;
+    }
+    // Same for the ephemeral replay knife preview: restore the real equipped arm.
+    const replaySkin = KarambitSkinSystem.getInstance();
+    if (replaySkin.getReplaySkinPreviewId() !== null) {
+      replaySkin.setReplaySkinPreview(null);
+      this.viewmodelController.refreshRenderedSkin();
+    }
     this.stateMachine.transitionTo(GameState.IMPORT);
   }
 
@@ -3655,11 +4216,27 @@ export class Game {
       0,
       0
     );
+    const skin = KarambitSkinSystem.getInstance();
     const skinId = this.povPlayer.getSkinId();
-    if (skinId && skinId !== KarambitSkinSystem.getInstance().getEquippedSkinId()) {
-      // equipSkin() denies unknown ids and falls back safely, so an old replay
-      // referencing a removed cosmetic cannot break playback.
-      KarambitSkinSystem.getInstance().equipSkin(skinId);
+    // REPLAY LOOK: render the recorded knife as an EPHEMERAL preview. This never
+    // equips it and never persists, so watching another player's run (an
+    // unowned WORLD RECORD knife, a dropped glove) cannot change the viewer's
+    // own loadout. Neither the equip listener nor the glove listener fire for an
+    // override, so the rendered skin is refreshed explicitly.
+    const desiredSkin = skinId || null;
+    if (skin.getReplaySkinPreviewId() !== desiredSkin) {
+      skin.setReplaySkinPreview(desiredSkin);
+      this.viewmodelController.refreshRenderedSkin();
+    }
+
+    // GLOVES: same ephemeral rule, and a different namespace. setDevPreview()
+    // supports BOTH recorded drop gloves (even unowned) and mastery gloves.
+    // Historical replays carry no glove metadata and fall back to the neutral
+    // default rather than the SPECTATOR's equipped glove.
+    const desiredGlove = this.povPlayer.getGloveId() || null;
+    if (desiredGlove !== this.replayGlovePreviewId) {
+      masteryGloveSystem.setDevPreview(desiredGlove);
+      this.replayGlovePreviewId = desiredGlove;
     }
 
     this.ui.replayOverlay.update({
@@ -3691,7 +4268,12 @@ export class Game {
   private onRaceFinish(): void {
     if (!this.raceActive || this.raceFinishReported) return;
     this.raceFinishReported = true;
-    const timeUs = Math.round(this.runElapsedTime * 1_000_000);
+    // COMPETITIVE: the finish time is derived from the SHARED epoch so both
+    // clients' finish results are comparable on one timeline. Outside a
+    // synchronized race (no epoch) the personal run timer is used as before.
+    const timeUs = this.raceStartAtMs !== null
+      ? Math.max(1, Math.round((this.raceNowMs() - this.raceStartAtMs) * 1000))
+      : Math.round(this.runElapsedTime * 1_000_000);
     this.raceLastLocalBestUs =
       this.raceLastLocalBestUs === null ? timeUs : Math.min(this.raceLastLocalBestUs, timeUs);
     void raceRoomService.reportFinish(timeUs);

@@ -28,6 +28,10 @@ const MAX_PLAUSIBLE_TIME_US = 30 * 60_000_000;  // 30 min
 const MAX_CHECKPOINTS = 512;
 const MAX_RESETS = 100_000;
 
+// The SINGLE prestige knife awarded for a world record. Server-owned constant:
+// the client never supplies an unlock id.
+const WORLD_RECORD_PRESTIGE_KNIFE = 'BLACKSTAR';
+
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -205,66 +209,52 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // --- write ----------------------------------------------------------------
+  // --- write (ATOMIC, server-authoritative) ----------------------------------
+  // The DATABASE performs the insert, the strict-time world-record decision and
+  // the PB upsert inside ONE transaction serialized by a per-board advisory lock.
+  // The client cannot influence the decision, and no privileged flag is accepted.
   const { data: profile } = await admin
     .from('profiles')
     .select('display_name')
     .eq('id', userId)
     .maybeSingle();
 
-  const { data: inserted, error: insertError } = await admin
-    .from('leaderboard_runs')
-    .insert({
-      user_id: userId,
-      display_name: profile?.display_name ?? 'PLAYER',
-      track_id: trackId,
-      map_version: mapVersion,
-      map_fingerprint: mapFingerprint,
-      time_us: timeUs,
-      rank,
-      movement_version: movementVersion,
-      generator_version: generatorVersion,
-      build_version: buildVersion,
-      replay_version: acceptedReplayVersion,
-      replay_hash: acceptedReplayHash,
-      replay_path: acceptedReplayPath,
-      checkpoint_count: checkpointCount,
-      reset_count: resetCount,
-      verification_state: 'accepted'
-    })
-    .select('id')
-    .single();
-
-  if (insertError || !inserted) {
-    return reject('INSERT_FAILED', insertError?.message ?? 'unknown insert error', 500);
-  }
-
-  // Atomic PB upsert: the DATABASE decides whether this is a personal best, so
-  // two tabs / two devices cannot race a read-modify-write.
-  const { data: before } = await admin
-    .from('track_progress')
-    .select('best_time_us')
-    .eq('user_id', userId)
-    .eq('track_id', trackId)
-    .eq('map_version', mapVersion)
-    .eq('map_fingerprint', mapFingerprint)
-    .maybeSingle();
-
-  const { error: pbError } = await admin.rpc('upsert_track_progress', {
+  const { data: acceptData, error: acceptError } = await admin.rpc('accept_leaderboard_run', {
+    p_user_id: userId,
+    p_display_name: profile?.display_name ?? 'PLAYER',
     p_track_id: trackId,
     p_map_version: mapVersion,
     p_map_fingerprint: mapFingerprint,
-    p_best_time_us: timeUs,
-    p_best_rank: rank
+    p_time_us: timeUs,
+    p_rank: rank,
+    p_movement_version: movementVersion,
+    p_generator_version: generatorVersion,
+    p_build_version: buildVersion,
+    p_replay_version: acceptedReplayVersion,
+    p_replay_hash: acceptedReplayHash,
+    p_replay_path: acceptedReplayPath,
+    p_checkpoint_count: checkpointCount,
+    p_reset_count: resetCount
   });
 
-  const previousBest = before?.best_time_us ?? null;
-  const isPersonalBest = pbError === null && (previousBest === null || timeUs < Number(previousBest));
+  if (acceptError || !acceptData) {
+    return reject('INSERT_FAILED', acceptError?.message ?? 'unknown accept error', 500);
+  }
+
+  const verdict = acceptData as {
+    run_id: string;
+    is_world_record: boolean;
+    world_record_award_id: string | null;
+    is_personal_best: boolean;
+  };
 
   return json({
     accepted: true,
     verification_state: 'accepted',
-    run_id: inserted.id,
-    is_personal_best: isPersonalBest
+    run_id: verdict.run_id,
+    is_personal_best: verdict.is_personal_best === true,
+    // The client shows the reward UI from THIS server verdict, never its own.
+    is_world_record: verdict.is_world_record === true,
+    world_record_award_id: verdict.world_record_award_id ?? null
   });
 });

@@ -190,8 +190,14 @@ export class ArmoryModal {
     this.devToggleBtn.style.borderColor = isDev ? '#ffdd00' : '#00f0ff';
 
     const pendingDrops = this.skinSystem.getPendingDropCount();
-    this.dropCount.textContent = `SIGNAL DROPS // ${pendingDrops.toString().padStart(2, '0')}`;
-    this.dropOpenBtn.disabled = pendingDrops <= 0;
+    // CATEGORY-AWARE: the pools are only exhausted when BOTH knives and gloves
+    // are fully owned. isCollectionComplete() alone is a KNIFE-only question and
+    // would wrongly disable glove drops for a knife-complete player.
+    const poolsComplete = this.skinSystem.isDropPoolComplete();
+    this.dropCount.textContent = poolsComplete
+      ? 'SIGNAL DROPS // ARCHIVE COMPLETE'
+      : `SIGNAL DROPS // ${pendingDrops.toString().padStart(2, '0')}`;
+    this.dropOpenBtn.disabled = pendingDrops <= 0 || poolsComplete;
 
     this.items = this.buildItems();
 
@@ -372,6 +378,12 @@ export class ArmoryModal {
     this.dropOpenBtn.addEventListener('click', () => {
       if (this.decodeModal) {
         this.decodeModal.open(() => this.render());
+        return;
+      }
+      if (this.skinSystem.isDropPoolComplete()) {
+        this.dropReveal.classList.remove('hidden');
+        this.dropReveal.textContent = 'ALL SIGNALS DECODED // ARCHIVE COMPLETE';
+        this.render();
         return;
       }
       const reward = this.skinSystem.openSignalDrop();

@@ -72,6 +72,11 @@ export class ImportScreen {
     this.onlineStatusBar.setIdentity(displayName, onOpenProfile);
   }
 
+  /** Account entry in the footer: shows the username or SIGN IN. */
+  public setAccountState(username: string | null, onOpenAccount: () => void): void {
+    this.onlineStatusBar.setAccount(username, onOpenAccount);
+  }
+
   /** Called when the leaderboard tab is opened (used to refresh the board). */
   public onLeaderboardTabOpened?: () => void;
 
