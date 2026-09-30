@@ -296,17 +296,25 @@ export const KarambitCosmicShaderDef = {
           // Multi-angle iridescent chromatic wave shifting between icy electric cyan and soft pale rose-pink
           float angleShift = dot(N, V) * 2.8 + (parallaxShift.x + parallaxShift.y) * 2.2;
           float iridWave = sin(angleShift * 3.5 + flowTime * 0.4) * 0.5 + 0.5;
-          vec3 icyCyan = vec3(0.24, 0.82, 0.96);     // Electric cyan
-          vec3 palePink = vec3(0.97, 0.62, 0.78);    // Soft rose opal
+          // Restrained, icy luster: the pearl must read as porcelain-white with
+          // colour living only in its sheen, never as a candy gradient.
+          vec3 icyCyan = vec3(0.62, 0.88, 1.0);      // Glacier cyan
+          vec3 palePink = vec3(1.0, 0.84, 0.92);     // Rose nacre
           vec3 pearlLuster = mix(icyCyan, palePink, iridWave);
 
           // Faint cloudy internal depth
           float cloud1 = fbm(uvLayer1 * 2.5 + vec2(flowTime * 0.04, -flowTime * 0.02));
           float cloud2 = fbm(uvLayer2 * 3.2 + vec2(-flowTime * 0.03, flowTime * 0.05));
 
-          // Clean luminous pearl base (clearly intentional pearl rather than flat white)
-          vec3 pearlBase = vec3(0.88, 0.90, 0.94);
-          vec3 iridescentPearl = mix(pearlBase, pearlLuster, 0.32 + cloud1 * 0.22);
+          // Clean luminous pearl base with nacre depth: slightly deeper where the
+          // blade faces the eye, brighter toward grazing edges.
+          float grazing = pow(1.0 - max(0.0, dot(N, V)), 0.8);
+          vec3 pearlBase = vec3(0.90, 0.92, 0.95) * mix(0.84, 1.04, grazing);
+          vec3 iridescentPearl = mix(pearlBase, pearlLuster, 0.16 + cloud1 * 0.14);
+
+          // Thin-film nacre: a whisper of spectral colour only at glancing angles.
+          vec3 thinFilm = 0.5 + 0.5 * cos(6.28318 * (angleShift * 0.35 + vec3(0.0, 0.33, 0.67)));
+          iridescentPearl = mix(iridescentPearl, iridescentPearl * (0.75 + thinFilm * 0.4), grazing * 0.35);
 
           vec2 pShift = parallaxShift * 0.025;
           float rTex = texture2D(tCosmicTexture, uvLayer1 + pShift).r;
@@ -440,6 +448,22 @@ export const KarambitCosmicShaderDef = {
 
       // Composite the trapped cosmic blade
       vec3 cosmicBlade = cosmicCore + starGlow + rimGlow + vec3(bladeSpec * 0.35);
+
+      if (uIsPrism > 0.5) {
+        // Pearl: broad, soft cool sheen on top of the tight gloss, the way
+        // polished nacre catches a whole light source rather than a point.
+        float sheen = pow(max(0.0, dot(reflect(-uLightDirection, N), V)), 5.0);
+        cosmicBlade += vec3(0.86, 0.93, 1.0) * sheen * 0.14;
+      } else if (uIsBlackstar > 0.5) {
+        // Blackstar: a slow accretion catch-light sweeps the blade roughly
+        // every 14 s, bending from violet into white-cyan across the edge. It
+        // is the one moment of brilliance on an otherwise light-eating blade.
+        float sweep = fract(uTime * 0.07);
+        float along = bladeUv.x + bladeUv.y * 0.35;
+        float glint = exp(-pow((along - (sweep * 1.9 - 0.35)) * 16.0, 2.0));
+        vec3 glintCol = mix(vec3(0.46, 0.22, 1.0), vec3(0.82, 0.98, 1.0), fresnel);
+        cosmicBlade += glintCol * glint * (0.12 + fresnel * 0.55) * (1.0 + uAudioImpact * 0.6);
+      }
       if (uIsVideoArtifact > 0.5) {
         vec3 artifactSteel = baseTex.rgb * uBaseColor * (0.28 + diffuseLight * 0.28);
         cosmicBlade = mix(artifactSteel, cosmicBlade, 0.94);

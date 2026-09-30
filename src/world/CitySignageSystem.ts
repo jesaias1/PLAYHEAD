@@ -381,8 +381,11 @@ export class CitySignageSystem {
     const crownGeom = new THREE.PlaneGeometry(14.0, 7.0);
     // Window Slit Cluster: 18m x 36m (1:2 aspect ratio)
     const windowGeom = new THREE.PlaneGeometry(18.0, 36.0);
+    // PLAYHEAD Mascot Signal: 9.6m x 12m (4:5 aspect ratio)
+    const mascotGeom = new THREE.PlaneGeometry(9.6, 12.0);
 
     this.sharedGeometries.push(
+      mascotGeom,
       heroGeom,
       telemGeom,
       spectroGeom,
@@ -453,15 +456,17 @@ export class CitySignageSystem {
     // STEP 2: SUPPORT BILLBOARDS ON PRIMARY MONOLITHS (Horizontal & Spectrogram)
     // =========================================================================
     let supportCount = 0;
-    const maxSupport = 7;
+    // Moderate density: signal signage should read as part of the megastructure's
+    // life, not as an ad city. Every third tower stays dark for negative space.
+    const maxSupport = 10;
 
     for (let i = 0; i < monoliths.length; i++) {
       if (supportCount >= maxSupport) break;
       const m = monoliths[i];
       if (this.occupiedTowers.has(m.id)) continue;
 
-      // Skip every 2nd tower to preserve intentional negative space
-      if (i % 2 !== 0) continue;
+      // Skip every 3rd tower to preserve intentional negative space
+      if (i % 3 === 2) continue;
 
       const facade = resolveRouteFacingFacade(m.position, m.width, m.depth, m.yaw, m.node.position);
       if (!facade) continue;
@@ -470,7 +475,26 @@ export class CitySignageSystem {
       const stagedMat = this.stagedWaveMats[stageIdx];
       const preferredY = m.node.position.y + 30.0;
 
-      if (supportCount % 2 === 0) {
+      if (supportCount % 3 === 2) {
+        // PLAYHEAD mascot system-branding panel
+        const mMat = this.midMat.clone();
+        mMat.map = PixelArtLibrary.getMascotSignalTexture(Math.floor(supportCount / 3), accentHex, secondaryHex);
+        const mesh = this.tryMountSign(
+          m.id,
+          facade,
+          9.6,
+          12.0,
+          preferredY + 4.0,
+          m.topY,
+          m.abyssBottom,
+          false,
+          mascotGeom,
+          mMat,
+          corridor,
+          0.18
+        );
+        if (mesh) supportCount++;
+      } else if (supportCount % 3 === 0) {
         // Horizontal Telemetry Display
         const sec =
           analysis.sections && analysis.sections.length > 0
@@ -530,15 +554,15 @@ export class CitySignageSystem {
     // STEP 3: VERTICAL JAPANESE STELAE RUNNERS ON SUPPORT STELAE
     // =========================================================================
     let vertCount = 0;
-    const maxVert = 5;
+    const maxVert = 7;
 
     for (let j = 0; j < stelae.length; j++) {
       if (vertCount >= maxVert) break;
       const s = stelae[j];
       if (this.occupiedTowers.has(s.id)) continue;
 
-      // Select every 3rd stela to avoid clutter
-      if (j % 3 !== 1) continue;
+      // Select every 2nd stela to avoid clutter
+      if (j % 2 !== 1) continue;
 
       const facade = resolveRouteFacingFacade(s.position, s.width, s.depth, s.yaw, s.node.position);
       if (!facade) continue;

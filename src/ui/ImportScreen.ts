@@ -37,6 +37,7 @@ import { formatTime } from '../utils/math';
 import { RacePanel } from './RacePanel';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { OnlineStatusBar } from './OnlineStatusBar';
+import { BUILD_LABEL } from '../core/BuildInfo';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -251,85 +252,93 @@ export class ImportScreen {
     this.element.className = 'screen import-screen';
     this.element.innerHTML = `
       <div class="import-container terminal-console">
-        <div class="brand-header">
+        <header class="brand-header console-topbar">
           <div class="brand-title-wrap">
+            <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="" />
             <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
-            <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="PLAYHEAD" />
           </div>
-          <p class="brand-tagline">ENTER THE SIGNAL.<span class="terminal-cursor" aria-hidden="true"></span></p>
-          <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
-        </div>
+          <div class="brand-lines">
+            <p class="brand-tagline">ENTER THE SIGNAL.<span class="terminal-cursor" aria-hidden="true"></span></p>
+            <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
+          </div>
+        </header>
 
         <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
           <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">[ 01 // SIGNAL PACK ]</button>
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
           <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // ARMORY ]</button>
-        <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
+          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
         </div>
 
-        <!-- 01: THE SIGNAL PACK PANEL -->
+        <!-- 01: THE SIGNAL PACK PANEL: hero deck (selected signal) + catalog list. -->
         <div class="showcase-container showcase-panel" id="panel-showcase" role="tabpanel" aria-labelledby="tab-btn-showcase">
-          <div class="terminal-panel-header">// SELECTED SIGNAL TELEMETRY</div>
-          <div class="showcase-card terminal-card" id="showcase-card">
-            <div class="showcase-header">
-              <div class="showcase-title-group">
-                <div class="showcase-artist" id="showcase-artist">SIGNAL ARCHIVES</div>
-                <div class="showcase-track-title" id="showcase-title">FLOW STATE</div>
+          <div class="signal-deck">
+            <section class="showcase-card terminal-card" id="showcase-card">
+              <div class="hero-topline">
+                <span class="hero-slot" id="showcase-slot">SIGNAL 01</span>
+                <span class="showcase-artist" id="showcase-artist">SIGNAL ARCHIVES</span>
               </div>
-            </div>
-
-            <div class="showcase-meta-row">
-              <span class="showcase-badge accent" id="showcase-genre">CHILLWAVE // FLOW</span>
-              <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
-              <span class="showcase-badge" id="showcase-duration">01:12</span>
-              <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
-            </div>
-
-            <div class="showcase-records-strip" id="showcase-records-strip">
-              <div class="showcase-record-pill rank">
-                <span class="record-label">BEST //</span>
-                <span class="record-val" id="showcase-best-rank">—</span>
+              <div class="showcase-header">
+                <div class="showcase-title-group">
+                  <div class="showcase-track-title" id="showcase-title">FLOW STATE</div>
+                </div>
               </div>
-              <div class="showcase-record-pill pb">
-                <span class="record-label">PB //</span>
-                <span class="record-val" id="showcase-pb-time">—</span>
-              </div>
-              <div class="showcase-record-pill local-first">
-                <span class="record-label">LOCAL #1 //</span>
-                <span class="record-val" id="showcase-local-first">—</span>
-              </div>
-            </div>
 
-            <div class="showcase-desc" id="showcase-desc">
-              Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
-            </div>
-
-            <div class="signal-program-readout" aria-label="Deterministic signal program identity">
-              <div class="signal-program-header">
-                <span class="signal-program-label">[SIGNAL] PROGRAM FINGERPRINT</span>
-                <span class="signal-program-state">LOCKED // DETERMINISTIC</span>
+              <div class="showcase-meta-row">
+                <span class="showcase-badge accent" id="showcase-genre">CHILLWAVE // FLOW</span>
+                <span class="showcase-badge" id="showcase-bpm">110 BPM</span>
+                <span class="showcase-badge" id="showcase-duration">01:12</span>
+                <span class="showcase-badge" id="showcase-diff">TIER I · FLOW</span>
               </div>
-              <div class="signal-program-bars" id="showcase-fingerprint" aria-hidden="true"></div>
-            </div>
 
-            <div class="showcase-actions">
-              <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter">> EXEC TRACK</button>
-              <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
-                <span id="preview-icon">▶</span>
-                <span id="preview-text">> AUDITION // PREVIEW</span>
-              </button>
-              <button class="btn-preview btn-terminal-action" id="btn-showcase-race-pb" title="Race your personal best as a recorded ghost.">
-                PB GHOST // UNAVAILABLE
-              </button>
-            </div>
+              <div class="showcase-desc" id="showcase-desc">
+                Introductory rhythm run with gentle momentum hops, broad landing pads, and relaxing surf curves.
+              </div>
+
+              <div class="signal-program-readout" aria-hidden="true">
+                <div class="signal-program-bars" id="showcase-fingerprint"></div>
+              </div>
+
+              <div class="showcase-records-strip" id="showcase-records-strip">
+                <div class="showcase-record-pill rank">
+                  <span class="record-label">BEST RANK</span>
+                  <span class="record-val" id="showcase-best-rank">—</span>
+                </div>
+                <div class="showcase-record-pill pb">
+                  <span class="record-label">PERSONAL BEST</span>
+                  <span class="record-val" id="showcase-pb-time">—</span>
+                </div>
+                <div class="showcase-record-pill local-first">
+                  <span class="record-label">LOCAL #1</span>
+                  <span class="record-val" id="showcase-local-first">—</span>
+                </div>
+              </div>
+
+              <div class="showcase-actions">
+                <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter">&gt; EXEC TRACK</button>
+                <div class="showcase-actions-secondary">
+                  <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
+                    <span id="preview-icon">▶</span>
+                    <span id="preview-text">[ AUDITION // PREVIEW ]</span>
+                  </button>
+                  <button class="btn-preview btn-terminal-action" id="btn-showcase-race-pb" title="Race your personal best as a recorded ghost.">
+                    PB GHOST // UNAVAILABLE
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <aside class="signal-catalog" aria-label="Signal Pack catalog">
+              <div class="terminal-panel-header catalog-header">
+                <span>SIGNAL PACK</span><span class="catalog-count" id="showcase-catalog-count"></span>
+              </div>
+              <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
+                <!-- Populated dynamically via buildStrip() -->
+              </div>
+              <div class="showcase-mastery-strip" id="showcase-mastery-strip"></div>
+            </aside>
           </div>
-
-          <div class="terminal-panel-header" style="margin-top: 8px;">// SYSTEM CATALOG MATRIX · 14 SIGNALS LOADED</div>
-          <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
-            <!-- Populated dynamically via buildStrip() -->
-          </div>
-          <div class="showcase-mastery-strip" id="showcase-mastery-strip"></div>
         </div>
 
         <!-- 02: CUSTOM AUDIO PANEL -->
@@ -349,19 +358,27 @@ export class ImportScreen {
 
         <!-- 03: MOVEMENT LAB SETUP PANEL -->
         <div class="showcase-container showcase-panel hidden" id="panel-lab" role="tabpanel" aria-labelledby="tab-btn-lab" aria-hidden="true">
-          <div class="terminal-panel-header">// MOVEMENT LAB · KINETIC CALIBRATION & SANDBOX</div>
           <div class="terminal-card lab-console-card">
-            <div class="lab-console-copy">
-              Dedicated isolated physics sandbox for practicing bunny-hop timing, Source-inspired air strafing, and high-velocity surf ramp control.
+            <div class="lab-console-head">
+              <span class="hero-slot">MOVEMENT LAB // SETUP</span>
+              <h2 class="lab-console-title">KINETIC SANDBOX</h2>
             </div>
+            <div class="lab-console-copy">
+              Isolated practice space for bunny-hop timing, air-strafing and surf ramp control. No clock, no rank. Configure the session, then enter.
+            </div>
+            <ul class="lab-feature-list" aria-label="Lab contents">
+              <li><b>BHOP</b><span>runway + bhop straight</span></li>
+              <li><b>STRAFE</b><span>air gap + slalom</span></li>
+              <li><b>SURF</b><span>surf ramp + gauntlet</span></li>
+            </ul>
             <div class="lab-control-grid">
-              <label class="settings-label" for="lab-music-select">[SIGNAL] SOUNDTRACK</label>
+              <label class="settings-label" for="lab-music-select">SOUNDTRACK</label>
               <select class="settings-select lab-signal-select" id="lab-music-select">
                 <option value="NONE">NONE // SILENT SANDBOX</option>
               </select>
             </div>
             <div class="lab-actions">
-              <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">> ENTER MOVEMENT LAB</button>
+              <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">&gt; ENTER MOVEMENT LAB</button>
             </div>
           </div>
         </div>
@@ -454,8 +471,9 @@ export class ImportScreen {
         </div>
 
         <div class="privacy-notice terminal-footer-status">
-          [CLIENT-SIDE AUDIO DSP] · [PROCEDURAL ROUTE GENERATION]
-        </div>      </div>
+          <span class="footer-build">PLAYHEAD // ${BUILD_LABEL}</span>
+        </div>
+      </div>
     `;
 
     // Tab buttons
@@ -643,14 +661,21 @@ export class ImportScreen {
       const secs = Math.floor(t.duration % 60);
       const duration = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
+      const tier = Math.max(1, Math.min(5, Math.round(t.difficulty)));
+      const pips = '<i class="on"></i>'.repeat(tier) + '<i></i>'.repeat(5 - tier);
+      item.style.setProperty('--row-accent', t.accentColor);
       item.innerHTML = `
         <div class="strip-item-inner">
-          <div class="strip-item-header">
-            <span class="strip-item-num">[${displayIndex}] // ${isTutorial ? 'CALIBRATION // TUTORIAL' : t.difficultyLabel}</span>
-            ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
+          <span class="strip-item-index">${displayIndex}</span>
+          <div class="strip-item-body">
+            <div class="strip-item-title">${t.title}</div>
+            <div class="strip-item-header">
+              <span class="strip-item-num">${isTutorial ? 'CALIBRATION' : t.difficultyLabel}</span>
+              <span class="strip-item-pips" aria-label="Tier ${tier}">${pips}</span>
+              ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
+            </div>
+            <div class="strip-signal-bars" aria-hidden="true"></div>
           </div>
-          <div class="strip-item-title">${t.title}</div>
-          <div class="strip-signal-bars" aria-hidden="true"></div>
           <div class="strip-item-meta"><span>${t.bpm} BPM</span><span>${duration}</span></div>
         </div>
       `;
@@ -729,13 +754,20 @@ export class ImportScreen {
       local1Elem.textContent = summary.localFirstTime !== null ? formatTime(summary.localFirstTime) : '—';
     }
 
-    const card = this.element.querySelector('#showcase-card') as HTMLElement;
-    if (card) {
-      card.style.borderLeftColor = t.accentColor;
+    // The whole Signal Pack deck takes the selected track's palette.
+    this.showcasePanel.style.setProperty('--track-accent', t.accentColor);
+    const slotElem = this.element.querySelector('#showcase-slot') as HTMLElement | null;
+    if (slotElem) {
+      const official = this.catalog.filter((c) => c.id !== 'tutorial_00');
+      const idx = official.indexOf(t);
+      slotElem.textContent =
+        idx >= 0 ? `SIGNAL ${pad2(idx + 1)} / ${pad2(official.length)}` : 'CALIBRATION';
     }
+    const countElem = this.element.querySelector('#showcase-catalog-count') as HTMLElement | null;
+    if (countElem) countElem.textContent = `${pad2(this.catalog.length)} SIGNALS`;
     this.showcaseGenreElem.style.borderColor = t.accentColor;
     this.showcaseGenreElem.style.color = t.accentColor;
-    this.renderFingerprint(this.showcaseFingerprintElem, t);
+    this.renderFingerprint(this.showcaseFingerprintElem, t, 72);
     this.renderMasterySummary();
   }
 
@@ -764,13 +796,17 @@ export class ImportScreen {
   public renderMasterySummary(): void {
     if (!this.showcaseMasteryStripElem) return;
     const s = masteryGloveSystem.evaluate().summary;
-    const parts = [
-      `FULL SIGNAL PACK // ${pad2(s.cleared)} / ${pad2(s.total)} CLEARED`,
-      `GOLD MASTERY // ${pad2(s.goldPlus)} / ${pad2(s.total)}`,
-      `DIAMOND MASTERY // ${pad2(s.diamond)} / ${pad2(s.total)}`
+    const parts: Array<[string, number, string]> = [
+      ['CLEARED', s.cleared, 'clear'],
+      ['GOLD+', s.goldPlus, 'gold'],
+      ['DIAMOND', s.diamond, 'diamond']
     ];
     this.showcaseMasteryStripElem.innerHTML = parts
-      .map((p) => `<span class="showcase-mastery-chip">${p}</span>`)
+      .map(
+        ([label, n, cls]) =>
+          `<span class="showcase-mastery-chip ${cls}"><span>${label}</span><b>${pad2(n)}<small>/${pad2(s.total)}</small></b>` +
+          `<i style="--fill:${s.total > 0 ? n / s.total : 0}"></i></span>`
+      )
       .join('');
   }
 

@@ -36,16 +36,18 @@ function patchSignalBands(
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nvarying float vSignalWorldY;'
+        '#include <common>\nvarying float vSignalWorldY;\nvarying vec2 vSignalWorldXZ;'
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 #ifdef USE_INSTANCING
-  vSignalWorldY = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).y;
+  vec4 signalWorld = modelMatrix * instanceMatrix * vec4( transformed, 1.0 );
 #else
-  vSignalWorldY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;
-#endif`
+  vec4 signalWorld = modelMatrix * vec4( transformed, 1.0 );
+#endif
+  vSignalWorldY = signalWorld.y;
+  vSignalWorldXZ = signalWorld.xz;`
       );
 
     shader.fragmentShader = shader.fragmentShader
@@ -53,6 +55,7 @@ function patchSignalBands(
         '#include <common>',
         `#include <common>
 varying float vSignalWorldY;
+varying vec2 vSignalWorldXZ;
 uniform float uSignalPhase;
 uniform float uSignalGain;
 uniform float uSignalSegCount;
@@ -66,7 +69,21 @@ uniform float uSignalBandScale;`
   float signalCoord = vSignalWorldY * uSignalBandScale;
   float signalSeg = fract( signalCoord * uSignalSegCount - uSignalPhase );
   float signalPulse = pow( 1.0 - abs( signalSeg * 2.0 - 1.0 ), uSignalSegSharp );
-  totalEmissiveRadiance += diffuseColor.rgb * signalPulse * uSignalGain;
+
+  // STRUCTURE MASK: the music-driven emissive no longer floods whole faces.
+  // It lives in thin floor slits and panel seams, strongest around the
+  // player's altitude and dissolving downward into the abyss, so towers read
+  // as colossal dark mass with signal running through it.
+  float relY = vSignalWorldY - cameraPosition.y;
+  float floorSlit = step( 0.86, fract( vSignalWorldY * 0.21 ) );
+  float seam = step( 0.93, fract( ( vSignalWorldXZ.x + vSignalWorldXZ.y ) * 0.11 ) );
+  float structure = 0.14 + floorSlit * 0.86 + seam * 0.35;
+  float abyssFade = smoothstep( -260.0, 10.0, relY );
+  totalEmissiveRadiance *= structure * mix( 0.25, 1.0, abyssFade );
+
+  // Signal bands carry the accent itself (the dark basalt albedo made them
+  // nearly invisible before).
+  totalEmissiveRadiance += emissive * signalPulse * uSignalGain * 1.4 * ( 0.35 + 0.65 * abyssFade );
 }`
       );
   };

@@ -37,6 +37,7 @@ uniform float uSectionIntensity;
 uniform float uReactivity;
 uniform float uStarVisibility;
 uniform float uSignalField;
+uniform float uHeroFlare;
 
 varying vec3 vWorldPosition;
 varying vec2 vUv;
@@ -74,13 +75,14 @@ float bayer4x4(vec2 p) {
 }
 
 // Multi-tier procedural starfield with spatial clustering and 4 star classes
-vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float starVis, vec3 secColor, vec3 hiColor) {
+vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float starVis, vec3 secColor, vec3 hiColor, float heroFlare) {
   if (dir.y < 0.015 || starVis <= 0.01) return vec3(0.0);
+  heroFlare = clamp(heroFlare, 0.0, 1.0);
 
   // Spatial variation: Clustered sky regions vs open cosmic void pockets
   vec3 clusterGrid = floor(dir * 18.0);
   float clusterDensity = pow(hash31(clusterGrid), 2.2); // Concentrates stars in clusters
-  if (clusterDensity < 0.15) return vec3(0.0); // Quiet void pockets
+  if (clusterDensity < 0.15) clusterDensity = 0.0; // Quiet void pockets (hero stars survive)
 
   float elevationFade = smoothstep(0.015, 0.22, dir.y);
 
@@ -110,8 +112,11 @@ vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float s
     vec3 dHero = dir - (gridHero + 0.5) / 85.0;
     float dist = length(dHero);
 
-    // Transient reactivity: flare on high transients & drop impacts
-    float transientEnergy = dropImpact * 2.6 + high * 1.4;
+    // Only a curated subset of hero stars ANSWERS strong musical events; the
+    // rest stay calm. heroFlare is a gated envelope (strong hits only), so the
+    // sky reads as sparse, deliberate flashes rather than constant shimmer.
+    float responder = step(0.4, fract(hHero * 173.0));
+    float transientEnergy = dropImpact * 1.4 + high * 0.5 + heroFlare * responder * 2.4;
     float heroTwinkle = sin(time * 1.5 + hHero * 6.28) * 0.25 + 0.75;
     float dynamicRadius = 0.0048 + clamp(transientEnergy * 0.0035, 0.0, 0.008);
 
@@ -141,7 +146,30 @@ vec3 renderStarfield(vec3 dir, float time, float high, float dropImpact, float s
   col += secColor * colorStar;
   col += heroGlowCol * hero;
 
-  return col * elevationFade * (1.0 + dropImpact * 0.4) * starVis * clusterDensity;
+  col *= clusterDensity;
+  // Hero stars keep their presence even in sparse cluster pockets.
+  col += heroGlowCol * hero * (1.0 - clusterDensity) * 0.8;
+  return col * elevationFade * (1.0 + dropImpact * 0.4) * starVis;
+}
+
+// Cheap value noise for the galactic band.
+float vnoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash31(i);
+  float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
 }
 
 void main() {
@@ -177,10 +205,27 @@ void main() {
   vec3 signalField = uHazeColor * fieldBand * uSignalField * 0.11 * uReactivity;
 
   // 4. Clustered Multi-Tier Starfield
-  vec3 stars = renderStarfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility, uSecondaryColor, uHighlightColor);
+  vec3 stars = renderStarfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility, uSecondaryColor, uHighlightColor, uHeroFlare * uReactivity);
+
+  // 4b. Galactic signal band: one slow diagonal river of faint light, broken
+  // by noise so it reads as dust lanes, not a gradient stripe.
+  vec3 bandAxis = normalize(vec3(0.34, 0.52, 0.78));
+  float bandD = dot(dir, bandAxis);
+  float bandCore = exp(-bandD * bandD * 22.0);
+  float lanes = vnoise(dir * 7.0 + vec3(0.0, uTime * 0.004, 0.0)) * 0.65 + vnoise(dir * 19.0) * 0.35;
+  float band = bandCore * smoothstep(0.28, 0.85, lanes) * smoothstep(0.02, 0.3, elevation);
+  vec3 galactic = mix(uSecondaryColor, uHighlightColor, lanes) * band * (0.05 + uStarVisibility * 0.05);
+
+  // 4c. Bottomless abyss: below the horizon the sky falls away into black,
+  // with two faint strata of light from impossibly distant lower levels.
+  float below = smoothstep(0.0, -0.55, elevation);
+  vec3 abyss = uHorizonColor * (
+    exp(-pow((elevation + 0.22) * 11.0, 2.0)) * 0.10 +
+    exp(-pow((elevation + 0.46) * 14.0, 2.0)) * 0.05
+  ) * (1.0 + bassPressure * 0.6);
 
   // 5. Compose Final Atmospheric Color
-  vec3 finalColor = baseVoid + horizonGlow + haze + signalField + stars;
+  vec3 finalColor = mix(baseVoid, uVoidColor * 0.12, below) + horizonGlow + haze + signalField + stars + galactic + abyss;
 
   gl_FragColor = vec4(finalColor, 1.0);
 }
@@ -189,6 +234,8 @@ void main() {
 export class ProceduralSky {
   public mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
+  private heroFlare = 0;
+  private lastTime = 0;
 
   constructor(scene: THREE.Scene) {
     const geometry = new THREE.SphereGeometry(900, 32, 24);
@@ -212,7 +259,8 @@ export class ProceduralSky {
         uSectionIntensity: { value: 0.5 },
         uReactivity: { value: 1.0 },
         uStarVisibility: { value: 0.5 },
-        uSignalField: { value: 0.0 }
+        uSignalField: { value: 0.0 },
+        uHeroFlare: { value: 0.0 }
       },
       side: THREE.BackSide,
       depthWrite: false
@@ -251,6 +299,14 @@ export class ProceduralSky {
         visualState.channels.bassMass * 0.4 +
         visualState.channels.dropPrimary * 0.5
     );
+
+    // Gated strong-event envelope for the hero-star subset: only onsets above
+    // the threshold register, attack is instant and decay is ~0.4 s.
+    const strong = Math.max(0, (visualState.channels.transient - 0.55) / 0.45) + visualState.channels.dropPrimary * 0.6;
+    const dt = Math.min(0.1, Math.max(0, visualState.time - this.lastTime));
+    this.lastTime = visualState.time;
+    this.heroFlare = Math.max(Math.min(1, strong), this.heroFlare * Math.exp(-dt / 0.4));
+    u.uHeroFlare.value = this.heroFlare;
 
     let baseStarVis = 0.45;
     if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {

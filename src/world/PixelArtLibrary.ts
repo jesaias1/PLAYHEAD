@@ -957,6 +957,58 @@ export class PixelArtLibrary {
     });
   }
 
+  /**
+   * PLAYHEAD MASCOT SIGNAL (128x160)
+   * System-branding panel: the mascot icon above a cryptic transmission line
+   * and a thin waveform rule. The mascot bitmap is painted in once it loads.
+   */
+  public static getMascotSignalTexture(
+    variant = 0,
+    accentHex = '#00f0ff',
+    secondaryHex = '#ff00aa'
+  ): THREE.CanvasTexture {
+    const lines = ['BECOME THE PLAYHEAD', 'SIGNAL IS THE ROUTE', 'DO NOT STOP MOVING', 'ENTER THE SIGNAL'];
+    const line = lines[variant % lines.length];
+    const key = `billboard_mascot_${variant % lines.length}_${accentHex}_${secondaryHex}`;
+    const cached = this.cache.has(key);
+    const tex = this.getOrCreateRect(key, 128, 160, (ctx, w, h) => {
+      ctx.fillStyle = '#03050a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = accentHex;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(3.5, 3.5, w - 7, h - 7);
+      // Corner ticks
+      ctx.fillStyle = secondaryHex;
+      ctx.fillRect(3, 3, 8, 2);
+      ctx.fillRect(w - 11, h - 5, 8, 2);
+      ctx.font = 'bold 7px monospace';
+      ctx.fillStyle = '#5b6678';
+      ctx.fillText(`PH-${(0x3a + variant * 17).toString(16).toUpperCase().padStart(3, '0')} // TX`, 9, 15);
+      // Waveform rule
+      ctx.fillStyle = accentHex;
+      for (let x = 10; x < w - 10; x += 3) {
+        const a = Math.abs(Math.sin(x * 0.21 + variant) * Math.sin(x * 0.047)) * 9 + 1;
+        ctx.fillRect(x, 128 - a / 2, 2, a);
+      }
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(line, Math.max(6, (w - ctx.measureText(line).width) / 2), 150);
+    });
+    if (!cached && typeof Image !== 'undefined' && tex.image) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = tex.image as HTMLCanvasElement;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, 24, 22, 80, 80);
+        tex.needsUpdate = true;
+      };
+      img.src = '/assets/brand/playhead_mascot.png';
+    }
+    return tex;
+  }
+
   public static getOrCreateRect(
     key: string,
     width: number,
