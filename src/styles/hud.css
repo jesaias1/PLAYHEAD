@@ -456,3 +456,152 @@
 
 .replay-actions { display: flex; align-items: center; gap: 10px; }
 .replay-hint { margin-left: auto; font-size: 0.62rem; letter-spacing: 0.12em; color: #566170; }
+
+/* ==========================================================================
+   HUD — SIGNAL FRAME (matches the frontend)
+   Presentation only. Track identity top-left, speed as the one large readout
+   at bottom centre, telemetry as unboxed text, a thin glowing progress line.
+   ========================================================================== */
+
+#hud-container { padding: clamp(18px, 3vh, 30px) clamp(20px, 3vw, 40px); }
+
+#hud-container::before,
+#hud-container::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  opacity: 0.35;
+}
+#hud-container::before {
+  top: 14px;
+  left: 14px;
+  border-top: 1px solid var(--accent-color);
+  border-left: 1px solid var(--accent-color);
+}
+#hud-container::after {
+  bottom: 14px;
+  right: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.hud-track-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.36em;
+  color: #e6edf5;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+.hud-track-title::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 10px;
+  vertical-align: middle;
+  background: var(--accent-color);
+  box-shadow: 0 0 8px var(--accent-color);
+}
+.hud-section-info {
+  background: none;
+  border-left: 0;
+  padding: 0 0 0 28px;
+  font-size: 0.62rem;
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 12px var(--accent-glow);
+}
+
+/* Speed: the one hero number, bottom centre, where the eye already is. */
+.hud-speed-gauge {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(44px, 7vh, 64px);
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.hud-speed-value {
+  font-family: var(--font-sans);
+  font-size: clamp(2.2rem, 3.4vw, 3rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85);
+}
+.hud-speed-unit {
+  font-size: 0.54rem;
+  letter-spacing: 0.4em;
+  color: #7c8898;
+}
+
+.hud-reticle {
+  width: 3px;
+  height: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 6px rgba(255, 255, 255, 0.6);
+  opacity: 0.9;
+}
+
+/* Telemetry strip: text, not boxes. */
+.hud-bottom { gap: 10px; }
+.hud-stats-strip { gap: 26px; }
+.hud-sync-indicator,
+.hud-split-badge,
+.hud-ghost-indicator {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+.hud-ghost-indicator { border-left: 2px solid #9d8cff; padding-left: 8px; }
+.hud-sync-label,
+.hud-split-badge-label { font-size: 0.54rem; letter-spacing: 0.28em; color: #6f7d8e; }
+.hud-sync-val,
+.hud-split-badge-val { font-size: 0.78rem; }
+
+.hud-progress-bar-container {
+  max-width: min(640px, 60vw);
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.hud-progress-bar-fill {
+  position: relative;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.35), var(--accent-color));
+}
+.hud-progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -3px;
+  width: 2px;
+  height: 8px;
+  background: #fff;
+  box-shadow: 0 0 8px var(--accent-color);
+}
+
+/* Toasts: slim signal bars instead of dialog boxes. */
+.hud-toast,
+.hud-split-toast {
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: linear-gradient(90deg, transparent, rgba(3, 5, 10, 0.78) 20%, rgba(3, 5, 10, 0.78) 80%, transparent);
+  padding: 10px 64px;
+}
+.hud-toast { letter-spacing: 0.34em; font-size: 0.72rem; }
+.hud-split-header { font-size: 0.56rem; letter-spacing: 0.3em; }
+.hud-split-val { font-family: var(--font-sans); font-size: 1.7rem; font-weight: 700; }
+
+.hud-surf-indicator {
+  border: 0;
+  border-left: 2px solid var(--accent-color);
+  background: rgba(3, 5, 10, 0.82);
+  box-shadow: none;
+}
+
+/* Keep the restart-hold notice clear of the bottom-centre speed readout. */
+#hud-restart-hold { bottom: 150px !important; }

@@ -138,6 +138,51 @@ export class GeometryBuilder {
     });
     reactiveMaterials.push(surfMaterial);
 
+    // 1b. ARCHITECTURAL DECK TREATMENT (visual only; collision is untouched).
+    // Every platform face knows its size in metres (aFace), so the shader can
+    // draw a lit chamfer rim, an inset seam groove carrying a thin signal line,
+    // deck joints, and a glowing lip trim just under the top edge of the sides.
+    patchPlatformArchitecture(platformMaterial, primaryCol);
+
+    // 1c. Structural underside keels hung beneath each deck.
+    const keelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x080a10,
+      roughness: 0.82,
+      metalness: 0.32,
+      map: basaltTex
+    });
+    patchKeel(keelMaterial, primaryCol);
+    const keelGeoms: THREE.BufferGeometry[] = [];
+    const keelSpaces = gameplayNodes.map((n) => {
+      const r = Math.max(n.dimensions.x, n.dimensions.z) * 0.5 + 0.5;
+      return {
+        id: n.id,
+        topY: n.position.y + n.dimensions.y * 0.5,
+        box: new THREE.Box3(
+          new THREE.Vector3(n.position.x - r, n.position.y - n.dimensions.y * 0.5 - 0.5, n.position.z - r),
+          new THREE.Vector3(n.position.x + r, n.position.y + n.dimensions.y * 0.5 + 5.0, n.position.z + r)
+        )
+      };
+    });
+    const addKeel = (node: RouteNode): void => {
+      const keel = createKeelGeometry(node);
+      const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(node.pitch, node.yaw, node.roll, 'YXZ'));
+      m.setPosition(node.position.x, node.position.y, node.position.z);
+      keel.applyMatrix4(m);
+      keel.computeBoundingBox();
+      const kb = keel.boundingBox!;
+      const ownTop = node.position.y + node.dimensions.y * 0.5;
+      for (const s of keelSpaces) {
+        // Only route that sits BELOW this deck can be obstructed by its keel.
+        if (s.id === node.id || s.topY >= ownTop - 0.75) continue;
+        if (s.box.intersectsBox(kb)) {
+          keel.dispose();
+          return;
+        }
+      }
+      keelGeoms.push(keel);
+    };
+
     // 3. Audio-Reactive Accent Edge Material
     const accentMaterial = new THREE.MeshStandardMaterial({
       color: 0x05060a,
@@ -356,6 +401,8 @@ export class GeometryBuilder {
     const addPlatformNode = (node: RouteNode): void => {
       // Rendering and collision consume the same authoritative footprint.
       const geom = createPlatformGeometry(node);
+      addFaceSizeAttribute(geom, node);
+      if (!node.isSurf && node.type !== RouteNodeType.FINISH) addKeel(node);
 
       // Edge trim is built from the LOCAL geometry before the platform geometry
       // is baked into world space for batching.
@@ -363,7 +410,7 @@ export class GeometryBuilder {
       const lineMat = new THREE.LineBasicMaterial({
         color: node.isSurf ? secondaryCol : primaryCol,
         transparent: true,
-        opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.85)
+        opacity: node.isSurf ? 0.98 : (node.isBoost ? 1.0 : 0.4)
       });
       const edges = new THREE.LineSegments(edgesGeom, lineMat);
       tagWorldRole(edges, 'VISUAL_ONLY', 'GeometryBuilder.RouteEdgeTrim', false);
@@ -528,6 +575,7 @@ export class GeometryBuilder {
     addBatched(platformGeoms, platformMaterial, 'RoutePlatformsMerged');
     addBatched(surfPlatformGeoms, surfMaterial, 'RouteSurfPlatformsMerged');
     addBatched(finishPlatformGeoms, finishMaterial, 'RouteFinishMerged');
+    addBatched(keelGeoms, keelMaterial, 'RouteKeelsMerged', 'VISUAL_ONLY');
     addBatched(
       pylonGeoms,
       backgroundMonolithMaterial,
@@ -1046,4 +1094,163 @@ function createSurfFlank(
   }
 
   return group;
+}
+
+// ===========================================================================
+// ROUTE ARCHITECTURE — visual-only deck treatment + underside keels.
+// None of this touches collision: PhysicsWorld builds colliders from nodes.
+// ===========================================================================
+
+/**
+ * Per-vertex face size in metres (x = u extent, y = v extent) and face kind
+ * (z: 0 = top, 1 = side, 2 = bottom). BoxGeometry face order is
+ * [+X, -X, +Y, -Y, +Z, -Z] with 4 vertices each.
+ */
+function addFaceSizeAttribute(geom: THREE.BufferGeometry, node: RouteNode): void {
+  const pos = geom.getAttribute('position');
+  const data = new Float32Array(pos.count * 3);
+  const w = node.dimensions.x;
+  const h = node.dimensions.y;
+  const d = node.dimensions.z;
+  const faces: Array<[number, number, number]> = [
+    [d, h, 1],
+    [d, h, 1],
+    [w, d, 0],
+    [w, d, 2],
+    [w, h, 1],
+    [w, h, 1]
+  ];
+  const normals = geom.getAttribute('normal');
+  for (let i = 0; i < pos.count; i++) {
+    let f: [number, number, number];
+    if (pos.count === 24) {
+      f = faces[Math.floor(i / 4)];
+    } else {
+      const ny = normals ? normals.getY(i) : 0;
+      f = ny > 0.5 ? faces[2] : ny < -0.5 ? faces[3] : faces[4];
+    }
+    data[i * 3] = f[0];
+    data[i * 3 + 1] = f[1];
+    data[i * 3 + 2] = f[2];
+  }
+  geom.setAttribute('aFace', new THREE.BufferAttribute(data, 3));
+}
+
+function patchPlatformArchitecture(material: THREE.MeshStandardMaterial, accent: THREE.Color): void {
+  const seamColor = { value: accent.clone() };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSeamColor = seamColor;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute vec3 aFace;\nvarying vec3 vFace;\nvarying vec2 vPlatUv;'
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vFace = aFace;\n  vPlatUv = uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform vec3 uSeamColor;
+varying vec3 vFace;
+varying vec2 vPlatUv;
+float archGlow = 0.0;
+float archTop = 0.0;`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+{
+  vec2 meters = vPlatUv * vFace.xy;
+  vec2 ed = min(meters, vFace.xy - meters);
+  float edgeD = min(ed.x, ed.y);
+  if (vFace.z < 0.5) {
+    // TOP DECK: lit chamfer, inset groove with a signal line, deck joints.
+    float rim = 1.0 - smoothstep(0.18, 0.3, edgeD);
+    float groove = smoothstep(0.85, 0.9, edgeD) * (1.0 - smoothstep(1.15, 1.2, edgeD));
+    float jointDist = abs(fract(meters.y / 5.0 + 0.5) - 0.5) * 5.0;
+    float joint = (1.0 - smoothstep(0.06, 0.12, jointDist)) * step(1.2, edgeD);
+    // Inner field is a touch lighter than the border band: reads as an inset slab.
+    float field = step(1.2, edgeD);
+    diffuseColor.rgb *= (1.0 - groove * 0.7 - joint * 0.4) * mix(0.8, 1.15, field);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 2.4 + vec3(0.06), rim * 0.7);
+    float line = smoothstep(0.96, 0.99, edgeD) * (1.0 - smoothstep(1.06, 1.09, edgeD));
+    archGlow = line * 0.7 + rim * 0.06;
+    archTop = 1.0;
+  } else if (vFace.z < 1.5) {
+    // SIDES: dark mass, a glowing lip trim just under the deck edge, and a
+    // darkening toward the underside so the deck floats.
+    float topDist = (1.0 - vPlatUv.y) * vFace.y;
+    float lip = smoothstep(0.1, 0.14, topDist) * (1.0 - smoothstep(0.3, 0.34, topDist));
+    diffuseColor.rgb *= 0.5 * mix(1.0, 0.55, vPlatUv.y < 0.5 ? 1.0 - vPlatUv.y * 2.0 : 0.0);
+    archGlow = lip * 1.1;
+  } else {
+    diffuseColor.rgb *= 0.3;
+  }
+}`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+  totalEmissiveRadiance += uSeamColor * archGlow;
+  {
+    // Grazing sky sheen on deck tops: far platforms catch the atmosphere, so
+    // surfaces stay readable at speed without lifting the whole scene.
+    float fres = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 4.0);
+    totalEmissiveRadiance += (vec3(0.05, 0.07, 0.11) + uSeamColor * 0.02) * fres * archTop * 1.4;
+  }`
+      );
+  };
+  material.needsUpdate = true;
+}
+
+/**
+ * Tapered structural keel beneath a deck: full inset footprint at the top,
+ * narrowing toward the bottom. aKeel = 0 at the deck, 1 at the keel tip.
+ */
+function createKeelGeometry(node: RouteNode): THREE.BufferGeometry {
+  const w = node.dimensions.x;
+  const d = node.dimensions.z;
+  const depth = THREE.MathUtils.clamp(Math.max(w, d) * 0.28, 2.2, 9.0);
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const keelV = new Float32Array(pos.count);
+  const topY = -node.dimensions.y * 0.5 + 0.02;
+  for (let i = 0; i < pos.count; i++) {
+    const isTop = pos.getY(i) > 0;
+    const sx = isTop ? w * 0.92 : w * 0.42;
+    const sz = isTop ? d * 0.92 : d * 0.55;
+    pos.setXYZ(i, pos.getX(i) * sx, isTop ? topY : topY - depth, pos.getZ(i) * sz);
+    keelV[i] = isTop ? 0 : 1;
+  }
+  pos.needsUpdate = true;
+  g.setAttribute('aKeel', new THREE.BufferAttribute(keelV, 1));
+  g.computeVertexNormals();
+  return g;
+}
+
+function patchKeel(material: THREE.MeshStandardMaterial, accent: THREE.Color): void {
+  const seamColor = { value: accent.clone() };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uKeelSeam = seamColor;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aKeel;\nvarying float vKeel;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vKeel = aKeel;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uKeelSeam;\nvarying float vKeel;')
+      .replace(
+        '#include <map_fragment>',
+        '#include <map_fragment>\n  diffuseColor.rgb *= mix(1.0, 0.35, vKeel);'
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+  {
+    // Signal seam where keel meets deck, and a faint strata band lower down.
+    float seam = 1.0 - smoothstep(0.02, 0.06, vKeel);
+    float strata = smoothstep(0.52, 0.55, vKeel) * (1.0 - smoothstep(0.57, 0.6, vKeel));
+    totalEmissiveRadiance += uKeelSeam * (seam * 0.35 + strata * 0.18);
+  }`
+      );
+  };
+  material.needsUpdate = true;
 }

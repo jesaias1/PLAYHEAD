@@ -21,6 +21,7 @@ import { SpectacleRenderer } from './SpectacleRenderer';
 import { CelestialLandmarks } from './CelestialLandmarks';
 import { SignalLandmarks } from './SignalLandmarks';
 import { RouteSignalPackets } from './RouteSignalPackets';
+import { Megastructure } from './Megastructure';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 import { collectForkSequences } from '../generation/RouteForkGenerator';
@@ -46,6 +47,7 @@ export class World {
   public signalLandmarks: SignalLandmarks | null = null;
   /** Travelling route signal packets (presentation only, one draw call). */
   public routePackets: RouteSignalPackets | null = null;
+  public megastructure: Megastructure | null = null;
   public debugChainMesh: THREE.LineSegments | null = null;
 
   /** DEV-only debug visualization of the protected gameplay region. */
@@ -169,6 +171,9 @@ export class World {
     );
     this.scene.add(this.routePackets.group);
 
+    // 8. Megastructure: abyss strata, composed hero structures, light shafts.
+    this.megastructure = new Megastructure(this.scene, track, this.visualController.state.palette);
+
     // ==========================================================
     // FINAL AUTHORITATIVE WORLD GEOMETRY SAFETY PASS
     //
@@ -207,6 +212,10 @@ export class World {
     }
     if (this.routePackets?.group) {
       safetyPass.register(this.routePackets.group, 'RouteSignalPackets', 'VISUAL_ONLY');
+    }
+    if (this.megastructure) {
+      safetyPass.register(this.megastructure.group, 'Megastructure', 'DECORATION');
+      safetyPass.register(this.megastructure.atmosphereGroup, 'MegastructureAtmosphere', 'IGNORE_WORLD_SAFETY');
     }
     safetyPass.register(this.spectacleRenderer.group, 'SpectacleRenderer', 'IGNORE_WORLD_SAFETY');
     safetyPass.register(this.sky.mesh, 'ProceduralSky', 'IGNORE_WORLD_SAFETY');
@@ -359,6 +368,10 @@ export class World {
       this.routePackets.update(vState, progress.arcProgress, dt, reduceMotion);
     }
 
+    if (this.megastructure) {
+      this.megastructure.update(vState, playerPos, reduceMotion);
+    }
+
     // Update celestial landmarks (moon, eclipse, halos, relics)
     if (this.celestialLandmarks) {
       this.celestialLandmarks.update(songTime, vState.bass, vState.dropImpact);
@@ -467,6 +480,11 @@ export class World {
       this.scene.remove(this.signalLandmarks.group);
       this.signalLandmarks.dispose();
       this.signalLandmarks = null;
+    }
+
+    if (this.megastructure) {
+      this.megastructure.dispose();
+      this.megastructure = null;
     }
 
     if (this.routePackets) {

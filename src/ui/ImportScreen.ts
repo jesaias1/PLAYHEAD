@@ -38,6 +38,7 @@ import { RacePanel } from './RacePanel';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { OnlineStatusBar } from './OnlineStatusBar';
 import { BUILD_LABEL } from '../core/BuildInfo';
+import { MenuBackdrop } from './MenuBackdrop';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -243,6 +244,9 @@ export class ImportScreen {
   private onErrorCallback?: (err: string) => void;
   private onMovementLabCallback?: (trackId?: string) => void;
   private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
+  private backdrop = new MenuBackdrop();
+  private previewAnalyser: AnalyserNode | null = null;
+  private previewLevelBuf: Uint8Array<ArrayBuffer> | null = null;
 
   constructor() {
     this.catalog = MusicPack.getCatalog();
@@ -297,6 +301,7 @@ export class ImportScreen {
               </div>
 
               <div class="signal-program-readout" aria-hidden="true">
+                <canvas class="hero-wave" id="showcase-wave"></canvas>
                 <div class="signal-program-bars" id="showcase-fingerprint"></div>
               </div>
 
@@ -316,7 +321,7 @@ export class ImportScreen {
               </div>
 
               <div class="showcase-actions">
-                <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter">&gt; EXEC TRACK</button>
+                <button class="btn-hero btn-terminal-exec" id="btn-showcase-enter"><span class="exec-glyph">&gt;</span> EXEC TRACK</button>
                 <div class="showcase-actions-secondary">
                   <button class="btn-preview btn-terminal-action" id="btn-showcase-preview">
                     <span id="preview-icon">▶</span>
@@ -589,6 +594,12 @@ export class ImportScreen {
     this.decoderDetailElem = this.element.querySelector('#decoder-detail') as HTMLElement;
     this.decoderButton = this.element.querySelector('#btn-decode-signal') as HTMLButtonElement;
 
+    this.element.prepend(this.backdrop.canvas);
+    this.backdrop.isVisible = () => !this.element.classList.contains('hidden');
+    const heroWave = this.element.querySelector('#showcase-wave') as HTMLCanvasElement | null;
+    if (heroWave) this.backdrop.attachHeroWave(heroWave);
+    this.backdrop.start();
+
     this.buildStrip();
     this.buildLabSelect();
     this.updateShowcaseCard(this.selectedTrack);
@@ -768,6 +779,16 @@ export class ImportScreen {
     this.showcaseGenreElem.style.borderColor = t.accentColor;
     this.showcaseGenreElem.style.color = t.accentColor;
     this.renderFingerprint(this.showcaseFingerprintElem, t, 72);
+    this.backdrop.setTrack(t.accentColor, createProgramFingerprint(t.id, t.bpm, t.duration, t.difficulty, 48));
+    this.backdrop.setHeroFingerprint(createProgramFingerprint(t.id, t.bpm, t.duration, t.difficulty, 96));
+    // Re-run the hero reveal so a selection change feels like a new signal
+    // locking in rather than text swapping in place.
+    const deck = this.element.querySelector('.signal-deck');
+    if (deck) {
+      deck.classList.remove('is-switching');
+      void (deck as HTMLElement).offsetWidth;
+      deck.classList.add('is-switching');
+    }
     this.renderMasterySummary();
   }
 
@@ -1226,6 +1247,9 @@ export class ImportScreen {
   public show(): void {
     this.renderArmory();
     this.element.classList.remove('hidden');
+    this.element.classList.remove('menu-enter');
+    void this.element.offsetWidth;
+    this.element.classList.add('menu-enter');
   }
 
   public hide(): void {
@@ -1263,6 +1287,20 @@ export class ImportScreen {
 
       this.currentPreviewSource.connect(gain);
       gain.connect(this.previewCtx.destination);
+      // Feed the menu backdrop so the world answers the audition.
+      if (!this.previewAnalyser) {
+        this.previewAnalyser = this.previewCtx.createAnalyser();
+        this.previewAnalyser.fftSize = 256;
+        this.previewLevelBuf = new Uint8Array(new ArrayBuffer(this.previewAnalyser.frequencyBinCount));
+      }
+      gain.connect(this.previewAnalyser);
+      this.backdrop.setLevelSource(() => {
+        if (!this.previewAnalyser || !this.previewLevelBuf) return 0;
+        this.previewAnalyser.getByteFrequencyData(this.previewLevelBuf);
+        let sum = 0;
+        for (let i = 0; i < 24; i++) sum += this.previewLevelBuf[i];
+        return sum / (24 * 255);
+      });
 
       this.currentPreviewSource.onended = () => {
         this.stopPreview();
@@ -1289,6 +1327,7 @@ export class ImportScreen {
       this.currentPreviewSource = null;
     }
     this.isPreviewPlaying = false;
+    this.backdrop.setLevelSource(null);
     this.previewIconElem.textContent = '▶';
     this.previewTextElem.textContent = '[ AUDITION // PREVIEW ]';
     this.showcasePreviewBtn?.classList.remove('playing');
