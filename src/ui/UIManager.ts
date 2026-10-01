@@ -60,6 +60,7 @@ export class UIManager {
 
     this.armoryModal.setDecodeModal(this.decodeModal);
     this.importScreen.setDecodeModal(this.decodeModal);
+    this.importScreen.onOpenLegacyReveal = () => this.importScreen.openLegacyReveal();
     this.resultsScreen.setDecodeModal(this.decodeModal);
 
     this.root.appendChild(this.importScreen.element);

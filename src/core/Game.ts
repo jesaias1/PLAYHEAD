@@ -485,7 +485,13 @@ export class Game {
         });
       },
       onAgain: () => this.restartTrack(),
-      onNewTrack: () => this.returnToImport()
+      onNewTrack: () => this.returnToImport(),
+      onArmory: () => {
+        // Results -> ARMORY: land on the real drops inventory, then the player
+        // opens the stored drop there (results never runs the full reveal).
+        this.returnToImport();
+        this.ui.importScreen.openArmoryTab();
+      }
     });
 
     // Player fall / restore / full restart
@@ -824,10 +830,10 @@ export class Game {
               };
 
               if (elig.eligible && results.rank !== 'UNRANKED') {
+                // Custom audio earns its own completion reward, but it MUST NOT
+                // create a Signal Drop: drops are reserved for the first
+                // DIAMOND on a unique official Signal Pack track.
                 CustomAudioRewardService.getInstance().claimReward(fp);
-                KarambitSkinSystem.getInstance().grantSignalDrop('BRONZE');
-                dropsAwarded = 1;
-                bestDropRank = 'BRONZE';
               }
             }
 
@@ -837,7 +843,7 @@ export class Game {
               { rivalDelta, isNewPB },
               this.currentAnalysis.filename || 'PLAYHEAD TRACK',
               { isOvertime, overtimeDuration },
-              { dropsAwarded, bestDropRank },
+              { dropsAwarded, bestDropRank, registered: authService.isRegisteredAccount() },
               officialInfo,
               customRewardInfo,
               this.lastGhostComparison
@@ -1881,6 +1887,11 @@ export class Game {
     this.currentAnalysis = null;
     this.currentTrack = null;
     this.currentOfficialTrackId = null;
+    // Leaving the world clears any Armory preview override so a stale ephemeral
+    // skin can never outlive the screen that set it, and releases any equipped
+    // ARTIFACT video so an offscreen menu never keeps decoding it.
+    this.ui.importScreen.clearArmoryPreview();
+    KarambitSkinSystem.getInstance().suspendActiveVideo();
     this.stateMachine.transitionTo(GameState.IMPORT);
   }
 
@@ -3664,10 +3675,16 @@ export class Game {
   ): Promise<void> {
     const trackId = this.currentOfficialTrackId;
     if (!trackId) return;
+    const submissionUserId = authService.getUserId();
+    let signalDropAcquired = false;
 
     const publish = (state: SubmissionState, detail?: string): void => {
+      if (authService.getUserId() !== submissionUserId) return;
       this.lastSubmissionState = { state, detail };
       this.ui.resultsScreen.setSubmissionState(state, detail);
+      // The drop panel was drawn BEFORE the submit answer. Re-render it now so a
+      // server-minted first-Diamond drop is reported immediately.
+      this.ui.resultsScreen.refreshSignalDropPanel(signalDropAcquired);
     };
 
     // 1. Canonical guard. A non-canonical map can never be submitted.
@@ -3689,6 +3706,7 @@ export class Game {
     //    The results screen is already visible and reads SUBMITTING meanwhile.
     publish('SUBMITTING');
     const uploaded = await (this.pendingReplayUpload ?? Promise.resolve(null));
+    if (authService.getUserId() !== submissionUserId) return;
     const replay = this.lastFinalizedReplay;
 
     // 3. Ghost bookkeeping FIRST, so ghost racing works even if the world
@@ -3719,8 +3737,16 @@ export class Game {
     };
 
     const outcome = await leaderboardService.submitRun(submission);
+    if (authService.getUserId() !== submissionUserId) return;
 
     if (outcome.ok) {
+      // SERVER-MINTED SIGNAL DROP: the server created it for the first DIAMOND on
+      // a unique official track. Mirror the id so the next Armory visit can open
+      // it. This is a mirror only; no ownership is granted here.
+      if (outcome.signalDropId) {
+        KarambitSkinSystem.getInstance().mergeCloudDropAward(outcome.signalDropId);
+        signalDropAcquired = true;
+      }
       // WORLD RECORD: the server decides and creates the award. This client only
       // CLAIMS what the server already made for it, then unions the prestige
       // cosmetic into local ownership. No client path can mint the provenance.

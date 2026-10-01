@@ -183,37 +183,59 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     mat.dispose();
   });
 
-  it('awards each official level rank threshold once and never rewards custom audio', () => {
+  it('awards ONE Signal Drop per unique official track on FIRST DIAMOND only', () => {
     const [first, second] = SignalPackCatalog.getTracks();
 
+    // Lower rank thresholds record the achievement but never mint a drop.
     const bronze = skinSystem.recordTrackCompletion(first.id, 'BRONZE', first.id);
-    expect(bronze.awardedDropRanks).toEqual(['BRONZE']);
-    expect(bronze.pendingDrops).toBe(1);
+    expect(bronze.awardedDropRanks).toEqual([]);
+    expect(bronze.pendingDrops).toBe(0);
 
     const repeatClear = skinSystem.recordTrackCompletion(first.id, 'BRONZE', first.id);
     expect(repeatClear.dropAwarded).toBe(false);
-    expect(repeatClear.pendingDrops).toBe(1);
+    expect(repeatClear.pendingDrops).toBe(0);
 
-    expect(skinSystem.recordTrackCompletion(first.id, 'SILVER', first.id).awardedDropRanks).toEqual(['SILVER']);
-    expect(skinSystem.recordTrackCompletion(first.id, 'GOLD', first.id).awardedDropRanks).toEqual(['GOLD']);
-    expect(skinSystem.recordTrackCompletion(first.id, 'DIAMOND', first.id).awardedDropRanks).toEqual(['DIAMOND']);
+    expect(skinSystem.recordTrackCompletion(first.id, 'SILVER', first.id).awardedDropRanks).toEqual([]);
+    expect(skinSystem.recordTrackCompletion(first.id, 'GOLD', first.id).awardedDropRanks).toEqual([]);
 
-    const firstDiamond = skinSystem.recordTrackCompletion(second.id, 'DIAMOND', second.id);
-    expect(firstDiamond.awardedDropRanks).toEqual(['DIAMOND', 'GOLD', 'SILVER', 'BRONZE']);
-    expect(firstDiamond.pendingDrops).toBe(8);
+    const firstDiamond = skinSystem.recordTrackCompletion(first.id, 'DIAMOND', first.id);
+    expect(firstDiamond.awardedDropRanks).toEqual(['DIAMOND']);
+    expect(firstDiamond.pendingDrops).toBe(0);
+
+    // The rank achievements are all recorded.
+    expect(skinSystem.getAwardedRankKeys()).toEqual(
+      expect.arrayContaining([
+        `${first.id}:BRONZE`, `${first.id}:SILVER`, `${first.id}:GOLD`, `${first.id}:DIAMOND`
+      ])
+    );
+
+    // A repeated DIAMOND never mints a second drop for the same track.
+    const repeatDiamond = skinSystem.recordTrackCompletion(first.id, 'DIAMOND', first.id);
+    expect(repeatDiamond.awardedDropRanks).toEqual([]);
+
+    // A DIFFERENT track's first DIAMOND mints its own drop (Diamond only).
+    const secondDiamond = skinSystem.recordTrackCompletion(second.id, 'DIAMOND', second.id);
+    expect(secondDiamond.awardedDropRanks).toEqual(['DIAMOND']);
 
     const customClear = skinSystem.recordTrackCompletion('custom-upload.wav', 'DIAMOND', 'custom-upload');
     expect(customClear.dropAwarded).toBe(false);
-    expect(customClear.pendingDrops).toBe(8);
+    expect(customClear.pendingDrops).toBe(0);
   });
 
-  it('preserves pending drops and reward ownership across reloads', () => {
+  it('preserves DIAMOND drop notification and reward ownership across reloads (dev roller)', () => {
     const official = SignalPackCatalog.getTracks()[0];
-    skinSystem.recordTrackCompletion(official.id, 'DIAMOND', official.id);
+    const completion = skinSystem.recordTrackCompletion(official.id, 'DIAMOND', official.id);
+    expect(completion.awardedDropRanks).toEqual(['DIAMOND']);
+    expect(skinSystem.getAwardedDiamondDropKeys()).toEqual([official.id]);
+    expect(skinSystem.getAwardedDiamondLevelIds()).toEqual([official.id]);
+
+    // The SERVER issues the real drop; without a cloud opener the DEV roller is
+    // the only way to open it, so seed one for the offline round-trip test.
+    skinSystem.grantDevPendingSignals(1, 'DIAMOND');
 
     (KarambitSkinSystem as any).instance = null;
     skinSystem = KarambitSkinSystem.getInstance();
-    expect(skinSystem.getPendingDropCount()).toBe(4);
+    expect(skinSystem.getPendingDropCount()).toBe(1);
     expect(skinSystem.getAwardedDiamondLevelIds()).toEqual([official.id]);
 
     const reward = skinSystem.openSignalDrop();
@@ -225,10 +247,10 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
 
     (KarambitSkinSystem as any).instance = null;
     skinSystem = KarambitSkinSystem.getInstance();
-    expect(skinSystem.getPendingDropCount()).toBe(3);
+    expect(skinSystem.getPendingDropCount()).toBe(0);
     expect(skinSystem.isCosmeticOwned(reward!.item.id)).toBe(true);
     if (reward!.kind === 'KNIFE') {
-      expect(skinSystem.isSkinUnlocked(reward!.item.id)).toBe(true);
+      expect(skinSystem.isSkinRewardOwned(reward!.item.id)).toBe(true);
     } else {
       expect(skinSystem.isDropGloveOwned(reward!.item.id)).toBe(true);
     }
@@ -240,6 +262,8 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
       for (const track of SignalPackCatalog.getTracks()) {
         system.recordTrackCompletion(track.id, 'DIAMOND', track.id);
       }
+      // Server-issued drops are opened through the offline DEV roller here.
+      system.grantDevPendingSignals(800, 'DIAMOND');
       const rewards: string[] = [];
       while (system.getPendingDropCount() > 0 && !(system.isCollectionComplete() && system.isGloveCollectionComplete())) {
         const drop = system.openSignalDrop();
@@ -275,6 +299,8 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
     for (const track of SignalPackCatalog.getTracks()) {
       skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
     }
+    // The server issues drops; the offline DEV roller supplies the opens here.
+    skinSystem.grantDevPendingSignals(400, 'DIAMOND');
     // Only KNIFE awards can be video Artifacts. A glove drop is skipped.
     let opened = skinSystem.openSignalDrop()!;
     let guard = 0;

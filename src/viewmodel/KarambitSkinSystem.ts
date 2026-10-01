@@ -45,6 +45,30 @@ interface SignalDropProgressionV2 {
   gloveRewardBags?: Record<RunRank, string[]>;
   gloveRewardBagCursors?: Record<RunRank, number>;
   lastRewardGloveId?: string;
+  /**
+   * SERVER-ISSUED unopened Signal Drop ids. CLOUD-AUTHORITATIVE.
+   *
+   * These are minted only by the submit-run Edge Function on the FIRST DIAMOND
+   * of a unique official track. A local flag can never fabricate one, so this
+   * replaces the old client-controlled "pendingDropRanks means a drop exists"
+   * model for real awards. Legacy/DEV pending ranks remain a separate, offline
+   * dev path that the server ignores.
+   */
+  unopenedDropIds?: string[];
+  /** Drop ids already opened/spent, so a replayed id can never re-award. */
+  openedDropIds?: string[];
+  /**
+   * Locally-awarded drop ids the server has NOT yet echoed back. Lets
+   * reconciliation keep a just-awarded in-flight drop while still dropping a
+   * stale pending id that another device already opened/consumed.
+   */
+  pendingLocalAwardIds?: string[];
+  /**
+   * Local (non-authoritative) ledger of unique official tracks whose FIRST
+   * DIAMOND has already produced a drop notification. Prevents a duplicated
+   * client notification; the SERVER unique key is the real anti-re-award guard.
+   */
+  awardedDiamondDropKeys?: string[];
 }
 
 export interface TrackCompletionReward {
@@ -73,6 +97,8 @@ export interface OpenedSignalDrop {
   sourceRank: RunRank;
   qualityLabel: 'STANDARD SIGNAL' | 'REFINED SIGNAL' | 'HIGH-FIDELITY SIGNAL' | 'PRISTINE SIGNAL';
   isCollectionComplete?: boolean;
+  /** Server-issued Signal Drop id this open consumed (structured drops only). */
+  dropId?: string;
 }
 
 const SIGNAL_DROP_PROGRESSION_VERSION = 2 as const;
@@ -940,7 +966,27 @@ export class KarambitSkinSystem {
   private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
   /** Which animated-cosmetic encode to decode. Presentation only. */
   private videoQuality: 'STANDARD' | 'LOW' = 'STANDARD';
+  /**
+   * SERVER-DRIVEN OPEN HOOK.
+   *
+   * The Armory sets this to a CloudProgression call that performs the atomic
+   * open_signal_drop RPC. When it is present, opening a STRUCTURED drop is
+   * decided entirely by the server (weighting, duplicate protection, ownership,
+   * persistence). The client only animates the resolved result, so it can never
+   * reroll, double-spend or mint a premium id.
+   */
+  private structuredDropOpener:
+    | ((dropId: string) => Promise<{
+        dropId: string;
+        cosmeticId: string | null;
+        kind: 'KNIFE' | 'GLOVE' | null;
+        rarity?: CosmeticRarity;
+      }>)
+    | null = null;
+
   private progression: SignalDropProgressionV2 = this.createDefaultProgression();
+  /** Bumped on account switch so in-flight drop opens cannot cross accounts. */
+  private accountGeneration = 0;
 
   private readonly STORAGE_KEY_RECORDS = 'playhead.karambit.trackRecords';
   private readonly STORAGE_KEY_EQUIPPED = 'playhead.karambit.equippedSkin';
@@ -1146,6 +1192,17 @@ export class KarambitSkinSystem {
     return this.activeVideo?.skinId ?? null;
   }
 
+  /**
+   * Releases the active video element without changing the equip or any
+   * ownership. Called when the world is left (menu / Armory / account screens),
+   * so an equipped ARTIFACT never keeps decoding offscreen. The next material
+   * application in gameplay lazily recreates it, and the same-id path resumes
+   * instantly because releaseActiveVideoTexture() fully re-initializes.
+   */
+  public suspendActiveVideo(): void {
+    this.releaseActiveVideoTexture();
+  }
+
   private createEmptyRewardBags(): Record<RunRank, string[]> {
     return { BRONZE: [], SILVER: [], GOLD: [], DIAMOND: [] };
   }
@@ -1162,8 +1219,28 @@ export class KarambitSkinSystem {
       rewardOwnedSkinIds: [],
       rewardBags: this.createEmptyRewardBags(),
       rewardBagCursors: this.createEmptyRewardBagCursors(),
-      rngState: DEFAULT_REWARD_RNG_STATE
+      rngState: DEFAULT_REWARD_RNG_STATE,
+      unopenedDropIds: [],
+      openedDropIds: [],
+      pendingLocalAwardIds: [],
+      awardedDiamondDropKeys: []
     };
+  }
+
+  /**
+   * Sanitizes a structured drop-id ledger. Ids are server-issued uuids or the
+   * conservative 'legacy:<rank>' migration keys; anything else is dropped.
+   */
+  private sanitizeDropIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    const out: string[] = [];
+    for (const item of value) {
+      if (typeof item !== 'string' || item.length === 0 || item.length > 96) continue;
+      if (/^[0-9a-fA-F-]{36}$/.test(item) || /^legacy:[A-Z]+$/.test(item)) {
+        if (!out.includes(item)) out.push(item);
+      }
+    }
+    return out.slice(0, 512);
   }
 
   private isRunRank(value: unknown): value is RunRank {
@@ -1238,7 +1315,16 @@ export class KarambitSkinSystem {
         lastRewardGloveId:
           typeof parsed.lastRewardGloveId === 'string' && gloveIds.has(parsed.lastRewardGloveId)
             ? parsed.lastRewardGloveId
-            : undefined
+            : undefined,
+        // Structured, cloud-authoritative drop ledgers.
+        unopenedDropIds: this.sanitizeDropIds(parsed.unopenedDropIds),
+        openedDropIds: this.sanitizeDropIds(parsed.openedDropIds),
+        pendingLocalAwardIds: this.sanitizeDropIds(parsed.pendingLocalAwardIds),
+        awardedDiamondDropKeys: Array.isArray(parsed.awardedDiamondDropKeys)
+          ? [...new Set(parsed.awardedDiamondDropKeys.filter(
+              (k): k is string => typeof k === 'string' && !!SignalPackCatalog.getTrackById(k)
+            ))]
+          : []
       };
     } catch {
       this.progression = this.createDefaultProgression();
@@ -1473,10 +1559,18 @@ export class KarambitSkinSystem {
         .filter(threshold => this.rankToValue(threshold) <= newVal)
         .filter(threshold => !this.progression.awardedRankKeys.includes(`${officialLevelId}:${threshold}`))
         .reverse();
+      const diamondKeys = (this.progression.awardedDiamondDropKeys ??= []);
       for (const threshold of newlyReached) {
         this.progression.awardedRankKeys.push(`${officialLevelId}:${threshold}`);
-        this.progression.pendingDropRanks.push(threshold);
-        awardedDropRanks.push(threshold);
+        // ONE durable Signal Drop per account per unique official track: the
+        // FIRST DIAMOND only. BRONZE/SILVER/GOLD, a repeated DIAMOND and custom
+        // audio never mint a drop. The real award is server-issued (the
+        // submit-run Edge Function returns signal_drop_id); this only records
+        // the tracking achievement and raises the concise results notification.
+        if (threshold === 'DIAMOND' && !diamondKeys.includes(officialLevelId)) {
+          diamondKeys.push(officialLevelId);
+          awardedDropRanks.push(threshold);
+        }
       }
     }
     if (awardedDropRanks.length > 0) {
@@ -1500,12 +1594,193 @@ export class KarambitSkinSystem {
     };
   }
 
+  /**
+   * Unopened drops = SERVER-issued structured drops + DEV/legacy pending ranks.
+   * The structured list is the authoritative one; the legacy list exists only so
+   * the offline DEV decoder and pre-migration devices keep working.
+   */
+  /** Wires the server-side opener (CloudProgression). Web-only; optional. */
+  public setStructuredDropOpener(
+    opener:
+      | ((dropId: string) => Promise<{
+          dropId: string;
+          cosmeticId: string | null;
+          kind: 'KNIFE' | 'GLOVE' | null;
+          rarity?: CosmeticRarity;
+        }>)
+      | null
+  ): void {
+    this.structuredDropOpener = opener;
+  }
+
+  /**
+   * Whether a SERVER-ISSUED structured drop is pending. When true the UI must
+   * open through the server (openNextDrop) rather than the offline roller.
+   */
+  public hasStructuredDropPending(): boolean {
+    return !!this.structuredDropOpener && (this.progression.unopenedDropIds?.length ?? 0) > 0;
+  }
+
   public getPendingDropCount(): number {
-    return this.progression.pendingDropRanks.length;
+    if (this.structuredDropOpener) return this.progression.unopenedDropIds?.length ?? 0;
+    return this.progression.pendingDropRanks.length + (this.progression.unopenedDropIds?.length ?? 0);
   }
 
   public getPendingDropRanks(): RunRank[] {
     return [...this.progression.pendingDropRanks];
+  }
+
+  /** Legacy/DEV pending rank count only (excludes structured server drops). */
+  public getLegacyPendingDropCount(): number {
+    return this.progression.pendingDropRanks.length;
+  }
+
+  /**
+   * Opens the NEXT pending drop.
+   *
+   * PRODUCTION (a cloud opener IS configured): ONLY a server-issued drop id can
+   * ever be opened. A legacy/DEV `pendingDropRanks` entry is NOT a real award in
+   * this mode, so when no server id is pending this returns null rather than
+   * falling back to the offline rank roller — a local flag can never mint
+   * premium ownership. The server path is idempotent and cannot reroll.
+   *
+   * OFFLINE / DEV (no opener configured): the legacy rank roller is used, which
+   * keeps the dedicated dev fixtures and pre-cloud devices working.
+   */
+  public async openNextDrop(): Promise<OpenedSignalDrop | null> {
+    const hasOpener = !!this.structuredDropOpener;
+    const dropId = this.progression.unopenedDropIds?.[0];
+    if (hasOpener && !dropId) {
+      // No server-issued drop is pending: NOTHING may be opened. Never fall
+      // through to the client roller while a cloud opener is configured.
+      return null;
+    }
+    if (dropId && this.structuredDropOpener) {
+      // ACCOUNT-SCOPED GENERATION: capture the identity of the account that
+      // STARTED this open. resetProgressionForAccountSwitch() bumps the counter,
+      // so a resolution that arrives AFTER a switch is discarded instead of
+      // being applied to (and saved into) the wrong account.
+      const generation = this.accountGeneration;
+      const res = await this.structuredDropOpener(dropId);
+      if (generation !== this.accountGeneration) {
+        throw new Error('account changed');
+      }
+      // The opener may have echoed a different id; never apply an id this
+      // account did not have pending.
+      if (!(this.progression.unopenedDropIds ?? []).includes(res.dropId)) {
+        throw new Error('drop no longer pending for this account');
+      }
+      return this.applyServerDropResult({
+        dropId: res.dropId,
+        cosmeticId: res.cosmeticId,
+        kind: res.kind,
+        rarity: res.rarity
+      });
+    }
+    return this.openSignalDrop();
+  }
+
+  /** Server-issued, unopened drop ids (cloud-authoritative). */
+  public getUnopenedDropIds(): string[] {
+    return [...(this.progression.unopenedDropIds ?? [])];
+  }
+
+  /** Drop ids already opened/spent (mirror of the server's open ledger). */
+  public getOpenedDropIds(): string[] {
+    return [...(this.progression.openedDropIds ?? [])];
+  }
+
+  /** Unique official tracks whose first DIAMOND has already paid out a drop. */
+  public getAwardedDiamondDropKeys(): string[] {
+    return [...(this.progression.awardedDiamondDropKeys ?? [])];
+  }
+
+  public hasUnopenedDrops(): boolean {
+    return (this.progression.unopenedDropIds?.length ?? 0) > 0 ||
+      this.progression.pendingDropRanks.length > 0;
+  }
+
+  /**
+   * Records a SERVER-ISSUED drop id (from a submit-run response) so the next
+   * Armory visit can open it. This only mirrors the server; it never mints
+   * ownership and never invents a premium id.
+   */
+  public mergeCloudDropAward(dropId: string | null | undefined): void {
+    if (typeof dropId !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(dropId)) return;
+    const ids = (this.progression.unopenedDropIds ??= []);
+    if (ids.includes(dropId)) return;
+    ids.push(dropId);
+    // Mark it as a LOCAL in-flight award so reconciliation does not discard it
+    // as stale before the server ledger can echo it back.
+    const local = (this.progression.pendingLocalAwardIds ??= []);
+    if (!local.includes(dropId)) local.push(dropId);
+    this.saveState();
+    this.notifyListeners();
+  }
+
+  /**
+   * Applies the SERVER's resolved open result. The server already persisted the
+   * outcome and the ownership, so this only mirrors it locally: the drop leaves
+   * the unopened set, the cosmetic becomes owned, and an idempotent replay of
+   * the same drop can never reroll or double-award.
+   */
+  public applyServerDropResult(result: {
+    dropId: string;
+    cosmeticId: string | null;
+    kind: 'KNIFE' | 'GLOVE' | null;
+    rarity?: CosmeticRarity;
+  }): OpenedSignalDrop | null {
+    const ids = (this.progression.unopenedDropIds ??= []);
+    const idx = ids.indexOf(result.dropId);
+    if (idx >= 0) ids.splice(idx, 1);
+    const opened = (this.progression.openedDropIds ??= []);
+    if (!opened.includes(result.dropId)) opened.push(result.dropId);
+    const local = this.progression.pendingLocalAwardIds ?? [];
+    if (local.includes(result.dropId)) {
+      this.progression.pendingLocalAwardIds = local.filter((id) => id !== result.dropId);
+    }
+
+    const cosmeticId = result.cosmeticId;
+    if (!cosmeticId) {
+      this.saveState();
+      this.notifyListeners();
+      this.notifyCommitted();
+      return {
+        kind: 'KNIFE',
+        item: this.knifeDropItem(this.getEquippedSkin()),
+        name: this.getEquippedSkin().name,
+        codename: this.getEquippedSkin().codename,
+        rarity: this.getEquippedSkin().rarity,
+        accentTag: this.getEquippedSkin().paletteTag,
+        isLive: !!this.getEquippedSkin().profile.isVideoArtifact,
+        skin: this.getEquippedSkin(),
+        sourceRank: 'DIAMOND',
+        qualityLabel: this.getQualityLabel('DIAMOND'),
+        isCollectionComplete: true,
+        dropId: result.dropId
+      };
+    }
+
+    if (result.kind === 'GLOVE' || isDropGloveId(cosmeticId)) {
+      const glove = getDropGlove(cosmeticId);
+      const owned = (this.progression.rewardOwnedGloveIds ??= []);
+      if (glove && !owned.includes(glove.id)) owned.push(glove.id);
+      this.saveState();
+      this.notifyListeners();
+      this.notifyCommitted();
+      return glove
+        ? { ...this.buildGloveDrop(glove, 'DIAMOND'), dropId: result.dropId }
+        : null;
+    }
+
+    const skin = this.getSkin(cosmeticId);
+    if (!this.progression.rewardOwnedSkinIds.includes(skin.id)) {
+      this.progression.rewardOwnedSkinIds.push(skin.id);
+    }
+    this.saveState();
+    this.notifyListeners();
+    this.notifyCommitted();
+    return { ...this.buildKnifeDrop(skin, 'DIAMOND'), dropId: result.dropId };
   }
 
   public getAwardedRankKeys(): string[] {
@@ -1529,11 +1804,108 @@ export class KarambitSkinSystem {
    *
    * DEV preview state and calibration are never touched here.
    */
+  /**
+   * AUTHORITATIVE DROP-LEDGER RECONCILIATION.
+   *
+   * Unlike a union, this treats the server's ledger as the truth for the
+   * PENDING set: a drop opened on another device disappears locally, and a
+   * previously opened id is suppressed so it can never re-award. In-flight
+   * local awards (an id the server has not yet returned) are preserved unless
+   * they appear in `opened`. Ownership is only ever ADDED, never removed.
+   */
+  public applyCloudDropLedger(ledger: {
+    unopened?: readonly string[];
+    opened?: readonly string[];
+    tracks?: readonly string[];
+  }): void {
+    const accepted = (raw: unknown): string | null => {
+      if (typeof raw !== 'string' || raw.length === 0 || raw.length > 96) return null;
+      if (/^[0-9a-fA-F-]{36}$/.test(raw) || /^legacy:[A-Z]+$/.test(raw)) return raw;
+      return null;
+    };
+    const opened = new Set(
+      (ledger.opened ?? []).map(accepted).filter((x): x is string => !!x)
+    );
+    let changed = false;
+
+    if (ledger.unopened) {
+      const serverUnopened = (ledger.unopened ?? [])
+        .map(accepted)
+        .filter((x): x is string => !!x && !opened.has(x));
+      const previous = this.progression.unopenedDropIds ?? [];
+      const localAwards = this.progression.pendingLocalAwardIds ?? [];
+      // Keep ONLY a locally-awarded id that the server has not yet echoed. A
+      // stale id that another device opened is NOT in localAwards, so it is
+      // dropped here — the authoritative empty state is honored.
+      const inFlight = previous.filter((id) => localAwards.includes(id) && !opened.has(id));
+      const next = [...new Set([...serverUnopened, ...inFlight])];
+      if (next.length !== previous.length || next.some((id, i) => id !== previous[i])) {
+        this.progression.unopenedDropIds = next;
+        changed = true;
+      }
+      // An id the server now reports unopened (or that was opened) is no longer
+      // an un-echoed local award.
+      const serverSeen = new Set([...serverUnopened, ...opened]);
+      const nextLocal = localAwards.filter((id) => !serverSeen.has(id));
+      if (nextLocal.length !== localAwards.length) {
+        this.progression.pendingLocalAwardIds = nextLocal;
+        changed = true;
+      }
+    }
+
+    const openedList = [...(this.progression.openedDropIds ?? [])];
+    for (const id of opened) {
+      if (!openedList.includes(id)) openedList.push(id);
+    }
+    if (openedList.length !== (this.progression.openedDropIds ?? []).length) {
+      this.progression.openedDropIds = openedList;
+      changed = true;
+    }
+
+    if (ledger.tracks) {
+      const tracks = [...(this.progression.awardedDiamondDropKeys ?? [])];
+      for (const raw of ledger.tracks) {
+        if (typeof raw !== 'string' || !SignalPackCatalog.getTrackById(raw)) continue;
+        if (!tracks.includes(raw)) tracks.push(raw);
+      }
+      if (tracks.length !== (this.progression.awardedDiamondDropKeys ?? []).length) {
+        this.progression.awardedDiamondDropKeys = tracks;
+        changed = true;
+      }
+    }
+
+    // Any id that is BOTH pending and recorded opened is a contradiction: the
+    // server's opened ledger wins, so the stale pending entry is dropped.
+    const cleaned = (this.progression.unopenedDropIds ?? []).filter((id) => !opened.has(id));
+    if (cleaned.length !== (this.progression.unopenedDropIds ?? []).length) {
+      this.progression.unopenedDropIds = cleaned;
+      changed = true;
+    }
+
+    // SERVER-AUTHORITATIVE MODE: once the server ledger has hydrated, the
+    // legacy/DEV `pendingDropRanks` counter is no longer a source of truth (a
+    // real award is a server drop id, and the client roller is unreachable
+    // while an opener is configured). Reconcile it to EMPTY here so the pending
+    // count is not double-counted across devices and a legacy rank can never be
+    // mistaken for an openable drop.
+    if (this.structuredDropOpener && this.progression.pendingDropRanks.length > 0) {
+      this.progression.pendingDropRanks = [];
+      changed = true;
+    }
+
+    if (changed) {
+      this.saveState();
+      this.notifyListeners();
+    }
+  }
+
   public applyCloudProgression(cloud: {
     awardedRankKeys?: readonly string[];
     rewardOwnedSkinIds?: readonly string[];
     pendingDropRanks?: readonly RunRank[];
     equippedSkinId?: string;
+    /** Server-issued unopened drop ids. UNIONED: a cloud drop is never lost. */
+    unopenedDropIds?: readonly string[];
   }): void {
     let changed = false;
 
@@ -1566,6 +1938,17 @@ export class KarambitSkinSystem {
         if (existing.has(id)) continue;
         existing.add(id);
         this.progression.rewardOwnedSkinIds.push(id);
+        changed = true;
+      }
+    }
+
+    if (cloud.unopenedDropIds) {
+      const ids = (this.progression.unopenedDropIds ??= []);
+      for (const raw of cloud.unopenedDropIds) {
+        if (typeof raw !== 'string') continue;
+        if (!/^[0-9a-fA-F-]{36}$/.test(raw) && !/^legacy:[A-Z]+$/.test(raw)) continue;
+        if (ids.includes(raw)) continue;
+        ids.push(raw);
         changed = true;
       }
     }
@@ -1631,6 +2014,9 @@ export class KarambitSkinSystem {
    * account's cosmetics, ranks or records.
    */
   public resetProgressionForAccountSwitch(): void {
+    // Bump the account generation FIRST so any in-flight drop open that resolves
+    // after this switch is discarded rather than applied to the new account.
+    this.accountGeneration += 1;
     this.releaseActiveVideoTexture();
     this.progression = this.createDefaultProgression();
     this.trackRecords = {};
@@ -1765,6 +2151,7 @@ export class KarambitSkinSystem {
 
     const unowned = eligible.filter((g) => !this.isDropGloveOwned(g.id));
     if (unowned.length === 0) return null;
+
     const candidateIds = new Set<string>(unowned.map((g) => g.id));
 
     const bags = this.ensureGloveBags();
@@ -1942,9 +2329,11 @@ export class KarambitSkinSystem {
 
     // 3. Rarity within the resolved category, using the existing rank-weighted bag.
     if (category === 'GLOVE') {
+      // Consume the pending rank BEFORE awarding, so a resolved-but-missing
+      // glove can never leave the rank in place to be rolled again.
       const glove = this.getNextRewardGlove(sourceRank);
-      if (!glove) return exhausted();
       this.progression.pendingDropRanks.shift();
+      if (!glove) return exhausted();
       const owned = this.progression.rewardOwnedGloveIds ?? [];
       if (!owned.includes(glove.id)) owned.push(glove.id);
       this.progression.rewardOwnedGloveIds = owned;

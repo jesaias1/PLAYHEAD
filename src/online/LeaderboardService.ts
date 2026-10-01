@@ -73,6 +73,12 @@ export type SubmitOutcome =
       isWorldRecord: boolean;
       /** The award the server created for this account, if any. */
       worldRecordAwardId: string | null;
+      /**
+       * Server-minted Signal Drop id for the account's FIRST DIAMOND on a
+       * unique official track. Non-null at most once per track. The client only
+       * mirrors this id; it can never fabricate one.
+       */
+      signalDropId: string | null;
     }
   | {
       ok: false;
@@ -253,6 +259,7 @@ export class LeaderboardService {
         is_personal_best?: boolean;
         is_world_record?: boolean;
         world_record_award_id?: string | null;
+        signal_drop_id?: string | null;
         reason?: string;
       } | null;
 
@@ -271,7 +278,8 @@ export class LeaderboardService {
         isPersonalBest: payload.is_personal_best === true,
         // The reward is shown ONLY from this server verdict. Never inferred.
         isWorldRecord: payload.is_world_record === true,
-        worldRecordAwardId: payload.world_record_award_id ?? null
+        worldRecordAwardId: payload.world_record_award_id ?? null,
+        signalDropId: payload.signal_drop_id ?? null
       };
     } catch (err) {
       return { ok: false, reason: 'ERROR', detail: err instanceof Error ? err.message : String(err) };

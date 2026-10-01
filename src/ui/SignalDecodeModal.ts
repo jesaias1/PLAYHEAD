@@ -4,9 +4,10 @@
  */
 
 import { CosmeticRarity, KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
-import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
+import { cosmeticKindLabel, displayRarity } from '../viewmodel/CosmeticDrop';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { SignalDecoderAudio } from '../audio/SignalDecoderAudio';
+import { attachArtifactVideoPreview } from './ArtifactVideoPreview';
 
 export class SignalDecodeModal {
   public element: HTMLElement;
@@ -18,15 +19,20 @@ export class SignalDecodeModal {
   private statusElem: HTMLElement;
   private skipBtn: HTMLButtonElement;
   private closeBtn: HTMLButtonElement;
-  private onCompleteCallback?: (reward: OpenedSignalDrop) => void;
+  private onCompleteCallback?: (reward: OpenedSignalDrop | null) => void;
 
   private skinSystem = KarambitSkinSystem.getInstance();
   private decoderAudio = SignalDecoderAudio.getInstance();
   private isRolling = false;
+  /** True while a SERVER open is in flight (before the reveal starts). */
+  private isOpening = false;
+  /** Bumped on every open attempt so a stale async resolution is discarded. */
+  private openToken = 0;
   private rollTimeout: number | null = null;
   private animFrameId: number | null = null;
   private activeReward: OpenedSignalDrop | null = null;
   private currentTargetOffset = 0;
+  private releaseArtifactPreview?: () => void;
 
   constructor() {
     this.element = document.createElement('div');
@@ -97,12 +103,30 @@ export class SignalDecodeModal {
     });
   }
 
-  public open(onComplete?: (reward: OpenedSignalDrop) => void): void {
-    if (this.isRolling) return;
+  public open(onComplete?: (reward: OpenedSignalDrop | null) => void): void {
+    // SINGLE-FLIGHT: never start a second reveal while one is rolling OR while
+    // a server open is still awaiting its verdict (previously isRolling was
+    // false during the await, so repeated clicks duplicated reveals/callbacks).
+    if (this.isRolling || this.isOpening) return;
     this.onCompleteCallback = onComplete;
 
     const pending = this.skinSystem.getPendingDropCount();
     if (pending <= 0) {
+      return;
+    }
+
+    // SERVER-ISSUED drop: the winner is decided and persisted by the atomic
+    // server RPC BEFORE the reveal. The client only animates the verdict, so a
+    // skip/close/reload can never reroll and a retry can never double-spend.
+    if (this.skinSystem.hasStructuredDropPending()) {
+      void this.openStructured();
+      return;
+    }
+
+    // PRODUCTION: a legacy/DEV pending rank is NOT a server-issued drop and must
+    // never mint premium ownership through the normal reveal. Only the explicit
+    // DEV preview path may animate a client-side roll.
+    if (!this.skinSystem.isDevPreview()) {
       return;
     }
 
@@ -119,6 +143,74 @@ export class SignalDecodeModal {
     }
 
     this.startRollingReveal(reward);
+  }
+
+  private async openStructured(): Promise<void> {
+    const token = ++this.openToken;
+    this.isOpening = true;
+    this.element.classList.remove('hidden');
+    this.stripContainer.style.display = 'block';
+    this.celebrationCard.classList.add('hidden');
+    this.titleElem.textContent = 'DECODING SIGNAL TRANSMISSION...';
+    this.kickerElem.textContent = '// SERVER SIGNAL BUS';
+    this.statusElem.textContent = 'RECEIVING STREAM';
+    this.skipBtn.style.display = 'none';
+    this.closeBtn.style.display = 'none';
+    this.stripInner.innerHTML = '';
+
+    try {
+      const reward = await this.skinSystem.openNextDrop();
+      // STALE / CANCELLED: a newer open started, the modal closed, or the
+      // account changed while the server was answering. Drop the result.
+      if (token !== this.openToken) return;
+      this.isOpening = false;
+      if (!reward || reward.isCollectionComplete) {
+        this.showCollectionCompleteDialog();
+        return;
+      }
+      this.startRollingReveal(reward);
+    } catch (err) {
+      if (token !== this.openToken) return;
+      this.isOpening = false;
+      // A changed-account rejection is not a user-facing failure; just close.
+      if (err instanceof Error && err.message === 'account changed') {
+        this.hide();
+        return;
+      }
+      // Offline / server unavailable: the unopened drop STAYS on the account.
+      // NEVER fabricate a result — show an explicit, retryable offline state.
+      this.showStructuredError();
+    }
+  }
+
+  /** Explicit, retryable offline/error state. The drop is NOT consumed. */
+  private showStructuredError(): void {
+    this.element.classList.remove('hidden');
+    this.stripContainer.style.display = 'none';
+    this.celebrationCard.classList.remove('hidden');
+    this.titleElem.textContent = 'SIGNAL LINK UNAVAILABLE';
+    this.kickerElem.textContent = '// SERVER SIGNAL BUS';
+    this.statusElem.textContent = 'OFFLINE';
+    this.celebrationCard.innerHTML = `
+      <div style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: #ff6b6b;">COULD NOT REACH THE SIGNAL BUS</div>
+      <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #8fa0b5; margin-top: 6px; line-height: 1.5;">
+        Your unopened Signal Drop is stored on your account and will open when you are back online. It has NOT been spent and cannot be rerolled.
+      </div>
+      <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="btn-decode-retry" class="primary" style="padding: 8px 22px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">> RETRY</button>
+        <button id="btn-decode-error-close" class="secondary" style="padding: 8px 18px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">CLOSE</button>
+      </div>
+    `;
+    this.skipBtn.style.display = 'none';
+    this.closeBtn.style.display = 'none';
+    const retry = this.celebrationCard.querySelector('#btn-decode-retry') as HTMLButtonElement | null;
+    const close = this.celebrationCard.querySelector('#btn-decode-error-close') as HTMLButtonElement | null;
+    retry?.addEventListener('click', () => {
+      this.isOpening = false;
+      this.open(this.onCompleteCallback);
+    });
+    close?.addEventListener('click', () => this.hide());
+    retry?.focus();
   }
 
   private showCollectionCompleteDialog(): void {
@@ -204,7 +296,7 @@ export class SignalDecodeModal {
       card.innerHTML = `
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-family: var(--font-mono); font-size: 0.52rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${view.rarity}</span>
+            <span style="font-family: var(--font-mono); font-size: 0.52rem; color: ${rarityColor}; border: 1px solid ${rarityColor}; padding: 1px 3px;">${displayRarity(view.rarity)}</span>
             <span style="font-family: var(--font-mono); font-size: 0.50rem; color: #64748b;">${view.isLive ? 'VIDEO' : 'STATIC'}</span>
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.70rem; font-weight: 700; color: #f1f5f9; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -308,13 +400,13 @@ export class SignalDecodeModal {
     const isHighTier = isOverclocked || reward.rarity === 'ARTIFACT' || reward.rarity === 'RELIC';
 
     if (isOverclocked) {
-      this.titleElem.textContent = 'SYSTEM LIMIT EXCEEDED // OVERCLOCKED SIGNAL ACQUIRED';
+      this.titleElem.textContent = 'PRIORITY SIGNAL DECODED // ARTIFACT ACQUIRED';
       this.kickerElem.textContent = '// APEX SIGNAL EXTRACTION';
     } else {
       this.titleElem.textContent = isHighTier ? 'PRIORITY SIGNAL DECODED' : 'SIGNAL DECODED // ACQUIRED';
       this.kickerElem.textContent = '// SIGNAL RECOVERY BUS';
     }
-    this.statusElem.textContent = reward.rarity;
+    this.statusElem.textContent = displayRarity(reward.rarity);
     this.statusElem.style.borderColor = rarityColor;
     this.statusElem.style.color = rarityColor;
 
@@ -334,7 +426,7 @@ export class SignalDecodeModal {
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
         <div>
           <div style="font-family: var(--font-mono); font-size: 0.62rem; color: ${rarityColor}; letter-spacing: 0.15em; font-weight: 700;">
-            [${reward.qualityLabel} // ${reward.rarity}] ${isOverclocked ? '★ APEX SYSTEM OVERCLOCK ACHIEVED' : (isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : '')}
+            [${reward.qualityLabel} // ${displayRarity(reward.rarity)}] ${isHighTier ? '★ CRITICAL ARSENAL DISCOVERY' : ''}
           </div>
           <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8; margin-top: 8px; letter-spacing: 0.2em;">
             ${slotLabel}
@@ -366,6 +458,12 @@ export class SignalDecodeModal {
     `;
 
     const equipBtn = this.celebrationCard.querySelector('#btn-decode-equip') as HTMLButtonElement;
+    const path = reward.skin?.profile.videoPath;
+    if (reward.isLive && path) {
+      this.skinSystem.suspendActiveVideo();
+      this.releaseArtifactPreview?.();
+      this.releaseArtifactPreview = attachArtifactVideoPreview(this.celebrationCard, path);
+    }
     const claimBtn = this.celebrationCard.querySelector('#btn-decode-claim') as HTMLButtonElement;
 
     equipBtn.addEventListener('click', () => {
@@ -395,7 +493,14 @@ export class SignalDecodeModal {
   }
 
   public hide(): void {
+    // Cancels an in-flight server open: bumping the token makes its eventual
+    // resolution a no-op. A mid-rolling hide is still refused (the reveal must
+    // be finished or skipped explicitly).
     if (this.isRolling) return;
+    this.releaseArtifactPreview?.();
+    this.releaseArtifactPreview = undefined;
+    this.isOpening = false;
+    this.openToken += 1;
     this.stopTickMonitor();
     if (this.rollTimeout !== null) {
       window.clearTimeout(this.rollTimeout);
@@ -408,6 +513,10 @@ export class SignalDecodeModal {
 
   public isVisible(): boolean {
     return !this.element.classList.contains('hidden');
+  }
+
+  public setOnComplete(cb: (reward: OpenedSignalDrop | null) => void): void {
+    this.onCompleteCallback = cb;
   }
 
   private getRarityColor(rarity: string): string {

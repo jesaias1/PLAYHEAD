@@ -70,8 +70,11 @@ export class ResultsScreen {
   private onReplayCallback?: () => void;
   private onAgainCallback?: () => void;
   private onNewTrackCallback?: () => void;
+  private onArmoryCallback?: () => void;
 
   private revealTimeouts: number[] = [];
+  /** Whether the CURRENT submission belongs to a registered account. */
+  private registeredAccount = true;
 
   constructor() {
     this.element = document.createElement('div');
@@ -170,7 +173,7 @@ export class ResultsScreen {
             <div class="signal-drop-reward" id="res-signal-drop-reward">DIAMOND PACKET READY</div>
             <div class="signal-drop-count" id="res-signal-drop-count">01 STORED SIGNAL</div>
           </div>
-          <button class="btn-preview signal-drop-open" id="btn-res-signal-drop">DECODE SIGNAL</button>
+          <button class="btn-preview signal-drop-open" id="btn-res-signal-drop">OPEN IN ARMORY</button>
         </div>
 
         <div class="leaderboard-feedback-bar hidden" id="res-leaderboard-feedback"></div>
@@ -232,10 +235,12 @@ export class ResultsScreen {
     onReplay: () => void;
     onAgain: () => void;
     onNewTrack: () => void;
+    onArmory?: () => void;
   }): void {
     this.onReplayCallback = callbacks.onReplay;
     this.onAgainCallback = callbacks.onAgain;
     this.onNewTrackCallback = callbacks.onNewTrack;
+    this.onArmoryCallback = callbacks.onArmory;
   }
 
   public showResults(
@@ -244,7 +249,7 @@ export class ResultsScreen {
     ghostInfo?: { rivalDelta?: number; isNewPB?: boolean },
     trackTitle = 'PLAYHEAD TRACK',
     overtimeInfo?: { isOvertime: boolean; overtimeDuration: number },
-    progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank },
+    progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank; registered?: boolean },
     officialInfo?: {
       isOfficial: boolean;
       trackId: string;
@@ -358,6 +363,9 @@ export class ResultsScreen {
     this.strafeEffElem.textContent = results.strafeEfficiency >= 0 ? `${results.strafeEfficiency}%` : '—';
     this.fallsElem.textContent = `${results.fallsCount}`;
     this.scoreElem.textContent = results.score.toLocaleString();
+    if (progressionInfo?.registered !== undefined) {
+      this.registeredAccount = progressionInfo.registered;
+    }
     this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank, customRewardInfo);
 
     // Leaderboard Action Setup
@@ -473,30 +481,35 @@ export class ResultsScreen {
     }
 
     if (customRewardInfo?.isCustomAudio) {
+      this.signalDropPanel.classList.add('hidden');
+      return;
+    }
+
+    // SERVER-ISSUED drop: show the concise earned notification and route the
+    // player to the Armory to open it. The full reveal never interrupts gameplay.
+    if (skinSystem.hasStructuredDropPending()) {
+      const stored = skinSystem.getUnopenedDropIds().length;
       this.signalDropPanel.classList.remove('hidden');
-      if (customRewardInfo.eligible) {
-        this.signalDropStatus.textContent = 'SIGNAL ACQUIRED // 1 SIGNAL DROP';
-        this.signalDropReward.textContent = 'FIRST COMPLETION SIGNAL DROP';
-        this.signalDropCount.textContent = `${pending.toString().padStart(2, '0')} STORED SIGNAL${pending === 1 ? '' : 'S'}`;
-        this.signalDropOpenBtn.textContent = 'DECODE SIGNAL';
-        this.signalDropOpenBtn.disabled = false;
-      } else if (customRewardInfo.reason === 'TOO_SHORT') {
-        this.signalDropStatus.textContent = 'SIGNAL TOO SHORT // 01:00 MIN REQUIRED';
-        this.signalDropReward.textContent = 'AUDIO DURATION < 60 SECONDS';
-        this.signalDropCount.textContent = 'INELIGIBLE FOR SIGNAL DROP';
-        this.signalDropOpenBtn.textContent = 'TOO SHORT';
-        this.signalDropOpenBtn.disabled = true;
-      } else {
-        this.signalDropStatus.textContent = 'SIGNAL ARCHIVED // COMPLETION REWARD CLAIMED';
-        this.signalDropReward.textContent = 'PREVIOUSLY CLAIMED AUDIO CONTENT';
-        this.signalDropCount.textContent = 'ONE-TIME DROP PREVIOUSLY CLAIMED';
-        this.signalDropOpenBtn.textContent = 'CLAIMED';
-        this.signalDropOpenBtn.disabled = true;
-      }
+      this.signalDropStatus.textContent = newlyAwardedCount > 0 ? 'DIAMOND ACHIEVED' : 'STORED SIGNAL READY';
+      this.signalDropReward.textContent = newlyAwardedCount > 0 ? '[ARM] SIGNAL DROP ACQUIRED' : 'UNOPENED SIGNAL DROP';
+      this.signalDropCount.textContent = `${stored.toString().padStart(2, '0')} STORED SIGNAL${stored === 1 ? '' : 'S'}`;
+      this.signalDropOpenBtn.textContent = 'OPEN IN ARMORY';
+      this.signalDropOpenBtn.disabled = false;
       return;
     }
 
     if (pending <= 0) {
+      // FIRST DIAMOND but NOT a registered account: the server will not store a
+      // drop, so never silently promise a minted one. Tell the player plainly.
+      if (newlyAwardedCount > 0 && this.registeredAccount === false) {
+        this.signalDropPanel.classList.remove('hidden');
+        this.signalDropStatus.textContent = 'DIAMOND ACHIEVED';
+        this.signalDropReward.textContent = 'SIGN IN TO STORE DROP';
+        this.signalDropCount.textContent = 'ACCOUNT REQUIRED FOR SIGNAL DROPS';
+        this.signalDropOpenBtn.textContent = 'SIGN IN';
+        this.signalDropOpenBtn.disabled = true;
+        return;
+      }
       this.signalDropPanel.classList.add('hidden');
       return;
     }
@@ -526,15 +539,39 @@ export class ResultsScreen {
     this.decodeModal = modal;
   }
 
+  /**
+   * Re-renders the concise Signal Drop panel from CURRENT state. Called when the
+   * asynchronous submit answer arrives (the panel was first drawn BEFORE the
+   * server created the drop), so a first-Diamond award is surfaced immediately
+   * instead of waiting for the next results visit.
+   */
+  public refreshSignalDropPanel(acquired = false): void {
+    this.prepareSignalDropPanel(acquired ? 1 : 0);
+  }
+
   private openSignalDrop(): void {
+    const skinSystem = KarambitSkinSystem.getInstance();
+
+    // STRUCTURED drop: never open during results. Route to the Armory, where the
+    // server-driven decoder (terminal randomizer, skippable) performs the open.
+    if (skinSystem.hasStructuredDropPending()) {
+      this.decodeModal?.setOnComplete(() => this.prepareSignalDropPanel(0));
+      this.onArmoryCallback?.();
+      return;
+    }
+
     if (this.decodeModal) {
       this.decodeModal.open(() => {
         this.prepareSignalDropPanel(0);
       });
       return;
     }
-
-    const skinSystem = KarambitSkinSystem.getInstance();
+    // PRODUCTION: never mint from a legacy/DEV pending rank here. The offline
+    // roller is DEV-only; a real award arrives through the Armory.
+    if (!skinSystem.isDevPreview()) {
+      this.prepareSignalDropPanel(0);
+      return;
+    }
     const reward = skinSystem.openSignalDrop();
     if (!reward) {
       this.prepareSignalDropPanel(0);

@@ -79,3 +79,16 @@ export function resolveDropCategory(
 export function cosmeticKindLabel(kind: CosmeticKind): string {
   return kind === 'GLOVE' ? 'GLOVE' : 'KARAMBIT';
 }
+
+/**
+ * DISPLAY RARITY — FOUR tiers only: STANDARD | RARE | RELIC | ARTIFACT.
+ *
+ * Historically a fifth id, OVERCLOCKED, existed on a few knife profiles. It is
+ * mapped to ARTIFACT for PRESENTATION ONLY; the stored cosmetic id and the
+ * stored `rarity` value are never rewritten, so historical ownership is intact.
+ */
+export type DisplayRarity = 'STANDARD' | 'RARE' | 'RELIC' | 'ARTIFACT';
+
+export function displayRarity(rarity: CosmeticRarity): DisplayRarity {
+  return rarity === 'OVERCLOCKED' ? 'ARTIFACT' : rarity;
+}

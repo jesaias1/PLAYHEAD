@@ -275,17 +275,18 @@ describe('Unified duplicate protection', () => {
     for (const track of SignalPackCatalog.getTracks()) {
       skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
     }
+    // Official completion only RECORDS the achievement now; the SERVER issues
+    // the drop. The DEV roller supplies the opens for this offline check.
+    skinSystem.grantDevPendingSignals(400, 'DIAMOND');
     const seen = new Set<string>();
     let guard = 0;
-    while (
-      !(skinSystem.isCollectionComplete() && skinSystem.isGloveCollectionComplete()) &&
-      guard++ < 500
-    ) {
+    while (!skinSystem.isDropPoolComplete() && guard++ < 500) {
       const drop = skinSystem.openSignalDrop();
       if (!drop || drop.isCollectionComplete) break;
       expect(seen.has(drop.item.id), `duplicate ${drop.item.id}`).toBe(false);
       seen.add(drop.item.id);
     }
+    expect(skinSystem.isDropPoolComplete()).toBe(true);
   });
 
   it('a full glove pool falls through to knives instead of blocking', () => {
@@ -528,21 +529,26 @@ describe('Decoder and Armory presentation', () => {
 // ---------------------------------------------------------------------------
 
 describe('Reward sources', () => {
-  it('official rank thresholds and custom audio still drive drops', () => {
+  it('official thresholds record rank keys but ONLY the first DIAMOND mints a drop', () => {
     const src = read('src/viewmodel/KarambitSkinSystem.ts');
-    // Official thresholds award exactly one drop per newly reached rank.
     expect(src).toMatch(/RANK_THRESHOLDS/);
-    expect(src).toMatch(/pendingDropRanks\.push\(threshold\)/);
+    // DIAMOND-only minting: no lower-rank `pendingDropRanks.push(threshold)`.
+    expect(src).not.toMatch(/pendingDropRanks\.push\(threshold\)/);
+    expect(src).toMatch(/threshold === 'DIAMOND'/);
+    expect(src).toMatch(/awardedDiamondDropKeys/);
     // Custom audio still cannot award a rank key.
     expect(src).toMatch(/isOfficial/);
     // And no new farming path was added.
     expect(src).not.toMatch(/dailyReward|loginReward|farmCount|xpGain/i);
   });
 
-  it('the drop count per rank is unchanged', () => {
+  it('the local legacy pending count stays empty (server owns the award)', () => {
     const track = SignalPackCatalog.getTracks()[0];
-    skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
-    expect(skinSystem.getPendingDropCount()).toBe(4);
+    const completion = skinSystem.recordTrackCompletion(track.id, 'DIAMOND', track.id);
+    expect(completion.awardedDropRanks).toEqual(['DIAMOND']);
+    // The real drop id arrives from the server, never as a local rank.
+    expect(skinSystem.getPendingDropCount()).toBe(0);
+    expect(skinSystem.getUnopenedDropIds()).toEqual([]);
   });
 });
 

@@ -246,6 +246,7 @@ Deno.serve(async (req: Request) => {
     is_world_record: boolean;
     world_record_award_id: string | null;
     is_personal_best: boolean;
+    signal_drop_id: string | null;
   };
 
   return json({
@@ -255,6 +256,9 @@ Deno.serve(async (req: Request) => {
     is_personal_best: verdict.is_personal_best === true,
     // The client shows the reward UI from THIS server verdict, never its own.
     is_world_record: verdict.is_world_record === true,
-    world_record_award_id: verdict.world_record_award_id ?? null
+    world_record_award_id: verdict.world_record_award_id ?? null,
+    // Non-null only when THIS run earned the account's first-Diamond drop on a
+    // unique official track. The client merely reacts; it never mints.
+    signal_drop_id: verdict.signal_drop_id ?? null
   });
 });

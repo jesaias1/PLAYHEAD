@@ -79,7 +79,19 @@ export interface ArmoryInventoryInput {
   masteryGloves: readonly MasteryGloveStatus[];
   /** Equipped glove id, from EITHER family. */
   equippedGloveId: string;
+  /**
+   * When true, a LOCKED ARTIFACT keeps its rarity/status and a masked hint but
+   * withholds its name / codename / description / preview. Obtained items and
+   * every non-ARTIFACT item always reveal fully.
+   */
+  maskUnknownArtifacts?: boolean;
 }
+
+/** Player-facing placeholder for an undiscovered ARTIFACT cosmetic. */
+export const UNKNOWN_ARTIFACT_NAME = 'UNKNOWN ARTIFACT';
+export const UNKNOWN_ARTIFACT_CODENAME = 'IDENTITY SEALED';
+export const UNKNOWN_ARTIFACT_DESCRIPTION =
+  'Live-signal artifact. Identity and preview stay sealed until it is decoded from a Signal Drop.';
 
 export interface ArmoryFilters {
   slot: ArmorySlot;
@@ -168,6 +180,15 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
       swatch: paletteSwatch(skin.paletteTag) ?? rarityColor(skin.rarity),
       isLive: !!skin.profile?.isVideoArtifact
     });
+    // UNDISCOVERED ARTIFACT: keep the rarity/category/locked signal honest but
+    // seal the identity so the premium video skins stay a genuine discovery.
+    if (input.maskUnknownArtifacts && !owned && (skin.rarity === 'ARTIFACT' || skin.rarity === 'OVERCLOCKED')) {
+      const masked = items[items.length - 1];
+      masked.name = UNKNOWN_ARTIFACT_NAME;
+      masked.codename = UNKNOWN_ARTIFACT_CODENAME;
+      masked.description = UNKNOWN_ARTIFACT_DESCRIPTION;
+      masked.progress = '';
+    }
   }
 
   for (const glove of input.dropGloves) {

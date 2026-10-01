@@ -20,6 +20,7 @@
 import { OnlineClient, online } from './supabaseClient';
 import { AuthService, authService } from './AuthService';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import type { CosmeticRarity } from '../viewmodel/KarambitSkinSystem';
 import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
@@ -69,6 +70,14 @@ export interface LocalProgressionSnapshot {
     localFirstScore: number;
   }>;
   customClaimFingerprints: string[];
+  // NOTE: unopened drop ids are intentionally NOT part of this local snapshot.
+  // They are server-authoritative and reconciled live via my_signal_drop_ledger,
+  // so an in-progress drop on ANOTHER device is never restored here as if it
+  // were still pending.
+  /** Drop ids already opened/spent, so a replay cannot re-award. */
+  openedDropIds: string[];
+  /** Local ledger of unique tracks whose first DIAMOND produced a drop. */
+  awardedDiamondDropKeys: string[];
 }
 
 export interface CloudProgressionRow {
@@ -140,6 +149,11 @@ export class CloudProgression {
   ) {
     this.loadQueue();
     this.installCommittedChangeHooks();
+    // SERVER-AUTHORITATIVE OPENING: the Armory opens a real drop through the
+    // open_signal_drop RPC. The client only animates the server's verdict.
+    KarambitSkinSystem.getInstance().setStructuredDropOpener((dropId) =>
+      this.openStructuredSignalDrop(dropId)
+    );
   }
 
   // -- scoped key helpers --------------------------------------------------
@@ -264,7 +278,9 @@ export class CloudProgression {
         localFirstTime: r.localFirstTime,
         localFirstScore: r.localFirstScore
       })),
-      customClaimFingerprints: CustomAudioRewardService.getInstance().getClaimedFingerprints()
+      customClaimFingerprints: CustomAudioRewardService.getInstance().getClaimedFingerprints(),
+      openedDropIds: [...skins.getOpenedDropIds()],
+      awardedDiamondDropKeys: [...skins.getAwardedDiamondDropKeys()]
     };
   }
 
@@ -516,6 +532,32 @@ export class CloudProgression {
             .map((r) => String(r.audio_fingerprint ?? ''))
             .filter((f) => f.length > 0)
         );
+      }
+    } catch {
+      /* best effort */
+    }
+    if (this.auth.getUserId() !== userId) return;
+
+    // 2b. Signal Drops (server-authoritative ledger) — RECONCILE the pending set
+    //     from the server, so a drop opened on another device is dropped locally
+    //     and a spent id is suppressed. This never mints ownership: it only
+    //     reflects what the server already recorded for THIS account.
+    try {
+      const { data, error } = await client.rpc('my_signal_drop_ledger');
+      if (this.auth.getUserId() !== userId) return;
+      if (!error && data && typeof data === 'object') {
+        const ledger = data as {
+          unopened?: unknown;
+          opened?: unknown;
+          tracks?: unknown;
+        };
+        const asIds = (v: unknown): string[] =>
+          Array.isArray(v) ? v.map((x) => String(x)).filter((x) => x.length > 0) : [];
+        KarambitSkinSystem.getInstance().applyCloudDropLedger({
+          unopened: asIds(ledger.unopened),
+          opened: asIds(ledger.opened),
+          tracks: asIds(ledger.tracks)
+        });
       }
     } catch {
       /* best effort */
@@ -976,6 +1018,40 @@ export class CloudProgression {
       return { ok: false, cosmeticId: null, detail: err instanceof Error ? err.message : String(err) };
     }
   }
+
+  /**
+   * Atomic SERVER opening of one Signal Drop.
+   *
+   * The server serializes, resolves the weighted unowned winner, persists the
+   * result and grants ownership. This wrapper only carries the id and refuses to
+   * touch local state if the account changed while the RPC was in flight.
+   */
+  public async openStructuredSignalDrop(dropId: string): Promise<{
+    dropId: string;
+    cosmeticId: string | null;
+    kind: 'KNIFE' | 'GLOVE' | null;
+    rarity?: CosmeticRarity;
+  }> {
+    const client = this.onlineClient.getClient();
+    const userId = this.auth.getUserId();
+    if (!client || !userId) throw new Error('Signal Drop opening requires an online account');
+    const { data, error } = await client.rpc('open_signal_drop', { p_drop_id: dropId });
+    if (error) throw new Error(error.message);
+    // ASYNC ISOLATION: never hydrate a resolved drop into a different account.
+    if (this.auth.getUserId() !== userId) throw new Error('account changed');
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { drop_id?: string; cosmetic_id?: string | null; kind?: string | null; rarity?: string | null }
+      | null;
+    if (!row) throw new Error('empty drop response');
+    const kind = row.kind === 'GLOVE' ? 'GLOVE' : row.kind === 'KNIFE' ? 'KNIFE' : null;
+    return {
+      dropId: row.drop_id ?? dropId,
+      cosmeticId: row.cosmetic_id ?? null,
+      kind,
+      rarity: (row.rarity as CosmeticRarity | null) ?? undefined
+    };
+  }
+
 
   /** DEV-only reset of the CURRENT account's migration marker (not the backup). */
   public resetMigrationFlagForDev(): void {

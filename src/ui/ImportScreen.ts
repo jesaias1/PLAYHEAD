@@ -12,7 +12,7 @@ import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { getMasteryGlove } from '../mastery/MasteryLadder';
 import { DROP_GLOVES, getDropGlove, isDropGloveId } from '../viewmodel/DropGloveCatalog';
-import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
+import { cosmeticKindLabel, displayRarity } from '../viewmodel/CosmeticDrop';
 import {
   ArmoryItem,
   ArmorySlot,
@@ -39,6 +39,7 @@ import { LeaderboardPanel } from './LeaderboardPanel';
 import { OnlineStatusBar } from './OnlineStatusBar';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { MenuBackdrop } from './MenuBackdrop';
+import { attachArtifactVideoPreview } from './ArtifactVideoPreview';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -167,6 +168,49 @@ export class ImportScreen {
   public selectArmoryItem(id: string): void {
     this.armorySelectedId = id;
     this.renderArmorySelection();
+    this.previewArmoryItem(id);
+  }
+
+  /**
+   * PREVIEW-ONLY material swap for the focused KARAMBIT.
+   *
+   * Uses the SAME material system the equipped skin and the reward reveal use,
+   * and it never persists or notifies: no premature real equip override, and a
+   * replay keeps its own ephemeral identity. Locked/unknown items preview
+   * nothing. Gloves preview through their own (dev-preview) path, so only a
+   * knife is handled here.
+   */
+  private previewArmoryItem(id: string): void {
+    const item = this.armoryItems.find((i) => i.id === id);
+    if (!item || item.slot !== 'karambit') {
+      this.skinSystem.setReplaySkinPreview(null);
+      return;
+    }
+    const owned = this.skinSystem.isSkinUnlocked(item.id);
+    this.skinSystem.setReplaySkinPreview(owned ? item.id : null);
+  }
+
+  /** Clears the ephemeral preview when leaving the Armory. */
+  private releaseArtifactPreview?: () => void;
+
+  public clearArmoryPreview(): void {
+    this.releaseArtifactPreview?.();
+    this.releaseArtifactPreview = undefined;
+    this.skinSystem.setReplaySkinPreview(null);
+    this.skinSystem.suspendActiveVideo();
+  }
+
+  /**
+   * Opens the existing terminal randomizer for a LEGACY/DEV pending rank.
+   * Structured server drops never use this path: they open through the atomic
+   * server RPC, so the client cannot reroll them.
+   */
+  public openLegacyReveal(): void {
+    if (!this.decodeModal) return;
+    this.decodeModal.open((reward) => {
+      if (reward) this.lastDecoderReward = reward;
+      this.renderArmory();
+    });
   }
 
   private showcasePanel: HTMLElement;
@@ -414,7 +458,7 @@ export class ImportScreen {
             </div>
             <div class="armory-drops">
               <span class="armory-drops-count">SIGNAL DROPS // <b id="decoder-pending">00</b></span>
-              <button id="btn-decode-signal" class="armory-decrypt-btn" type="button" title="Rank signal quality: BRONZE signal · SILVER enhanced odds · GOLD high-grade · DIAMOND pristine">[ DECRYPT ]</button>
+              <button id="btn-decode-signal" class="armory-decrypt-btn" type="button" title="First DIAMOND on each unique Signal Pack track awards one account-stored Signal Drop">[ DECRYPT ]</button>
             </div>
             <button id="btn-armory-dev-toggle" class="terminal-btn-subtle armory-dev-toggle" type="button">DEV PREVIEW: OFF</button>
           </div>
@@ -856,7 +900,8 @@ export class ImportScreen {
       dropGloves: DROP_GLOVES,
       dropOwned: (id) => this.skinSystem.isDropGloveOwned(id),
       masteryGloves: masteryGloveSystem.evaluate().gloves,
-      equippedGloveId: masteryGloveSystem.getEquippedGloveId()
+      equippedGloveId: masteryGloveSystem.getEquippedGloveId(),
+      maskUnknownArtifacts: true
     });
   }
 
@@ -995,7 +1040,7 @@ export class ImportScreen {
     tile.setAttribute('aria-selected', item.id === this.armorySelectedId ? 'true' : 'false');
     tile.setAttribute(
       'aria-label',
-      `${item.name} // ${item.rarity}${
+      `${item.name} // ${displayRarity(item.rarity)}${
         item.equipped ? ' // EQUIPPED' : item.owned ? ' // OWNED' : ' // LOCKED'
       }`
     );
@@ -1009,7 +1054,7 @@ export class ImportScreen {
       `<span class="armory-tile-swatch" aria-hidden="true"></span>` +
       `<span class="armory-tile-name">${item.name}</span>` +
       `<span class="armory-tile-foot">` +
-      `<span class="armory-tile-rarity">${item.rarity}</span>` +
+      `<span class="armory-tile-rarity">${displayRarity(item.rarity)}</span>` +
       `<span class="armory-tile-mark" aria-hidden="true">${mark}</span>` +
       `</span>`;
 
@@ -1024,6 +1069,8 @@ export class ImportScreen {
    * progress and the actions. This is what keeps the grid scannable.
    */
   private renderArmoryDetail(visible: readonly ArmoryItem[]): void {
+    this.releaseArtifactPreview?.();
+    this.releaseArtifactPreview = undefined;
     if (!this.armoryDetailElem) return;
     const item = resolveSelection(visible, this.armorySelectedId);
     this.armorySelectedId = item?.id ?? null;
@@ -1045,7 +1092,7 @@ export class ImportScreen {
 
     this.armoryDetailElem.innerHTML =
       `<div class="armory-detail-inner" style="--detail-accent: ${item.swatch};">` +
-      `<div class="armory-detail-rarity">${item.rarity}${
+      `<div class="armory-detail-rarity">${displayRarity(item.rarity)}${
         item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
       }</div>` +
       `<div class="armory-detail-name">${item.name}</div>` +
@@ -1063,6 +1110,13 @@ export class ImportScreen {
       `</div>`;
 
     this.renderArmoryDetailActions(item);
+    if (item.owned && item.isLive && item.slot === 'karambit' && !this.armoryPanel.classList.contains('hidden') && !this.decodeModal?.isVisible()) {
+      const path = this.skinSystem.getSkin(item.id).profile.videoPath;
+      if (path) {
+        this.skinSystem.suspendActiveVideo();
+        this.releaseArtifactPreview = attachArtifactVideoPreview(this.armoryDetailElem, path);
+      }
+    }
   }
 
   /**
@@ -1162,6 +1216,22 @@ export class ImportScreen {
     const pending = this.skinSystem.getPendingDropCount();
     this.decoderPendingElem.textContent = pad2(pending);
 
+    // SERVER drops are authoritative: while one is unopened, report the real
+    // state and never offer the offline roller as if it were the same thing.
+    if (this.skinSystem.hasStructuredDropPending()) {
+      this.decoderButton.disabled = false;
+      if (this.skinSystem.isDropPoolComplete()) {
+        this.decoderStatusElem.textContent = 'SIGNAL COLLECTION COMPLETE';
+        this.decoderDetailElem.textContent =
+          'Every eligible Signal Drop cosmetic is owned. No duplicates are issued.';
+        return;
+      }
+      this.decoderStatusElem.textContent = 'SIGNAL DROP ACQUIRED';
+      this.decoderDetailElem.textContent =
+        'A server-issued drop is stored. Open it to register one permanent Armory cosmetic.';
+      return;
+    }
+
     if (this.decoderBusy) {
       this.decoderStatusElem.textContent = 'DECODING...';
       this.decoderDetailElem.textContent =
@@ -1175,7 +1245,7 @@ export class ImportScreen {
       const reward = this.lastDecoderReward;
       this.decoderStatusElem.textContent = 'ARMORY SIGNAL FOUND';
       this.decoderStatusElem.dataset.rarity = reward.rarity;
-      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${reward.rarity} // ${cosmeticKindLabel(
+      this.decoderDetailElem.textContent = `${reward.qualityLabel} // ${displayRarity(reward.rarity)} // ${cosmeticKindLabel(
         reward.kind
       )} // ${reward.name}`;
       this.armoryViewRewardBtn.classList.remove('hidden');
@@ -1185,7 +1255,7 @@ export class ImportScreen {
       this.decoderDetailElem.textContent =
         pending > 0
           ? 'Packet ready. Decode to register one permanent Armory cosmetic.'
-          : 'Complete official Signal Pack runs to acquire Armory signals.';
+          : 'Earn your first DIAMOND on a unique Signal Pack track to store one Signal Drop.';
       this.armoryViewRewardBtn.classList.add('hidden');
     }
 
@@ -1241,6 +1311,14 @@ export class ImportScreen {
     this.decodeModal = modal;
   }
 
+  /** Opens the RESULTS-style quick reveal for a legacy/DEV pending rank. */
+  public onOpenLegacyReveal?: () => void;
+
+  /** Opens 04 // ARMORY (used by the results OPEN IN ARMORY action). */
+  public openArmoryTab(): void {
+    this.switchModule(3);
+  }
+
   /**
    * Catalog entry for a track id. Used by ghost racing to enter the level that a
    * recorded run actually belongs to.
@@ -1258,6 +1336,7 @@ export class ImportScreen {
   }
 
   public hide(): void {
+    this.clearArmoryPreview();
     this.stopPreview();
     this.element.classList.add('hidden');
   }
@@ -1378,8 +1457,50 @@ export class ImportScreen {
       }
     });
 
-    this.decoderButton.addEventListener('click', () => {
+    this.decoderButton.addEventListener('click', async () => {
       if (this.decoderBusy || this.skinSystem.getPendingDropCount() === 0) return;
+      // SERVER-ISSUED drop: opening is a serialized, idempotent server RPC. The
+      // client only animates the returned verdict, so a retry/reload can never
+      // reroll or duplicate. Offline/unavailable shows retry, never a fake drop.
+      if (this.skinSystem.hasStructuredDropPending()) {
+        if (this.decodeModal) {
+          this.clearArmoryPreview();
+          this.decodeModal.open((reward) => {
+            if (reward) this.lastDecoderReward = reward;
+            this.renderArmory();
+          });
+          return;
+        }
+        this.decoderBusy = true;
+        this.renderSignalDecoder();
+        try {
+          const reward = await this.skinSystem.openNextDrop();
+          this.decoderBusy = false;
+          if (reward) this.lastDecoderReward = reward;
+          this.renderArmory();
+        } catch {
+          this.decoderBusy = false;
+          this.decoderStatusElem.textContent = 'SIGNAL PENDING // RETRY';
+          this.decoderDetailElem.textContent =
+            'Server unavailable. Your unopened drop is stored and will open when you are back online.';
+          this.decoderButton.disabled = false;
+        }
+        return;
+      }
+      // PRODUCTION: only SERVER-ISSUED drops may be opened. The offline
+      // rank-roller is an EXPLICIT DEV path (F3 / ?debug=1 dev preview); it can
+      // never mint premium ownership into a normal account.
+      if (!this.skinSystem.isDevPreview()) {
+        this.decoderStatusElem.textContent = 'SIGNAL BUS OFFLINE';
+        this.decoderDetailElem.textContent =
+          'Server-issued drops only. Sign in and finish a unique Signal Pack track to earn one.';
+        this.renderSignalDecoder();
+        return;
+      }
+      if (this.onOpenLegacyReveal) {
+        this.onOpenLegacyReveal();
+        return;
+      }
       if (this.decodeModal) {
         this.decodeModal.open(() => this.renderArmory());
         return;
@@ -1460,6 +1581,7 @@ export class ImportScreen {
   }
 
   private switchModule(activeIndex: number): void {
+    if (activeIndex !== 3) this.clearArmoryPreview();
     const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
     const panels = [
       this.showcasePanel,
