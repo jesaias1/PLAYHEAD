@@ -2624,8 +2624,8 @@ option:hover, option:focus, option:checked {
 
 .signal-deck {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
-  gap: clamp(24px, 6vw, 110px);
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+  gap: clamp(24px, 4vw, 72px);
   align-items: end;
   min-height: calc(100vh - 170px);
 }
@@ -2754,17 +2754,18 @@ option:hover, option:focus, option:checked {
   min-width: 0;
   align-self: end;
   margin-bottom: clamp(8px, 3vh, 36px);
-  padding-left: 22px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px 14px 14px 22px;
+  border-left: 2px solid color-mix(in srgb, var(--track-accent) 45%, transparent);
+  background: linear-gradient(90deg, rgba(5, 9, 18, 0.72), rgba(5, 9, 18, 0.38));
 }
 .catalog-header {
   display: flex;
   justify-content: space-between;
   margin: 0 0 8px;
   padding: 0 0 10px;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   letter-spacing: 0.28em;
-  color: #d4dce6;
+  color: #edf3fa;
   border-bottom: 0;
 }
 .catalog-count { color: #5d6a7a; }
@@ -2772,7 +2773,7 @@ option:hover, option:focus, option:checked {
 #panel-showcase .showcase-selector-strip {
   grid-template-columns: 1fr;
   gap: 0;
-  max-height: min(58vh, 600px);
+  max-height: min(64vh, 680px);
   padding: 0 4px 0 0;
 }
 #panel-showcase .strip-item {
@@ -2795,12 +2796,12 @@ option:hover, option:focus, option:checked {
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 8px 10px 8px 12px;
+  padding: 10px 10px 10px 12px;
 }
 .strip-item-index { font: 700 0.66rem/1 var(--font-mono); color: #3f4a58; letter-spacing: 0.06em; }
 .strip-item.active .strip-item-index { color: var(--row-accent, var(--accent-color)); }
 .strip-item-body { min-width: 0; }
-#panel-showcase .strip-item-title { font-size: 0.86rem; margin: 0 0 3px; letter-spacing: 0.08em; color: #97a4b4; transition: color 160ms; }
+#panel-showcase .strip-item-title { font-size: 0.96rem; margin: 0 0 3px; letter-spacing: 0.08em; color: #bdc9d8; transition: color 160ms; }
 #panel-showcase .strip-item:hover .strip-item-title { color: #e6edf5; }
 #panel-showcase .strip-item.active .strip-item-title { color: #fff; }
 #panel-showcase .strip-item-header { justify-content: flex-start; gap: 10px; }
@@ -2973,7 +2974,7 @@ option:hover, option:focus, option:checked {
   #panel-showcase .signal-program-readout { margin: 12px 0; }
   .hero-wave { height: 44px; }
   #panel-showcase .showcase-records-strip { margin-bottom: 16px; }
-  #panel-showcase .showcase-selector-strip { max-height: 48vh; }
+  #panel-showcase .showcase-selector-strip { max-height: 56vh; }
 }
 
 
