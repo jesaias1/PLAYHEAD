@@ -29,6 +29,12 @@ export class PlayerController {
   public stats: PlayerStats = new PlayerStats();
   public cameraController: CameraController;
 
+  // Perf pass: the fixed tick runs at 120 Hz, so these are reused instead of
+  // allocated every tick. Values are identical to the previous fresh vectors.
+  private wishDirScratch = new THREE.Vector3();
+  private forwardScratch = new THREE.Vector3();
+  private rightScratch = new THREE.Vector3();
+
   public lastAirAccelAdded = 0;
   public lastLandingSpeed = 0;
 
@@ -210,10 +216,10 @@ export class PlayerController {
     if (this.isRestoring) return;
 
     // 1. Calculate input Wish Direction relative to Camera Yaw
-    const forward = this.cameraController.getForwardVector();
-    const right = this.cameraController.getRightVector();
+    const forward = this.cameraController.getForwardVector(this.forwardScratch);
+    const right = this.cameraController.getRightVector(this.rightScratch);
 
-    const wishDir = new THREE.Vector3();
+    const wishDir = this.wishDirScratch.set(0, 0, 0);
     if (this.keys.forward) wishDir.add(forward);
     if (this.keys.backward) wishDir.sub(forward);
     if (this.keys.right) wishDir.add(right);

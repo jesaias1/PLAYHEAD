@@ -1150,6 +1150,11 @@ export class Game {
 
     // setPalette applies the map's primary hue to the adaptive viewmodel accent.
     this.viewmodelController.setPalette(this.world.visualController.state.palette);
+
+    // Perf pass: compile the loaded world's shader programs during this
+    // existing load/prepare stage so late-revealed structures do not cause a
+    // first-visible shader-compile hitch mid-run.
+    this.environment.prewarmShaders();
   }
 
   private isRestoringCheckpoint = false;
@@ -2435,7 +2440,9 @@ export class Game {
       this.movementSfx.setWindLevel(speedFeel * 0.55);
 
       // Dev Diagnostics update
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
+      if (this.devOverlay.visible) {
+        this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
+      }
 
       // Checkpoint passing check
       if (this.currentTrack) {
@@ -2497,7 +2504,9 @@ export class Game {
       const labReduceMotion = SettingsManager.getInstance().settings.reduceMotion;
       this.environment.setSpeedStreak(labSpeedFeel * 0.42, labReduceMotion);
       this.movementSfx.setWindLevel(labSpeedFeel * 0.55);
-      this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
+      if (this.devOverlay.visible) {
+        this.devOverlay.update(this.playerController, this.world, this.audioEngine, this.environment, this.smoothedFps, this.movementFeedback.state, this.gateDiagnostics(), this.raceGhostDiagnostics());
+      }
     } else if (this.stateMachine.is(GameState.REPLAY)) {
       if (this.replayMode === 'POV') {
         // True first-person replay: the camera, audio and music-reactive world

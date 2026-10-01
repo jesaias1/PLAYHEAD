@@ -277,7 +277,8 @@ export class World {
     this.buildDebugChain(track);
 
     // 9. DEV-only protected-corridor visualization (hidden by default)
-    this.buildCorridorDebug();
+    // Perf pass: built lazily on first Shift+C toggle instead of every run (66
+    // meshes/geometries/materials that are never drawn in normal play).
   }
 
   /** PRESENTATION ONLY: brief world signal pulse (decays back to music). */
@@ -558,7 +559,9 @@ export class World {
     return visible;
   }
 
-  public buildCorridorDebug(): void {    if (this.debugCorridorGroup) {
+  public buildCorridorDebug(): void {
+    if (!this.corridor || !this.track) return;
+    if (this.debugCorridorGroup) {
       this.scene.remove(this.debugCorridorGroup);
       this.debugCorridorGroup.traverse((o) => {
         const m = o as THREE.Mesh;

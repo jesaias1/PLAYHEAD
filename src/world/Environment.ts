@@ -197,6 +197,24 @@ export class Environment {
   }
 
   /**
+   * Precompiles every material program currently in the scene so the first
+   * time a late-revealed structure (a spectacle, drop setpiece or landmark)
+   * becomes visible it does not stall the frame while its shader compiles.
+   *
+   * Called during the existing countdown/loading stage; it performs only work
+   * that would otherwise happen mid-run, and is safe to call more than once.
+   */
+  public prewarmShaders(): void {
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } catch {
+      // Shader precompilation is an optimisation, not a requirement. A driver
+      // that refuses to compile ahead of the draw simply keeps the old
+      // first-use behaviour.
+    }
+  }
+
+  /**
    * Clears accumulated render statistics. Called once per frame by the game
    * loop because `renderer.info.autoReset` is disabled so the stats cover every
    * composer pass, not just the last one.

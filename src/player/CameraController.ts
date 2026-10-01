@@ -49,6 +49,13 @@ export class CameraController {
   private diagQuatBefore = { x: 0, y: 0 };
   private diagQuatAfter = { x: 0, y: 0 };
 
+  // Reusable scratch (perf pass): the movement path reads the forward/right
+  // basis every fixed tick and consumes a mouse delta every render frame.
+  // Returning fresh objects here allocated hundreds of objects per second;
+  // these are reused instead. Values are byte-for-byte identical.
+  private rotationScratch = new THREE.Euler();
+  private mouseDeltaScratch = { x: 0, y: 0 };
+
   // Base sensitivity: radians per raw mouse pixel
   private static readonly BASE_SENSITIVITY = 0.0022;
 
@@ -376,15 +383,20 @@ export class CameraController {
   /**
    * Exact horizontal forward vector matching camera.getWorldDirection() on XZ plane
    */
-  public getForwardVector(): THREE.Vector3 {
-    return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+  public getForwardVector(target?: THREE.Vector3): THREE.Vector3 {
+    // A caller that supplies a target opts into reuse (the hot movement path
+    // passes its own scratch); the default call keeps returning a fresh vector
+    // so callers that retain the previous result are unaffected.
+    const v = target ?? new THREE.Vector3();
+    return v.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
   }
 
   /**
    * Exact horizontal right vector (Forward x Up)
    */
-  public getRightVector(): THREE.Vector3 {
-    return new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+  public getRightVector(target?: THREE.Vector3): THREE.Vector3 {
+    const v = target ?? new THREE.Vector3();
+    return v.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
   }
 
   /**
@@ -455,7 +467,9 @@ export class CameraController {
   }) => void;
 
   public consumeMouseDelta(): { x: number; y: number } {
-    const d = { x: this.lastMouseDeltaX, y: this.lastMouseDeltaY };
+    const d = this.mouseDeltaScratch;
+    d.x = this.lastMouseDeltaX;
+    d.y = this.lastMouseDeltaY;
     this.lastMouseDeltaX = 0;
     this.lastMouseDeltaY = 0;
     return d;
@@ -463,7 +477,7 @@ export class CameraController {
 
   private updateCameraRotation(): void {
     this.pitch = clamp(this.pitch, -1.55, 1.55);
-    const euler = new THREE.Euler(this.pitch, this.yaw, this.roll, 'YXZ');
+    const euler = this.rotationScratch.set(this.pitch, this.yaw, this.roll, 'YXZ');
     this.camera.quaternion.setFromEuler(euler);
   }
 

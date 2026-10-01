@@ -245,6 +245,15 @@ export class DevOverlay {
     this.element.style.display = 'none';
   }
 
+  /**
+   * True while the overlay is on screen. The game loop uses this to skip the
+   * explanatory DEV diagnostic objects it would otherwise build only to throw
+   * them away when the overlay is hidden.
+   */
+  public get visible(): boolean {
+    return this.isVisible;
+  }
+
   public update(
     player: PlayerController,
     world: World,

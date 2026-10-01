@@ -57,6 +57,8 @@ export class RouteSignalPackets {
   private previousTransient = 0;
 
   private dummy = new THREE.Object3D();
+  // Perf pass: reused per-frame sample (was allocated inside writeMatrices).
+  private sampleScratch = { x: 0, y: 0, z: 0, yaw: 0 };
 
   constructor(
     track: GeneratedTrack,
@@ -269,7 +271,7 @@ export class RouteSignalPackets {
 
   private writeMatrices(): void {
     if (!this.mesh) return;
-    const sample = { x: 0, y: 0, z: 0, yaw: 0 };
+    const sample = this.sampleScratch;
 
     for (let i = 0; i < this.packets.length; i++) {
       const packet = this.packets[i];

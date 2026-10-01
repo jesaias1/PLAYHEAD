@@ -201,6 +201,10 @@ export class SkylineArchitecture {
   private supportBase: THREE.Matrix4[] = [];
   private ridgeBase: THREE.Matrix4[] = [];
   private hiddenFlags: Map<THREE.InstancedMesh, boolean[]> = new Map();
+  // Perf pass: reusable scratch for the per-frame distance cull so the hot path
+  // does not allocate matrices/vectors every frame.
+  private cullHiddenMatrix = new THREE.Matrix4();
+  private cullPos = new THREE.Vector3();
   private cullingActive = false;
 
   constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
@@ -757,9 +761,9 @@ export class SkylineArchitecture {
       { mesh: this.backgroundRidges!, base: this.ridgeBase }
     ];
 
-    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    const hidden = this.cullHiddenMatrix.makeScale(0, 0, 0);
     hidden.setPosition(0, -99999, 0);
-    const pos = new THREE.Vector3();
+    const pos = this.cullPos;
 
     for (const { mesh, base } of targets) {
       if (!mesh) continue;
