@@ -61,6 +61,12 @@ export class Environment {
   /** Decoration LOD callback, supplied by World. */
   public decorationLodDistance = 0;
 
+  /**
+   * Resolved official world profile (presentation only). Null / usesOverride=false
+   * (Signal Drift, custom, fallback) leave the atmosphere exactly as before.
+   */
+  public worldProfile: import('./SignalWorldProfile').OfficialWorldProfile | null = null;
+
   constructor(container: HTMLElement) {
     // 1. Scene & Monumental Brutalist Fog (readable at distance)
     this.scene = new THREE.Scene();
@@ -302,6 +308,30 @@ export class Environment {
     }
   }
 
+  /**
+   * Apply the official world-profile ATMOSPHERE descriptor: a gentle background
+   * tint shift and the fog open/close scale used by updateAtmosphere. Presentation
+   * only; never read by physics, generation, scoring or camera gameplay.
+   */
+  public applyWorldProfile(profile: import('./SignalWorldProfile').OfficialWorldProfile): void {
+    this.worldProfile = profile;
+    const tint = new THREE.Color(profile.sky.backgroundTint);
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.lerp(tint, 0.35);
+    }
+  }
+
+  /**
+   * RESET the official-profile atmosphere state. Called on EVERY load whose
+   * resolved profile does not override (Signal Drift, custom/null, tutorial,
+   * lab), so a profiled track's tint and fog shaping never leak into the
+   * reference world. The palette itself is re-applied immediately afterwards
+   * by setPalette(), so no colour needs to be restored here.
+   */
+  public clearWorldProfile(): void {
+    this.worldProfile = null;
+  }
+
   public setAccent(accent: VisualAccent): void {
     const col = new THREE.Color(accent.hex);
     this.hemiLight.color.lerp(col, 0.15);
@@ -338,6 +368,17 @@ export class Environment {
     if (this.scene.fog instanceof THREE.Fog) {
       let targetFar = directorState ? directorState.fogFar : 320;
       let targetNear = directorState ? directorState.fogNear : 45;
+
+      // Official world-profile haze/openness shaping (identity for Signal Drift
+      // and fallback). Bounded: openness opens the range, haze closes it.
+      if (this.worldProfile && this.worldProfile.usesOverride) {
+        const haze = Math.max(0, Math.min(1, this.worldProfile.sky.hazeStrength));
+        const openness = Math.max(0, Math.min(1, this.worldProfile.space.openness));
+        const farScale = (0.72 + openness * 0.6) * (1.15 - haze * 0.5);
+        const nearScale = 1.0 - haze * 0.35;
+        targetFar *= farScale;
+        targetNear *= nearScale;
+      }
 
       if (!directorState) {
         if (visualState.sectionTheme === 'DROP' || visualState.dropImpact > 0.3) {

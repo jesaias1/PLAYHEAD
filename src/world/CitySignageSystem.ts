@@ -20,6 +20,7 @@ import { cleanTrackTitle } from '../audio/CleanTitle';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { patchEmbeddedSignal } from './EmbeddedSignal';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 
 export interface MonolithAnchor {
   id: string;
@@ -222,13 +223,18 @@ export class CitySignageSystem {
   }
   private cullingActive = false;
 
+  /** Official world profile: signage density / terminology / mascot usage. */
+  private profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE;
+
   constructor(
     analysis: TrackAnalysis,
     track: GeneratedTrack,
     corridor: RouteExclusionCorridor,
     monoliths: MonolithAnchor[],
-    stelae: StelaAnchor[]
+    stelae: StelaAnchor[],
+    profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
   ) {
+    this.profile = profile;
     this.group = new THREE.Group();
     this.group.name = 'CitySignageSystem';
 
@@ -467,8 +473,9 @@ export class CitySignageSystem {
       .filter(m => m.isHero)
       .sort((a, b) => b.node.intensity - a.node.intensity);
 
+    const signScale = this.profile.usesOverride ? this.profile.signage.amountScale : 1.0;
     let heroesPlaced = 0;
-    const maxHeroes = monoliths.length > 10 ? 3 : 2;
+    const maxHeroes = Math.max(1, Math.round((monoliths.length > 10 ? 3 : 2) * signScale));
     let lastHeroProgress = -1;
 
     for (const m of heroCandidates) {
@@ -511,7 +518,7 @@ export class CitySignageSystem {
     let supportCount = 0;
     // Moderate density: signal signage should read as part of the megastructure's
     // life, not as an ad city. Every third tower stays dark for negative space.
-    const maxSupport = 10;
+    const maxSupport = Math.max(2, Math.round(10 * signScale));
 
     for (let i = 0; i < monoliths.length; i++) {
       if (supportCount >= maxSupport) break;
@@ -528,7 +535,7 @@ export class CitySignageSystem {
       const stagedMat = this.stagedWaveMats[stageIdx];
       const preferredY = m.node.position.y + 30.0;
 
-      if (supportCount % 3 === 2) {
+      if (supportCount % 3 === 2 && this.profile.signage.mascotUsage >= 0.4) {
         // PLAYHEAD mascot system-branding panel
         const mMat = this.midMat.clone();
         mMat.map = PixelArtLibrary.getMascotSignalTexture(Math.floor(supportCount / 3), accentHex, secondaryHex);
@@ -607,7 +614,7 @@ export class CitySignageSystem {
     // STEP 3: VERTICAL JAPANESE STELAE RUNNERS ON SUPPORT STELAE
     // =========================================================================
     let vertCount = 0;
-    const maxVert = 7;
+    const maxVert = Math.max(0, Math.round(7 * signScale * (0.5 + this.profile.signage.terminology)));
 
     for (let j = 0; j < stelae.length; j++) {
       if (vertCount >= maxVert) break;
@@ -649,7 +656,7 @@ export class CitySignageSystem {
     // STEP 4: ROOFTOP CROWN SIGNS (1 to 2 Across Whole Level)
     // =========================================================================
     let crownCount = 0;
-    const maxCrowns = 2;
+    const maxCrowns = Math.max(1, Math.round(2 * signScale));
 
     for (let i = 0; i < monoliths.length; i++) {
       if (crownCount >= maxCrowns) break;
@@ -732,8 +739,8 @@ export class CitySignageSystem {
    * Colour is preserved by scaling the AUTHORED hue rather than flattening to
    * grey, so the palette stays legible while the luminance moves.
    */
-  public update(visualState: MusicVisualState, _dt = 0): void {
-    const mult = visualState.reactivityMultiplier;
+  public update(visualState: MusicVisualState, _dt = 0, signageGain = 1.0): void {
+    const mult = visualState.reactivityMultiplier * signageGain;
     const ch = resolveChannels(visualState);
     const t = visualState.time;
 

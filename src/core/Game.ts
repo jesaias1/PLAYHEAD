@@ -978,7 +978,14 @@ export class Game {
         this.currentTrack = precomputed.track;
         this.currentAnalysis = precomputed.analysis;
         this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.88);
-        this.world.loadTrack(precomputed.analysis, precomputed.track, this.environment);
+        // The catalog id here is TRUSTED (arrived from a real official track
+        // selection), so the world can resolve the correct official profile.
+        this.world.loadTrack(
+          precomputed.analysis,
+          precomputed.track,
+          this.environment,
+          trackEntry.id
+        );
         if (precomputed.spectacleEvents) {
           this.world.songDirector.spectaclePlanner.events = precomputed.spectacleEvents;
         }
@@ -1080,7 +1087,9 @@ export class Game {
     this.currentTrack = TrackGenerator.generate(analysis);
     this.ui.analysisScreen.setStage('[ROUTE] TRAVERSAL VALIDATED', 0.9);
     this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
-    this.world.loadTrack(analysis, this.currentTrack, this.environment);
+    // Custom audio / tutorial / lab: no official catalog id, so the world uses
+    // the fallback profile. A filename is never trusted to select an official one.
+    this.world.loadTrack(analysis, this.currentTrack, this.environment, this.currentOfficialTrackId);
     this.world.songDirector.onSectionAnnouncement = (title) => {
       this.ui.hud.showSectionTitle(title);
     };

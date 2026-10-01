@@ -12,6 +12,7 @@ import { createPlatformGeometry } from '../generation/PlatformShape';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { patchEmbeddedSignal } from './EmbeddedSignal';
 import { VisualAccent } from '../audio/AudioFeatures';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelTextureGenerator } from './PixelTextureGenerator';
 import { BrutalistShapeLibrary } from './BrutalistShapeLibrary';
@@ -68,7 +69,8 @@ export interface BuiltWorldAssets {
 export class GeometryBuilder {
   public static buildWorld(
     track: GeneratedTrack,
-    paletteOrAccent: TrackPalette | VisualAccent
+    paletteOrAccent: TrackPalette | VisualAccent,
+    worldProfile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
   ): BuiltWorldAssets {
     const rootGroup = new THREE.Group();
     const decorativeGroup = new THREE.Group();
@@ -115,24 +117,60 @@ export class GeometryBuilder {
     const basaltTex = PixelTextureGenerator.getBlackBasaltTexture();
     const surfTex = PixelTextureGenerator.getSurfSignalTexture(primaryHex);
 
+    // --- OFFICIAL WORLD PROFILE ROUTE MATERIAL FAMILY -----------------------
+    // Readability is preserved for every family: landing decks stay legible,
+    // platform edges stay clear and the surf face stays brighter than the
+    // backside. Identity for Signal Drift / fallback (usesOverride=false).
+    const routeMat = worldProfile.usesOverride ? worldProfile.material : null;
+    const rm = ((): {
+      platformColor: number; platformRough: number; platformMetal: number;
+      surfColor: number; surfRough: number; surfMetal: number; surfEmissive: number;
+      edgeTone: number;
+    } => {
+      switch (routeMat?.route) {
+        case 'FRACTURED_SLAB':
+          return { platformColor: 0x0e141f, platformRough: 0.78, platformMetal: 0.12, surfColor: 0x141c2b, surfRough: 0.30, surfMetal: 0.55, surfEmissive: 0.30, edgeTone: 0.9 };
+        case 'POLISHED_SIGNAL_STONE':
+          return { platformColor: 0x121a24, platformRough: 0.4, platformMetal: 0.34, surfColor: 0x1a2634, surfRough: 0.14, surfMetal: 0.7, surfEmissive: 0.34, edgeTone: 1.15 };
+        case 'INDUSTRIAL_PLATE':
+          return { platformColor: 0x121315, platformRough: 0.62, platformMetal: 0.58, surfColor: 0x17191c, surfRough: 0.32, surfMetal: 0.82, surfEmissive: 0.24, edgeTone: 1.0 };
+        case 'COLD_GLASS':
+          return { platformColor: 0x0c1620, platformRough: 0.22, platformMetal: 0.46, surfColor: 0x101d29, surfRough: 0.10, surfMetal: 0.6, surfEmissive: 0.4, edgeTone: 1.2 };
+        case 'NEAR_BLACK_CERAMIC':
+          return { platformColor: 0x05070a, platformRough: 0.36, platformMetal: 0.2, surfColor: 0x090c11, surfRough: 0.16, surfMetal: 0.48, surfEmissive: 0.36, edgeTone: 0.85 };
+        case 'WEATHERED_BRUTALIST':
+          return { platformColor: 0x141210, platformRough: 0.86, platformMetal: 0.1, surfColor: 0x191713, surfRough: 0.52, surfMetal: 0.34, surfEmissive: 0.2, edgeTone: 1.05 };
+        default:
+          return { platformColor: 0x0e141f, platformRough: 0.72, platformMetal: 0.12, surfColor: 0x141c2b, surfRough: 0.22, surfMetal: 0.78, surfEmissive: 0.28, edgeTone: 1.0 };
+      }
+    })();
+    const platformColor = routeMat ? new THREE.Color(rm.platformColor) : surfaceCol;
+    const platformRough = routeMat ? rm.platformRough : 0.72;
+    const platformMetal = routeMat ? rm.platformMetal : 0.12;
+    const surfColor = routeMat ? rm.surfColor : 0x141c2b;
+    const surfRough = routeMat ? rm.surfRough : 0.22;
+    const surfMetal = routeMat ? rm.surfMetal : 0.78;
+    const surfEmissive = routeMat ? rm.surfEmissive : 0.28;
+    const platformEdgeTone = routeMat ? rm.edgeTone : 1.0;
+
     // 1. Route Platform Material (Brutalist Cast Concrete with Pixel Aggregate)
     const platformMaterial = new THREE.MeshStandardMaterial({
-      color: surfaceCol,
-      roughness: 0.72,
-      metalness: 0.12,
+      color: platformColor,
+      roughness: platformRough,
+      metalness: platformMetal,
       emissive: new THREE.Color(0x060910),
       map: concreteTex,
       bumpMap: concreteTex,
-      bumpScale: 0.04
+      bumpScale: 0.04 * (routeMat ? 1.6 - worldProfile.material.surfaceBreakup : 1.0)
     });
 
     // 2. Surf Material (Directional Glide Chevrons + Edge Guide Rails)
     const surfMaterial = new THREE.MeshStandardMaterial({
-      color: 0x141c2b,
+      color: surfColor,
       emissive: primaryCol,
-      emissiveIntensity: 0.28,
-      roughness: 0.22,
-      metalness: 0.78,
+      emissiveIntensity: surfEmissive,
+      roughness: surfRough,
+      metalness: surfMetal,
       map: surfTex,
       bumpMap: surfTex,
       bumpScale: 0.03
@@ -143,7 +181,7 @@ export class GeometryBuilder {
     // Every platform face knows its size in metres (aFace), so the shader can
     // draw a lit chamfer rim, an inset seam groove carrying a thin signal line,
     // deck joints, and a glowing lip trim just under the top edge of the sides.
-    patchPlatformArchitecture(platformMaterial, primaryCol);
+    patchPlatformArchitecture(platformMaterial, primaryCol, platformEdgeTone);
 
     // 1c. Structural underside keels hung beneath each deck.
     const keelMaterial = new THREE.MeshStandardMaterial({
@@ -1140,10 +1178,12 @@ function addFaceSizeAttribute(geom: THREE.BufferGeometry, node: RouteNode): void
   geom.setAttribute('aFace', new THREE.BufferAttribute(data, 3));
 }
 
-function patchPlatformArchitecture(material: THREE.MeshStandardMaterial, accent: THREE.Color): void {
+function patchPlatformArchitecture(material: THREE.MeshStandardMaterial, accent: THREE.Color, edgeTone = 1.0): void {
   const seamColor = { value: accent.clone() };
+  const edgeToneUniform = { value: edgeTone };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSeamColor = seamColor;
+    shader.uniforms.uEdgeTone = edgeToneUniform;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -1155,6 +1195,7 @@ function patchPlatformArchitecture(material: THREE.MeshStandardMaterial, accent:
         '#include <common>',
         `#include <common>
 uniform vec3 uSeamColor;
+uniform float uEdgeTone;
 varying vec3 vFace;
 varying vec2 vPlatUv;
 float archGlow = 0.0;
@@ -1193,7 +1234,7 @@ float archTop = 0.0;`
     bracket = min(bracket, 1.0) * step(4.0, min(vFace.x, vFace.y));
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.8 + vec3(0.03), bracket * 0.6);
 
-    archGlow = line * 0.7 + rim * 0.06 + bracket * 0.35;
+    archGlow = (line * 0.7 + rim * 0.06 + bracket * 0.35) * uEdgeTone;
     archTop = 1.0;
   } else if (vFace.z < 1.5) {
     // SIDES: dark mass, a glowing lip trim just under the deck edge, and a

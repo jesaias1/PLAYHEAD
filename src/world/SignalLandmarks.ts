@@ -24,6 +24,7 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from '../generation/GenerationTypes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { tagWorldRole } from './WorldRoles';
 
@@ -201,8 +202,13 @@ export class SignalLandmarks {
     analysis: TrackAnalysis,
     track: GeneratedTrack,
     palette: TrackPalette,
-    landmarkScale = 1.0
+    landmarkScale = 1.0,
+    profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
   ) {
+    // Official profile modulates landmark count/scale (identity for Drift/fallback).
+    const effectiveLandmarkScale = profile.usesOverride
+      ? landmarkScale * (0.7 + profile.hero.scale * 0.4)
+      : landmarkScale;
     this.group = new THREE.Group();
     // World role: declared explicitly so the final world safety pass can
     // never mistake this geometry for gameplay (or miss it entirely).
@@ -224,7 +230,7 @@ export class SignalLandmarks {
       route,
       corridor,
       minWorldY,
-      landmarkScale,
+      effectiveLandmarkScale,
       analysis.seed >>> 0
     );
     if (placements.length === 0) return;

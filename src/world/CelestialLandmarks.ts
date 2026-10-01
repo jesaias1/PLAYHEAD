@@ -14,6 +14,7 @@ import { TrackPalette } from '../audio/TrackPalettes';
 import { PixelArtLibrary } from './PixelArtLibrary';
 import { tagWorldRole } from './WorldRoles';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 
 export type CelestialType = 'MOON' | 'ECLIPSE' | 'EYE_VOID' | 'HALO_DISC';
 
@@ -23,9 +24,20 @@ export class CelestialLandmarks {
   private haloMesh: THREE.Mesh | null = null;
   private heroStarsMesh: THREE.InstancedMesh | null = null;
   private relicGroup: THREE.Group = new THREE.Group();
+  private profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE;
+  /** True when a large celestial body (moon/eclipse/halo) is placed: false for
+   *  NONE and the sky-only motifs (NEBULA/GALAXY_BAND/DISTANT_LIGHT_FIELD). */
+  public hasBody = false;
 
-  constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack, palette: TrackPalette) {
+  constructor(
+    scene: THREE.Scene,
+    analysis: TrackAnalysis,
+    track: GeneratedTrack,
+    palette: TrackPalette,
+    profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
+  ) {
     this.group = new THREE.Group();
+    this.profile = profile;
     // World role: declared explicitly so the final world safety pass can
     // never mistake this geometry for gameplay (or miss it entirely).
     tagWorldRole(this.group, 'VISUAL_ONLY', 'CelestialLandmarks');
@@ -40,6 +52,19 @@ export class CelestialLandmarks {
     // Determine celestial landmark type from song seed & spectral profile
     const seed = track.seed || 12345;
     let celestialType: CelestialType = 'MOON';
+    // OFFICIAL WORLD PROFILE celestial identity. Rarity is respected: some
+    // tracks carry NO large celestial body at all (memorable, not a planet in
+    // every level). Identity for Signal Drift / fallback.
+    const useProfile = this.profile.usesOverride;
+    // NONE, and the sky-only motifs (NEBULA / GALAXY_BAND / DISTANT_LIGHT_FIELD)
+    // carry NO large body: those are rendered as real ProceduralSky shader
+    // motifs instead of being aliased onto a fake moon/halo.
+    const skyOnlyMotif =
+      this.profile.sky.celestial === 'NEBULA' ||
+      this.profile.sky.celestial === 'GALAXY_BAND' ||
+      this.profile.sky.celestial === 'DISTANT_LIGHT_FIELD';
+    const skipCelestial = useProfile && (this.profile.sky.celestial === 'NONE' || skyOnlyMotif);
+    this.hasBody = !skipCelestial;
     if (palette.name === 'BLOOD_MOON' || palette.name === 'DEEP_SIGNAL') {
       celestialType = (seed % 2 === 0) ? 'ECLIPSE' : 'EYE_VOID';
     } else if (palette.name === 'EMBER_VOID' || palette.name === 'DUSK') {
@@ -48,6 +73,21 @@ export class CelestialLandmarks {
       celestialType = (seed % 2 === 0) ? 'EYE_VOID' : 'HALO_DISC';
     } else {
       celestialType = (seed % 2 === 0) ? 'MOON' : 'HALO_DISC';
+    }
+
+    if (useProfile) {
+      switch (this.profile.sky.celestial) {
+        case 'MOON': celestialType = 'MOON'; break;
+        case 'ECLIPSE': celestialType = 'ECLIPSE'; break;
+        case 'HALO': celestialType = 'HALO_DISC'; break;
+        // NONE and the sky-only motifs (NEBULA/GALAXY_BAND/DISTANT_LIGHT_FIELD)
+        // render no large body; they are consumed as sky shader motifs.
+        case 'NEBULA':
+        case 'GALAXY_BAND':
+        case 'DISTANT_LIGHT_FIELD':
+        case 'NONE':
+        default: break;
+      }
     }
 
     // Anchor position: placed 420m away in the horizon opposite the route's mid-point.
@@ -81,14 +121,18 @@ export class CelestialLandmarks {
       cy = midNode.position.y + elev + step * 20.0;
     }
 
-    // 1. Multi-plane Celestial Body
+    const primaryHex = palette.primaryHex;
+    const secondaryHex = palette.secondaryHex;
+    const highlightHex = palette.highlight ? '#' + palette.highlight.getHexString() : '#ffffff';
+
+    // 1. Multi-plane Celestial Body (skipped when the profile calls for NONE).
+    if (!skipCelestial) {
     const celestialGroup = new THREE.Group();
     celestialGroup.position.set(cx, cy, cz);
     celestialGroup.lookAt(midNode.position.x, midNode.position.y + 10.0, midNode.position.z);
+    // Authored scale bridges: rarer/larger identities read as monumental.
+    if (useProfile) celestialGroup.scale.setScalar(0.8 + this.profile.hero.scale * 0.35);
 
-    const primaryHex = palette.primaryHex;
-    const secondaryHex = palette.secondaryHex;
-    const highlightHex = palette.highlight ? `#${palette.highlight.getHexString()}` : '#ffffff';
 
     let coreTex: THREE.CanvasTexture;
     let coreSize = 130.0;
@@ -139,9 +183,11 @@ export class CelestialLandmarks {
     celestialGroup.add(this.celestialMesh);
 
     this.group.add(celestialGroup);
+    }
 
-    // 2. HERO STAR CROSSES: 24 iconic 4-point pixel stars scattered across sky constellations
-    const starCount = 28;
+    // 2. HERO STAR CROSSES: iconic 4-point pixel stars scattered across sky constellations.
+    // Count follows the profile star character (identity for Drift / fallback).
+    const starCount = useProfile ? Math.max(8, Math.round(28 * (0.5 + this.profile.sky.starDensity))) : 28;
     const starGeom = new THREE.PlaneGeometry(12.0, 12.0);
     const starTex = PixelArtLibrary.getStarCrossTexture(highlightHex);
     const starMat = new THREE.MeshBasicMaterial({
@@ -200,11 +246,12 @@ export class CelestialLandmarks {
     }
   }
 
-  public update(time: number, bass: number, dropImpact: number): void {
-    // Subtle rotation of the outer celestial halo
+  public update(time: number, bass: number, dropImpact: number, gain = 1.0): void {
+    // Subtle rotation of the outer celestial halo. gain is the bounded,
+    // smoothed official-profile reaction gain for the HERO/SKY subsystems.
     if (this.haloMesh) {
       this.haloMesh.rotation.z = time * 0.04;
-      const baseOp = 0.5 + bass * 0.25 + dropImpact * 0.3;
+      const baseOp = 0.5 + (bass * 0.25 + dropImpact * 0.3) * gain;
       (this.haloMesh.material as THREE.MeshBasicMaterial).opacity = Math.min(1.0, baseOp);
     }
 

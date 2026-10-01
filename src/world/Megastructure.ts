@@ -27,6 +27,7 @@ import { GeneratedTrack } from '../generation/GenerationTypes';
 import { TrackPalette } from '../audio/TrackPalettes';
 import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { tagWorldRole } from './WorldRoles';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 
 const STRUCTURE_VERT = `
 varying vec3 vWorld;
@@ -165,7 +166,15 @@ export class Megastructure {
   private pulse = 0;
   private lastTime = 0;
 
-  constructor(scene: THREE.Scene, track: GeneratedTrack, palette: TrackPalette) {
+  private profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE;
+
+  constructor(
+    scene: THREE.Scene,
+    track: GeneratedTrack,
+    palette: TrackPalette,
+    profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
+  ) {
+    this.profile = profile;
     this.group.name = 'Megastructure';
     this.atmosphereGroup.name = 'MegastructureAtmosphere';
     tagWorldRole(this.group, 'DECORATION', 'Megastructure');
@@ -200,7 +209,13 @@ export class Megastructure {
     dir.normalize();
     const right = new THREE.Vector3(dir.z, 0, -dir.x);
     const yawAlong = Math.atan2(dir.x, dir.z);
-    const span = Math.max(400, new THREE.Vector3(end.x - start.x, 0, end.z - start.z).length());
+    let span = Math.max(400, new THREE.Vector3(end.x - start.x, 0, end.z - start.z).length());
+    // Official profile: openness spreads the hero compositions out; verticality
+    // stretches the documented vertical scale. Identity for Drift/fallback.
+    if (this.profile.usesOverride) {
+      span *= 0.85 + this.profile.space.openness * 0.35;
+    }
+    const vertScale = this.profile.usesOverride ? 0.85 + this.profile.space.verticality * 0.4 : 1.0;
 
     // Cool slate atmosphere with only a trace of the track palette, so distant
     // mass reads as air-lit stone rather than tinted plastic.
@@ -276,6 +291,7 @@ export class Megastructure {
     const farMat = makeMat(0.2, 0.6, 1900);
 
     const box = (w: number, h: number, d: number): THREE.BoxGeometry => {
+      h *= vertScale;
       const g = new THREE.BoxGeometry(w, h, d);
       this.geometries.push(g);
       return g;

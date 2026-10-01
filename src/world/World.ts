@@ -22,6 +22,8 @@ import { CelestialLandmarks } from './CelestialLandmarks';
 import { SignalLandmarks } from './SignalLandmarks';
 import { RouteSignalPackets } from './RouteSignalPackets';
 import { Megastructure } from './Megastructure';
+import { SignalHeroMotifs } from './SignalHeroMotifs';
+import { SignalWorldProfileRegistry, OfficialWorldProfile, stepProfileReactionGain } from './SignalWorldProfile';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 import { collectForkSequences } from '../generation/RouteForkGenerator';
@@ -48,6 +50,8 @@ export class World {
   /** Travelling route signal packets (presentation only, one draw call). */
   public routePackets: RouteSignalPackets | null = null;
   public megastructure: Megastructure | null = null;
+  /** Per-track hero composition (decoration only, corridor-validated). */
+  public heroMotifs: SignalHeroMotifs | null = null;
   public debugChainMesh: THREE.LineSegments | null = null;
 
   /** DEV-only debug visualization of the protected gameplay region. */
@@ -55,6 +59,23 @@ export class World {
 
   public track: GeneratedTrack | null = null;
   public analysis: TrackAnalysis | null = null;
+
+  /**
+   * Data-driven official visual world profile for the loaded track. Resolved
+   * from the TRUSTED catalog id only; custom/tutorial/lab fall back to the
+   * default. Signal Drift is the baseline reference (usesOverride=false).
+   */
+  public worldProfile: OfficialWorldProfile = SignalWorldProfileRegistry.resolveForTrackId(null);
+
+  /** Smoothed, bounded official-profile reaction gain (1.0 = identity). */
+  public profileReactionGain = 1.0;
+
+  // Cached per-load reaction selection. Constant for the whole track, so the
+  // per-frame update reads booleans instead of allocating an emphasis array.
+  private reactHero = false;
+  private reactCelestialSky = false;
+  private reactSky = false;
+  private reactAtmosphere = false;
 
   /**
    * PRESENTATION ONLY. A short-lived multiplier added on top of the
@@ -82,17 +103,52 @@ export class World {
     this.spectacleRenderer = new SpectacleRenderer(scene);
   }
 
-  public loadTrack(analysis: TrackAnalysis, track: GeneratedTrack, environment?: Environment): void {
+  public loadTrack(
+    analysis: TrackAnalysis,
+    track: GeneratedTrack,
+    environment?: Environment,
+    officialTrackId: string | null = null
+  ): void {
     this.disposeTrackAssets();
 
     this.analysis = analysis;
     this.track = track;
 
+    // 0. Resolve the data-driven official visual world profile. This ONLY
+    //    trusts a real catalog id; custom audio / tutorial / lab (null) and any
+    //    unknown id receive the safe fallback. A filename that happens to look
+    //    like an official title can never select an official profile.
+    this.worldProfile = SignalWorldProfileRegistry.resolveForTrackId(officialTrackId);
+    const emph = this.worldProfile.usesOverride ? this.worldProfile.reaction.emphasis : null;
+    this.reactHero = !!emph?.includes('HERO');
+    this.reactCelestialSky = !!emph && (emph.includes('HERO') || emph.includes('SKY'));
+    this.reactSky = !!emph?.includes('SKY');
+    this.reactAtmosphere = !!emph?.includes('ATMOSPHERE');
+
     // 1. Initialize Visual Signal Bus with Palette and Song Director
     this.visualController.init(analysis, track);
     this.songDirector.init(analysis, track);
+
+    // 1b. RESET every piece of persistent profile state on EVERY load BEFORE
+    //     applying the new one. This is what guarantees a previously loaded
+    //     profiled track cannot leak its reaction bounds, atmosphere tint,
+    //     star density/tint or skyline shaping into Signal Drift, custom/null
+    //     or any other official track. Signal Drift and the fallback
+    //     (usesOverride=false) therefore end up inert.
+    this.profileReactionGain = 1.0;
+    this.visualController.clearWorldProfile();
+    this.sky.clearWorldProfile();
+    if (environment) environment.clearWorldProfile();
+
+    // 1c. Order matters for the sky: its palette/base colours are set FIRST,
+    //     then the profile tint is layered on, so tint is never overwritten.
     if (environment) {
       environment.setPalette(this.visualController.state.palette);
+    }
+    if (this.worldProfile.usesOverride) {
+      this.visualController.applyWorldProfile(this.worldProfile);
+      this.sky.applyWorldProfile(this.worldProfile.sky);
+      if (environment) environment.applyWorldProfile(this.worldProfile);
     }
 
     // 2. Build Physics Colliders (frozen authoritative physics)
@@ -110,7 +166,7 @@ export class World {
     );
 
     // 3. Build Procedural Route & Monolith Meshes
-    this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette);
+    this.builtAssets = GeometryBuilder.buildWorld(track, this.visualController.state.palette, this.worldProfile);
     this.scene.add(this.builtAssets.rootGroup);
 
     // Register route edge trim with PlayheadSystem for temporal activation
@@ -131,15 +187,17 @@ export class World {
       this.playheadSystem.registerReactive(beacon.mesh, beacon.channel);
     }
 
-    // 4. Build Distant Audio Skyline
-    this.skyline = new SkylineArchitecture(this.scene, analysis, track);
+    // 4. Build Distant Audio Skyline (architecture family / density / spacing
+    //    / signage density follow the resolved official world profile).
+    this.skyline = new SkylineArchitecture(this.scene, analysis, track, this.worldProfile);
 
     // 5. Build Celestial Landmarks (Giant low-res Moon / Eclipse / Halos in negative space)
     this.celestialLandmarks = new CelestialLandmarks(
       this.scene,
       analysis,
       track,
-      this.visualController.state.palette
+      this.visualController.state.palette,
+      this.worldProfile
     );
 
     // 6. Build Spatial Spectral Architecture (Waveform Canyons, Canopy, Onset Gates)
@@ -160,7 +218,8 @@ export class World {
       analysis,
       track,
       this.visualController.state.palette,
-      preset?.reactiveLandmarkScale ?? 1.0
+      preset?.reactiveLandmarkScale ?? 1.0,
+      this.worldProfile
     );
     this.scene.add(this.signalLandmarks.group);
 
@@ -172,7 +231,22 @@ export class World {
     this.scene.add(this.routePackets.group);
 
     // 8. Megastructure: abyss strata, composed hero structures, light shafts.
-    this.megastructure = new Megastructure(this.scene, track, this.visualController.state.palette);
+    this.megastructure = new Megastructure(
+      this.scene,
+      track,
+      this.visualController.state.palette,
+      this.worldProfile
+    );
+
+    // 9. Per-track HERO composition. One authored motif family placed in
+    //    validated negative space; decoration only, never inside the corridor.
+    this.heroMotifs = new SignalHeroMotifs(
+      analysis,
+      track,
+      this.visualController.state.palette,
+      this.worldProfile
+    );
+    this.scene.add(this.heroMotifs.group);
 
     // ==========================================================
     // FINAL AUTHORITATIVE WORLD GEOMETRY SAFETY PASS
@@ -212,6 +286,9 @@ export class World {
     }
     if (this.routePackets?.group) {
       safetyPass.register(this.routePackets.group, 'RouteSignalPackets', 'VISUAL_ONLY');
+    }
+    if (this.heroMotifs) {
+      safetyPass.register(this.heroMotifs.group, 'SignalHeroMotifs', 'DECORATION');
     }
     if (this.megastructure) {
       safetyPass.register(this.megastructure.group, 'Megastructure', 'DECORATION');
@@ -334,8 +411,32 @@ export class World {
     if (this.signalImpulse > 0) {
       this.signalImpulse = Math.max(0, this.signalImpulse - dt * 1.9);
     }
+    // The global reactivity bus stays EXACTLY as authored, so the load-bearing
+    // gate/finish/knife beacons are never affected by a track profile.
     this.visualController.reactivityMultiplier =
       (directorState.spectralReactivity + this.signalImpulse) * effectEmissiveScale;
+
+    // Bounded, smoothed OFFICIAL WORLD PROFILE reaction gain, surfaced on the
+    // shared state for the profile's SELECTED presentation subsystems only. It
+    // is clamped to the profile bounds, glides across sections, and is exactly
+    // 1.0 for Signal Drift / fallback, so the reference world is untouched. It
+    // never feeds physics, generation or scoring.
+    const profileGain = stepProfileReactionGain(
+      this.worldProfile,
+      vState.sectionTheme,
+      dt,
+      this.profileReactionGain
+    );
+    this.profileReactionGain = profileGain;
+    vState.profileReactionGain = profileGain;
+
+    // Bounded SKY / ATMOSPHERE motif response: the authored sky reacts only
+    // when the profile selects those families; 1.0 everywhere else (identity
+    // for Signal Drift / fallback). No global gate/finish/knife change.
+    this.sky.setProfileReactionGains(
+      this.reactSky ? profileGain : 1.0,
+      this.reactAtmosphere ? profileGain : 1.0
+    );
 
     // Update procedural sky & atmosphere with director modulation
     this.sky.update(vState, playerPos, directorState.starVisibility);
@@ -373,9 +474,20 @@ export class World {
       this.megastructure.update(vState, playerPos, reduceMotion);
     }
 
-    // Update celestial landmarks (moon, eclipse, halos, relics)
+    // Hero composition answers only when HERO is a selected reaction family.
+    if (this.heroMotifs) {
+      this.heroMotifs.update(this.reactHero ? profileGain : 1.0);
+    }
+
+    // Update celestial landmarks (moon, eclipse, halos, relics). The profile
+    // gain applies only when HERO or SKY is a selected reaction family.
     if (this.celestialLandmarks) {
-      this.celestialLandmarks.update(songTime, vState.bass, vState.dropImpact);
+      this.celestialLandmarks.update(
+        songTime,
+        vState.bass,
+        vState.dropImpact,
+        this.reactCelestialSky ? profileGain : 1.0
+      );
     }
 
     // Update spatial spectral architecture
@@ -486,6 +598,11 @@ export class World {
     if (this.megastructure) {
       this.megastructure.dispose();
       this.megastructure = null;
+    }
+
+    if (this.heroMotifs) {
+      this.heroMotifs.dispose();
+      this.heroMotifs = null;
     }
 
     if (this.routePackets) {

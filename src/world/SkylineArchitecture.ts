@@ -13,6 +13,7 @@ import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
 import { tagWorldRole } from './WorldRoles';
+import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
 
 /**
  * ARCHITECTURAL TOWER SHADER (patched onto the skyline's standard materials).
@@ -174,6 +175,137 @@ float archWindow = 0.0;`
   material.needsUpdate = true;
 }
 
+/**
+ * Architecture-family composition shaping derived from the official profile.
+ *
+ * STRICT IDENTITY ON THE INERT PATH. When the profile is Signal Drift or the
+ * fallback (`usesOverride=false`) every multiplier below is exactly 1.0 and
+ * `cornerCut` is 0, so the composition formulas in `build()` collapse to the
+ * untouched authored HEAD constants (step=6, pDist=175+(i*19)%35,
+ * pTopY=...+max(90,100+bass*160), sTopY=...+max(50,55+mid*80)). Reads only
+ * scalar fields; never mutates the profile or the track.
+ */
+interface FamilyShaping {
+  stepScale: number;
+  distScale: number;
+  primaryTopScale: number;
+  stelaTopScale: number;
+  ridgeTopScale: number;
+  tierTilt: number;
+  carveScale: number;
+  cornerCut: number;
+  floating: number;
+  stelaThin: number;
+  frameMode: boolean;
+  baseMode: boolean;
+}
+
+const FAMILY_SHAPING_IDENTITY: FamilyShaping = {
+  stepScale: 1.0,
+  distScale: 1.0,
+  primaryTopScale: 1.0,
+  stelaTopScale: 1.0,
+  ridgeTopScale: 1.0,
+  tierTilt: 0.0,
+  carveScale: 1.0,
+  cornerCut: 0.0,
+  floating: 0.0,
+  stelaThin: 0.0,
+  frameMode: false,
+  baseMode: false
+};
+
+function profileFamilyShaping(profile: OfficialWorldProfile): FamilyShaping {
+  if (!profile.usesOverride) return FAMILY_SHAPING_IDENTITY;
+
+  const a = profile.architecture;
+  const sp = profile.space;
+  const density = clamp01(a.density);
+  const spacing = Math.max(0.5, a.spacingScale);
+  const proportion = Math.max(0.4, a.proportionScale);
+  const slender = clamp01(a.slenderness);
+  const floating = clamp01(a.floating);
+  const verticality = clamp01(sp.verticality);
+  const openness = clamp01(sp.openness);
+
+  // Family identity flags: primary or secondary family lists the family.
+  const fams: string[] = [a.primary, a.secondary];
+  const has = (f: string): boolean => fams.includes(f);
+  const frameMode = has('FRAMEWORK') || has('MACHINE');
+  const baseMode = has('RUINED') || has('MONOLITHIC') || has('STACKED');
+  const spireMode = has('SPIRE');
+  const canyonMode = has('CANYON');
+  const floatingMode = has('FLOATING') || floating > 0.55;
+  const megacityMode = has('MEGACITY');
+
+  let stepScale = spacing / (0.35 + density * 0.9);
+  let distScale = 0.85 + spacing * 0.3;
+  let primaryTopScale = proportion * (0.85 + verticality * 0.4);
+  let stelaTopScale = 0.85 + proportion * 0.3;
+  let ridgeTopScale = 1.0;
+  let tierTilt = 0.0;
+  let cornerCut = 0.0;
+  let stelaThin = 0.0;
+
+  if (frameMode) {
+    stepScale *= 1.08;
+    distScale *= 1.05;
+    primaryTopScale *= 0.96;
+    tierTilt = Math.max(tierTilt, 0.05 * slender + 0.04);
+    stelaThin = 0.25 + slender * 0.5;
+  }
+  if (baseMode) {
+    stepScale *= 0.94 * (0.85 + density * 0.45);
+    primaryTopScale *= 0.92;
+    stelaTopScale *= 0.9;
+    cornerCut = 0.45;
+  }
+  if (canyonMode) {
+    // A dense wall of structure close on both sides.
+    stepScale *= 0.7;
+    distScale *= 0.82;
+    primaryTopScale *= 1.05;
+    stelaThin = 1.0;
+  }
+  if (spireMode) {
+    stepScale *= 1.5;
+    distScale *= 1.12;
+    primaryTopScale *= 1.12 + verticality * 0.25;
+    stelaTopScale *= 1.05;
+    stelaThin = 0.85;
+  }
+  if (floatingMode) {
+    // No grounded supports: stelae largely disappear into the void.
+    stelaThin = Math.max(stelaThin, 0.9);
+    stelaTopScale *= 1.08;
+  }
+  if (megacityMode) {
+    stepScale *= 0.75;
+    primaryTopScale *= 1.02;
+    stelaTopScale *= 1.02;
+  }
+  ridgeTopScale = 1.0 + openness * 0.12 - Math.min(density, 0.8) * 0.08;
+
+  return {
+    stepScale: Math.max(0.4, Math.min(2.5, stepScale)),
+    distScale: Math.max(0.7, Math.min(1.6, distScale)),
+    primaryTopScale: Math.max(0.6, Math.min(2.2, primaryTopScale)),
+    stelaTopScale: Math.max(0.5, Math.min(1.8, stelaTopScale)),
+    ridgeTopScale: Math.max(0.8, Math.min(1.3, ridgeTopScale)),
+    tierTilt: Math.max(0, Math.min(0.2, tierTilt)),
+    carveScale: 0.5 + clamp01(a.cutoutFrequency) * (spireMode || frameMode ? 1.15 : 1.0),
+    cornerCut,
+    floating,
+    stelaThin,
+    frameMode,
+    baseMode
+  };
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 export class SkylineArchitecture {
   public group: THREE.Group;
   private primaryMonoliths: THREE.InstancedMesh | null = null;
@@ -182,6 +314,12 @@ export class SkylineArchitecture {
 
   private towerMaterials: THREE.MeshStandardMaterial[] = [];
   public signageSystem: CitySignageSystem | null = null;
+
+  /** Data-driven official world profile (or the inert fallback). */
+  private profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE;
+
+  /** DEV/report: non-zero when a real official profile changed the skyline. */
+  public skylineImpact = 0;
 
   // --- Audio-reactive signal bands -----------------------------------------
   // One shared sweep phase (so the whole city scans as a single machine) plus
@@ -207,7 +345,13 @@ export class SkylineArchitecture {
   private cullPos = new THREE.Vector3();
   private cullingActive = false;
 
-  constructor(scene: THREE.Scene, analysis: TrackAnalysis, track: GeneratedTrack) {
+  constructor(
+    scene: THREE.Scene,
+    analysis: TrackAnalysis,
+    track: GeneratedTrack,
+    profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
+  ) {
+    this.profile = profile;
     this.group = new THREE.Group();
     // World role: declared explicitly so the final world safety pass can
     // never mistake this geometry for gameplay (or miss it entirely).
@@ -222,6 +366,29 @@ export class SkylineArchitecture {
 
     const palette = analysis.visualAccent;
     const accentCol = new THREE.Color(palette.hex);
+
+    // --- OFFICIAL WORLD PROFILE composition shaping.
+    //
+    // INERT WHEN NOT OVERRIDDEN. Signal Drift (usesOverride=false) and the
+    // fallback (custom/tutorial/lab) MUST reproduce the exact authored HEAD
+    // composition: step=6, pDist=175+(i*19)%35, pTopY=...+max(90,100+bass*160),
+    // sTopY=...+max(50,55+mid*80). profileFamilyShaping() therefore returns
+    // strict identity (every multiplier 1.0, cornerCut 0) on the inert path, so
+    // the formulas below collapse to those exact constants. Architecture family,
+    // slenderness and floating are consumed HERE so they genuinely change the
+    // silhouette/proportion/support selection for profiled tracks only.
+    const fam = profileFamilyShaping(this.profile);
+    const carveScale = fam.carveScale;
+
+    // Report-only: non-zero when the profile left the authored baseline.
+    this.skylineImpact =
+      Math.abs(fam.stepScale - 1) +
+      Math.abs(fam.distScale - 1) +
+      Math.abs(fam.primaryTopScale - 1) +
+      Math.abs(fam.stelaTopScale - 1) +
+      Math.abs(fam.ridgeTopScale - 1) +
+      fam.tierTilt +
+      fam.cornerCut;
 
     // Authored pixel textures
 
@@ -258,8 +425,8 @@ export class SkylineArchitecture {
     // ridge tier gets broad, faint ones.
     // Per tier: face width (m), silhouette carving strength, surface detail.
     const bandConfigs = [
-      { gain: 0.0, segCount: 22.0, segSharp: 3.4, bandScale: 0.055, faceW: 24.0, carve: 1.0, detail: 1.0 },
-      { gain: 0.0, segCount: 15.0, segSharp: 2.6, bandScale: 0.040, faceW: 11.0, carve: 0.6, detail: 0.8 },
+      { gain: 0.0, segCount: 22.0, segSharp: 3.4, bandScale: 0.055, faceW: 24.0, carve: 1.0 * carveScale, detail: 1.0 },
+      { gain: 0.0, segCount: 15.0, segSharp: 2.6, bandScale: 0.040, faceW: 11.0, carve: 0.6 * carveScale, detail: 0.8 },
       { gain: 0.0, segCount: 9.0, segSharp: 1.9, bandScale: 0.028, faceW: 70.0, carve: 0.0, detail: 0.35 }
     ];
     let routeMinY = 0;
@@ -292,20 +459,34 @@ export class SkylineArchitecture {
     // Background Distant Ridge Slab
     const ridgeGeom = new THREE.BoxGeometry(70, 1, 18);
 
-    // Controlled cluster spacing: every 6 nodes to preserve generous negative space
-    const step = 6;
+    // Controlled cluster spacing: authored baseline is every 6 nodes. The
+    // profile (density/family) scales it; the inert path is exactly round(6)=6.
+    const step = Math.max(3, Math.round(6 * fam.stepScale));
     const clusterCount = Math.floor(route.length / step);
-    const maxInstances = Math.min(36, clusterCount) * 2;
+    // Authored primary budget (both sides). Family support geometry may add up
+    // to one extra instance per primary, so allocate 2x + a small margin; the
+    // LIVE count is still set to what is actually placed, so the inert path
+    // emits exactly the authored instance set (headroom is never drawn).
+    const primaryBudget = Math.min(36, clusterCount) * 2;
+    let maxInstances = primaryBudget * 2 + 8;
+    let stelaCap = primaryBudget * 2;
+    if (fam.baseMode) {
+      // GROUNDED families keep more support stelae (mass reads as buttressed).
+      stelaCap = Math.round(primaryBudget * 2 * 1.25);
+    } else if (fam.frameMode) {
+      // FRAMEWORK families replace some support stelae with masts (sized below).
+      stelaCap = Math.round(primaryBudget * 2 * 0.7);
+    }
 
     this.primaryMonoliths = new THREE.InstancedMesh(monolithGeom, primaryMat, maxInstances);
-    this.supportStelae = new THREE.InstancedMesh(stelaGeom, stelaMat, maxInstances * 2);
+    this.supportStelae = new THREE.InstancedMesh(stelaGeom, stelaMat, stelaCap);
     this.backgroundRidges = new THREE.InstancedMesh(ridgeGeom, ridgeMat, maxInstances);
 
     // Per-instance architecture data: (topY, profile seed).
     const towerData = (count: number): THREE.InstancedBufferAttribute =>
       new THREE.InstancedBufferAttribute(new Float32Array(count * 2), 2);
     const pData = towerData(maxInstances);
-    const sData = towerData(maxInstances * 2);
+    const sData = towerData(stelaCap);
     const rData = towerData(maxInstances);
     monolithGeom.setAttribute('aTower', pData);
     stelaGeom.setAttribute('aTower', sData);
@@ -353,14 +534,24 @@ export class SkylineArchitecture {
         if (((i / step) % 3 === 0) && side === 1) continue;
 
         // 1. Primary Landmark Monolith (175m - 210m away, plunging 340m-600m into deep abyss)
-        const pDist = 175.0 + ((i * 19) % 35);
+        const pDist = (175.0 + ((i * 19) % 35)) * fam.distScale;
         const px = node.position.x + rightX * side * pDist;
         const pz = node.position.z + rightZ * side * pDist;
-        const pTopY = node.position.y + Math.max(90.0, 100.0 + frame.bass * 160.0);
+        const pTopY = node.position.y + Math.max(90.0, 100.0 + frame.bass * 160.0) * fam.primaryTopScale;
         const pPlunge = 340.0 + ((i * 37 + (side > 0 ? 113 : 47)) % 260.0); // 340m - 600m varying plunge
         const pAbyssBottom = minWorldY - pPlunge;
         const pHeight = pTopY - pAbyssBottom;
         const py = pAbyssBottom + pHeight * 0.5;
+
+        // --- FAMILY SUPPORT LANGUAGE -------------------------------------
+        // FLOATING / HANGING families raise the mass into the void and drop a
+        // short support column beneath it (or none at all), so the silhouette
+        // reads as detached structure rather than a grounded tower. GROUNDED
+        // families (baseMode) instead sink a buttressed foundation into the
+        // abyss. FRAMEWORK families add an open cross-brace band. All detach
+        // distances are computed from the ALREADY-CHOSEN depth so masts and
+        // foundations can never lift the mass off the authored plunge.
+        const detach = fam.floating * Math.min(90.0, (pAbyssBottom - pTopY) * 0.12);
 
         dummy.position.set(px, py, pz);
         dummy.scale.set(1.0, pHeight, 1.0);
@@ -379,8 +570,75 @@ export class SkylineArchitecture {
           pData.setXY(pIdx, pTopY, pSeed);
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
 
+          // --- FAMILY SUPPORT GEOMETRY (profiled tracks only) --------------
+          // Profile-less shapes are baked into the SAME shared tower matrices
+          // (no new mesh/material) and are corridor-validated with the tower.
+          if (detach > 4.0) {
+            // Floating / hanging: a DETACHED lower mass hangs beneath the tower
+            // with a visible gap, so the silhouette reads as suspended structure
+            // rather than a grounded slab. The segment stays below the authored
+            // abyss floor, so it never lifts the composition.
+            const gap = 24.0 + fam.floating * 40.0;
+            const segH = Math.min(200.0, (-pAbyssBottom) * 0.28 + 60.0);
+            const segTop = pAbyssBottom - gap;
+            const segY = segTop - segH * 0.5;
+            dummy.position.set(px, segY, pz);
+            dummy.scale.set(0.72, segH, 0.72);
+            dummy.rotation.set(0, node.yaw, 0);
+            dummy.updateMatrix();
+            const cBox = new THREE.Box3(
+              new THREE.Vector3(-12.0, -0.5, -12.0),
+              new THREE.Vector3(12.0, 0.5, 12.0)
+            ).applyMatrix4(dummy.matrix);
+            if (!corridor.isBoxInsideCorridor(cBox) && pIdx < maxInstances) {
+              pData.setXY(pIdx, segTop, pSeed + 0.004);
+              this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
+            }
+          } else if (fam.baseMode) {
+            // Grounded: a wide, shorter pedestal sunk below the mass reads as a
+            // solid buttressed foundation instead of a floating slab.
+            const fH = Math.max(60.0, -pAbyssBottom * 0.5);
+            const fym = pAbyssBottom + fH * 0.5;
+            dummy.position.set(px, fym, pz);
+            dummy.scale.set(0.82, fH, 0.82);
+            dummy.rotation.set(0, node.yaw, 0);
+            dummy.updateMatrix();
+            const fBox = new THREE.Box3(
+              new THREE.Vector3(-10.0, -0.5, -10.0),
+              new THREE.Vector3(10.0, 0.5, 10.0)
+            ).applyMatrix4(dummy.matrix);
+            if (!corridor.isBoxInsideCorridor(fBox) && pIdx < maxInstances) {
+              pData.setXY(pIdx, pAbyssBottom + fH, pSeed + 0.006);
+              this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
+            }
+          } else if (fam.frameMode) {
+            // Framework: an open cross-brace band high on the shaft adds the
+            // "braced frame" read without closing the silhouette.
+            const bandY = pTopY - Math.min(pHeight * 0.3, 140.0);
+            const braceH = 10.0;
+            for (const s of [-1, 1]) {
+              dummy.position.set(px + rightX * s * 30.0, bandY, pz + rightZ * s * 30.0);
+              dummy.scale.set(0.6, braceH, pHeight * 0.16);
+              dummy.rotation.set(0, node.yaw, 0);
+              dummy.updateMatrix();
+              const bBox = new THREE.Box3(
+                new THREE.Vector3(-4.0, -5.0, -0.5),
+                new THREE.Vector3(4.0, 5.0, 0.5)
+              ).applyMatrix4(dummy.matrix);
+              if (!corridor.isBoxInsideCorridor(bBox) && pIdx < maxInstances) {
+                pData.setXY(pIdx, bandY, pSeed + 0.008);
+                this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
+              }
+            }
+          }
+
           // Masts crown the plain and setback profiles only.
-          if (pSeed < 0.6 && ((i / step) | 0) % 2 === 0) {
+          // FRAMEWORK families use masts far more often (open skeleton read);
+          // the inert path keeps the exact authored 0.6 / every-other-node rule.
+          const mastOn = fam.frameMode
+            ? pSeed < 0.92
+            : (pSeed < 0.6 && ((i / step) | 0) % 2 === 0);
+          if (mastOn) {
             const mastH = 26 + pSeed * 60;
             mastMatrices.push(
               new THREE.Matrix4().compose(
@@ -439,11 +697,16 @@ export class SkylineArchitecture {
 
         // 2. Secondary Support Stelae (Framing primary monolith, staying 160m-225m away)
         for (let st = -1; st <= 1; st += 2) {
-          if (sIdx >= maxInstances * 2) break;
+          if (sIdx >= stelaCap) break;
+          // Slenderness thins the support ring: higher slenderness drops more
+          // stelae (open frame). Inert path = 1.0 (all authored stelae kept).
+          if (fam.stelaThin > 0.0 && (((i * 3 + st + (side > 0 ? 1 : 0)) & 1) === 0)) {
+            if (seedOf(i * 5 + st, side + 7) < fam.stelaThin) continue;
+          }
           const sDist = pDist + (st > 0 ? 16.0 : -12.0);
           const sx = node.position.x + rightX * side * sDist + fwdX * (st * 24.0);
           const sz = node.position.z + rightZ * side * sDist + fwdZ * (st * 24.0);
-          const sTopY = node.position.y + Math.max(50.0, 55.0 + frame.mid * 80.0);
+          const sTopY = node.position.y + Math.max(50.0, 55.0 + frame.mid * 80.0) * fam.stelaTopScale;
           const sPlunge = 320.0 + ((i * 29 + st * 71) % 240.0); // 320m - 560m varying plunge
           const sAbyssBottom = minWorldY - sPlunge;
           const sHeight = sTopY - sAbyssBottom;
@@ -451,7 +714,7 @@ export class SkylineArchitecture {
 
           dummy.position.set(sx, sy, sz);
           dummy.scale.set(1.0, sHeight, 1.0);
-          dummy.rotation.set(0.04 * st, node.yaw + 0.1 * st, 0.05 * side);
+          dummy.rotation.set(0.04 * st, node.yaw + 0.1 * st, 0.05 * side + fam.tierTilt * side);
           dummy.updateMatrix();
 
           const sLocalBox = new THREE.Box3(
@@ -485,11 +748,13 @@ export class SkylineArchitecture {
         }
 
         // 3. Distant Background Ridge (280m - 330m away in far atmosphere)
-        if (rIdx < maxInstances) {
+        // baseMode/ruined families break the far ridge line into segments.
+        const ridgeCut = fam.cornerCut > 0.4 && ((i / step) | 0) % 2 === 0;
+        if (rIdx < maxInstances && !ridgeCut) {
           const rDist = 280.0 + ((i * 23) % 50);
           const rx = node.position.x + rightX * side * rDist;
           const rz = node.position.z + rightZ * side * rDist;
-          const rTopY = node.position.y + Math.max(55.0, 60.0 + frame.bass * 70.0);
+          const rTopY = node.position.y + Math.max(55.0, 60.0 + frame.bass * 70.0) * fam.ridgeTopScale;
           const rPlunge = 360.0 + ((i * 41) % 240.0); // 360m - 600m varying plunge
           const rAbyssBottom = minWorldY - rPlunge;
           const rHeight = rTopY - rAbyssBottom;
@@ -604,14 +869,22 @@ export class SkylineArchitecture {
       track,
       corridor,
       monolithAnchors,
-      stelaeAnchors
+      stelaeAnchors,
+      this.profile
     );
     this.group.add(this.signageSystem.group);
     this.group.add(this.signageSystem.frameGroup);
   }
 
   public update(visualState: MusicVisualState, dt = 0, reduceMotion = false): void {
-    const react = visualState.reactivityMultiplier;
+    // Official profile gate: only the SELECTED presentation subsystems multiply
+    // by the bounded profile gain. Unselected subsystem gains are forced to 1.0
+    // here (no global change), so nothing else is altered. Identity for Drift /
+    // fallback, whose gain is 1.0 anyway.
+    const pg = visualState.profileReactionGain ?? 1.0;
+    const sel = this.profile.reaction.emphasis;
+    const react = visualState.reactivityMultiplier * (this.profile.usesOverride && sel.includes('SKYLINE') ? pg : 1.0);
+    const sigGain = this.profile.usesOverride && sel.includes('SIGNAGE') ? pg : 1.0;
     const energy = visualState.energy;
     const ch = resolveChannels(visualState);
     const slot = ch.slot;
@@ -664,7 +937,7 @@ export class SkylineArchitecture {
     }
 
     if (this.signageSystem) {
-      this.signageSystem.update(visualState, dt);
+      this.signageSystem.update(visualState, dt, sigGain);
     }
   }
 
@@ -822,6 +1095,7 @@ export class SkylineArchitecture {
   }
 
   public dispose(): void {
+    this.group.parent?.remove(this.group);
     if (this.signageSystem) {
       this.signageSystem.dispose();
       this.signageSystem = null;

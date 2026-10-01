@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { AnalysisSection, TrackAnalysis } from '../audio/AudioFeatures';
 import { TrackPalette, PaletteSelector } from '../audio/TrackPalettes';
 import { GeneratedTrack } from '../generation/GenerationTypes';
+import { OfficialWorldProfile } from './SignalWorldProfile';
 
 /**
  * DERIVED MUSIC CHANNELS — the visual music language.
@@ -133,6 +134,12 @@ export interface MusicVisualState {
   dramaticIntensity: number;
 
   reactivityMultiplier: number;
+  /**
+   * Bounded, smoothed OFFICIAL WORLD PROFILE reaction gain (1.0 = identity).
+   * Only the profile's selected presentation subsystems multiply by it, so the
+   * load-bearing gate/finish/knife beacons always keep their existing response.
+   */
+  profileReactionGain: number;
 }
 
 export class MusicVisualController {
@@ -210,6 +217,12 @@ export class MusicVisualController {
   private smoothSecondaryMix = 0.2;
   private smoothHighlightMix = 0.05;
 
+  // --- Official world-profile section-response bounds ------------------------
+  public profileGainMin = 1.0;
+  public profileGainMax = 1.0;
+  public profileCuratedThemes: string[] = [];
+  public profileReactionActive = false;
+
   // Drop detection tracker
   private triggeredDrops = new Set<number>();
 
@@ -263,7 +276,8 @@ export class MusicVisualController {
       routePulsePhase: 0,
       kineticMusicIntensity: 0,
       dramaticIntensity: 0.2,
-      reactivityMultiplier: 1.0
+      reactivityMultiplier: 1.0,
+      profileReactionGain: 1.0
     };
   }
 
@@ -782,6 +796,36 @@ export class MusicVisualController {
       default:
         return 0.48;
     }
+  }
+
+  /**
+   * Apply the official world-profile SECTION RESPONSE descriptor.
+   *
+   * This only stores the profile's bounded gain bounds and the curated section
+   * themes that may reach the ceiling. The actual per-frame gain is produced by
+   * `stepProfileReactionGain` in World.update, which already clamps to these
+   * bounds and smooths across sections. No gameplay, generation or scoring
+   * consumer reads this.
+   */
+  public applyWorldProfile(profile: OfficialWorldProfile): void {
+    this.profileGainMin = profile.reaction.gainMin;
+    this.profileGainMax = profile.reaction.gainMax;
+    this.profileCuratedThemes = profile.reaction.curatedThemes.slice();
+    this.profileReactionActive = profile.usesOverride;
+  }
+
+  /**
+   * RESET the official-profile section-response state. Called on EVERY load
+   * whose resolved profile does not override (Signal Drift, custom/null,
+   * tutorial, lab), so a previously loaded profiled track can never leak its
+   * gain bounds / curated themes into the reference world. Identity defaults.
+   */
+  public clearWorldProfile(): void {
+    this.profileGainMin = 1.0;
+    this.profileGainMax = 1.0;
+    this.profileCuratedThemes = [];
+    this.profileReactionActive = false;
+    this.state.profileReactionGain = 1.0;
   }
 
   public setReactivityMultiplier(mult: number): void {

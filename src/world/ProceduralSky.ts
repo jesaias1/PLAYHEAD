@@ -36,8 +36,15 @@ uniform float uBuildup;
 uniform float uSectionIntensity;
 uniform float uReactivity;
 uniform float uStarVisibility;
+uniform float uStarDensity;
 uniform float uSignalField;
 uniform float uHeroFlare;
+uniform vec3 uStarTint;
+uniform float uNebula;
+uniform float uGalaxyBand;
+uniform float uLightField;
+uniform float uSkyMotif;
+uniform float uAtmosphereMotif;
 
 varying vec3 vWorldPosition;
 varying vec2 vUv;
@@ -194,7 +201,7 @@ void main() {
 
   // 3. Drifting Mid Atmospheric Haze Bands
   float hazeBand = sin(elevation * 24.0 + uTime * 0.15) * 0.5 + 0.5;
-  float hazeFactor = hazeBand * smoothstep(0.30, 0.0, abs(elevation)) * (0.12 + uLowMid * 0.3 * uReactivity);
+  float hazeFactor = hazeBand * smoothstep(0.30, 0.0, abs(elevation)) * (0.12 + uLowMid * 0.3 * uReactivity) * uAtmosphereMotif;
   vec3 haze = uHazeColor * hazeFactor;
 
   // 3b. Sustained signal field.
@@ -202,19 +209,53 @@ void main() {
   // still physically present when no reactive structure is in the player's
   // view. Deliberately restrained: the sky must never become a nightclub.
   float fieldBand = smoothstep(0.62, 0.0, abs(elevation));
-  vec3 signalField = uHazeColor * fieldBand * uSignalField * 0.11 * uReactivity;
+  vec3 signalField = uHazeColor * fieldBand * uSignalField * 0.11 * uReactivity * uAtmosphereMotif;
 
-  // 4. Clustered Multi-Tier Starfield
+  // 4. Clustered Multi-Tier Starfield. The official SKY reaction (bounded) can
+  // gently scale the star emissive; 1.0 elsewhere.
   vec3 stars = renderStarfield(dir, uTime, uHigh * uReactivity, uDropImpact * uReactivity, uStarVisibility, uSecondaryColor, uHighlightColor, uHeroFlare * uReactivity);
+  stars *= mix(1.0, uSkyMotif, 0.85);
 
   // 4b. Galactic signal band: one slow diagonal river of faint light, broken
-  // by noise so it reads as dust lanes, not a gradient stripe.
+  // by noise so it reads as dust lanes, not a gradient stripe. uGalaxyBand lets
+  // an authored GALAXY_BAND track strengthen it into a named motif; the default
+  // authored contribution is preserved exactly (uGalaxyBand = 1.0).
   vec3 bandAxis = normalize(vec3(0.34, 0.52, 0.78));
   float bandD = dot(dir, bandAxis);
   float bandCore = exp(-bandD * bandD * 22.0);
   float lanes = vnoise(dir * 7.0 + vec3(0.0, uTime * 0.004, 0.0)) * 0.65 + vnoise(dir * 19.0) * 0.35;
   float band = bandCore * smoothstep(0.28, 0.85, lanes) * smoothstep(0.02, 0.3, elevation);
-  vec3 galactic = mix(uSecondaryColor, uHighlightColor, lanes) * band * (0.05 + uStarVisibility * 0.05);
+  vec3 galactic = mix(uSecondaryColor, uHighlightColor, lanes) * band * (0.05 + uStarVisibility * 0.05) * uGalaxyBand;
+
+  // 4b2. NEBULA motif: a broad, multi-lane cloud of coloured dust concentrated
+  // in a wide soft region of the sky. Real volumetric (screen) motif, gated by
+  // uNebula and the bounded SKY reaction (uSkyMotif). Zero for other profiles.
+  float neb = 0.0;
+  vec3 nebCol = vec3(0.0);
+  if (uNebula > 0.001) {
+    vec3 nebAxis = normalize(vec3(-0.6, 0.35, 0.72));
+    float nd = dot(dir, nebAxis);
+    float core = exp(-nd * nd * 3.2);
+    float c1 = vnoise(dir * 3.0 + vec3(uTime * 0.002, 0.0, 0.0));
+    float c2 = vnoise(dir * 6.5 - vec3(0.0, uTime * 0.003, 0.0));
+    float cloud = smoothstep(0.35, 0.85, c1 * 0.6 + c2 * 0.4) * core * smoothstep(-0.1, 0.5, elevation);
+    neb = cloud * uNebula;
+    nebCol = mix(uStarTint, uSecondaryColor, 0.45) * (0.6 + c2 * 0.9);
+  }
+
+  // 4b3. DISTANT_LIGHT_FIELD motif: a dense but very faint scatter of distant
+  // pin-prick lights far below the horizon band. Reads as a huge distant city /
+  // light field without any large celestial body. Gated by uLightField and the
+  // bounded atmosphere reaction (uAtmosphereMotif).
+  float lights = 0.0;
+  if (uLightField > 0.001) {
+    vec3 g = floor(dir * 260.0);
+    float h = hash31(g);
+    float pin = step(0.986, h) * (1.0 - smoothstep(0.0, 0.0022, length(dir - (g + 0.5) / 260.0)));
+    float horiz = smoothstep(0.28, -0.02, elevation) * (1.0 - smoothstep(0.0, 0.5, abs(elevation + 0.28)));
+    lights = pin * horiz * uLightField * uAtmosphereMotif;
+  }
+  vec3 lightField = mix(uStarTint, vec3(1.0), 0.5) * lights * 0.6;
 
   // 4c. Bottomless abyss: below the horizon the sky falls away into black,
   // with two faint strata of light from impossibly distant lower levels.
@@ -225,7 +266,7 @@ void main() {
   ) * (1.0 + bassPressure * 0.6);
 
   // 5. Compose Final Atmospheric Color
-  vec3 finalColor = mix(baseVoid, uVoidColor * 0.12, below) + horizonGlow + haze + signalField + stars + galactic + abyss;
+  vec3 finalColor = mix(baseVoid, uVoidColor * 0.12, below) + horizonGlow + haze + signalField + stars + galactic + nebCol * neb + lightField + abyss;
 
   gl_FragColor = vec4(finalColor, 1.0);
 }
@@ -236,6 +277,18 @@ export class ProceduralSky {
   private material: THREE.ShaderMaterial;
   private heroFlare = 0;
   private lastTime = 0;
+  /** Official world-profile star-density multiplier (1.0 = unchanged). */
+  private starDensity = 1.0;
+  /** Bounded official-profile reaction gains for the SKY / ATMOSPHERE motifs. */
+  private skyMotifGain = 1.0;
+  private atmosphereGain = 1.0;
+  /** Pristine constructor colours, restored by clearWorldProfile(). */
+  private defaultVoid = new THREE.Color();
+  private defaultHorizon = new THREE.Color();
+  private defaultSecondary = new THREE.Color();
+  private defaultHighlight = new THREE.Color();
+  private defaultHaze = new THREE.Color();
+  private defaultStarTint = new THREE.Color();
 
   constructor(scene: THREE.Scene) {
     const geometry = new THREE.SphereGeometry(900, 32, 24);
@@ -260,7 +313,14 @@ export class ProceduralSky {
         uReactivity: { value: 1.0 },
         uStarVisibility: { value: 0.5 },
         uSignalField: { value: 0.0 },
-        uHeroFlare: { value: 0.0 }
+        uHeroFlare: { value: 0.0 },
+        uStarDensity: { value: 1.0 },
+        uStarTint: { value: new THREE.Color(0xa78bfa) },
+        uNebula: { value: 0.0 },
+        uGalaxyBand: { value: 1.0 },
+        uLightField: { value: 0.0 },
+        uSkyMotif: { value: 1.0 },
+        uAtmosphereMotif: { value: 1.0 }
       },
       side: THREE.BackSide,
       depthWrite: false
@@ -269,6 +329,14 @@ export class ProceduralSky {
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.renderOrder = -1000;
     scene.add(this.mesh);
+
+    const u0 = this.material.uniforms;
+    this.defaultVoid.copy(u0.uVoidColor.value as THREE.Color);
+    this.defaultHorizon.copy(u0.uHorizonColor.value as THREE.Color);
+    this.defaultSecondary.copy(u0.uSecondaryColor.value as THREE.Color);
+    this.defaultHighlight.copy(u0.uHighlightColor.value as THREE.Color);
+    this.defaultHaze.copy(u0.uHazeColor.value as THREE.Color);
+    this.defaultStarTint.copy(u0.uStarTint.value as THREE.Color);
   }
 
   public setPalette(palette: TrackPalette): void {
@@ -317,7 +385,71 @@ export class ProceduralSky {
       baseStarVis = 0.7;
     }
 
-    u.uStarVisibility.value = baseStarVis * starVisibilityMod;
+    u.uStarVisibility.value = baseStarVis * starVisibilityMod * this.starDensity;
+    u.uSkyMotif.value = this.skyMotifGain;
+    u.uAtmosphereMotif.value = this.atmosphereGain;
+  }
+
+  /**
+   * Apply an official world-profile SKY descriptor. This sets the star-density
+   * multiplier and gently tints the star/highlight colours. It is only called
+   * for tracks whose profile opts in (usesOverride=true); Signal Drift and the
+   * fallback keep the untouched default sky.
+   */
+  public applyWorldProfile(sky: {
+    starDensity: number;
+    starTint: string;
+    hazeStrength: number;
+    celestial?: string;
+  }): void {
+    this.starDensity = Math.max(0.15, Math.min(1.4, sky.starDensity));
+    this.material.uniforms.uStarDensity.value = this.starDensity;
+    const tint = new THREE.Color(sky.starTint);
+    this.material.uniforms.uHighlightColor.value.lerp(tint, 0.35);
+    this.material.uniforms.uSecondaryColor.value.lerp(tint, 0.25);
+    // Real authored sky motifs: strengthen the actual shader band/cloud/field
+    // instead of aliasing the large celestial body. Presence is set here; the
+    // bounded SKY / ATMOSPHERE reaction scales it per frame.
+    (this.material.uniforms.uStarTint.value as THREE.Color).copy(tint);
+    const celestial = sky.celestial ?? 'NONE';
+    this.material.uniforms.uNebula.value = celestial === 'NEBULA' ? 1.0 : 0.0;
+    this.material.uniforms.uGalaxyBand.value = celestial === 'GALAXY_BAND' ? 2.6 : 1.0;
+    this.material.uniforms.uLightField.value = celestial === 'DISTANT_LIGHT_FIELD' ? 1.0 : 0.0;
+  }
+
+  /**
+   * Bounded, smoothed official-profile reaction gain for the SKY and
+   * ATMOSPHERE motifs. Exactly 1.0 when those subsystems are not selected (and
+   * on the inert path), so the authored sky is untouched there.
+   */
+  public setProfileReactionGains(skyGain: number, atmosphereGain: number): void {
+    this.skyMotifGain = Math.max(0.5, Math.min(1.6, skyGain));
+    this.atmosphereGain = Math.max(0.5, Math.min(1.6, atmosphereGain));
+  }
+
+  /**
+   * RESET the official-profile sky state. Called on EVERY load whose resolved
+   * profile does not override (Signal Drift, custom/null, tutorial, lab), so a
+   * previously loaded profiled track can never leak star density or tint into
+   * the reference world. Restores the exact constructor defaults.
+   */
+  public clearWorldProfile(): void {
+    this.starDensity = 1.0;
+    this.skyMotifGain = 1.0;
+    this.atmosphereGain = 1.0;
+    const u = this.material.uniforms;
+    u.uStarDensity.value = 1.0;
+    u.uNebula.value = 0.0;
+    u.uGalaxyBand.value = 1.0;
+    u.uLightField.value = 0.0;
+    u.uSkyMotif.value = 1.0;
+    u.uAtmosphereMotif.value = 1.0;
+    (u.uStarTint.value as THREE.Color).copy(this.defaultStarTint);
+    (u.uVoidColor.value as THREE.Color).copy(this.defaultVoid);
+    (u.uHorizonColor.value as THREE.Color).copy(this.defaultHorizon);
+    (u.uSecondaryColor.value as THREE.Color).copy(this.defaultSecondary);
+    (u.uHighlightColor.value as THREE.Color).copy(this.defaultHighlight);
+    (u.uHazeColor.value as THREE.Color).copy(this.defaultHaze);
   }
 
   public setCenter(pos: THREE.Vector3): void {
