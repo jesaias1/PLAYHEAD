@@ -2624,8 +2624,8 @@ option:hover, option:focus, option:checked {
 
 .signal-deck {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
-  gap: clamp(24px, 4vw, 72px);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
+  gap: clamp(20px, 3vw, 48px);
   align-items: end;
   min-height: calc(100vh - 170px);
 }
