@@ -91,6 +91,31 @@ export interface SectionReaction {
   maxSimultaneous: number;
 }
 
+/**
+ * Authored macro-composition zones, expressed in ARC-LENGTH fraction of the
+ * route (0 = start, 1 = finish). This is what turns procedurally placed
+ * scenery into an art-directed journey instead of uniform noise:
+ *
+ *   lateStart / lateEnd    an EMPTY zone — silent negative space (restraint)
+ *   denseStart / denseEnd  a DENSE zone — monumental concentration
+ *   revealArc              a single prepared REVEAL moment (hero/frame opening)
+ *   finishFunnel           where the skyline closes into a structural funnel
+ *                          that frames the finish approach
+ *
+ * Every band is OPTIONAL. When absent (Signal Drift / fallback, or a track that
+ * chooses not to use it) the resolver returns the inert defaults, so the
+ * reference composition is untouched. Bands only ever THIN or SHIFT existing
+ * instances; they never add geometry, materials or draw calls.
+ */
+export interface CompositionBand {
+  lateStart: number;
+  lateEnd: number;
+  denseStart: number;
+  denseEnd: number;
+  revealArc: number | null;
+  finishFunnel: number | null;
+}
+
 export interface OfficialWorldProfile {
   /** Trusted catalog id, or 'FALLBACK' for custom/tutorial/lab. */
   trackId: string;
@@ -162,6 +187,12 @@ export interface OfficialWorldProfile {
     /** Whether the hero is the dominant composition element. */
     dominant: boolean;
   };
+
+  /**
+   * Authored macro-composition zones (arc-length fractions). Optional: absent
+   * means inert. Signal Drift / fallback never declare bands.
+   */
+  composition?: CompositionBand;
 
   reaction: SectionReaction;
 }
@@ -261,7 +292,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'SPARSE', amountScale: 0.55, terminology: 0.3, mascotUsage: 0.2 },
     celestialRarity: { presence: 0.35, allowRare: true },
     hero: { motif: 'FRACTURED_ARCHIPELAGO', scale: 0.9, dominant: false },
-    reaction: { emphasis: ['SKYLINE', 'HERO'], gainMin: 0.85, gainMax: 1.2, curatedThemes: ['BREATH', 'ASCENT'], smoothingSeconds: 2.6, maxSimultaneous: 2 }
+    composition: { lateStart: 0.3, lateEnd: 0.45, denseStart: 0.55, denseEnd: 0.72, revealArc: 0.8, finishFunnel: 0.9 },
+    reaction: { emphasis: ['SKYLINE', 'HERO'], gainMin: 0.85, gainMax: 1.2, curatedThemes: ['ASCENT', 'PRECISION'], smoothingSeconds: 2.6, maxSimultaneous: 2 }
   },
 
   // 03 SURF THE VOID — dream-surf over abysses; suspended frames, deep voids.
@@ -285,7 +317,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'SPARSE', amountScale: 0.6, terminology: 0.35, mascotUsage: 0.25 },
     celestialRarity: { presence: 0.4, allowRare: true },
     hero: { motif: 'SUSPENDED_FRAME', scale: 1.25, dominant: true },
-    reaction: { emphasis: ['HERO', 'SKY'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['SURF', 'BREATH'], smoothingSeconds: 2.2, maxSimultaneous: 2 }
+    composition: { lateStart: 0.07, lateEnd: 0.16, denseStart: 0.28, denseEnd: 0.46, revealArc: 0.62, finishFunnel: 0.88 },
+    reaction: { emphasis: ['HERO', 'SKY'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['SURF', 'PRECISION'], smoothingSeconds: 2.2, maxSimultaneous: 2 }
   },
 
   // 04 AIRWAVE THEORY — atmospheric air-strafe; broad tiered public plazas, airy.
@@ -309,7 +342,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 0.9, terminology: 0.5, mascotUsage: 0.4 },
     celestialRarity: { presence: 0.55, allowRare: true },
     hero: { motif: 'IMPOSSIBLE_TOWER', scale: 1.0, dominant: false },
-    reaction: { emphasis: ['SKYLINE', 'SIGNAGE'], gainMin: 0.85, gainMax: 1.25, curatedThemes: ['ASCENT', 'DROP'], smoothingSeconds: 2.2, maxSimultaneous: 2 }
+    composition: { lateStart: 0.28, lateEnd: 0.4, denseStart: 0.55, denseEnd: 0.74, revealArc: 0.8, finishFunnel: 0.92 },
+    reaction: { emphasis: ['SKYLINE', 'SIGNAGE'], gainMin: 0.85, gainMax: 1.25, curatedThemes: ['ASCENT', 'PRECISION'], smoothingSeconds: 2.2, maxSimultaneous: 2 }
   },
 
   // 05 GRAVITY LINE — synthesiser bhop through arch monuments; ordered processional.
@@ -333,7 +367,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 1.0, terminology: 0.55, mascotUsage: 0.5 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'MONOLITH_FIELD', scale: 1.05, dominant: false },
-    reaction: { emphasis: ['SKYLINE', 'SIGNAGE', 'HERO'], gainMin: 0.85, gainMax: 1.3, curatedThemes: ['SPEED', 'DROP'], smoothingSeconds: 2.0, maxSimultaneous: 3 }
+    composition: { lateStart: 0.4, lateEnd: 0.52, denseStart: 0.6, denseEnd: 0.8, revealArc: 0.86, finishFunnel: 0.94 },
+    reaction: { emphasis: ['SKYLINE', 'SIGNAGE', 'HERO'], gainMin: 0.85, gainMax: 1.3, curatedThemes: ['SPEED', 'ASCENT'], smoothingSeconds: 2.0, maxSimultaneous: 3 }
   },
 
   // 06 OVER THE EDGE — hardwave drift; aggressive drops, ruined collapsing edges.
@@ -357,7 +392,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 1.1, terminology: 0.6, mascotUsage: 0.5 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'FRACTURED_ARCHIPELAGO', scale: 1.1, dominant: false },
-    reaction: { emphasis: ['SKYLINE', 'SIGNAGE'], gainMin: 0.9, gainMax: 1.4, curatedThemes: ['DROP', 'SPEED'], smoothingSeconds: 1.8, maxSimultaneous: 3 }
+    composition: { lateStart: 0.42, lateEnd: 0.55, denseStart: 0.22, denseEnd: 0.4, revealArc: 0.8, finishFunnel: 0.9 },
+    reaction: { emphasis: ['SKYLINE', 'SIGNAGE'], gainMin: 0.9, gainMax: 1.4, curatedThemes: ['SURF', 'PRECISION'], smoothingSeconds: 1.8, maxSimultaneous: 3 }
   },
 
   // 07 DROP ZONE SURFER — breakbeat kinetic; surf inclines + fast chaining, energetic.
@@ -381,7 +417,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'DENSE', amountScale: 1.35, terminology: 0.7, mascotUsage: 0.6 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'ENERGY_CHASM', scale: 1.15, dominant: true },
-    reaction: { emphasis: ['SKYLINE', 'SIGNAGE', 'HERO'], gainMin: 0.9, gainMax: 1.4, curatedThemes: ['DROP', 'SURF'], smoothingSeconds: 1.9, maxSimultaneous: 3 }
+    composition: { lateStart: 0.44, lateEnd: 0.6, denseStart: 0.15, denseEnd: 0.33, revealArc: 0.84, finishFunnel: 0.93 },
+    reaction: { emphasis: ['SKYLINE', 'SIGNAGE', 'HERO'], gainMin: 0.9, gainMax: 1.4, curatedThemes: ['ASCENT', 'PRECISION'], smoothingSeconds: 1.9, maxSimultaneous: 3 }
   },
 
   // 08 WAVE SURFING — progressive glide; continuous harmonic surf, rhythmic.
@@ -405,7 +442,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 1.1, terminology: 0.6, mascotUsage: 0.5 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'SIGNAL_WALL', scale: 1.15, dominant: false },
-    reaction: { emphasis: ['SKYLINE', 'HERO'], gainMin: 0.9, gainMax: 1.35, curatedThemes: ['SURF', 'DROP'], smoothingSeconds: 2.0, maxSimultaneous: 2 }
+    composition: { lateStart: 0.16, lateEnd: 0.3, denseStart: 0.35, denseEnd: 0.5, revealArc: 0.66, finishFunnel: 0.9 },
+    reaction: { emphasis: ['SKYLINE', 'HERO'], gainMin: 0.9, gainMax: 1.35, curatedThemes: ['SURF', 'SPEED'], smoothingSeconds: 2.0, maxSimultaneous: 2 }
   },
 
   // 09 NEON ABYSS — dark electro void; heavy bass, monumental dark framing, abyss.
@@ -429,7 +467,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'DENSE', amountScale: 1.3, terminology: 0.65, mascotUsage: 0.55 },
     celestialRarity: { presence: 0.6, allowRare: true },
     hero: { motif: 'ENERGY_CHASM', scale: 1.3, dominant: true },
-    reaction: { emphasis: ['SKYLINE', 'ATMOSPHERE', 'HERO'], gainMin: 0.9, gainMax: 1.45, curatedThemes: ['SURF', 'DROP'], smoothingSeconds: 2.1, maxSimultaneous: 3 }
+    composition: { lateStart: 0.3, lateEnd: 0.48, denseStart: 0.1, denseEnd: 0.36, revealArc: 0.58, finishFunnel: 0.88 },
+    reaction: { emphasis: ['SKYLINE', 'ATMOSPHERE', 'HERO'], gainMin: 0.9, gainMax: 1.45, curatedThemes: ['SURF', 'ASCENT'], smoothingSeconds: 2.1, maxSimultaneous: 3 }
   },
 
   // 10 NEON SLIPSTREAM — hyperpop speedway; near-black ceramic lanes, minimal rest.
@@ -453,7 +492,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'SPARSE', amountScale: 0.6, terminology: 0.4, mascotUsage: 0.3 },
     celestialRarity: { presence: 0.3, allowRare: false },
     hero: { motif: 'IMPOSSIBLE_TOWER', scale: 1.2, dominant: false },
-    reaction: { emphasis: ['HERO', 'SKY'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['SPEED'], smoothingSeconds: 1.7, maxSimultaneous: 2 }
+    composition: { lateStart: 0.33, lateEnd: 0.52, denseStart: 0.6, denseEnd: 0.8, revealArc: 0.86, finishFunnel: 0.94 },
+    reaction: { emphasis: ['HERO', 'SKY'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['ASCENT', 'SURF'], smoothingSeconds: 1.7, maxSimultaneous: 2 }
   },
 
   // 11 EX GRAVITY — neurofunk precision; machine vertical world, drop-driven.
@@ -477,6 +517,7 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 1.0, terminology: 0.6, mascotUsage: 0.5 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'MACHINE_SPINE', scale: 1.25, dominant: true },
+    composition: { lateStart: 0.34, lateEnd: 0.48, denseStart: 0.7, denseEnd: 0.86, revealArc: 0.6, finishFunnel: 0.9 },
     reaction: { emphasis: ['SKYLINE', 'HERO', 'SIGNAGE'], gainMin: 0.9, gainMax: 1.45, curatedThemes: ['DROP', 'BUILDUP'], smoothingSeconds: 1.8, maxSimultaneous: 3 }
   },
 
@@ -501,7 +542,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 0.9, terminology: 0.75, mascotUsage: 0.35 },
     celestialRarity: { presence: 0.4, allowRare: true },
     hero: { motif: 'SIGNAL_WALL', scale: 1.05, dominant: false },
-    reaction: { emphasis: ['SIGNAGE', 'SKYLINE'], gainMin: 0.85, gainMax: 1.25, curatedThemes: ['DROP'], smoothingSeconds: 2.4, maxSimultaneous: 2 }
+    composition: { lateStart: 0.14, lateEnd: 0.27, denseStart: 0.32, denseEnd: 0.5, revealArc: 0.72, finishFunnel: 0.9 },
+    reaction: { emphasis: ['SIGNAGE', 'SKYLINE'], gainMin: 0.85, gainMax: 1.25, curatedThemes: ['ASCENT', 'PRECISION'], smoothingSeconds: 2.4, maxSimultaneous: 2 }
   },
 
   // 13 WAVEFORM DESCENT — halftime descent; steep steps, hanging architecture below.
@@ -525,7 +567,8 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'MODERATE', amountScale: 0.9, terminology: 0.5, mascotUsage: 0.45 },
     celestialRarity: { presence: 0.5, allowRare: true },
     hero: { motif: 'HANGING_ARCHITECTURE', scale: 1.15, dominant: true },
-    reaction: { emphasis: ['HERO', 'ATMOSPHERE'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['DESCENT', 'BREATH'], smoothingSeconds: 2.3, maxSimultaneous: 2 }
+    composition: { lateStart: 0.5, lateEnd: 0.65, denseStart: 0.35, denseEnd: 0.48, revealArc: 0.8, finishFunnel: 0.92 },
+    reaction: { emphasis: ['HERO', 'ATMOSPHERE'], gainMin: 0.9, gainMax: 1.3, curatedThemes: ['ASCENT', 'BREATH'], smoothingSeconds: 2.3, maxSimultaneous: 2 }
   },
 
   // 14 KZ ASCENT — max-difficulty industrial climb; near-black endgame void, minimal.
@@ -549,6 +592,7 @@ const TRACK_PROFILES: OfficialWorldProfile[] = [
     signage: { density: 'SPARSE', amountScale: 0.5, terminology: 0.45, mascotUsage: 0.3 },
     celestialRarity: { presence: 0.0, allowRare: false },
     hero: { motif: 'CELESTIAL_ASCENT', scale: 1.4, dominant: true },
+    composition: { lateStart: 0.36, lateEnd: 0.52, denseStart: 0.75, denseEnd: 0.9, revealArc: 0.9, finishFunnel: 0.96 },
     reaction: { emphasis: ['SKYLINE', 'HERO'], gainMin: 0.85, gainMax: 1.35, curatedThemes: ['ASCENT', 'PRECISION'], smoothingSeconds: 2.0, maxSimultaneous: 2 }
   }
 ];
@@ -618,4 +662,81 @@ export function stepProfileReactionGain(
   const rate = Math.min(1, Math.max(0, dt) / Math.max(0.05, r.smoothingSeconds));
   const next = current + (target - current) * rate;
   return Math.max(r.gainMin, Math.min(r.gainMax, next));
+}
+
+/**
+ * Resolved macro-composition bands. INERT for Signal Drift / fallback: when the
+ * profile does not opt in, 'active' is false and every helper returns identity.
+ */
+export interface ResolvedCompositionBands {
+  lateStart: number;
+  lateEnd: number;
+  denseStart: number;
+  denseEnd: number;
+  revealArc: number | null;
+  finishFunnel: number | null;
+  active: boolean;
+}
+
+export const INERT_COMPOSITION_BANDS: ResolvedCompositionBands = {
+  lateStart: 1,
+  lateEnd: 1,
+  denseStart: 0,
+  denseEnd: 0,
+  revealArc: null,
+  finishFunnel: null,
+  active: false
+};
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * Pure resolver for a profile's authored bands. Clamps and orders the zone
+ * bounds so a malformed band can never invert or escape [0,1]; an inverted or
+ * degenerate band simply becomes empty rather than misbehaving.
+ */
+export function resolveCompositionBands(profile: OfficialWorldProfile): ResolvedCompositionBands {
+  const c = profile.composition;
+  if (!profile.usesOverride || !c) return INERT_COMPOSITION_BANDS;
+  const lateStart = clamp01(Math.min(c.lateStart, c.lateEnd));
+  const lateEnd = clamp01(Math.max(c.lateStart, c.lateEnd));
+  const denseStart = clamp01(Math.min(c.denseStart, c.denseEnd));
+  const denseEnd = clamp01(Math.max(c.denseStart, c.denseEnd));
+  const revealArc = c.revealArc == null ? null : clamp01(c.revealArc);
+  const finishFunnel = c.finishFunnel == null ? null : clamp01(c.finishFunnel);
+  return { lateStart, lateEnd, denseStart, denseEnd, revealArc, finishFunnel, active: true };
+}
+
+/**
+ * Density multiplier for purely decorative skyline clusters at an arc-length
+ * fraction along the route.
+ *
+ *  - authored EMPTY zone   -> strongly thinned (silent negative space)
+ *  - prepared REVEAL point -> moderately thinned (opens the sight line)
+ *  - FINISH funnel run-in  -> progressively thinned (frame the end)
+ *  - authored DENSE core   -> never thinned (protective monumental mass)
+ *  - everything else       -> 1.0
+ *
+ * Bands only ever REMOVE or KEEP existing instances, so this can never add a
+ * draw call and can never place geometry inside gameplay. Allocation-free and
+ * deterministic (no RNG, no time). Identity (1.0) on the inert path.
+ */
+export function compositionDensityScale(
+  bands: ResolvedCompositionBands,
+  arcFraction: number,
+  revealRadius = 0.05
+): number {
+  if (!bands.active) return 1.0;
+  const f = clamp01(arcFraction);
+
+  // A protected DENSE core is never thinned, so concentration still reads even
+  // when it sits next to an empty zone.
+  if (f >= bands.denseStart && f < bands.denseEnd) return 1.0;
+  if (f >= bands.lateStart && f < bands.lateEnd) return 0.22;
+  if (bands.revealArc != null && Math.abs(f - bands.revealArc) < revealRadius) return 0.5;
+  if (bands.finishFunnel != null && f >= bands.finishFunnel) {
+    const t = (f - bands.finishFunnel) / Math.max(0.0001, 1 - bands.finishFunnel);
+    return Math.max(0.4, 1 - t * 0.6);
+  }
+  return 1.0;
 }

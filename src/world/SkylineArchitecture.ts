@@ -13,7 +13,14 @@ import { MusicVisualState, resolveChannels } from './MusicVisualController';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { CitySignageSystem, MonolithAnchor, StelaAnchor } from './CitySignageSystem';
 import { tagWorldRole } from './WorldRoles';
-import { OfficialWorldProfile, FALLBACK_WORLD_PROFILE } from './SignalWorldProfile';
+import { planSignalJourney } from './SignalJourney';
+import {
+  OfficialWorldProfile,
+  FALLBACK_WORLD_PROFILE,
+  compositionDensityScale,
+  ResolvedCompositionBands,
+  INERT_COMPOSITION_BANDS
+} from './SignalWorldProfile';
 
 /**
  * ARCHITECTURAL TOWER SHADER (patched onto the skyline's standard materials).
@@ -321,6 +328,15 @@ export class SkylineArchitecture {
   /** DEV/report: non-zero when a real official profile changed the skyline. */
   public skylineImpact = 0;
 
+  /**
+   * Report only: how many authored cluster instances were THINNED by the
+   * profile's macro-composition bands during this build (0 = inert path).
+   */
+  public compositionThinnedInstances = 0;
+
+  /** Authored composition bands, resolved ONCE (never per frame). */
+  private compBands: ResolvedCompositionBands = INERT_COMPOSITION_BANDS;
+
   // --- Audio-reactive signal bands -----------------------------------------
   // One shared sweep phase (so the whole city scans as a single machine) plus
   // per-tier gains, patched into the three tower materials. This costs three
@@ -352,6 +368,7 @@ export class SkylineArchitecture {
     profile: OfficialWorldProfile = FALLBACK_WORLD_PROFILE
   ) {
     this.profile = profile;
+    this.compBands = planSignalJourney(analysis, track, profile).bands;
     this.group = new THREE.Group();
     // World role: declared explicitly so the final world safety pass can
     // never mistake this geometry for gameplay (or miss it entirely).
@@ -517,6 +534,21 @@ export class SkylineArchitecture {
     const monolithAnchors: MonolithAnchor[] = [];
     const stelaeAnchors: StelaAnchor[] = [];
 
+    // --- AUTHORED MACRO-COMPOSITION ----------------------------------------
+    //
+    // The authored bands turn the uniform procedural skyline into a deliberate
+    // journey: an EMPTY zone thins clusters to silent negative space, a prepared
+    // REVEAL point opens the sight line, and the FINISH run-in closes gently so
+    // the end is framed rather than dropped after another platform. A protected
+    // DENSE core is never thinned.
+    //
+    // STRICT IDENTITY on the inert path: `bands.active` is false for Signal
+    // Drift / fallback, so `compScale` is always exactly 1.0 and the accepted-
+    // instance RNG draw below never even runs — the recorded baseline matrices
+    // are reproduced byte-for-byte.
+    const revealBias =
+      this.compBands.active && this.compBands.revealArc != null ? this.compBands.revealArc : Infinity;
+
     for (let i = 2; i < route.length - 2 && pIdx < maxInstances; i += step) {
       const node = route[i];
       const timeRatio = Math.min(1, Math.max(0, node.time / analysis.duration));
@@ -527,6 +559,10 @@ export class SkylineArchitecture {
       const fwdZ = Math.cos(node.yaw);
       const rightX = fwdZ;
       const rightZ = -fwdX;
+
+      const arcFraction = node.arcLength / Math.max(1, route[route.length - 1].arcLength);
+      const compScale = compositionDensityScale(this.compBands, arcFraction);
+      const revealInterior = Math.abs(arcFraction - revealBias) < 0.05;
 
       // Place architectural clusters left or right alternating
       for (const side of [-1, 1]) {
@@ -565,10 +601,24 @@ export class SkylineArchitecture {
         );
         const mCandidateBox = mLocalBox.applyMatrix4(dummy.matrix);
 
+        // Authored composition may THIN a cluster (never add one). Inert path:
+        // compScale === 1 and revealInterior === false, so these gates are
+        // exact no-ops and the baseline instance set is untouched.
         if (!corridor.isBoxInsideCorridor(mCandidateBox)) {
+          if (compScale < 1.0 && seedOf(i * 11 + 3, side + 5) >= compScale) {
+            this.compositionThinnedInstances++;
+            continue;
+          }
           const pSeed = seedOf(i, side);
           pData.setXY(pIdx, pTopY, pSeed);
           this.primaryMonoliths.setMatrixAt(pIdx++, dummy.matrix);
+
+          // An authored REVEAL point clears the surrounding support framing so
+          // the prepared moment reads as an opening rather than a gap.
+          if (revealInterior) {
+            lastMonolithBySide.set(side, { pos: new THREE.Vector3(px, 0, pz), topY: pTopY });
+            continue;
+          }
 
           // --- FAMILY SUPPORT GEOMETRY (profiled tracks only) --------------
           // Profile-less shapes are baked into the SAME shared tower matrices
@@ -724,6 +774,11 @@ export class SkylineArchitecture {
           const sCandidateBox = sLocalBox.applyMatrix4(dummy.matrix);
 
           if (!corridor.isBoxInsideCorridor(sCandidateBox)) {
+            if (compScale < 1.0 && seedOf(i * 13 + st + 17, side + 9) >= compScale) {
+              this.compositionThinnedInstances++;
+              continue;
+            }
+            if (revealInterior) continue;
             sData.setXY(sIdx, sTopY, seedOf(i * 3 + st, side));
             this.supportStelae.setMatrixAt(sIdx++, dummy.matrix);
 
@@ -749,7 +804,8 @@ export class SkylineArchitecture {
 
         // 3. Distant Background Ridge (280m - 330m away in far atmosphere)
         // baseMode/ruined families break the far ridge line into segments.
-        const ridgeCut = fam.cornerCut > 0.4 && ((i / step) | 0) % 2 === 0;
+        const ridgeCut =
+          revealInterior || (fam.cornerCut > 0.4 && ((i / step) | 0) % 2 === 0);
         if (rIdx < maxInstances && !ridgeCut) {
           const rDist = 280.0 + ((i * 23) % 50);
           const rx = node.position.x + rightX * side * rDist;
@@ -771,9 +827,14 @@ export class SkylineArchitecture {
           );
           const rCandidateBox = rLocalBox.applyMatrix4(dummy.matrix);
 
-          if (!corridor.isBoxInsideCorridor(rCandidateBox)) {
+          if (
+            !corridor.isBoxInsideCorridor(rCandidateBox) &&
+            (compScale >= 1.0 || seedOf(i * 17 + 23, side + 4) < compScale)
+          ) {
             rData.setXY(rIdx, rTopY, seedOf(i * 7, side));
             this.backgroundRidges.setMatrixAt(rIdx++, dummy.matrix);
+          } else if (compScale < 1.0) {
+            this.compositionThinnedInstances++;
           }
         }
       }
@@ -972,6 +1033,7 @@ export class SkylineArchitecture {
     if (this.primaryMonoliths) this.hiddenFlags.set(this.primaryMonoliths, new Array(this.primaryMonoliths.count).fill(false));
     if (this.supportStelae) this.hiddenFlags.set(this.supportStelae, new Array(this.supportStelae.count).fill(false));
     if (this.backgroundRidges) this.hiddenFlags.set(this.backgroundRidges, new Array(this.backgroundRidges.count).fill(false));
+
   }
 
   /**

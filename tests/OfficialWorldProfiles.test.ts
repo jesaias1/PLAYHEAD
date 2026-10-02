@@ -37,6 +37,7 @@ import { SignalLandmarks } from '../src/world/SignalLandmarks';
 import { RouteSignalPackets } from '../src/world/RouteSignalPackets';
 import { SpectacleRenderer } from '../src/world/SpectacleRenderer';
 import { SignalHeroMotifs } from '../src/world/SignalHeroMotifs';
+import { planSignalJourney, signatureEnvelope } from '../src/world/SignalJourney';
 import { World } from '../src/world/World';
 import { RouteNodeType } from '../src/generation/GenerationTypes';
 import { PaletteSelector } from '../src/audio/TrackPalettes';
@@ -262,9 +263,9 @@ describe('Official world profiles — section/drop response bounds', () => {
 
     const profile = SignalWorldProfileRegistry.resolveForTrackId('track_7_drop_zone_surfer');
     let gain = 1.0;
-    // Push toward the ceiling on a curated drop across many frames.
+    // Push toward the ceiling on an actual curated phrase across many frames.
     for (let i = 0; i < 600; i++) {
-      gain = stepProfileReactionGain(profile, 'DROP', 1 / 60, gain);
+      gain = stepProfileReactionGain(profile, profile.reaction.curatedThemes[0], 1 / 60, gain);
       expect(gain).toBeGreaterThanOrEqual(profile.reaction.gainMin);
       expect(gain).toBeLessThanOrEqual(profile.reaction.gainMax);
     }
@@ -554,6 +555,63 @@ describe('Official world profiles — celestial body vs sky-only motifs', () => 
     const scene = new THREE.Scene();
     const cel = new CelestialLandmarks(scene, analysis, track, palette, SIGNAL_DRIFT_PROFILE);
     expect(cel.hasBody).toBe(true);
+  });
+});
+
+describe('Official musical journey', () => {
+  it('actually thins the skyline while retaining the same shared mesh families', () => {
+    const { analysis, track } = loadPreset('track_11_ex_gravity');
+    const profile = SignalWorldProfileRegistry.resolveForTrackId('track_11_ex_gravity');
+    const directed = new SkylineArchitecture(new THREE.Scene(), analysis, track, profile);
+    const uniform = new SkylineArchitecture(new THREE.Scene(), analysis, track, { ...profile, composition: undefined });
+    expect(directed.compositionThinnedInstances).toBeGreaterThan(0);
+    expect(uniform.compositionThinnedInstances).toBe(0);
+    expect(directed.getVisibleCounts().total).toBeLessThan(uniform.getVisibleCounts().total);
+    directed.dispose();
+    uniform.dispose();
+  });
+  it('derives deterministic spatial bands and at most two signatures from real cached sections', () => {
+    for (const id of officialTrackIds()) {
+      const { analysis, track } = loadPreset(id);
+      const profile = SignalWorldProfileRegistry.resolveForTrackId(id);
+      const before = JSON.stringify(track);
+      const plan = planSignalJourney(analysis, track, profile);
+      expect(planSignalJourney(analysis, track, profile)).toEqual(plan);
+      expect(JSON.stringify(track)).toBe(before);
+      if (!profile.usesOverride) {
+        expect(plan.bands.active).toBe(false);
+        expect(plan.signatureTimes).toEqual([]);
+        continue;
+      }
+      expect(plan.signatureTimes.length).toBeGreaterThan(0);
+      expect(plan.signatureTimes.length).toBeLessThanOrEqual(2);
+      for (const time of plan.signatureTimes) {
+        expect(analysis.sections.some(s => s.start === time)).toBe(true);
+      }
+      expect(plan.bands.revealArc).toBeGreaterThanOrEqual(0);
+      expect(plan.bands.revealArc).toBeLessThanOrEqual(1);
+      expect(plan.bands.denseEnd).toBeGreaterThanOrEqual(plan.bands.denseStart);
+      expect(plan.bands.lateEnd).toBeGreaterThanOrEqual(plan.bands.lateStart);
+      const hero = new SignalHeroMotifs(analysis, track,
+        PaletteSelector.selectPalette(analysis.seed, 0.5, analysis.globalEnergy), profile);
+      const mesh = hero.group.children[0] as THREE.InstancedMesh;
+      expect(mesh).toBeDefined();
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      hero.update(1, plan.signatureTimes[0]);
+      const idle = material.emissiveIntensity;
+      hero.update(1, plan.signatureTimes[0] + 4);
+      expect(material.emissiveIntensity).toBeCloseTo(idle + (hero.reacts ? 0.4 : 0));
+      hero.update(1, plan.signatureTimes[0] + 4, true);
+      expect(material.emissiveIntensity).toBe(idle);
+      hero.dispose();
+    }
+  });
+  it('activates slowly then resolves without reacting to every beat', () => {
+    expect(signatureEnvelope([20, 70], 19)).toBe(0);
+    expect(signatureEnvelope([20, 70], 20)).toBe(0);
+    expect(signatureEnvelope([20, 70], 24)).toBe(1);
+    expect(signatureEnvelope([20, 70], 28)).toBe(0);
+    expect(signatureEnvelope([20, 70], 50)).toBe(0);
   });
 });
 

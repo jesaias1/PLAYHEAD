@@ -487,7 +487,7 @@ export class World {
 
     // Hero composition answers only when HERO is a selected reaction family.
     if (this.heroMotifs) {
-      this.heroMotifs.update(this.reactHero ? profileGain : 1.0);
+      this.heroMotifs.update(this.reactHero ? profileGain : 1.0, songTime, reduceMotion);
     }
 
     // Update celestial landmarks (moon, eclipse, halos, relics). The profile

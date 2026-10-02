@@ -29,6 +29,7 @@ import { TrackPalette } from '../audio/TrackPalettes';
 import { OfficialWorldProfile } from './SignalWorldProfile';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { tagWorldRole } from './WorldRoles';
+import { planSignalJourney, signatureEnvelope } from './SignalJourney';
 
 /** One authored box segment, in FINAL local-space size + world placement. */
 interface HeroBox {
@@ -54,9 +55,11 @@ export class SignalHeroMotifs {
   private material: THREE.MeshStandardMaterial | null = null;
   private geometry: THREE.BoxGeometry | null = null;
   private mesh: THREE.InstancedMesh | null = null;
+  private signatureTimes: number[] = [];
+  private heroIndex = 0;
 
   constructor(
-    _analysis: TrackAnalysis,
+    analysis: TrackAnalysis,
     track: GeneratedTrack,
     palette: TrackPalette,
     profile: OfficialWorldProfile
@@ -64,6 +67,9 @@ export class SignalHeroMotifs {
     this.group.name = 'SignalHeroMotifs';
     tagWorldRole(this.group, 'DECORATION', 'SignalHeroMotifs');
     if (!profile.usesOverride) return;
+    const journey = planSignalJourney(analysis, track, profile);
+    this.signatureTimes = journey.signatureTimes;
+    this.heroIndex = journey.heroIndex;
     this.reacts = profile.reaction.emphasis.includes('HERO');
     this.build(track, palette, profile);
   }
@@ -92,8 +98,8 @@ export class SignalHeroMotifs {
     const heroScale = profile.hero.scale * (profile.hero.dominant ? 1.15 : 1.0);
     const motif = profile.hero.motif;
 
-    // Anchor ~62% along the route so the hero is visible AHEAD of the player.
-    const anchorNode = route[Math.max(1, Math.min(route.length - 2, Math.floor(route.length * 0.62)))];
+    // Prepare the existing motif ahead of its strongest actual musical phrase.
+    const anchorNode = route[Math.max(1, Math.min(route.length - 2, this.heroIndex))];
     const fwd = new THREE.Vector3(Math.sin(anchorNode.yaw), 0, Math.cos(anchorNode.yaw));
     const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
 
@@ -308,6 +314,25 @@ export class SignalHeroMotifs {
     if (boxes.length === 0) return;
 
     // --- BATCH: one shared unit box, one material, one InstancedMesh --------
+    // Sparse opening piers establish scale. A paired finish processional opens
+    // a clean sight line to the unchanged finish. All share the hero batch.
+    const fin = track.finish;
+    for (const [node, count] of [[route[0], 1], [fin, 3]] as const) {
+      if (!node) continue;
+      const forwardX = Math.sin(node.yaw), forwardZ = Math.cos(node.yaw);
+      for (let i = 0; i < count; i++) {
+        const lateral = (190 + profile.space.openness * 70) - i * 18;
+        const height = (90 + profile.space.verticality * 100 + i * 35) * heroScale;
+        for (const side of [-1, 1]) {
+          emit(18 + i * 5, height, 24, new THREE.Vector3(
+            node.position.x - forwardX * i * 100 + forwardZ * lateral * side,
+            node.position.y - 90 + height / 2,
+            node.position.z - forwardZ * i * 100 - forwardX * lateral * side
+          ), node.yaw);
+        }
+      }
+    }
+
     // Corridor validation uses the ACTUAL final world-space bounds of each
     // composed instance (non-uniform scale + rotation), so the safety pass and
     // this build agree; rejected segments are simply never instanced.
@@ -358,9 +383,10 @@ export class SignalHeroMotifs {
    * safe range. Identity gain (1.0) leaves it exactly as authored for Signal
    * Drift / fallback. No allocation.
    */
-  public update(gain = 1.0): void {
+  public update(gain = 1.0, songTime = 0, reduceMotion = false): void {
     if (!this.material) return;
-    this.material.emissiveIntensity = Math.max(0.08, Math.min(0.95, 0.35 * gain));
+    const signature = this.reacts && !reduceMotion ? signatureEnvelope(this.signatureTimes, songTime) : 0;
+    this.material.emissiveIntensity = Math.max(0.08, Math.min(0.95, 0.35 * gain + signature * 0.4));
   }
 
   public dispose(): void {
