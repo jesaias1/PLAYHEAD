@@ -4,9 +4,27 @@
  * onset detection, tempo autocorrelation, and section segmentation.
  */
 
-import { AnalysisFrame, AnalysisSection, OnsetEvent, SectionTheme, TrackAnalysis, VisualAccent } from './AudioFeatures';
-import { hashAudioBuffer } from '../utils/hash';
+import { AnalysisFrame, AnalysisSection, CustomAggregate, CustomSourceMeta, OnsetEvent, SectionConfidence, SectionTheme, TrackAnalysis, VisualAccent } from './AudioFeatures';
+import { computeCustomContentIdentity, CustomContentIdentity, hashAudioBuffer } from '../utils/hash';
 import { clamp } from '../utils/math';
+
+export interface AnalyzeOptions {
+  /**
+   * Marks this buffer as player-supplied custom audio. Only the custom path
+   * receives content-derived provenance and the custom macro section model;
+   * official precomputed presets call analyze() without it.
+   */
+  custom?: {
+    source: CustomSourceMeta['source'];
+    encodedBytes?: ArrayBuffer | null;
+  };
+  /**
+   * Precomputed content identity (shared with Game's cache lookup) so the
+   * analyzer never hashes the same bytes twice. When absent the analyzer
+   * derives it from the buffer / encoded bytes itself.
+   */
+  contentIdentity?: CustomContentIdentity;
+}
 
 const CURATED_ACCENTS: VisualAccent[] = [
   { name: 'Icy Cyan', hex: '#00f0ff', rgb: [0, 240, 255] },
@@ -22,7 +40,8 @@ export class AudioAnalyzer {
   public static async analyze(
     buffer: AudioBuffer,
     filename: string,
-    onProgress?: (stage: string, progress: number) => void
+    onProgress?: (stage: string, progress: number) => void,
+    options?: AnalyzeOptions
   ): Promise<TrackAnalysis> {
     const duration = buffer.duration;
     if (duration < 1) {
@@ -166,6 +185,15 @@ export class AudioAnalyzer {
     const normHigh = normalizePercentile(rawHigh, 0.95);
     const normCentroid = normalizePercentile(rawCentroid, 0.95);
     const normFlux = normalizePercentile(rawFlux, 0.95);
+    if (options?.custom) {
+      // Relative spectral change rejects FFT leakage from sustained tones;
+      // percentile normalization alone amplifies tiny fluctuations into beats.
+      for (let f = 0; f < numFrames; f++) {
+        const spectralMass = rawBass[f] + rawLowMid[f] + rawMid[f] + rawHigh[f];
+        normFlux[f] = clamp(rawFlux[f] / Math.max(1e-6, spectralMass) * 4, 0, 1);
+        normCentroid[f] = clamp(rawCentroid[f] / 4000, 0, 1);
+      }
+    }
 
     // 5. Onset Peak-Picking
     onProgress?.('FINDING ONSETS', 0.7);
@@ -228,7 +256,11 @@ export class AudioAnalyzer {
     onProgress?.('ESTIMATING TEMPO', 0.82);
     await yieldThread();
 
-    const { bpm, confidence: bpmConfidence } = estimateBPM(normFlux, windowSec);
+    const tempo = estimateBPM(normFlux, windowSec);
+    const bpm = tempo.bpm;
+    const bpmConfidence = options?.custom && onsets.length < Math.max(4, duration * 0.1)
+      ? Math.min(0.2, tempo.confidence)
+      : tempo.confidence;
 
     // 8. Assemble Analysis Frames
     const frames: AnalysisFrame[] = new Array(numFrames);
@@ -247,16 +279,42 @@ export class AudioAnalyzer {
       };
       globalEnergySum += normRms[f];
     }
-    const globalEnergy = globalEnergySum / numFrames;
+    const relativeEnergy = globalEnergySum / numFrames;
+    const globalEnergy = options?.custom
+      ? clamp(relativeEnergy * 0.45 + mean(density) * 0.35 + mean(normFlux) * 0.2, 0, 1)
+      : relativeEnergy;
 
     // 9. Section Boundary Detection (4-10 coherent sections)
     onProgress?.('FINDING SECTIONS', 0.92);
     await yieldThread();
 
-    const sections = detectSections(frames, duration);
+    const isCustom = options?.custom != null;
+    const sections = isCustom
+      ? detectCustomSections(frames, duration, normBass)
+      : detectSections(frames, duration);
 
-    // 10. Deterministic seed & curated accent color
-    const seed = hashAudioBuffer(buffer, filename);
+    // 10. Deterministic seed & curated accent color.
+    // The custom path derives identity from CONTENT (encoded bytes when
+    // available, otherwise decoded PCM), never from the filename, so renaming
+    // a file cannot change its geometry. Official presets keep the legacy
+    // hashAudioBuffer contract.
+    let customSource: CustomSourceMeta | undefined;
+    let customAggregate: CustomAggregate | undefined;
+    let seed: number;
+    if (isCustom && options?.custom) {
+      const identity = options.contentIdentity ?? (await computeCustomContentIdentity(buffer, options.custom.encodedBytes));
+      seed = identity.seed;
+      customSource = {
+        source: options.custom.source,
+        displayName: filename,
+        contentHash: identity.contentHash,
+        byteLength: identity.byteLength,
+        hashSource: identity.hashSource
+      };
+      customAggregate = computeCustomAggregate(frames, normBass, normHigh);
+    } else {
+      seed = hashAudioBuffer(buffer, filename);
+    }
     const accentIndex = Math.abs(seed) % CURATED_ACCENTS.length;
     const visualAccent = CURATED_ACCENTS[accentIndex];
 
@@ -274,7 +332,9 @@ export class AudioAnalyzer {
       sections,
       waveform,
       seed,
-      visualAccent
+      visualAccent,
+      ...(customAggregate ? { customAggregate } : {}),
+      ...(customSource ? { customSource } : {})
     };
   }
 }
@@ -536,6 +596,323 @@ function detectSections(frames: AnalysisFrame[], duration: number): AnalysisSect
   }
 
   return sections;
+}
+
+/**
+ * Aggregate motion summary used by the custom visual profile. Bounded O(n) —
+ * a single pass over frames, plus a percentile pass over a copy of rms.
+ */
+function computeCustomAggregate(
+  frames: AnalysisFrame[],
+  bass: Float32Array,
+  high: Float32Array
+): CustomAggregate {
+  const n = frames.length;
+  if (n === 0) {
+    return { bass: 0.4, brightness: 0.5, density: 0.25, dynamics: 0.25, contrast: 0.4 };
+  }
+
+  let rmsSum = 0;
+  let centroidSum = 0;
+  let densitySum = 0;
+  let bassSum = 0;
+  let highSum = 0;
+  for (let i = 0; i < n; i++) {
+    rmsSum += frames[i].rms;
+    centroidSum += frames[i].centroid;
+    densitySum += frames[i].density;
+  }
+
+  const rmsValues = new Float32Array(n);
+  for (let i = 0; i < n; i++) rmsValues[i] = frames[i].rms;
+  rmsValues.sort();
+  const p10 = rmsValues[Math.floor(n * 0.1)];
+  const p90 = rmsValues[Math.floor(n * 0.9)];
+
+  for (let i = 0; i < bass.length; i++) bassSum += bass[i];
+  for (let i = 0; i < high.length; i++) highSum += high[i];
+
+  return {
+    bass: clamp(bassSum / bass.length, 0, 1),
+    brightness: clamp(centroidSum / n, 0, 1),
+    density: clamp(densitySum / n, 0, 1),
+    dynamics: clamp(p90 - p10, 0, 1),
+    contrast: clamp(Math.abs(highSum / high.length - bassSum / bass.length), 0, 1)
+  };
+}
+
+/**
+ * CUSTOM section model: bounded O(n) macro descriptors with honest, data-driven
+ * intensity/brightness/density/energy-trend scoring. Unlike the official
+ * detector it never fabricates evenly-spaced "pop" sections, never assigns
+ * arbitrary alternating ASCENT/PRECISION indices, and collapses constant /
+ * ambient input to a broad, safe BREATH/FLOW shape.
+ */
+function detectCustomSections(
+  frames: AnalysisFrame[],
+  duration: number,
+  bass: Float32Array
+): AnalysisSection[] {
+  if (frames.length === 0 || duration <= 0) {
+    return [{
+      index: 0,
+      start: 0,
+      end: Math.max(1, duration),
+      duration: Math.max(1, duration),
+      intensity: 0.4,
+      rhythmicDensity: 0.2,
+      brightness: 0.5,
+      theme: 'FLOW'
+    }];
+  }
+
+  const windowSec = 3.0;
+  const windowFrames = Math.max(1, Math.round(windowSec / Math.max(1e-3, frames[1] ? frames[1].time - frames[0].time : 0.02)));
+  const minSection = Math.min(Math.max(6.0, duration * 0.08), 24.0);
+  const targetSections = clamp(Math.round(duration / 24), 3, 9);
+
+  // Local descriptor windows.
+  const windowCount = Math.max(1, Math.ceil(frames.length / windowFrames));
+  const winRms = new Float32Array(windowCount);
+  const winBass = new Float32Array(windowCount);
+  const winBright = new Float32Array(windowCount);
+  const winFlux = new Float32Array(windowCount);
+  const winDensity = new Float32Array(windowCount);
+  const winStart = new Float32Array(windowCount);
+
+  for (let w = 0; w < windowCount; w++) {
+    const start = w * windowFrames;
+    const end = Math.min(frames.length, start + windowFrames);
+    let rmsSum = 0, brightSum = 0, fluxSum = 0, denSum = 0, bassSum = 0, count = 0;
+    for (let i = start; i < end; i++) {
+      rmsSum += frames[i].rms;
+      brightSum += frames[i].centroid;
+      fluxSum += frames[i].flux;
+      denSum += frames[i].density;
+      if (i < bass.length) bassSum += bass[i];
+      count++;
+    }
+    const inv = count > 0 ? 1 / count : 0;
+    winRms[w] = rmsSum * inv;
+    winBright[w] = brightSum * inv;
+    winFlux[w] = fluxSum * inv;
+    winDensity[w] = denSum * inv;
+    winBass[w] = bassSum * inv;
+    winStart[w] = frames[Math.min(frames.length - 1, start)].time;
+  }
+
+  const globalRms = mean(winRms);
+  const rmsSpread = Math.sqrt(variance(winRms, globalRms));
+  const fluxMean = mean(winFlux);
+  const densityMean = mean(winDensity);
+  const brightMean = mean(winBright);
+  const broadAggregate = {
+    intensity: clamp(globalRms, 0, 1),
+    density: clamp(densityMean, 0, 1),
+    brightness: clamp(brightMean, 0, 1),
+    dynamics: clamp(Math.min(1, rmsSpread * 6), 0, 1)
+  };
+
+  // Constantness test: flat energy, low dynamics and negligible flux => broad safe shape.
+  const flatEnergy = rmsSpread < 0.035;
+  const lowFlux = fluxMean < 0.05;
+  const lowDensity = densityMean < 0.12;
+  if (flatEnergy && lowFlux && lowDensity) {
+    return broadSafeSections(duration, broadAggregate);
+  }
+
+  // ---- Boundary ranking --------------------------------------------------
+  // Score every plausible boundary by the macro contrast between the windows
+  // immediately before and after it, then rank ALL supported candidates and
+  // greedily select a spaced chronological subset. This preserves early
+  // build/drop/release transitions instead of letting a single late change
+  // dominate a greedy earliest-first scan.
+  const minSectionFrames = Math.max(1, Math.round(minSection / windowSec));
+  const halfWindow = Math.max(1, Math.round(minSectionFrames / 2));
+  const maxSections = Math.max(2, targetSections);
+
+  interface BoundaryCandidate { index: number; score: number; }
+  const boundaryCandidates: BoundaryCandidate[] = [];
+  for (let w = halfWindow + 1; w < windowCount - halfWindow; w++) {
+    const beforeRms = averageWindowRange(winRms, w - halfWindow, w);
+    const afterRms = averageWindowRange(winRms, w, w + halfWindow);
+    const energyDelta = Math.abs(afterRms - beforeRms) / Math.max(0.05, globalRms);
+    const bassDelta = Math.abs(
+      averageWindowRange(winBass, w, w + halfWindow) - averageWindowRange(winBass, w - halfWindow, w)
+    );
+    const brightDelta = Math.abs(
+      averageWindowRange(winBright, w, w + halfWindow) - averageWindowRange(winBright, w - halfWindow, w)
+    );
+    const densityDelta = Math.abs(
+      averageWindowRange(winDensity, w, w + halfWindow) - averageWindowRange(winDensity, w - halfWindow, w)
+    );
+    const score = energyDelta * 1.6 + bassDelta * 0.7 + brightDelta * 0.5 + densityDelta * 0.6;
+    // A boundary needs a real energy step or a strong combined change; tiny
+    // spectral wobble must not manufacture fake precision.
+    if (score >= 0.18 && energyDelta >= 0.1) {
+      boundaryCandidates.push({ index: w, score });
+    }
+  }
+  boundaryCandidates.sort((a, b) => b.score - a.score);
+
+  const boundaryWindows: number[] = [];
+  for (const cand of boundaryCandidates) {
+    if (boundaryWindows.length >= maxSections - 1) break;
+    const tooClose = boundaryWindows.some((b) => Math.abs(b - cand.index) < minSectionFrames);
+    if (!tooClose) boundaryWindows.push(cand.index);
+  }
+  boundaryWindows.sort((a, b) => a - b);
+
+  const scoreForWindow = (w: number): number => {
+    const match = boundaryCandidates.find((c) => c.index === w);
+    return match ? match.score : 0;
+  };
+
+  // ---- Segment aggregates from real windows ------------------------------
+  const segmentRanges: { startW: number; endW: number }[] = [];
+  let prevBoundary = 0;
+  for (const b of boundaryWindows) {
+    if (b > prevBoundary) segmentRanges.push({ startW: prevBoundary, endW: b });
+    prevBoundary = b;
+  }
+  segmentRanges.push({ startW: prevBoundary, endW: windowCount });
+
+  const aggregates = segmentRanges.map(({ startW, endW }) => {
+    let intensity = 0, brightness = 0, density = 0, bassAvg = 0;
+    for (let w = startW; w < endW; w++) {
+      intensity += winRms[w];
+      brightness += winBright[w];
+      density += winDensity[w];
+      bassAvg += winBass[w];
+    }
+    const invW = endW > startW ? 1 / (endW - startW) : 0;
+    return {
+      startW,
+      endW,
+      intensity: clamp(intensity * invW, 0, 1),
+      brightness: clamp(brightness * invW, 0, 1),
+      density: clamp(density * invW, 0, 1),
+      bassAvg: clamp(bassAvg * invW, 0, 1)
+    };
+  });
+
+  // ---- Honest themes -----------------------------------------------------
+  // A final high-energy portion is a traversal intent, not a forced calm BREATH.
+  // BREATH is only assigned when the segment is genuinely quiet.
+  const quietThreshold = Math.max(0.18, globalRms * 0.55);
+  const sections: AnalysisSection[] = [];
+  for (let i = 0; i < aggregates.length; i++) {
+    const agg = aggregates[i];
+    const start = i === 0 ? 0 : winStart[agg.startW];
+    const end = agg.endW >= windowCount ? duration : winStart[agg.endW];
+    const dur = Math.max(0.5, end - start);
+
+    const isFirst = i === 0;
+    const isLast = i === aggregates.length - 1;
+    const prevIntensity = i > 0 ? aggregates[i - 1].intensity : agg.intensity;
+    const trend = agg.intensity - prevIntensity;
+    // The next segment's OWN average over its whole window range (never a
+    // single boundary window).
+    const nextIntensity = !isLast ? aggregates[i + 1].intensity : agg.intensity;
+
+    let theme: SectionTheme;
+    if (isFirst) theme = 'FLOW';
+    else if (agg.intensity < quietThreshold && agg.density < 0.3) theme = 'BREATH';
+    else if (trend > 0.06 && nextIntensity > agg.intensity + 0.02 && agg.intensity > 0.5) theme = 'BUILDUP';
+    else if (trend > 0.12 && agg.intensity > 0.7) theme = 'DROP';
+    else if (agg.bassAvg > 0.6 && agg.density > 0.4) theme = 'SPEED';
+    else if (agg.brightness > 0.62 && agg.density >= 0.16) theme = 'SURF';
+    else if (agg.density > 0.45 || isLast) theme = 'FLOW';
+    else theme = 'PRECISION';
+
+    const boundaryScore = isFirst ? 0 : scoreForWindow(agg.startW);
+    const separation =
+      Math.abs(agg.intensity - globalRms) / Math.max(0.05, globalRms) +
+      Math.abs(agg.density - densityMean) +
+      Math.abs(agg.brightness - brightMean);
+    const confidence: SectionConfidence = {
+      boundary: clamp(boundaryScore / 0.4, 0, 1),
+      descriptor: clamp(0.2 + separation * 0.8 + rmsSpread * 4, 0, 1)
+    };
+
+    sections.push({
+      index: i,
+      start,
+      end,
+      duration: dur,
+      intensity: agg.intensity,
+      rhythmicDensity: agg.density,
+      brightness: agg.brightness,
+      theme,
+      confidence
+    });
+  }
+
+  if (sections.length === 0) return broadSafeSections(duration, broadAggregate);
+  return sections;
+}
+
+/**
+ * Broad low-information fallback for flat / ambient / constant input. It
+ * deliberately reuses the REAL aggregate descriptors instead of inventing
+ * precision, always opens with a safe onboarding FLOW window, and marks every
+ * segment as low-confidence so downstream code can treat it honestly.
+ */
+function broadSafeSections(
+  duration: number,
+  aggregate: { intensity: number; density: number; brightness: number; dynamics: number } = {
+    intensity: 0.35,
+    density: 0.12,
+    brightness: 0.5,
+    dynamics: 0.05
+  }
+): AnalysisSection[] {
+  const count = clamp(Math.round(duration / 40), 2, 4);
+  const sections: AnalysisSection[] = [];
+  for (let i = 0; i < count; i++) {
+    const start = (i / count) * duration;
+    const end = ((i + 1) / count) * duration;
+    sections.push({
+      index: i,
+      start,
+      end,
+      duration: end - start,
+      intensity: aggregate.intensity,
+      rhythmicDensity: aggregate.density,
+      brightness: aggregate.brightness,
+      theme: i === 0 ? 'FLOW' : 'BREATH',
+      confidence: { boundary: 0, descriptor: clamp(0.35 - aggregate.dynamics * 2, 0, 0.5) }
+    });
+  }
+  return sections;
+}
+
+function clampWindow(index: number, count: number): number {
+  return index < 0 ? 0 : index >= count ? count - 1 : index;
+}
+
+function averageWindowRange(values: Float32Array, from: number, to: number): number {
+  if (to <= from) return values[clampWindow(from, values.length)];
+  let sum = 0;
+  for (let i = from; i < to && i < values.length; i++) sum += values[i];
+  return sum / (to - from);
+}
+
+function mean(values: Float32Array): number {
+  if (values.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) sum += values[i];
+  return sum / values.length;
+}
+
+function variance(values: Float32Array, avg: number): number {
+  if (values.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    const d = values[i] - avg;
+    sum += d * d;
+  }
+  return sum / values.length;
 }
 
 function yieldThread(): Promise<void> {

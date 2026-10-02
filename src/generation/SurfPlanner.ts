@@ -4,8 +4,9 @@
  * musically-timed surf events.
  */
 
-import { TrackAnalysis, AnalysisSection } from '../audio/AudioFeatures';
+import { TrackAnalysis, AnalysisSection, SectionTheme } from '../audio/AudioFeatures';
 import { computeTempoProfile } from './TempoPressure';
+import { computeCustomPhraseProfile, isCustomAnalysis, supportsCustomSurf } from './CustomPhraseProfile';
 
 export type SurfPhraseType =
   | 'SURF_DROP'
@@ -44,6 +45,9 @@ export class SurfPlanner {
     // more frequent redirects and launch-to-rejoin sequences.
     const tempo = computeTempoProfile(analysis);
     const pressure = tempo.pressure;
+    const customProfile = computeCustomPhraseProfile(analysis);
+    const isCustom = isCustomAnalysis(analysis);
+    const customSurfThemes = customProfile.surfThemes;
     const candidates: {
       sectionIndex: number;
       section: AnalysisSection;
@@ -63,6 +67,14 @@ export class SurfPlanner {
       if (sec.start < 18.0) continue;
       if (sec.start + sec.duration > totalDuration - 12.0) continue;
       if (sec.duration < 5.0) continue;
+
+      // CUSTOM: surf must be backed by genuine rhythmic/structural support.
+      // Sustained brightness alone is NOT support; ambient BREATH is never a
+      // surf candidate.
+      if (isCustom) {
+        if (!customSurfThemes.has(sec.theme as SectionTheme)) continue;
+        if (!supportsCustomSurf(sec, prevSec)) continue;
+      }
 
       let score = 0;
       let preferredType: SurfPhraseType = 'SURF_RELEASE';

@@ -2,6 +2,7 @@ import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from './GenerationTypes';
 import { RouteGenerator } from './RouteGenerator';
 import { RouteConnectivityValidator, RouteConnectivityResult } from './RouteConnectivityValidator';
+import { isCustomAnalysis } from './CustomPhraseProfile';
 
 export interface GenerationReport {
   track: GeneratedTrack;
@@ -59,6 +60,18 @@ export class TrackGenerator {
     console.error(`[TrackGenerator] CRITICAL: All ${maxAttempts} procedural generation attempts failed connectivity validation. Generating guaranteed safe fallback course.`);
     const fallbackTrack = RouteGenerator.generateSafeFallback(analysis);
     const fallbackValidation = RouteConnectivityValidator.validate(fallbackTrack);
+
+    // The fallback must itself be valid. For custom audio we reject rather than
+    // hand an unvalidated course to the player (Game surfaces a retry); for
+    // official presets we preserve the legacy last-resort behaviour.
+    if (!fallbackValidation.isValid) {
+      const summary = `${fallbackValidation.brokenEdges.length} broken edge(s)`;
+      if (isCustomAnalysis(analysis)) {
+        console.error(`[TrackGenerator] Safe fallback failed validation for custom audio (${summary}); rejecting this analysis.`);
+        throw new Error('CUSTOM COURSE COULD NOT BE VALIDATED');
+      }
+      console.warn(`[TrackGenerator] Safe fallback reported ${summary}; returning it as the legacy last resort.`);
+    }
 
     this.lastReport = {
       track: fallbackTrack,

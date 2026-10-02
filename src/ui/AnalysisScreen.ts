@@ -173,11 +173,12 @@ export class AnalysisScreen {
     this.trackTitleElem.textContent = title.toUpperCase();
   }
 
-  public show(): void {
+  public show(reset = true): void {
     this.element.classList.remove('hidden');
     this.element.classList.remove('contracting');
     this.enterBtn.disabled = true;
     this.enterBtn.textContent = '[SYS] ENTER WORLD';
+    if (!reset) return;
     if (this.logElem) {
       this.logElem.innerHTML = '';
     }
@@ -200,8 +201,10 @@ export class AnalysisScreen {
     this.setStage('[SYS] SIGNAL LOCKED // WORLD READY', 1);
 
     this.durElem.textContent = formatTime(analysis.duration).slice(0, 5);
-    this.bpmElem.textContent = `${analysis.bpm} BPM`;
-    this.sectionsElem.textContent = `${analysis.sections.length} PHRASES`;
+    this.bpmElem.textContent = analysis.customSource && analysis.bpmConfidence < 0.35
+      ? 'FREEFORM // TEMPO UNCERTAIN'
+      : `${analysis.bpm} BPM`;
+    this.sectionsElem.textContent = `${analysis.sections.length} ${analysis.sections.length === 1 ? 'PHRASE' : 'PHRASES'}`;
 
     let energyDesc = 'MODERATE';
     if (analysis.globalEnergy > 0.65) energyDesc = 'EXTREME';

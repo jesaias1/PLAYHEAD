@@ -255,6 +255,7 @@ export class ImportScreen {
 
   // Custom Drop Elements
   private dropZone: HTMLElement;
+  private customStatusElem: HTMLElement | null = null;
   private fileInput: HTMLInputElement;
   private browseBtn: HTMLButtonElement;
 
@@ -408,6 +409,7 @@ export class ImportScreen {
           <div class="custom-actions">
             <button class="btn-hero btn-terminal-exec" id="btn-browse-file">[ BROWSE AUDIO FILE ]</button>
           </div>
+          <div class="custom-status" id="custom-status" role="status" aria-live="polite" hidden></div>
         </div>
 
         <!-- 03: MOVEMENT LAB SETUP PANEL -->
@@ -631,6 +633,7 @@ export class ImportScreen {
 
     // Custom drop elements
     this.dropZone = this.element.querySelector('#import-drop-zone') as HTMLElement;
+    this.customStatusElem = this.element.querySelector('#custom-status') as HTMLElement | null;
     this.fileInput = this.element.querySelector('#import-file-input') as HTMLInputElement;
     this.browseBtn = this.element.querySelector('#btn-browse-file') as HTMLButtonElement;
 
@@ -1309,6 +1312,23 @@ export class ImportScreen {
 
   public setDecodeModal(modal: import('./SignalDecodeModal').SignalDecodeModal): void {
     this.decodeModal = modal;
+  }
+
+  /**
+   * Compact, human-readable custom-audio status/error notice on the import
+   * page. Never receives raw decoder output or stack traces.
+   */
+  public setCustomStatus(message: string | null, kind: 'info' | 'error' = 'info'): void {
+    if (!this.customStatusElem) return;
+    if (!message) {
+      this.customStatusElem.hidden = true;
+      this.customStatusElem.textContent = '';
+      this.customStatusElem.dataset.kind = '';
+      return;
+    }
+    this.customStatusElem.hidden = false;
+    this.customStatusElem.textContent = message;
+    this.customStatusElem.dataset.kind = kind;
   }
 
   /** Opens the RESULTS-style quick reveal for a legacy/DEV pending rank. */

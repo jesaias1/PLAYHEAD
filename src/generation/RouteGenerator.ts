@@ -22,6 +22,7 @@ import {
   computeTempoPressure,
   tempoRouteEffects
 } from './TempoPressure';
+import { computeCustomPhraseProfile, customTrackHasSurfSupport, supportsCustomSurf } from './CustomPhraseProfile';
 
 export const ROUTE_GENERATION_VERSION = 5;
 
@@ -56,6 +57,12 @@ export class RouteGenerator {
     // Plan structured, musically-aligned surf events
     const surfEvents = SurfPlanner.plan(analysis);
     const executedSurfEventIds = new Set<number>();
+    const customPhrase = computeCustomPhraseProfile(analysis);
+    const isCustomRoute = customPhrase.isCustom;
+    // CUSTOM surf is only allowed where the music genuinely supports it.
+    const customSurfSupported = isCustomRoute ? customTrackHasSurfSupport(analysis) : false;
+    // Custom onboarding window scales with duration; official keeps 25s exactly.
+    const onboardingWindow = isCustomRoute ? Math.max(8.0, Math.min(25.0, analysis.duration * 0.12)) : 25.0;
 
     // Reference running velocity (metres/second)
     const refSpeed = 16.0;
@@ -145,7 +152,10 @@ export class RouteGenerator {
       }
 
       // Generate movement phrases according to section theme
-      const sectionTargetDistance = section.duration * refSpeed;
+      // Official tracks keep the historical full-speed target exactly; custom
+      // tracks use a conservative competent-speed budget with headroom.
+      const sectionTargetDistance = section.duration * refSpeed *
+        (isCustomRoute ? (customPhrase.paceByTheme[section.theme] ?? 0.85) : 1);
       let sectionCurrentDistance = 0;
 
       // Section-scoped tempo pressure: BPM sets the overall movement language,
@@ -166,7 +176,13 @@ export class RouteGenerator {
         const phraseRoll = rng.next();
         const theme = section.theme;
         const currentNodeTime = section.start + (sectionTargetDistance > 0 ? (sectionCurrentDistance / sectionTargetDistance) * section.duration : 0);
-        const isOnboarding = currentNodeTime < 25.0;
+        const isOnboarding = currentNodeTime < onboardingWindow;
+        const pendingSurf = surfEvents.find(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id)) ?? null;
+        // CUSTOM: never fire a scheduled surf prematurely just because the
+        // section index matches; wait for its musical start and real progress.
+        const surfEligible = pendingSurf != null && (
+          !isCustomRoute || (currentNodeTime >= pendingSurf.startTime && sectionCurrentDistance >= sectionTargetDistance * 0.2)
+        );
 
         if (isOnboarding) {
           // Onboarding period (first 25 seconds): Wide, forgiving runways (14m width) with gentle gaps (3.0m - 4.2m)
@@ -201,9 +217,9 @@ export class RouteGenerator {
           estimatedSpeed = refSpeed; // Onboarding keeps baseline speed
           consecutiveNarrow = 0;
 
-        } else if (surfEvents.some(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id))) {
+        } else if (surfEligible) {
           // Dedicated planned musical surf event
-          const plannedSurf = surfEvents.find(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id))!;
+          const plannedSurf = pendingSurf!;
           executedSurfEventIds.add(plannedSurf.id);
 
           const phrase = SurfPhraseGenerator.generate(
@@ -355,7 +371,11 @@ export class RouteGenerator {
             consecutiveNarrow = 0;
           }
 
-        } else if (theme === 'SURF' && phraseRoll < 0.6) {
+        } else if (
+          theme === 'SURF' &&
+          phraseRoll < 0.6 &&
+          (!isCustomRoute || supportsCustomSurf(section, sIdx > 0 ? analysis.sections[sIdx - 1] : null))
+        ) {
           // Generate a validated surf phrase
           const phrase = SurfPhraseGenerator.generate(
             {
@@ -699,8 +719,19 @@ export class RouteGenerator {
       yaw: updatedFinishNode.yaw
     };
 
-    // 5. Generate Optional Side-Surf Skill Ramps alongside selected platform sequences
-    const optionalRampsRaw = RouteGenerator.generateOptionalSideSurfs(repairedNodes, rng);
+    // 5. Generate Optional Side-Surf Skill Ramps alongside selected platform sequences.
+    // CUSTOM: optional surf also requires genuine musical support for its own
+    // section, so a bright ambient pad never gets forced surf ramps.
+    let optionalRampsRaw = (!isCustomRoute || customSurfSupported)
+      ? RouteGenerator.generateOptionalSideSurfs(repairedNodes, rng)
+      : [];
+    if (isCustomRoute) {
+      optionalRampsRaw = optionalRampsRaw.filter((r) => {
+        const sec = analysis.sections[r.sectionIndex];
+        if (!sec) return false;
+        return supportsCustomSurf(sec, r.sectionIndex > 0 ? analysis.sections[r.sectionIndex - 1] : null);
+      });
+    }
 
     // 6. Generate Subtle Recovery Catch-Shelves under tricky platform sequences
     const recoveryShelves = RouteGenerator.generateRecoveryShelves(repairedNodes, rng);

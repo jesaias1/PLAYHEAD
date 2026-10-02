@@ -11,7 +11,10 @@ import { AudioEngine } from '../audio/AudioEngine';
 import { AudioLoader } from '../audio/AudioLoader';
 import { AudioAnalyzer } from '../audio/AudioAnalyzer';
 import { SyntheticGenre, SyntheticTrack } from '../audio/SyntheticTrack';
-import { TrackAnalysis } from '../audio/AudioFeatures';
+import { CustomSourceMeta, TrackAnalysis } from '../audio/AudioFeatures';
+import { computeCustomContentIdentity } from '../utils/hash';
+import { estimateRouteTiming } from '../generation/CustomTimingEstimate';
+import { resolveCustomAudioLevel } from '../generation/CustomPipeline';
 import { TrackGenerator } from '../generation/TrackGenerator';
 import { GeneratedTrack, CheckpointDefinition } from '../generation/GenerationTypes';
 import { Environment } from '../world/Environment';
@@ -653,7 +656,7 @@ export class Game {
 
         case GameState.READY:
           this.ui.hideAllScreens();
-          this.ui.analysisScreen.show();
+          this.ui.analysisScreen.show(prevState !== GameState.ANALYSING);
           if (this.currentAnalysis) {
             this.ui.analysisScreen.displayAnalysis(this.currentAnalysis);
           }
@@ -1037,14 +1040,15 @@ export class Game {
       this.ui.analysisScreen.setTrackTitle(file.name);
       this.ui.analysisScreen.setStage('[SIGNAL] INPUT RECEIVED', 0.02);
 
-      const { buffer, filename } = await AudioLoader.loadFromFile(file);
+      const { buffer, filename, encodedBytes } = await AudioLoader.loadFromFile(file);
       this.currentCustomAudioBuffer = buffer;
       this.ui.analysisScreen.setStage('[AUDIO] PCM DECODED', 0.08);
-      await this.processBuffer(buffer, filename);
+      await this.processBuffer(buffer, filename, {
+        custom: { source: 'FILE', encodedBytes: encodedBytes }
+      });
     } catch (err: unknown) {
       this.currentCustomAudioBuffer = null;
-      const msg = err instanceof Error ? err.message : 'Audio load failed';
-      alert(msg);
+      this.reportCustomImportError(err);
       this.stateMachine.transitionTo(GameState.IMPORT);
     }
   }
@@ -1061,30 +1065,91 @@ export class Game {
 
       const buffer = await SyntheticTrack.generate(genre);
       this.ui.analysisScreen.setStage('[AUDIO] PCM BUFFER READY', 0.08);
-      await this.processBuffer(buffer, title);
+      await this.processBuffer(buffer, title, {
+        custom: { source: 'DEV', encodedBytes: null }
+      });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Dev track failed';
-      alert(msg);
+      this.reportCustomImportError(err);
       this.stateMachine.transitionTo(GameState.IMPORT);
     }
   }
 
-  private async processBuffer(buffer: AudioBuffer, filename: string): Promise<void> {
+  /**
+   * Compact, user-facing custom-import error. Never surfaces raw decoder
+   * messages or stack traces; the existing import page remains the retry path.
+   */
+  private reportCustomImportError(err: unknown): void {
+    const raw = err instanceof Error ? err.message : '';
+    let message = 'CUSTOM AUDIO COULD NOT BE ANALYSED — CHOOSE ANOTHER FILE';
+    if (/too short/i.test(raw)) {
+      message = 'SIGNAL TOO SHORT — MINIMUM 1 SECOND OF AUDIO REQUIRED';
+    } else if (/unsupported|decode|format/i.test(raw)) {
+      message = 'UNSUPPORTED OR UNREADABLE AUDIO — TRY WAV, MP3, OGG OR FLAC';
+    }
+    console.error('[CUSTOM AUDIO] import failed:', raw || err);
+    this.ui.importScreen.setCustomStatus(message, 'error');
+  }
+
+  private async processBuffer(
+    buffer: AudioBuffer,
+    filename: string,
+    options?: { custom?: { source: CustomSourceMeta['source']; encodedBytes?: ArrayBuffer | null } }
+  ): Promise<void> {
+    const isCustom = options?.custom != null;
+    if (isCustom) this.ui.importScreen.setCustomStatus(null);
+
     await this.audioEngine.init();
     this.audioEngine.setBuffer(buffer);
 
+    // Compute content identity BEFORE analysis so a cache hit can skip the
+    // expensive DSP entirely. The identity is handed to the analyzer so the
+    // bytes are hashed exactly once.
+    const identity = isCustom
+      ? await computeCustomContentIdentity(buffer, options!.custom!.encodedBytes ?? null)
+      : null;
+
     this.ui.analysisScreen.setStage('[DSP] PREPARING ANALYSIS', 0.1);
-    const analysis = await AudioAnalyzer.analyze(buffer, filename, (stage, progress) => {
-      this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68);
-    });
+
+    let analysis: TrackAnalysis;
+    let track: GeneratedTrack;
+    if (identity) {
+      const resolved = await resolveCustomAudioLevel(
+        buffer,
+        filename,
+        identity,
+        options!.custom!,
+        { analyze: AudioAnalyzer.analyze, generate: (value) => TrackGenerator.generate(value) },
+        (stage, progress) => this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68)
+      );
+      analysis = resolved.analysis;
+      track = resolved.track;
+      this.ui.analysisScreen.setStage(
+        resolved.cacheHit ? '[MAP] CACHED MOVEMENT PHRASES RESTORED' : '[MAP] MOVEMENT PHRASES',
+        0.82
+      );
+    } else {
+      analysis = await AudioAnalyzer.analyze(buffer, filename, (stage, progress) => {
+        this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68);
+      });
+      this.ui.analysisScreen.setStage('[MAP] MOVEMENT PHRASES', 0.82);
+      track = TrackGenerator.generate(analysis);
+    }
 
     this.currentAnalysis = analysis;
     this.ui.applyAccent(analysis.visualAccent);
     this.environment.setAccent(analysis.visualAccent);
-
-    // Deterministically generate the course
-    this.ui.analysisScreen.setStage('[MAP] MOVEMENT PHRASES', 0.82);
-    this.currentTrack = TrackGenerator.generate(analysis);
+    this.currentTrack = track;
+    // Honest timing: a short clip that cannot contain a safe start/finish is
+    // reported as a limitation instead of claiming a before-song finish. The
+    // competitive run itself is unchanged; this only sets player-facing copy.
+    if (isCustom) {
+      const timing = estimateRouteTiming(track, analysis);
+      if (!timing.fitsSong) {
+        this.ui.analysisScreen.addStageLog(
+          `[TIME] COURSE ESTIMATE ${Math.ceil(timing.planningBudgetSeconds)}s // OVERTIME MAY BE NEEDED`
+        );
+      }
+    }
     this.ui.analysisScreen.setStage('[ROUTE] TRAVERSAL VALIDATED', 0.9);
     this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
     // Custom audio / tutorial / lab: no official catalog id, so the world uses

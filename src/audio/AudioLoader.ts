@@ -13,7 +13,9 @@ export class AudioLoader {
     return this.decodeCtx;
   }
 
-  public static async loadFromFile(file: File): Promise<{ buffer: AudioBuffer; filename: string }> {
+  public static async loadFromFile(
+    file: File
+  ): Promise<{ buffer: AudioBuffer; filename: string; encodedBytes: ArrayBuffer | null }> {
     const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.webm'];
     const lowerName = file.name.toLowerCase();
     const isValid = validExtensions.some(ext => lowerName.endsWith(ext)) || file.type.startsWith('audio/');
@@ -25,6 +27,14 @@ export class AudioLoader {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const ctx = this.getContext();
+      // decodeAudioData detaches the source buffer on some engines, so keep a
+      // copy for content hashing before decoding.
+      let encodedBytes: ArrayBuffer | null = null;
+      try {
+        encodedBytes = arrayBuffer.slice(0);
+      } catch {
+        encodedBytes = null;
+      }
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
       if (audioBuffer.duration < 1.0) {
@@ -32,7 +42,7 @@ export class AudioLoader {
       }
 
       const cleanName = file.name.replace(/\.[^/.]+$/, '').trim() || 'Untitled Signal';
-      return { buffer: audioBuffer, filename: cleanName };
+      return { buffer: audioBuffer, filename: cleanName, encodedBytes };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown decoding error';
       throw new Error(`Failed to decode audio file: ${msg}`);

@@ -24,6 +24,7 @@ import { RouteSignalPackets } from './RouteSignalPackets';
 import { Megastructure } from './Megastructure';
 import { SignalHeroMotifs } from './SignalHeroMotifs';
 import { SignalWorldProfileRegistry, OfficialWorldProfile, stepProfileReactionGain } from './SignalWorldProfile';
+import { VisualDreamDirector } from './VisualDreamProfile';
 import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { getNodeExitAnchor, getNodeEntryAnchor } from '../generation/RouteConnectivityValidator';
 import { collectForkSequences } from '../generation/RouteForkGenerator';
@@ -118,7 +119,17 @@ export class World {
     //    trusts a real catalog id; custom audio / tutorial / lab (null) and any
     //    unknown id receive the safe fallback. A filename that happens to look
     //    like an official title can never select an official profile.
-    this.worldProfile = SignalWorldProfileRegistry.resolveForTrackId(officialTrackId);
+    if (officialTrackId == null && analysis.customSource != null) {
+      // CUSTOM runtime: derive a bounded world profile from the audio
+      // descriptors + content seed and feed it through the EXISTING
+      // architecture/sky/atmosphere/reaction mechanisms. Only used when there
+      // is genuinely a custom source; official/null keeps the legacy fallback.
+      this.worldProfile =
+        VisualDreamDirector.deriveCustomWorldProfile(analysis) ??
+        SignalWorldProfileRegistry.resolveForTrackId(null);
+    } else {
+      this.worldProfile = SignalWorldProfileRegistry.resolveForTrackId(officialTrackId);
+    }
     const emph = this.worldProfile.usesOverride ? this.worldProfile.reaction.emphasis : null;
     this.reactHero = !!emph?.includes('HERO');
     this.reactCelestialSky = !!emph && (emph.includes('HERO') || emph.includes('SKY'));
