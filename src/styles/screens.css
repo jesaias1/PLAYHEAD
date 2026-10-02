@@ -3043,3 +3043,69 @@ option:hover, option:focus, option:checked {
   margin: 4px 0 10px;
 }
 #login-hint.error { color: #ff6b6b; }
+
+/* MOVEMENT ACADEMY — in-world lesson HUD. Terminal language, sparse, and
+   diff-throttled upstream so it never causes per-frame style churn. */
+#movement-academy-hud {
+  position: absolute;
+  left: 24px;
+  top: 24px;
+  z-index: 40;
+  pointer-events: none;
+  display: flex;
+  font-family: var(--font-mono);
+}
+#movement-academy-hud .academy-panel {
+  min-width: 260px;
+  max-width: 340px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(3, 5, 10, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 2px solid var(--accent-color);
+  backdrop-filter: blur(8px);
+}
+#movement-academy-hud .academy-header { font-size: 0.6rem; letter-spacing: 0.32em; color: #6f7d8e; }
+#movement-academy-hud .academy-lesson { font-size: 0.95rem; letter-spacing: 0.16em; color: var(--accent-color, #00f0ff); }
+#movement-academy-hud .academy-lesson.complete { color: #39ff14; }
+#movement-academy-hud .academy-objective { font-size: 0.8rem; line-height: 1.5; color: #dfe7f0; white-space: pre-line; }
+#movement-academy-hud .academy-objective.complete { color: #39ff14; }
+#movement-academy-hud .academy-speed { font-size: 1.5rem; letter-spacing: 0.05em; color: #fff; }
+#movement-academy-hud .academy-speed.hidden { display: none; }
+#movement-academy-hud .academy-status { font-size: 0.66rem; letter-spacing: 0.2em; color: #6f7d8e; min-height: 1em; }
+#movement-academy-hud .academy-status.good { color: #39ff14; }
+#movement-academy-hud .academy-status.warn { color: #ffb703; }
+#movement-academy-hud .academy-status.skipped { color: #ff5d5d; }
+#movement-academy-hud .academy-status.complete { color: #39ff14; }
+#movement-academy-hud .academy-progress { font-size: 0.62rem; line-height: 1.6; color: #7d8b9c; white-space: pre; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+#movement-academy-hud .academy-buttons { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
+#movement-academy-hud .academy-btn {
+  pointer-events: auto;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  color: #cfd8e3;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 6px 9px;
+  cursor: pointer;
+}
+#movement-academy-hud .academy-btn:hover { color: #fff; border-color: var(--accent-color, #00f0ff); }
+#movement-academy-hud .academy-controls { font-size: 0.58rem; letter-spacing: 0.14em; color: #5c6875; }
+#panel-lab .btn-terminal-academy { border-color: rgba(57, 255, 20, 0.5); }
+.strip-item-recommended {
+  font-size: 0.5rem;
+  letter-spacing: 0.14em;
+  color: #39ff14;
+  border: 1px solid rgba(57, 255, 20, 0.4);
+  padding: 1px 4px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+#movement-academy-hud .academy-select { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
+#movement-academy-hud .academy-btn-lesson { min-width: 84px; }
+#movement-academy-hud .academy-btn-lesson.active { color: #fff; border-color: var(--accent-color, #00f0ff); background: rgba(0, 240, 255, 0.12); }
+#movement-academy-hud .academy-btn-lesson.done { color: #39ff14; border-color: rgba(57, 255, 20, 0.5); }

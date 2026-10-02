@@ -87,6 +87,10 @@ export class ImportScreen {
     this.switchOnlineSection('race');
   }
 
+  public openSignalPackTab(): void {
+    this.switchModule(0);
+  }
+
   /** Opens 05 // ONLINE on the LEADERBOARD subsection. */
   public openLeaderboardTab(): void {
     this.switchModule(4);
@@ -236,6 +240,8 @@ export class ImportScreen {
   private armoryPanel: HTMLElement;
   private labMusicSelect: HTMLSelectElement;
   private labEnterBtn: HTMLButtonElement;
+  private labAcademyBtn: HTMLButtonElement;
+  private onMovementAcademyCallback?: () => void;
 
   // Showcase Elements
   private showcaseTitleElem: HTMLElement;
@@ -386,7 +392,7 @@ export class ImportScreen {
 
             <aside class="signal-catalog" aria-label="Signal Pack catalog">
               <div class="terminal-panel-header catalog-header">
-                <span>SIGNAL PACK</span><span class="catalog-count" id="showcase-catalog-count"></span>
+                <span>SIGNAL PACK // OFFICIAL TRACKS</span><span class="catalog-count" id="showcase-catalog-count"></span>
               </div>
               <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
                 <!-- Populated dynamically via buildStrip() -->
@@ -398,7 +404,7 @@ export class ImportScreen {
 
         <!-- 02: CUSTOM AUDIO PANEL -->
         <div class="custom-panel terminal-panel hidden" id="panel-custom" role="tabpanel" aria-labelledby="tab-btn-custom" aria-hidden="true">
-          <div class="terminal-panel-header">// EXTERNAL SIGNAL INJECTION</div>
+          <div class="terminal-panel-header">// IMPORT YOUR OWN MUSIC</div>
           <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone" role="button" tabindex="0" aria-label="Choose or drop an audio file">
             <div class="drop-icon terminal-glow-icon">⤓</div>
             <div class="drop-title">INITIALIZE AUDIO STREAM</div>
@@ -420,7 +426,7 @@ export class ImportScreen {
               <h2 class="lab-console-title">KINETIC SANDBOX</h2>
             </div>
             <div class="lab-console-copy">
-              Isolated practice space for bunny-hop timing, air-strafing and surf ramp control. No clock, no rank. Configure the session, then enter.
+              MOVEMENT LAB is a free training sandbox: hop, strafe and surf with no clock, no rank. MOVEMENT ACADEMY is a short guided course that teaches the movement itself.
             </div>
             <ul class="lab-feature-list" aria-label="Lab contents">
               <li><b>BHOP</b><span>runway + bhop straight</span></li>
@@ -435,6 +441,7 @@ export class ImportScreen {
             </div>
             <div class="lab-actions">
               <button class="btn-hero btn-terminal-exec" id="btn-lab-enter">&gt; ENTER MOVEMENT LAB</button>
+              <button class="btn-hero btn-terminal-exec btn-terminal-academy" id="btn-lab-academy">&gt; START MOVEMENT ACADEMY</button>
             </div>
           </div>
         </div>
@@ -447,7 +454,7 @@ export class ImportScreen {
           <!-- 1. COMPACT HEADER: what am I wearing + how many drops are waiting. -->
           <div class="armory-header">
             <div class="armory-header-title">
-              <div class="armory-kicker">[ARMORY] LOADOUT INVENTORY</div>
+              <div class="armory-kicker">[ARMORY] COSMETICS + LOADOUT</div>
               <h2 class="armory-title">ARMORY</h2>
             </div>
             <div class="armory-loadout" aria-label="Current loadout">
@@ -614,6 +621,7 @@ export class ImportScreen {
     this.armoryPanel = this.element.querySelector('#panel-armory') as HTMLElement;
     this.labMusicSelect = this.element.querySelector('#lab-music-select') as HTMLSelectElement;
     this.labEnterBtn = this.element.querySelector('#btn-lab-enter') as HTMLButtonElement;
+    this.labAcademyBtn = this.element.querySelector('#btn-lab-academy') as HTMLButtonElement;
 
     // Showcase elements
     this.showcaseTitleElem = this.element.querySelector('#showcase-title') as HTMLElement;
@@ -727,6 +735,7 @@ export class ImportScreen {
       const tier = Math.max(1, Math.min(5, Math.round(t.difficulty)));
       const pips = '<i class="on"></i>'.repeat(tier) + '<i></i>'.repeat(5 - tier);
       item.style.setProperty('--row-accent', t.accentColor);
+      const recommended = t.id === 'track_1_signal_drift';
       item.innerHTML = `
         <div class="strip-item-inner">
           <span class="strip-item-index">${displayIndex}</span>
@@ -734,6 +743,7 @@ export class ImportScreen {
             <div class="strip-item-title">${t.title}</div>
             <div class="strip-item-header">
               <span class="strip-item-num">${isTutorial ? 'CALIBRATION' : t.difficultyLabel}</span>
+              ${recommended ? '<span class="strip-item-recommended">RECOMMENDED FIRST SIGNAL</span>' : ''}
               <span class="strip-item-pips" aria-label="Tier ${tier}">${pips}</span>
               ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
             </div>
@@ -1299,6 +1309,7 @@ export class ImportScreen {
     onDevTrack: (genre?: SyntheticGenre) => void,
     onError: (err: string) => void,
     onMovementLab?: (trackId?: string) => void,
+    onMovementAcademy?: () => void,
     onCatalogTrack?: (track: TrackCatalogEntry) => void,
     onRacePbGhost?: (trackId: string) => void
   ): void {
@@ -1306,6 +1317,7 @@ export class ImportScreen {
     this.onDevTrackCallback = onDevTrack;
     this.onErrorCallback = onError;
     this.onMovementLabCallback = onMovementLab;
+    this.onMovementAcademyCallback = onMovementAcademy;
     this.onCatalogTrackCallback = onCatalogTrack;
     this.onRacePbGhostCallback = onRacePbGhost;
   }
@@ -1459,6 +1471,11 @@ export class ImportScreen {
       this.stopPreview();
       const chosen = this.labMusicSelect.value;
       this.onMovementLabCallback?.(chosen === 'NONE' ? undefined : chosen);
+    });
+
+    this.labAcademyBtn.addEventListener('click', () => {
+      this.stopPreview();
+      this.onMovementAcademyCallback?.();
     });
 
     this.armoryDevToggleBtn.addEventListener('click', () => {

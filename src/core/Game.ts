@@ -410,6 +410,7 @@ export class Game {
       (genre) => this.handleDevTrackSelected(genre),
       (err) => alert(err),
       (trackId) => this.enterMovementLab(trackId),
+      () => this.enterMovementLab(undefined, { academy: true }),
       (track) => this.handleCatalogTrackSelected(track),
       (trackId) => {
         // RACE PB GHOST: retrieve + validate + enter the level. Failures surface
@@ -577,8 +578,11 @@ export class Game {
     }
   }
 
-  private async enterMovementLab(trackId?: string): Promise<void> {
+  private pendingAcademyEntry = false;
+
+  private async enterMovementLab(trackId?: string, opts?: { academy?: boolean }): Promise<void> {
     this.currentOfficialTrackId = null;
+    this.pendingAcademyEntry = !!opts?.academy;
     this.stateMachine.transitionTo(GameState.MOVEMENT_LAB);
     if (trackId && trackId !== 'NONE') {
       const trackEntry = MusicPack.getTrackById(trackId);
@@ -646,6 +650,18 @@ export class Game {
               this.ui.root
             );
             this.wireSignalGatePresentation();
+            this.movementLab.onAcademySignalPack = () => {
+              this.returnToImport();
+              this.ui.importScreen.openSignalPackTab();
+            };
+            if (this.pendingAcademyEntry) {
+              this.pendingAcademyEntry = false;
+              this.movementLab.enterAcademy();
+              const academy = this.movementLab.getAcademy();
+              if (academy) {
+                academy.exitCallback = () => this.returnToImport();
+              }
+            }
           }
           break;
 
@@ -1564,6 +1580,16 @@ export class Game {
 
   private handlePlayerFall(reason: RestoreReason = RestoreReason.OTHER): void {
     if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
+      const academy = this.movementLab?.getAcademy();
+      if (academy) {
+        // The ONLY automatic academy restore: the authoritative void boundary.
+        // Numeric corruption remains a separate emergency recovery path.
+        if (reason === RestoreReason.NORMAL_VOID) academy.reportVoidRestore();
+        else academy.retryCurrent();
+        this.playerController.isRestoring = false;
+        this.isRestoringCheckpoint = false;
+        return;
+      }
       this.restoreToCheckpoint(RestoreReason.OTHER, false);
       return;
     }
@@ -1970,6 +1996,17 @@ export class Game {
   }
 
   private setupInputHandlers(): void {
+    // Academy lesson selection must reach us before the controller's Lab-only
+    // 1/2/3 calibration shortcuts, which would otherwise change the preset.
+    window.addEventListener('keydown', (e) => {
+      if (!this.movementLab?.isAcademyMode() || !/^Digit[1-3]$/.test(e.code)) return;
+      e.stopImmediatePropagation();
+      const target = e.target;
+      if (target instanceof HTMLElement &&
+          (target.isContentEditable || target.matches('input, textarea, select'))) return;
+      e.preventDefault();
+      this.handleAcademyKey(e);
+    }, true);
     // ---- View-orientation diagnostics (opt-in via ?debugMovement=1) -------
     // Pure observers: they read orientation state and never write it.
     if (movementDiagnostics.isEnabled) {
@@ -2166,6 +2203,9 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       // In-game race READY consumes SPACE only while the race is staged.
       if (this.handleRaceReadyKey(e)) return;
+      // MOVEMENT ACADEMY dedicated controls (only while a live lesson is
+      // running, never while paused or with a modal open).
+      if (this.handleAcademyKey(e)) return;
       if (e.code === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -2249,6 +2289,52 @@ export class Game {
     });
   }
 
+  /**
+   * MOVEMENT ACADEMY keys. Returns true when the event was consumed so Lab
+   * cheat keys and presets never fire mid-lesson. Retry ([R]) is intentionally
+   * NOT handled here: the approved PlayerController R path already routes to
+   * the Academy retry via MovementLab.resetPlayer, so there is no duplicate.
+   */
+  private handleAcademyKey(e: KeyboardEvent): boolean {
+    const academy = this.movementLab?.getAcademy();
+    if (!academy) return false;
+    if (this.stateMachine.is(GameState.PAUSED)) return false;
+    if (
+      this.ui.armoryModal.isVisible() ||
+      this.ui.settingsModal.isVisible() ||
+      this.ui.movementLabSongModal.isVisible()
+    ) {
+      return false;
+    }
+
+    if (e.repeat) return true;
+
+    switch (e.code) {
+      case 'KeyX':
+        e.preventDefault();
+        this.returnToImport();
+        return true;
+      case 'KeyK':
+        e.preventDefault();
+        academy.skipCurrent();
+        return true;
+      case 'Enter':
+        e.preventDefault();
+        this.movementLab?.onAcademySignalPack?.();
+        return true;
+      case 'Digit1':
+      case 'Digit2':
+      case 'Digit3':
+      case 'Digit4':
+      case 'Digit5': {
+        e.preventDefault();
+        academy.selectLessonByIndex(Number(e.code.slice(5)) - 1);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
   private jumpToNextCheckpoint(): void {
     if (!this.currentTrack || this.currentTrack.checkpoints.length === 0) return;
     const songTime = this.audioEngine.getCurrentTime();
@@ -2399,6 +2485,10 @@ export class Game {
         }
       } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         this.playerController.updateFixed(dt);
+        // Academy observes the SAME authoritative fixed tick: a bhop landing +
+        // immediately-buffered jump is never missed by render sampling.
+        const academy = this.movementLab?.getAcademy();
+        academy?.update(dt);
       }
 
       // Movement feedback runs on the SAME fixed tick as movement so landings,

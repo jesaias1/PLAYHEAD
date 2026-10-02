@@ -19,6 +19,7 @@ import { SignalGateSystem } from '../gates/SignalGateSystem';
 import { GateMusicState, SILENT_GATE_MUSIC } from '../gates/SignalGateRenderer';
 import { SignalGateDefinition } from '../gates/SignalGate';
 import { SettingsManager } from '../core/Settings';
+import { MovementAcademy } from './MovementAcademy';
 
 export class MovementLab {
   private scene: THREE.Scene;
@@ -54,6 +55,13 @@ export class MovementLab {
 
   private isDisposed = false;
   private keyListener?: (e: KeyboardEvent) => void;
+
+  /** Optional Movement Academy session on the SAME physics/player. */
+  private academy: MovementAcademy | null = null;
+  private labPhysicsSnapshot: ReturnType<PhysicsWorld['snapshotColliders']> | null = null;
+
+  /** Set by Game so the Academy complete screen can launch the Signal Pack. */
+  public onAcademySignalPack?: () => void;
 
   constructor(
     scene: THREE.Scene,
@@ -580,6 +588,13 @@ export class MovementLab {
   public update(dt: number, visualState?: GateMusicState): void {
     if (this.isDisposed) return;
 
+    // Academy mode replaces the Lab presentation entirely but shares this
+    // object's physics/player. The Lab course and its HUD stay untouched.
+    if (this.academy) {
+      // Academy observation is driven by Game on the authoritative fixed tick.
+      return;
+    }
+
     if (visualState) this.gateMusic = visualState;
 
     // Signal Gates: swept detection on consecutive sampled positions, then
@@ -643,6 +658,10 @@ export class MovementLab {
   }
 
   public resetPlayer(): void {
+    if (this.academy) {
+      this.academy.retryCurrent();
+      return;
+    }
     this.player.setPosition(this.spawnPosition);
     this.player.setOrientation(this.spawnYaw);
     this.player.velocity.set(0, 0, 0);
@@ -684,6 +703,10 @@ export class MovementLab {
    * Hold-R still performs the normal full restart (lab spawn).
    */
   public respawnAtTestCheckpoint(): void {
+    if (this.academy) {
+      this.academy.retryCurrent();
+      return;
+    }
     const cp = this.gauntletCheckpointIndex >= 0
       ? this.gauntletCheckpoints[this.gauntletCheckpointIndex]
       : null;
@@ -695,6 +718,62 @@ export class MovementLab {
     } else {
       this.resetPlayer();
     }
+  }
+
+  // ------------------------------------------------------------------
+  // MOVEMENT ACADEMY
+  // ------------------------------------------------------------------
+
+  /** True when the Academy has replaced the Lab session. */
+  public isAcademyMode(): boolean {
+    return this.academy !== null;
+  }
+
+  /**
+   * Enters the Academy on the SAME physics world + player as the Lab.
+   * The Lab course/HUD are hidden but left fully intact, so EXIT restores
+   * normal Lab behavior without a rebuild.
+   */
+  public enterAcademy(): void {
+    if (this.academy) return;
+    this.labPhysicsSnapshot = this.physics.snapshotColliders();
+    this.physics.clear();
+    this.hud.hide();
+    this.trajEnabled = false;
+    this.clearTrajectory();
+    // Hide the entire Lab presentation so no Lab mesh/collider reads as part of
+    // the Academy. The snapshot above preserves the normal Lab world while
+    // the Academy world contains ONLY Academy geometry.
+    this.rootGroup.visible = false;
+    this.signalGates?.group && (this.signalGates.group.visible = false);
+    this.academy = new MovementAcademy(
+      this.scene,
+      this.physics,
+      this.player,
+      this.cameraController,
+      this.hud.element.parentElement ?? document.body
+    );
+    this.academy.exitCallback = () => this.exitAcademy();
+    this.academy.signalPackCallback = () => this.onAcademySignalPack?.();
+  }
+
+  /** Leaves the Academy and restores the untouched Lab course/HUD. */
+  public exitAcademy(): void {
+    if (!this.academy) return;
+    this.academy.dispose();
+    this.academy = null;
+    if (this.labPhysicsSnapshot) {
+      this.physics.restoreColliders(this.labPhysicsSnapshot);
+      this.labPhysicsSnapshot = null;
+    }
+    this.rootGroup.visible = true;
+    this.signalGates?.group && (this.signalGates.group.visible = true);
+    this.hud.show();
+    this.resetPlayer();
+  }
+
+  public getAcademy(): MovementAcademy | null {
+    return this.academy;
   }
 
   /** DEV quick-jump: teleport to a gauntlet station checkpoint. */
@@ -741,6 +820,11 @@ export class MovementLab {
       // NOTE: R is intentionally NOT handled here. Tap-R (checkpoint restore)
       // and hold-R (full restart) are owned by the production PlayerController
       // path so the Lab uses the normal movement control semantics.
+      if (this.academy) {
+        // Academy keyboard controls live in Game so they can be gated to the
+        // LIVE lesson (never while paused/modal). Swallow Lab cheat keys here.
+        return;
+      }
       if (e.code === 'KeyT' && !e.repeat) {
         this.toggleTrajectory();
       } else if (e.code === 'Digit9' && !e.repeat) {
@@ -782,6 +866,15 @@ export class MovementLab {
 
     if (this.keyListener && typeof window !== 'undefined') {
       window.removeEventListener('keydown', this.keyListener);
+    }
+
+    if (this.academy) {
+      this.academy.dispose();
+      this.academy = null;
+    }
+    if (this.labPhysicsSnapshot) {
+      this.physics.restoreColliders(this.labPhysicsSnapshot);
+      this.labPhysicsSnapshot = null;
     }
 
     // Remove HUD

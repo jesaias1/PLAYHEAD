@@ -215,6 +215,46 @@ export class PhysicsWorld {
   }
 
   /**
+   * Snapshot the full collider set so a temporary world swap (Movement
+   * Academy) can restore the EXACT prior physics, including moving obstacles,
+   * without a course rebuild or a collider leak.
+   */
+  public snapshotColliders(): {
+    colliders: BoxCollider[];
+    dynamicObstacles: DynamicObstacle[];
+    obstacleColliders: ObstacleColliderEntry[];
+    lowestGameplayY: number;
+    killPlaneY: number;
+    voidEnvelope: RouteVoidEnvelope;
+  } {
+    return {
+      colliders: this.colliders.slice(),
+      dynamicObstacles: this.dynamicObstacles.slice(),
+      obstacleColliders: this.obstacleColliders.slice(),
+      lowestGameplayY: this.lowestGameplayY,
+      killPlaneY: this.killPlaneY,
+      voidEnvelope: this.voidEnvelope
+    };
+  }
+
+  /** Restore a snapshot taken by snapshotColliders (replacing current state). */
+  public restoreColliders(snapshot: {
+    colliders: BoxCollider[];
+    dynamicObstacles: DynamicObstacle[];
+    obstacleColliders: ObstacleColliderEntry[];
+    lowestGameplayY: number;
+    killPlaneY: number;
+    voidEnvelope: RouteVoidEnvelope;
+  }): void {
+    this.colliders = snapshot.colliders.slice();
+    this.dynamicObstacles = snapshot.dynamicObstacles.slice();
+    this.obstacleColliders = snapshot.obstacleColliders.slice();
+    this.lowestGameplayY = snapshot.lowestGameplayY;
+    this.killPlaneY = snapshot.killPlaneY;
+    this.voidEnvelope = snapshot.voidEnvelope;
+  }
+
+  /**
    * Resolve capsule collision for player
    * Player capsule represented as two spheres (bottom and top)
    */
