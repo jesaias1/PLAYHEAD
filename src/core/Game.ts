@@ -2318,6 +2318,14 @@ export class Game {
         e.preventDefault();
         academy.skipCurrent();
         return true;
+      case 'KeyL':
+        e.preventDefault();
+        academy.movementLabCallback?.();
+        return true;
+      case 'KeyT':
+        e.preventDefault();
+        academy.replayAcademy();
+        return true;
       case 'Enter':
         e.preventDefault();
         this.movementLab?.onAcademySignalPack?.();

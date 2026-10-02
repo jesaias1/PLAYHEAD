@@ -66,6 +66,7 @@ export class MovementAcademy {
   private progress: ProgressSnapshot = createProgress();
   private complete = false;
   private sessionFinished = false;
+  private replaying = false;
   private skipped = false;
   private voidFlashUntil = 0;
   private simTime = 0;
@@ -79,6 +80,7 @@ export class MovementAcademy {
   private isDisposed = false;
   public exitCallback?: () => void;
   public signalPackCallback?: () => void;
+  public movementLabCallback?: () => void;
 
   private materials = {
     concrete: new THREE.MeshStandardMaterial({ color: 0x222831, roughness: 0.65, metalness: 0.2 }),
@@ -119,7 +121,9 @@ export class MovementAcademy {
       onSkip: () => this.skipCurrent(),
       onExit: () => this.exitCallback?.(),
       onSelect: (index: number) => this.selectLessonByIndex(index),
-      onSignalPack: () => this.signalPackCallback?.()
+      onSignalPack: () => this.signalPackCallback?.(),
+      onMovementLab: () => this.movementLabCallback?.(),
+      onReplay: () => this.replayAcademy()
     });
 
     this.physics.voidEnvelope = new RouteVoidEnvelope();
@@ -346,12 +350,14 @@ export class MovementAcademy {
   }
 
   private completeCurrent(): void {
+    const finishedId = this.active;
     const result = completeLesson(this.progress, this.active);
     this.progress = result.progress;
     saveProgress(this.progress, this.storage());
     this.skipped = false;
     this.sessionFinished = result.sessionFinished;
     this.complete = isAcademyComplete(this.progress);
+    this.advanceReplay(finishedId);
 
     if (this.complete || this.sessionFinished) {
       this.pushHud(true);
@@ -362,12 +368,14 @@ export class MovementAcademy {
 
   public skipCurrent(): void {
     if (this.complete || this.sessionFinished) return;
+    const finishedId = this.active;
     const result = skipLesson(this.progress, this.active);
     this.progress = result.progress;
     saveProgress(this.progress, this.storage());
     this.skipped = true;
     this.sessionFinished = result.sessionFinished;
     this.complete = isAcademyComplete(this.progress);
+    this.advanceReplay(finishedId);
     if (this.sessionFinished) {
       this.pushHud(true);
       return;
@@ -390,6 +398,7 @@ export class MovementAcademy {
   }
 
   public selectLesson(id: LessonId): void {
+    this.replaying = false;
     this.progress = selectLessonProgress(this.progress, id);
     saveProgress(this.progress, this.storage());
     // An explicit lesson selection is ALWAYS a live, replayable attempt, even
@@ -398,6 +407,26 @@ export class MovementAcademy {
     this.sessionFinished = false;
     this.skipped = false;
     this.spawnCurrent();
+  }
+
+  /** Replay in order without clearing any earned completion markers. */
+  public replayAcademy(): void {
+    this.selectLesson('MOVEMENT');
+    this.replaying = true;
+  }
+
+  private advanceReplay(finishedId: LessonId): void {
+    if (!this.replaying) return;
+    const next = ACADEMY_LESSON_ORDER[ACADEMY_LESSON_ORDER.indexOf(finishedId) + 1];
+    if (!next) {
+      this.replaying = false;
+      this.sessionFinished = true;
+      return;
+    }
+    this.progress = selectLessonProgress(this.progress, next);
+    this.complete = false;
+    this.sessionFinished = false;
+    saveProgress(this.progress, this.storage());
   }
 
   /** Authoritative void restore only — the single automatic academy retry. */

@@ -63,7 +63,7 @@ function drive(ctx: ReturnType<typeof setup>, id: LessonId) {
     player.updateFixed(1 / 120);
     if (tick % 60 === 0) trace.push(`${tick}: ${player.position.toArray().map(n => n.toFixed(1))} v=${player.getSpeedUnits().toFixed(0)} surfing=${player.isSurfing} ${academy.getObserver().diagnose()}`);
     academy.update(1 / 120);
-    if (academy.getProgress().lessons[id] === 'COMPLETE') return tick;
+    if (academy.getActiveLesson() !== id || academy.isComplete() || academy.isSessionFinished()) return tick;
     if (falls.length > startFalls) break;
   }
   throw new Error(`${id}: pos=${player.position.toArray()} speed=${player.getSpeedUnits()} ${academy.getObserver().diagnose()} falls=${falls.slice(startFalls)} trace=${trace.join('; ')}`);
@@ -88,6 +88,27 @@ describe('Movement Academy actual physics', () => {
       drive(ctx, id);
     }
     expect(ctx.academy.isComplete()).toBe(true);
+    ctx.academy.dispose();
+  });
+  it('replays all five in order without erasing earned completion', () => {
+    const ctx = setup();
+    for (const id of ACADEMY_LESSON_ORDER) drive(ctx, id);
+    const earned = { ...ctx.academy.getProgress().lessons };
+    ctx.academy.replayAcademy();
+    expect(ctx.academy.isComplete()).toBe(false);
+    expect(ctx.academy.getProgress().lessons).toEqual(earned);
+    for (const id of ACADEMY_LESSON_ORDER) {
+      expect(ctx.academy.getActiveLesson()).toBe(id);
+      expect(ctx.academy.isSessionFinished()).toBe(false);
+      expect(drive(ctx, id)).toBeGreaterThan(30);
+    }
+    expect(ctx.academy.isComplete()).toBe(true);
+    expect(ctx.academy.getProgress().lessons).toEqual(earned);
+    ctx.academy.replayAcademy();
+    ctx.academy.skipCurrent();
+    expect(ctx.academy.getActiveLesson()).toBe('AIR_STRAFE');
+    expect(ctx.academy.isComplete()).toBe(false);
+    expect(ctx.academy.getProgress().lessons).toEqual(earned);
     ctx.academy.dispose();
   });
   it('teaches bhop with manual jump timing when hold-to-bhop is disabled', () => {

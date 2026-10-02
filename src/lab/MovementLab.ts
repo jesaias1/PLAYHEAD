@@ -755,6 +755,7 @@ export class MovementLab {
     );
     this.academy.exitCallback = () => this.exitAcademy();
     this.academy.signalPackCallback = () => this.onAcademySignalPack?.();
+    this.academy.movementLabCallback = () => this.exitAcademy();
   }
 
   /** Leaves the Academy and restores the untouched Lab course/HUD. */

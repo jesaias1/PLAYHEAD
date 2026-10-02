@@ -40,6 +40,8 @@ export interface AcademyHudControlCallbacks {
   onExit: () => void;
   onSelect: (index: number) => void;
   onSignalPack: () => void;
+  onMovementLab: () => void;
+  onReplay: () => void;
 }
 
 export type AcademyHudInput = {
@@ -85,7 +87,7 @@ export class MovementAcademyHUD implements AcademyHudInput {
         <div class="academy-header">MOVEMENT ACADEMY</div>
         <div class="academy-lesson" id="academy-lesson">01 // MOVEMENT</div>
         <div class="academy-objective" id="academy-objective"></div>
-        <div class="academy-speed" id="academy-speed">0 u/s</div>
+        <div class="academy-speed" id="academy-speed">SPEED // 0 u/s</div>
         <div class="academy-status" id="academy-status">--</div>
         <div class="academy-progress" id="academy-progress"></div>
         <div class="academy-buttons" id="academy-buttons">
@@ -93,6 +95,8 @@ export class MovementAcademyHUD implements AcademyHudInput {
           <button class="academy-btn" id="academy-btn-skip" type="button">[K] SKIP</button>
           <button class="academy-btn" id="academy-btn-exit" type="button" title="Exit Academy to the menu">[X] EXIT</button>
           <button class="academy-btn" id="academy-btn-pack" type="button">[ENTER] SIGNAL PACK</button>
+          <button class="academy-btn" id="academy-btn-lab" type="button">[L] MOVEMENT LAB</button>
+          <button class="academy-btn" id="academy-btn-replay" type="button">[T] REPLAY ACADEMY</button>
         </div>
         <div class="academy-select" id="academy-select"></div>
         <div class="academy-controls" id="academy-controls">WASD MOVE - MOUSE LOOK - SPACE JUMP - ESC PAUSE<br>[R] RETRY - [K] SKIP - [1-5] LESSON - [X] EXIT</div>
@@ -111,6 +115,8 @@ export class MovementAcademyHUD implements AcademyHudInput {
     (this.element.querySelector('#academy-btn-skip') as HTMLButtonElement | null)?.addEventListener('click', cb.onSkip);
     (this.element.querySelector('#academy-btn-exit') as HTMLButtonElement | null)?.addEventListener('click', cb.onExit);
     (this.element.querySelector('#academy-btn-pack') as HTMLButtonElement | null)?.addEventListener('click', cb.onSignalPack);
+    (this.element.querySelector('#academy-btn-lab') as HTMLButtonElement | null)?.addEventListener('click', cb.onMovementLab);
+    (this.element.querySelector('#academy-btn-replay') as HTMLButtonElement | null)?.addEventListener('click', cb.onReplay);
     this.buildLessonButtons(cb);
   }
 
@@ -148,6 +154,9 @@ export class MovementAcademyHUD implements AcademyHudInput {
     const id = state.active;
     const packButton = this.element.querySelector('#academy-btn-pack') as HTMLElement;
     packButton.style.display = state.complete || state.sessionFinished ? '' : 'none';
+    for (const selector of ['#academy-btn-lab', '#academy-btn-replay']) {
+      (this.element.querySelector(selector) as HTMLElement).style.display = packButton.style.display;
+    }
 
     // -------- COMPLETE (every lesson honestly completed) --------
     if (state.complete) {
@@ -156,7 +165,7 @@ export class MovementAcademyHUD implements AcademyHudInput {
         if (this.buttonsElem) this.buttonsElem.style.display = 'flex';
       }
       this.set(this.titleElem, 'lesson', 'MOVEMENT ACADEMY COMPLETE', 'academy-lesson complete');
-      this.set(this.objectiveElem, 'objective', '> SIGNAL PACK ONLINE\nREPLAY ANY LESSON [1-5]', 'academy-objective complete');
+      this.set(this.objectiveElem, 'objective', 'MOVEMENT SYSTEM // ONLINE\nCHOOSE YOUR NEXT RUN', 'academy-objective complete');
       this.set(this.speedElem, 'speed', '', 'academy-speed hidden');
       this.set(this.statusElem, 'status', 'ACADEMY COMPLETE', 'academy-status complete');
       this.set(this.progressElem, 'progress', this.renderProgress(state.progress), 'academy-progress');
@@ -179,7 +188,7 @@ export class MovementAcademyHUD implements AcademyHudInput {
 
     // -------- LIVE LESSON --------
     this.set(this.titleElem, 'lesson', ACADEMY_LESSON_TITLES[id], 'academy-lesson');
-    this.set(this.speedElem, 'speed', `${Math.round(state.speedUnits)} u/s`, 'academy-speed');
+    this.set(this.speedElem, 'speed', `SPEED // ${Math.round(state.speedUnits)} u/s`, 'academy-speed');
 
     let status = '--';
     let statusClass = 'academy-status';
