@@ -400,6 +400,35 @@
 .race-hud-clock-val { font-size: 1rem; letter-spacing: 0.08em; color: var(--accent-color); }
 .race-hud-clock-low { color: #ffb020; }
 
+/* Online Race: compact roster stays above the sightline; READY has its own panel. */
+.race-hud { width: min(460px, 88vw); }
+.race-hud-core { display: flex; align-items: center; gap: 12px; }
+.race-hud-place { font-size: 1.05rem; color: #e2edf2; }
+.race-hud-place-total { color: #8d9baa; font-size: .72rem; }
+.race-hud-delta { font-size: .68rem; color: #9cabb8; }
+.race-hud-rivals { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 12px; }
+.race-hud-rival { display: flex; gap: 6px; align-items: center; font-size: .62rem; padding: 3px 6px; background: rgba(0,0,0,.45); }
+.race-hud-rival-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.race-hud-rival-state { margin-left: auto; white-space: nowrap; color: #8d9baa; }
+.race-rival-dnf { opacity: .45; }
+.race-rival-done .race-hud-rival-state { color: #4dffb8; }
+.race-hud-rival-dot { width: 5px; height: 5px; flex-shrink: 0; background: var(--racer-color, #00f0ff); }
+.race-hud-rival[data-color="1"] { --racer-color: #9d8cff; }
+.race-hud-rival[data-color="2"] { --racer-color: #4dffb8; }
+.race-hud-rival[data-color="3"] { --racer-color: #ffb020; }
+.race-hud-rival[data-color="4"] { --racer-color: #ff5d9d; }
+.race-hud-rival[data-color="5"] { --racer-color: #ff6b3d; }
+.race-hud-rival[data-color="6"] { --racer-color: #7ad7ff; }
+.race-hud-rival[data-color="7"] { --racer-color: #d0ff4d; }
+.race-hud .race-hud-phase { position: relative; left: auto; top: auto; transform: none; margin-top: 12px; width: 100%; box-sizing: border-box; }
+.race-phase-title { font-size: .7rem; letter-spacing: .14em; color: #e2edf2; margin-bottom: 6px; }
+.race-phase-lines { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.race-hud .race-phase-line { font-size: .65rem; letter-spacing: .05em; }
+.race-hud-spectate { padding: 8px 12px; background: rgba(0,0,0,.65); border: 1px solid #ffffff20; text-align: center; }
+.race-hud-spectate-label, .race-hud-spectate-hint { font-size: .6rem; color: #8d9baa; margin: 4px 0; }
+.race-hud-spectate-name { font-size: .78rem; color: #e2edf2; }
+.race-hud-spectate-progress { font-size: .65rem; color: var(--accent-color); margin-top: 4px; }
+
 .race-hud-panel { display: flex; gap: 14px; }
 .race-hud-player {
   min-width: 168px;

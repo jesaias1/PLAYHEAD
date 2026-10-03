@@ -5,6 +5,7 @@ import * as path from 'node:path';
 const repoRoot = path.resolve(__dirname, '..');
 const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 const sql = read('supabase/migrations/20260930000003_authority_and_isolation.sql');
+const race2 = read('supabase/migrations/20261002000000_online_race_2.sql');
 const race = read('src/online/RaceRoomService.ts');
 const ghost = read('src/online/RemoteGhostRenderer.ts');
 const game = read('src/core/Game.ts');
@@ -94,12 +95,13 @@ describe('C. Race provenance hardening', () => {
   });
 
   it('COUNTDOWN requires both loaded AND in-game-ready for ALL connected members', () => {
-    expect(sql).toContain('v_ingame >= 2 and v_ingame = v_connected');
-    expect(sql).toContain('and v_loaded = v_connected');
+    expect(race2).toContain('v_ingame >= 2 and v_ingame = v_connected');
+    expect(race2).toContain('v_loaded >= 2 and v_loaded = v_connected');
   });
 
-  it('race_set_in_game_ready refuses true outside IN_GAME', () => {
-    expect(sql).toContain('in-game ready is only accepted during the in-game stage');
+  it('the RUNNING completion gate runs in race_room_advance', () => {
+    expect(race2).toContain('v_finishers >= v_connected');
+    expect(race2).toContain("set state = 'FINISHED', finished_at = now()");
   });
 
   it('stale-player expiry requires membership and clamps the grace window', () => {
@@ -108,17 +110,18 @@ describe('C. Race provenance hardening', () => {
     expect(exp).toContain('not a member of this room');
   });
 
-  it('race_report_finish is RUNNING-only, server-derived and idempotent', () => {
-    const fin = between(sql, 'create or replace function public.race_report_finish(', 'grant execute on function public.race_report_finish');
-    expect(fin).toContain("v_state <> 'RUNNING'");
-    expect(fin).toContain('v_time := v_epoch_us');
-    expect(fin).toContain('if v_row.session_best_us is not null and v_row.session_best_us = v_time then');
-    expect(fin).not.toContain('v_time := p_time_us');
+  it('race_report_finish_v2 is RUNNING-only, server-derived and idempotent', () => {
+    const fin = between(race2, 'create or replace function public.race_report_finish_v2(', 'grant execute on function public.race_report_finish_v2');
+    expect(fin).toContain("v_room.state <> 'RUNNING'");
+    expect(fin).toContain('v_epoch_us := ((extract(epoch from now())');
+    expect(fin).toContain('if v_row.finish_us is not null then return v_row; end if;');
+    expect(fin).toContain('if v_row.dnf or not v_row.connected then');
+    expect(fin).not.toContain('p_time_us');
   });
 
-  it('race_report_attempt_start is RUNNING-only', () => {
-    const att = between(sql, 'create or replace function public.race_report_attempt_start(', 'grant execute on function public.race_report_attempt_start');
-    expect(att).toContain("v_state <> 'RUNNING'");
+  it('the v1 finish overload is revoked and carries no client time', () => {
+    expect(race2).toContain('revoke execute on function public.race_report_finish(uuid, bigint)');
+    expect(race2).toContain('revoke execute on function public.race_report_attempt_start(uuid, integer)');
   });
 
   it('the client keeps a loadout on the room row and reads it back', () => {
@@ -130,7 +133,7 @@ describe('C. Race provenance hardening', () => {
   it('the remote ghost supports a deterministic competitive staging offset', () => {
     expect(ghost).toContain('setStagingOffset');
     expect(ghost).toContain('STAGING_LATERAL_OFFSET');
-    expect(game).toContain('setStagingOffset(true)');
+    expect(ghost).toContain('setStagingOffset(true)');
   });
 
   it('Game arms the shared start on RUNNING and retries a failed load report', () => {

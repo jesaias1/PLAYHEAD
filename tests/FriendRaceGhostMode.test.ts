@@ -163,8 +163,11 @@ function sample(over: Partial<GhostSample> = {}): GhostSample {
     vx: 0,
     vy: 0,
     vz: 0,
+    raceId: 'race-1',
+    colorIndex: 0,
+    checkpointIndex: 0,
+    checkpointTotal: 0,
     running: true,
-    attempt: 0,
     ...over
   };
 }
@@ -413,9 +416,11 @@ describe('Friend race — remote opponent is the only ghost', () => {
     expect(remote.getDiagnostics().samplesReceived).toBe(3);
   });
 
-  it('the game instantiates exactly one remote renderer', () => {
-    const matches = gameSrc.match(/new RemoteGhostRenderer\(/g) ?? [];
+  it('the game owns one remote racer ghost manager (per-user renderers)', () => {
+    const matches = gameSrc.match(/new RemoteRacerGhosts\(/g) ?? [];
     expect(matches).toHaveLength(1);
+    // Per-racer renderers are created by the manager, never directly in Game.
+    expect(gameSrc).not.toMatch(/new RemoteGhostRenderer\(/);
   });
 
   it('the remote opponent does not use recorded replay sampling', () => {
@@ -506,7 +511,7 @@ describe('Friend race — pre-start presence', () => {
   it('publishes the spawn before the shared timer is scheduled', () => {
     const begin = gameSrc.slice(
       gameSrc.indexOf('private async beginRaceFromSchedule('),
-      gameSrc.indexOf('private async beginRaceFromSchedule(') + 2200
+      gameSrc.indexOf('private endRaceSession(')
     );
     // Race world mode (which releases the recorded ghost) is entered before the
     // map load, and the spawn is republished after it.
@@ -591,21 +596,19 @@ describe('Friend race — opponent identity', () => {
     expect(HOST_SIGNAL_COLOR).not.toBe(GUEST_SIGNAL_COLOR);
   });
 
-  it('each client renders the REMOTE player in the REMOTE player colour', () => {
-    const begin = gameSrc.slice(
-      gameSrc.indexOf('Deterministic opponent identity'),
-      gameSrc.indexOf('Deterministic opponent identity') + 400
-    );
-    // The HOST sees the guest (violet); the GUEST sees the host (cyan).
-    expect(begin).toMatch(/raceRoomService\.isHost\(\) \? GUEST_SIGNAL_COLOR : HOST_SIGNAL_COLOR/);
+  it('each remote racer renders in their OWN stable server-assigned colour', () => {
+    const manager = read('src/online/RemoteGhostRenderer.ts');
+    expect(manager).toMatch(/accentColorFor\(colorIndex\)/);
+    expect(gameSrc).not.toMatch(/isHost\(\) \? GUEST_SIGNAL_COLOR/);
   });
 
   it('never renders the local player as a remote ghost', () => {
     const now = Date.now();
-    expect(shouldAcceptRemoteGhost(sample({ userId: 'me', t: now }), 'me', now)).toBe(false);
-    expect(shouldAcceptRemoteGhost(sample({ userId: 'them', t: now }), 'me', now)).toBe(true);
-    expect(shouldAcceptRemoteGhost(sample({ userId: 'them', t: now }), null, now)).toBe(false);
-    expect(shouldAcceptRemoteGhost(undefined, 'me', now)).toBe(false);
+    expect(shouldAcceptRemoteGhost(sample({ userId: 'me', t: now }), 'me', 'race-1', now)).toBe(false);
+    expect(shouldAcceptRemoteGhost(sample({ userId: 'them', t: now }), 'me', 'race-1', now)).toBe(true);
+    expect(shouldAcceptRemoteGhost(sample({ userId: 'them', t: now }), null, 'race-1', now)).toBe(false);
+    expect(shouldAcceptRemoteGhost(undefined, 'me', 'race-1', now)).toBe(false);
+    expect(shouldAcceptRemoteGhost(sample({ userId: 'them', t: now, raceId: 'race-0' }), 'me', 'race-1', now)).toBe(false);
   });
 
   it('keeps the self-echo guard at both layers', () => {
@@ -655,7 +658,7 @@ describe('Friend race — reset, leave, staleness', () => {
       gameSrc.indexOf('private onRaceAttemptRestart(') + 700
     );
     expect(restart).not.toMatch(/this\.raceGhost\?\.clear\(\)/);
-    expect(restart).toMatch(/reportAttemptStart/);
+    expect(restart).not.toMatch(/reportAttemptStart/);
   });
 
   it('drops genuinely stale packets at the receiver', () => {
@@ -690,18 +693,20 @@ describe('Friend race — reset, leave, staleness', () => {
     expect(remote.getDiagnostics().hasTarget).toBe(false);
   });
 
-  it('the game clears the remote ghost on session end and on leave', () => {
-    for (const method of ['private endRaceSession(', 'private async leaveRaceRoom(']) {
-      const block = gameSrc.slice(gameSrc.indexOf(method), gameSrc.indexOf(method) + 600);
-      expect(block, method).toMatch(/this\.raceGhost\?\.clear\(\)/);
-    }
+  it('the game clears every remote racer ghost when leaving the room', () => {
+    const block = gameSrc.slice(
+      gameSrc.indexOf('private async leaveRaceRoom('),
+      gameSrc.indexOf('private async leaveRaceRoom(') + 700
+    );
+    expect(block).toMatch(/this\.clearRaceGhosts\(\)/);
   });
 
   it('leaving restores solo ghost eligibility', () => {
-    for (const method of ['private endRaceSession(', 'private async leaveRaceRoom(']) {
-      const block = gameSrc.slice(gameSrc.indexOf(method), gameSrc.indexOf(method) + 600);
-      expect(block, method).toMatch(/this\.setFriendRaceWorld\(false\)/);
-    }
+    const leave = gameSrc.slice(
+      gameSrc.indexOf('private async leaveRaceRoom('),
+      gameSrc.indexOf('private async leaveRaceRoom(') + 700
+    );
+    expect(leave).toMatch(/this\.setFriendRaceWorld\(false\)/);
     const ret = gameSrc.slice(
       gameSrc.indexOf('private returnToImport('),
       gameSrc.indexOf('private returnToImport(') + 400
@@ -737,9 +742,9 @@ describe('Friend race — no contamination', () => {
     }
   });
 
-  it('the shared 5-minute session rule is untouched', () => {
+  it('the default race capacity rule is intact', () => {
     const src = read('src/online/RaceRoomService.ts');
-    expect(src).toMatch(/export const DEFAULT_SESSION_SECONDS = 300;/);
+    expect(src).toMatch(/export const DEFAULT_RACE_CAPACITY = 4;/);
   });
 
   it('the remote ghost remains a single cheap visual (no second scene)', () => {
@@ -1118,7 +1123,7 @@ describe('Friend race � background throttling', () => {
       gameSrc.indexOf('onPlayerLeft:'),
       gameSrc.indexOf('onPlayerLeft:') + 400
     );
-    expect(callback).toMatch(/this\.raceGhost\?\.markRemoteLeft\(\)/);
+    expect(callback).toMatch(/this\.raceGhosts\?\.markRemoteLeft\(userId\)/);
   });
 
   it('presence, not packet age, decides whether the opponent exists', () => {
@@ -1177,12 +1182,12 @@ describe('Friend race � background throttling', () => {
       src.indexOf('public publishNow('),
       src.indexOf('public publishNow(') + 900
     );
-    expect(publish).toMatch(/t: Date\.now\(\)/);
+    expect(publish).toMatch(/t: this\.getAuthoritativeNowMs\(\)/);
     expect(publish).toMatch(/\.\.\.this\.myTransform/);
     // The game loop only STORES the transform; it does not send.
     const store = gameSrc.slice(
       gameSrc.indexOf('private storeLocalTransform('),
-      gameSrc.indexOf('private storeLocalTransform(') + 700
+      gameSrc.indexOf('private publishLocalGhostSample(')
     );
     expect(store).toMatch(/raceRoomService\.setLocalTransform\(/);
     expect(store).not.toMatch(/\.send\(|publishNow/);
@@ -1269,6 +1274,7 @@ describe('Friend race - broadcast scheduler', () => {
     const service = new RaceRoomService(onlineClient, auth);
     const fake = fakeRealtime();
     (service as unknown as { channel: unknown }).channel = fake.channel;
+    (service as unknown as { room: unknown }).room = { id: 'room-1', raceId: 'race-1' };
     return { service, sent: fake.sent };
   }
 
@@ -1335,7 +1341,7 @@ describe('Friend race - broadcast scheduler', () => {
     service.publishNow();
     const packet = sent[sent.length - 1].payload;
     // The receiver's own staleness filter would accept this packet.
-    expect(shouldAcceptRemoteGhost(packet, 'them')).toBe(true);
+    expect(shouldAcceptRemoteGhost(packet, 'them', 'race-1')).toBe(true);
   });
 
   it('publishing is a safe no-op without a channel', () => {
@@ -1387,7 +1393,7 @@ describe('Friend race - broadcast scheduler', () => {
   it('the game stores every frame and never sends from the render loop', () => {
     const store = gameSrc.slice(
       gameSrc.indexOf('private storeLocalTransform('),
-      gameSrc.indexOf('private storeLocalTransform(') + 700
+      gameSrc.indexOf('private publishLocalGhostSample(')
     );
     expect(store).toMatch(/raceRoomService\.setLocalTransform\(/);
     // And updateRace calls it unconditionally for the whole race world.

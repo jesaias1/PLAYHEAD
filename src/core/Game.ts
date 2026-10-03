@@ -34,7 +34,9 @@ import {
   RaceRoomService,
   RacePlayer,
   RaceRoom,
-  RaceResultRow
+  RaceResultRow,
+  computeRaceResults,
+  isRaceComplete
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
 import type { RunSubmission } from '../online/LeaderboardService';
@@ -44,11 +46,10 @@ import { computeMapIdentity } from '../online/MapIdentity';
 import type { MapIdentity } from '../online/MapIdentity';
 import { OFFICIAL_MAP_REGISTRY } from '../online/OfficialMapRegistry';
 import {
-  RemoteGhostRenderer,
+  RemoteRacerGhosts,
   GUEST_SIGNAL_COLOR,
   HOST_SIGNAL_COLOR
 } from '../online/RemoteGhostRenderer';
-import { formatRaceTime } from '../ui/RaceHud';
 import { PovReplayRecorder } from '../replay/pov/PovReplayRecorder';
 import { PovReplayPlayer } from '../replay/pov/PovReplayPlayer';
 import { PovReplay, PovReplayEventType, PovReplayIdentity, POV_REPLAY_VERSION, encodePovReplay, decodePovReplay } from '../replay/pov/PovReplayFormat';
@@ -137,8 +138,15 @@ export class Game {
   // communication — never movement, collision or finish detection.
   // ==========================================================================
 
-  /** Translucent remote signal ghost (presentation only, no collision). */
-  private raceGhost: RemoteGhostRenderer | null = null;
+  /**
+   * All REMOTE racer ghosts (presentation only, no collision, no authority).
+   * One cheap RemoteGhostRenderer per remote participant, keyed by userId, so a
+   * 2-8 racer room shows every other racer. The local racer has no proxy.
+   */
+  private raceGhosts: RemoteRacerGhosts | null = null;
+  /** Racer currently followed after finishing (spectator). */
+  private spectateUserId: string | null = null;
+
   /**
    * RECORDED ghost race (solo). A completely separate lifecycle from the live
    * friend-race ghost above: a live multiplayer session never loads a recorded
@@ -201,8 +209,7 @@ export class Game {
    * of a local clock that can drift or arrive late.
    */
   private raceClockOffsetMs = 0;
-  private raceFinishReported = false;
-  private raceCurrentRunAccumulator = 0;
+
   /**
    * Reusable local presentation transform. Mutated every frame and handed to the
    * broadcast scheduler, so the hot path performs no allocation.
@@ -216,10 +223,32 @@ export class Game {
     vx: 0,
     vy: 0,
     vz: 0,
+    teleportId: 0,
+    checkpointIndex: 0,
+    checkpointTotal: 0,
     running: true
   };
-  private raceLastRivalBestUs: number | null = null;
-  private raceLastLocalBestUs: number | null = null;
+  /** Ordered ACTIVE rival ids for FINISH-spectator NEXT / PREV switching. */
+  private spectateOrder: string[] = [];
+  /** Last checkpoint index submitted for each rival (HUD placement only). */
+  private readonly rivalProgress = new Map<string, { index: number; total: number }>();
+  /** Throttle accumulator for ~2 Hz progress reporting. */
+  private raceProgressAccumulator = 0;
+  /** Last checkpoint index submitted for this racer (dedupes progress RPCs). */
+  private raceLastProgress = -1;
+  /** True once this racer has reported crossing the finish gate. */
+  private raceFinishReported = false;
+  /** Follower index for post-finish NEXT / PREV racer switching. */
+  private spectateIndex = 0;
+  /** Ensures the final room results are shown exactly once per race instance. */
+  private raceResultsShownForRaceId: string | null = null;
+  private currentRaceInstanceId: string | null = null;
+  private raceHudAccumulator = 0;
+  private raceTeleportId = 0;
+  private raceWasRestoring = false;
+  private readonly racePresentIds = new Set<string>();
+  private readonly rivalYaw = new Map<string, number>();
+  private readonly spectatePosition = new THREE.Vector3();
   /** Invite code captured from ?room= before the player reaches the menu. */
   private pendingInviteCode: string | null = null;
   private onlineInitialized = false;
@@ -560,7 +589,7 @@ export class Game {
       // Presentation only: scales decorative / audio-reactive emissive and the
       // rival ghost. Cannot reach geometry, collision, timing or scoring.
       this.environment.setEffectIntensity(settings.effectIntensity || 'STANDARD');
-      this.raceGhost?.setEffectScale(this.environment.effectProfile.additiveScale);
+      this.raceGhosts?.setEffectScale(this.environment.effectProfile.additiveScale);
       this.ghostRace.setEffectScale(this.environment.effectProfile.additiveScale);
     }
     if (changedKeys.has('ghostMode')) {
@@ -886,6 +915,11 @@ export class Game {
             } else {
               this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
             }
+          }
+          if (this.friendRaceWorld && this.raceFinishReported) {
+            this.ui.resultsScreen.hide();
+            this.ui.raceHud.show();
+            this.audioEngine.play(Math.max(0, (this.raceNowMs() - (this.raceStartAtMs ?? this.raceNowMs())) / 1000));
           }
           break;
 
@@ -1561,8 +1595,7 @@ export class Game {
     this.isFinished = true;
     this.playerController.resetKeys();
 
-    // Friend session: record this attempt's completion as a session best if it
-    // is faster. Uses the frozen authoritative microsecond value.
+    // Friend race: report the finish crossing to the shared race authority.
     this.onRaceFinish();
 
     // 0 ms: instant confirmation (signal impact + viewmodel accent + world pulse).
@@ -2203,6 +2236,9 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       // In-game race READY consumes SPACE only while the race is staged.
       if (this.handleRaceReadyKey(e)) return;
+      // FINISH spectator NEXT / PREV consumes the arrow keys only after we
+      // have finished (or DNF'd); live movement keys are never intercepted.
+      if (this.handleSpectateKey(e)) return;
       // MOVEMENT ACADEMY dedicated controls (only while a live lesson is
       // running, never while paused or with a modal open).
       if (this.handleAcademyKey(e)) return;
@@ -2568,6 +2604,7 @@ export class Game {
       // Presentation only — the local 120 Hz simulation above stays authoritative.
       this.updateRace(frameDelta);
       this.updateRaceGhost(frameDelta);
+      this.updateSpectatorCamera(frameDelta);
 
       // Forward the SAME authoritative music state the world uses to the viewmodel.
       // (calmed in overtime so the hands do not keep pulsing after the run)
@@ -2665,6 +2702,11 @@ export class Game {
           }
         }
       }
+    } else if (this.stateMachine.is(GameState.FINISHED) && this.friendRaceWorld) {
+      this.updateRace(frameDelta);
+      this.updateRaceGhost(frameDelta);
+      this.updateSpectatorCamera(frameDelta);
+      this.world.update(this.audioEngine.getCurrentTime(), this.environment.camera.position, 0, frameDelta, this.environment);
     } else if (this.stateMachine.is(GameState.MOVEMENT_LAB)) {
       this.cameraController.update(frameDelta);
       if (this.movementLab) {
@@ -2837,27 +2879,24 @@ export class Game {
     if (this.onlineInitialized) return;
     this.onlineInitialized = true;
 
-    // Remote ghost: a translucent signal body in the existing scene.
-    this.raceGhost = new RemoteGhostRenderer(this.environment.scene);
-    // COMPETITIVE STAGING: because both racers spawn on the SAME start platform
-    // node, the remote capsule is nudged laterally so the two identical capsules
-    // do not overlap indistinguishably. Presentation only.
-    this.raceGhost.setStagingOffset(true);
-    this.raceGhost.setEffectScale(this.environment.effectProfile.additiveScale);
+    // REMOTE RACER GHOSTS: one translucent signal body PER remote participant,
+    // keyed by stable userId, in the existing scene. Presentation only.
+    this.raceGhosts = new RemoteRacerGhosts(this.environment.scene);
+    this.raceGhosts.setEffectScale(this.environment.effectProfile.additiveScale);
 
     // DEV-only remote-opponent probes (F3). They bypass the ghost visual to
     // separate "wrong transform/scene" from "wrong rendering".
     this.devOverlay.onRaceProbeChange = (state) => {
-      this.raceGhost?.setDebugMarker(state.marker);
-      this.raceGhost?.setDebugOffset(state.offset);
-      this.raceGhost?.setForceVisible(state.force);
+      this.raceGhosts?.setDebugMarker(state.marker);
+      this.raceGhosts?.setDebugOffset(state.offset);
+      this.raceGhosts?.setForceVisible(state.force);
     };
 
     const racePanel = this.ui.importScreen.racePanel;
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
 
     racePanel.setCallbacks({
-      onCreateRoom: (trackId) => void this.createRaceRoom(trackId),
+      onCreateRoom: (trackId, capacity) => void this.createRaceRoom(trackId, capacity),
       onJoinRoom: (code) => void this.joinRaceRoom(code),
       onSetReady: (ready) => {
         void raceRoomService.setReady(ready).then((result) => {
@@ -2866,8 +2905,15 @@ export class Game {
           if (!result.ok) console.warn('[RACE] ready update failed:', result.detail);
         });
       },
-      onStartSession: () => void this.startRaceSession(),
       onLeaveRoom: () => void this.leaveRaceRoom(),
+      onRematch: () => this.handleRaceRematch(),
+      onReturnToLobby: () => {
+        void raceRoomService.returnToLobby().then(result => {
+          if (result.ok) this.returnToRaceLobby();
+          else this.ui.importScreen.racePanel.showError(result.detail);
+        });
+      },
+      onHostPickTrack: (trackId) => void this.hostPickRaceTrack(trackId),
       onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
 
@@ -2916,6 +2962,14 @@ export class Game {
     // Race room callbacks.
     raceRoomService.setCallbacks({
       onRoomUpdate: (room, players) => {
+        this.racePresentIds.clear();
+        const myId = authService.getUserId();
+        for (const racer of players) {
+          if (racer.userId === myId) continue;
+          this.racePresentIds.add(racer.userId);
+          this.raceGhosts?.setRemotePresent(racer.userId, racer.connected);
+        }
+        this.raceGhosts?.retainOnly(this.racePresentIds);
         const panelRef = this.ui.importScreen.racePanel;
         panelRef.setHost(raceRoomService.isHost());
         panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId(), this.raceIdentities);
@@ -2925,14 +2979,15 @@ export class Game {
         // client self-starts the race and no manual EXEC SONG is involved.
         this.onRacePhase(room, players);
       },
-      onGhost: (sample) => this.raceGhost?.setSample(sample),
+      onGhost: (sample) => this.onRemoteGhostSample(sample),
       onPlayerJoined: (player) => {
         this.ui.raceHud.showNotice(`${player.displayName} // JOINED`);
       },
-      onPlayerLeft: () => {
-        // Positive evidence: the opponent left the room. Remove the ghost at
+      onPlayerLeft: (userId) => {
+        // Positive evidence: that racer left the room. Remove their ghost at
         // once rather than waiting for the presence grace period.
-        this.raceGhost?.markRemoteLeft();
+        this.raceGhosts?.markRemoteLeft(userId);
+        this.rivalProgress.delete(userId);
         this.ui.raceHud.showNotice('PLAYER DISCONNECTED');
       },
       onFinished: (rows) => this.showRaceResults(rows),
@@ -2996,7 +3051,7 @@ export class Game {
 
   // -- race lifecycle -------------------------------------------------------
 
-  private async createRaceRoom(trackId: string): Promise<void> {
+  private async createRaceRoom(trackId: string, capacity?: number): Promise<void> {
     const panel = this.ui.importScreen.racePanel;
     panel.clearError();
 
@@ -3011,7 +3066,8 @@ export class Game {
     const result = await raceRoomService.createRoom({
       trackId,
       trackTitle: title,
-      identity
+      identity,
+      capacity
     });
     if (!result.ok) {
       panel.showError(`COULD NOT CREATE ROOM // ${result.detail.toUpperCase()}`);
@@ -3074,20 +3130,69 @@ export class Game {
   }
 
   /**
-   * Obsolete manual START SESSION path.
-   *
-   * The room state machine owns the start: LOBBY READY -> LOADING -> IN_GAME ->
-   * COUNTDOWN -> RUNNING, driven by the server trigger. There is no client path
-   * that writes state/start_at_ms directly (the guard rejects it), so this is a
-   * NO-OP that only reports the current authoritative phase. The legacy START
-   * SESSION button is hidden by the lobby panel.
+   * RESULT-SCREEN callbacks. REMATCH resets the room server-side and bumps the
+   * race instance; RETURN TO LOBBY also resets the authoritative room.
    */
-  private async startRaceSession(): Promise<void> {
+  private async handleRaceRematch(): Promise<void> {
+    const result = await raceRoomService.requestRematch();
+    if (!result.ok) {
+      this.ui.importScreen.racePanel.showError(`REMATCH FAILED // ${result.detail.toUpperCase()}`);
+      return;
+    }
+    this.ui.importScreen.racePanel.setRematchNote('REMATCH READY // ALL RACERS RESET');
+    this.returnToRaceLobby();
+  }
+
+  private returnToRaceLobby(): void {
+    this.raceLoadGeneration++;
     const room = raceRoomService.getRoom();
-    const state = room?.state ?? 'LOBBY';
-    this.ui.importScreen.racePanel.showError(
-      `RACE IS SERVER-AUTHORITATIVE // CURRENT PHASE ${state}`
+    if (!room) {
+      this.ui.importScreen.racePanel.showSelect();
+      return;
+    }
+    this.raceActive = false;
+    this.raceLoading = false;
+    this.raceGoArmed = false;
+    this.raceInGameReady = false;
+    this.raceLoadReported = false;
+    this.racePhase = 'WAITING';
+    this.raceStartAtMs = null;
+    this.raceResultsShownForRaceId = null;
+    this.ui.raceHud.setCountdown(null);
+    this.ui.raceHud.hide();
+    this.clearRaceGhosts();
+    this.setFriendRaceWorld(false);
+    if (this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.FINISHED)) {
+      this.stateMachine.transitionTo(GameState.IMPORT);
+    }
+    const panel = this.ui.importScreen.racePanel;
+    panel.clearError();
+    panel.showLobby();
+    panel.setHost(raceRoomService.isHost());
+    panel.renderLobby(
+      room,
+      raceRoomService.getPlayers(),
+      raceRoomService.getInviteUrl() ?? '',
+      authService.getUserId(),
+      this.raceIdentities
     );
+  }
+
+  /** Host: picks the OFFICIAL track while the room is still in LOBBY. */
+  private async hostPickRaceTrack(trackId: string): Promise<void> {
+    const level = await PresetLevelCache.loadPreset(trackId);
+    if (!level) {
+      this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
+      return;
+    }
+    const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
+    const identity = computeMapIdentity(trackId, level.track, level.analysis);
+    const result = await raceRoomService.selectTrack(trackId, title, identity);
+    if (!result.ok) {
+      this.ui.importScreen.racePanel.showError(`TRACK SELECT FAILED // ${result.detail.toUpperCase()}`);
+      return;
+    }
+    this.returnToRaceLobby();
   }
 
   /**
@@ -3101,6 +3206,15 @@ export class Game {
    * RUNNING   -> the race timeline is live
    */
   private onRacePhase(room: RaceRoom, players: readonly RacePlayer[]): void {
+    if (room.state === 'EXPIRED' || room.expiresAtMs < raceRoomService.getAuthoritativeNowMs()) {
+      void this.leaveRaceRoom().then(() => this.ui.importScreen.racePanel.showError('ROOM EXPIRED // CREATE A NEW RACE'));
+      return;
+    }
+    if (this.currentRaceInstanceId !== room.raceId) {
+      const previous = this.currentRaceInstanceId;
+      this.currentRaceInstanceId = room.raceId;
+      if (previous !== null) this.returnToRaceLobby();
+    }
     // ADOPT THE AUTHORITATIVE CLOCK. The service derives this offset from the
     // server now() returned with the room; re-reading it on every room update
     // keeps the countdown, timer, song and results on ONE shared timeline.
@@ -3109,6 +3223,8 @@ export class Game {
       case 'LOADING':
         if (!this.raceActive && !this.raceLoading) {
           void this.beginRaceFromSchedule(room.startAtMs ?? this.raceNowMs());
+        } else if (this.raceActive && !this.raceLoading && !this.raceLoadReported) {
+          void this.reportRaceLoaded(this.raceLoadGeneration);
         }
         break;
 
@@ -3121,20 +3237,13 @@ export class Game {
           break;
         }
         if (this.raceActive && !this.raceLoadReported) {
-          this.raceLoadReported = true;
-          // Honest, and self-healing: a failed load report is retried on the
-          // next room update, and an already-pressed in-game READY is re-asserted
-          // so a dropped transition cannot strand the room before COUNTDOWN.
-          void raceRoomService.reportLoaded(true).then((r) => {
-            if (!r.ok) {
-              this.raceLoadReported = false;
-              this.ui.raceHud.showNotice('LOAD REPORT RETRY // ' + r.detail);
-              return;
-            }
-            if (this.raceInGameReady) void raceRoomService.setInGameReady(true);
-          });
+          void this.reportRaceLoaded(this.raceLoadGeneration);
         }
         if (this.friendRaceWorld) {
+          const local = players.find(p => p.userId === authService.getUserId());
+          this.raceInGameReady = local?.inGameReady ?? false;
+          this.raceGoArmed = false;
+          this.raceStartAtMs = null;
           this.racePhase = this.raceInGameReady ? 'READY' : 'WAITING';
           this.updateRaceHudPhase();
         }
@@ -3149,7 +3258,7 @@ export class Game {
         // broadcast (dropped/throttled socket) but the room is already RUNNING,
         // arm the shared start from the authoritative start_at_ms now, so the
         // song, timer and results still share ONE timeline with the opponent.
-        if (this.raceActive && this.racePhase !== 'RACING' && room.startAtMs !== null) {
+        if (this.raceActive && !this.raceFinishReported && this.racePhase !== 'RACING' && room.startAtMs !== null) {
           this.armRaceGo(room.startAtMs);
         }
         break;
@@ -3163,9 +3272,9 @@ export class Game {
     if (
       this.raceActive &&
       this.racePhase !== 'RACING' &&
-      (room.state === 'LOBBY' || room.state === 'EXPIRED')
+      room.state === 'LOBBY'
     ) {
-      this.abortRaceBeforeStart();
+      this.returnToRaceLobby();
     }
 
     // FAILED LOAD / DISCONNECT DURING THE RACE WORLD: if the opponent is gone
@@ -3177,48 +3286,13 @@ export class Game {
       (room.state === 'LOADING' || room.state === 'IN_GAME' || room.state === 'COUNTDOWN')
     ) {
       const myId = authService.getUserId();
-      const rival = players.find((p) => p.userId !== myId) ?? null;
-      if (rival && !rival.connected) {
-        this.abortRaceBeforeStart();
-        this.ui.importScreen.racePanel.showError('RACE ABORTED // OPPONENT DISCONNECTED');
+      const remaining = players.filter(p => p.connected && p.userId !== myId);
+      if (remaining.length === 0) {
+        this.returnToRaceLobby();
+        this.ui.importScreen.racePanel.showError('RACE ABORTED // NOT ENOUGH CONNECTED RACERS');
       }
     }
     void players;
-  }
-
-  /**
-   * Cleanly abandons a race that never started (an opponent disconnected during
-   * loading or before GO). The remaining player returns to the lobby instead of
-   * being stuck in a dead countdown.
-   */
-  private abortRaceBeforeStart(): void {
-    // Cancel any in-flight load from this race generation.
-    this.raceLoadGeneration++;
-    // Clear this client's own authoritative flags so a re-entry starts clean and
-    // a stale READY/LOADED cannot leak into the next race. The server RPCs set
-    // their own authorized flag, so the direct-write guard never rejects them.
-    void raceRoomService.reportLoaded(false);
-    void raceRoomService.setInGameReady(false);
-    void raceRoomService.abandonSession('ABORTED');
-    this.raceActive = false;
-    this.raceLoading = false;
-    this.raceGoArmed = false;
-    this.raceInGameReady = false;
-    this.raceLoadReported = false;
-    this.racePhase = 'WAITING';
-    this.raceStartAtMs = null;
-    this.ui.raceHud.setCountdown(null);
-    this.ui.raceHud.hide();
-    this.raceGhost?.clear();
-    this.setFriendRaceWorld(false);
-    // STATE MACHINE: the pre-race abort must actually LEAVE the gameplay scene,
-    // not just repaint the lobby over a live PLAYING world.
-    if (this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.PLAYING)) {
-      this.stateMachine.transitionTo(GameState.IMPORT);
-    }
-    this.ui.importScreen.show();
-    this.ui.importScreen.openRaceTab();
-    this.ui.importScreen.racePanel.showError('RACE ABORTED // OPPONENT LEFT');
   }
 
   /** Authoritative race time: this browser clock corrected by the server offset. */
@@ -3256,6 +3330,8 @@ export class Game {
     this.updateRaceHudPhase();
     const tick = (): void => {
       if (!this.raceActive || this.racePhase === 'RACING') return;
+      const current = raceRoomService.getRoom();
+      if (!current || current.startAtMs !== startAtMs || (current.state !== 'COUNTDOWN' && current.state !== 'RUNNING')) return;
       // AUTHORITATIVE remaining time, never a raw local Date.now(): a throttled
       // or late client still counts down to the SAME server instant.
       const remaining = this.raceStartAtMs! - this.raceNowMs();
@@ -3274,7 +3350,9 @@ export class Game {
    * authoritative moment and the song/timer start from the same zero.
    */
   private onRaceGo(): void {
-    if (!this.raceActive || this.racePhase === 'RACING') return;
+    const room = raceRoomService.getRoom();
+    if (!this.raceActive || this.raceFinishReported || this.racePhase === 'RACING') return;
+    if (!room || (room.state !== 'COUNTDOWN' && room.state !== 'RUNNING') || room.startAtMs !== this.raceStartAtMs) return;
     this.racePhase = 'RACING';
     this.updateRaceHudPhase();
     this.ui.raceHud.setCountdown(null);
@@ -3350,17 +3428,30 @@ export class Game {
     }
   }
 
-  /** In-game WAITING / READY HUD, showing BOTH players' readiness. */
+  /**
+   * In-game WAITING / READY HUD, showing EVERY racer's readiness. The race does
+   * not begin until at least 2 racers are connected AND all of them are ready.
+   */
   private updateRaceHudPhase(): void {
     const myId = authService.getUserId();
     const players = raceRoomService.getPlayers();
-    const rival = players.find((p) => p.userId !== myId) ?? null;
-    const othersReady = players.filter((p) => p.userId !== myId).every((p) => p.inGameReady);
+    const connected = players.filter((p) => p.connected);
+    const lines = connected.map((p) => ({
+      label: `${p.displayName}${p.userId === myId ? ' (YOU)' : ''} // ${
+        p.inGameReady ? 'READY' : p.loaded ? 'WAITING' : 'LOADING'
+      }`,
+      ready: p.inGameReady
+    }));
+    const plural = connected.length === 1 ? 'RACER' : 'RACERS';
+    const prompt = this.raceInGameReady
+      ? `WAITING FOR ${Math.max(0, connected.length - 1)} OTHER ${plural}`
+      : 'PRESS [SPACE] TO READY';
+    const title = this.racePhase === 'COUNTDOWN' ? 'SIGNALS LOCKED' : 'SIGNAL CHECK';
     this.ui.raceHud.setPhase({
       phase: this.racePhase,
-      youReady: this.raceInGameReady,
-      opponentName: rival?.displayName ?? 'OPPONENT',
-      opponentReady: othersReady
+      title,
+      lines,
+      prompt
     });
   }
 
@@ -3370,13 +3461,17 @@ export class Game {
    */
   private opponentSpawnReceived(): { ok: boolean; detail: string } {
     const myId = authService.getUserId();
-    const players = raceRoomService.getPlayers();
-    const rival = players.find((p) => p.userId !== myId) ?? null;
-    if (!rival) return { ok: false, detail: 'WAITING FOR OPPONENT // NOT IN ROOM' };
-    if (!rival.connected) return { ok: false, detail: 'WAITING FOR OPPONENT // DISCONNECTED' };
-    const net = raceRoomService.getGhostDiagnostics();
-    if (net.rxCount <= 0) return { ok: false, detail: 'WAITING FOR OPPONENT TRANSFORM' };
-    return { ok: true, detail: 'opponent visible' };
+    const players = raceRoomService.getPlayers().filter(p => p.connected);
+    if (players.length < 2) return { ok: false, detail: 'WAITING FOR RACERS // NOT ENOUGH CONNECTED' };
+    if (!this.raceLoadReported || players.some(p => !p.loaded)) return { ok: false, detail: 'WAITING FOR ALL RACERS TO LOAD' };
+    for (const racer of players) {
+      if (racer.userId === myId) continue;
+      const age = raceRoomService.getRemoteRxAgeMs(racer.userId);
+      if (!this.raceGhosts?.hasSample(racer.userId) || age < 0 || age > 4000) {
+        return { ok: false, detail: `WAITING FOR ${racer.displayName} // SPAWN SIGNAL` };
+      }
+    }
+    return { ok: true, detail: 'all racers visible' };
   }
 
   /**
@@ -3391,8 +3486,10 @@ export class Game {
     this.clearGhostRace();
     const room = raceRoomService.getRoom();
     if (!room) { this.raceLoading = false; return; }
+    const loadGeneration = this.raceLoadGeneration;
 
     const level = await PresetLevelCache.loadPreset(room.trackId);
+    if (loadGeneration !== this.raceLoadGeneration) return;
     if (!level) {
       this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE');
       this.raceLoading = false;
@@ -3408,16 +3505,12 @@ export class Game {
 
     this.raceStartAtMs = startAtMs;
     this.raceActive = true;
-    this.raceLoading = false;
     this.raceFinishReported = false;
-    this.raceLastRivalBestUs = null;
-    this.raceLastLocalBestUs = null;
     this.raceLoadReported = false;
     this.raceInGameReady = false;
     this.raceGoArmed = false;
     this.racePhase = 'WAITING';
     this.raceSongStartSec = 0;
-    const loadGeneration = this.raceLoadGeneration;
 
     // FRIEND RACE WORLD MODE: from here until the session ends, the remote human
     // opponent is the ONLY gameplay-world ghost. This also releases any armed
@@ -3430,6 +3523,11 @@ export class Game {
 
     // Enter the normal track flow; the shared clock starts at startAtMs.
     await this.loadPresetTrack(room.trackId);
+    if (loadGeneration !== this.raceLoadGeneration || raceRoomService.getRoom()?.state === 'LOBBY' || raceRoomService.getRoom()?.state === 'EXPIRED') {
+      if (!this.raceActive) this.stateMachine.transitionTo(GameState.IMPORT);
+      return;
+    }
+    this.raceLoading = false;
 
     // The map load replaced the world: republish the spawn transform so the
     // opponent is visible on the start platform without moving.
@@ -3442,42 +3540,46 @@ export class Game {
     // Deterministic opponent identity: each client sees the REMOTE player in the
     // REMOTE player's colour. The host is cyan, the guest is violet, so the two
     // players are never the same colour on screen.
-    this.raceGhost?.setColor(
-      raceRoomService.isHost() ? GUEST_SIGNAL_COLOR : HOST_SIGNAL_COLOR
-    );
+    // RIVAL IDENTITY: every remote racer renders in THEIR OWN stable server-
+    // assigned accent (colour_index), set per userId at ghost creation. No
+    // per-client override, so all viewers see the same racer in the same colour.
+    void GUEST_SIGNAL_COLOR;
+    void HOST_SIGNAL_COLOR;
 
     // LOAD GENERATION CHECK: if the race was aborted / left while the map was
     // loading, do not publish a stale CLIENT_LOADED for a world we have left.
     if (loadGeneration !== this.raceLoadGeneration) return;
 
-    // CLIENT_LOADED: we are inside the gameplay scene and initialised. The
-    // server requires ALL players loaded and ready before any countdown may
-    // begin, so this report is awaited and a failure aborts instead of leaving
-    // this client silently absent from the readiness set.
-    this.raceLoadReported = true;
+    // CLIENT_LOADED: delayed replies must not abandon a newer load generation.
     this.racePhase = 'WAITING';
     this.updateRaceHudPhase();
+    await this.reportRaceLoaded(loadGeneration);
+  }
+
+  private async reportRaceLoaded(loadGeneration: number): Promise<void> {
+    if (loadGeneration !== this.raceLoadGeneration || this.raceLoadReported || !this.raceActive) return;
+    this.raceLoadReported = true;
     const loaded = await raceRoomService.reportLoaded(true);
+    if (loadGeneration !== this.raceLoadGeneration || !this.raceActive) return;
     if (!loaded.ok) {
-      this.abortRaceBeforeStart();
-      this.ui.importScreen.racePanel.showError('RACE LOAD REPORT FAILED // ' + loaded.detail);
-      return;
+      this.raceLoadReported = false;
+      this.ui.raceHud.showNotice('LOAD REPORT RETRY // ' + loaded.detail);
     }
   }
 
+  /**
+   * LOCAL FINISH: the racer crossed the gate. The race world, the other racers
+   * and the shared clock all keep running; this client switches to the FINISH
+   * spectator view until the whole room is finished (or the player leaves).
+   */
   private endRaceSession(): void {
     if (!this.raceActive) return;
-    this.raceActive = false;
-    this.raceLoading = false;
-    this.raceGoArmed = false;
-    this.raceInGameReady = false;
     this.racePhase = 'FINISHED';
-    this.raceStartAtMs = null;
-    this.ui.raceHud.setCountdown(null);
-    this.ui.raceHud.hide();
-    this.raceGhost?.clear();
-    this.setFriendRaceWorld(false);
-    void raceRoomService.finishSession();
+    this.updateRaceHudPhase();
+    this.ui.raceHud.showNotice('FINISHED // SPECTATING REMAINING RACERS');
+    // The ghost registry stays alive: the other racers are still moving.
+    this.spectateIndex = 0;
+    this.spectateUserId = null;
   }
 
   private showRaceResults(rows: readonly RaceResultRow[]): void {
@@ -3491,6 +3593,7 @@ export class Game {
   }
 
   private async leaveRaceRoom(): Promise<void> {
+    this.raceLoadGeneration++;
     this.raceActive = false;
     this.raceLoading = false;
     this.raceGoArmed = false;
@@ -3499,10 +3602,13 @@ export class Game {
     this.raceStartAtMs = null;
     this.ui.raceHud.setCountdown(null);
     this.ui.raceHud.hide();
-    this.raceGhost?.clear();
+    this.clearRaceGhosts();
     // Leaving the race world restores normal solo ghost eligibility.
     this.setFriendRaceWorld(false);
     await raceRoomService.leaveRoom();
+    if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.FINISHED)) {
+      this.stateMachine.transitionTo(GameState.IMPORT);
+    }
     this.ui.importScreen.racePanel.showSelect();
   }
 
@@ -3516,68 +3622,64 @@ export class Game {
    */
   private updateRace(frameDelta: number): void {
     if (!this.friendRaceWorld) return;
+    this.storeLocalTransform();
+    this.raceHudAccumulator += frameDelta;
+    if (this.raceHudAccumulator < 0.1) return;
+    frameDelta = this.raceHudAccumulator;
+    this.raceHudAccumulator = 0;
 
     const room = raceRoomService.getRoom();
-    if (room) {
-      // Authoritative session remaining: server-anchored, not a local clock.
-      const remainingMs = room.startAtMs !== null
-        ? Math.max(0, room.startAtMs + room.sessionSeconds * 1000 - this.raceNowMs())
-        : room.sessionSeconds * 1000;
+    const players = raceRoomService.getPlayers();
+    const myId = authService.getUserId();
+    const me = players.find((p) => p.userId === myId) ?? null;
 
-      const players = raceRoomService.getPlayers();
-      const myId = authService.getUserId();
-      const me = players.find((p) => p.userId === myId) ?? null;
-      const rival = players.find((p) => p.userId !== myId) ?? null;
+    // AUTHORITATIVE elapsed: derived from the shared start epoch, never a local
+    // countdown. Outside a running race it stays at zero.
+    const raceElapsedUs = this.raceStartAtMs !== null
+      ? Math.max(0, Math.round((this.raceNowMs() - this.raceStartAtMs) * 1000))
+      : 0;
 
-      // Local live values come from the authoritative run timer, not the network.
-      const currentRunUs = Math.round(this.runElapsedTime * 1_000_000);
+    this.ui.raceHud.update({
+      raceElapsedUs,
+      placement: this.computePlacement(players, myId),
+      totalRacers: players.length,
+      leaderDeltaUs: null,
+      finished: this.raceFinishReported,
+      myFinishTimeUs: me?.finishUs ?? null,
+      dnf: me?.dnf ?? false,
+      rivals: this.buildRivalViews(players, myId)
+    });
 
-      this.ui.raceHud.update({
-        remainingMs,
-        you: {
-          displayName: me?.displayName ?? 'YOU',
-          currentRunUs: this.raceFinishReported ? 0 : currentRunUs,
-          sessionBestUs: me?.sessionBestUs ?? this.raceLastLocalBestUs,
-          attemptCount: me?.attemptCount ?? 0,
-          finishCount: me?.finishCount ?? 0,
-          connected: true
-        },
-        rival: rival
-          ? {
-              displayName: rival.displayName,
-              currentRunUs: rival.currentRunUs,
-              sessionBestUs: rival.sessionBestUs,
-              attemptCount: rival.attemptCount,
-              finishCount: rival.finishCount,
-              connected: rival.connected
-            }
-          : null
-      });
-
-      // Rival improvement notice (non-blocking).
-      if (rival && rival.sessionBestUs !== null && rival.sessionBestUs !== this.raceLastRivalBestUs) {
-        const previous = this.raceLastRivalBestUs;
-        this.raceLastRivalBestUs = rival.sessionBestUs;
-        if (previous !== null && rival.sessionBestUs < previous) {
-          // Small, non-blocking. Names the rival AND states the role, so the
-          // notification is unambiguous without a large popup.
-          this.ui.raceHud.showNotice(
-            `RIVAL ${rival.displayName} // NEW BEST ${formatRaceTime(rival.sessionBestUs)}`
-          );
+    // FINISH SPECTATOR: once we have finished (or DNF'd) keep watching the
+    // racers still on track. NEXT / PREV switches the followed racer; the
+    // spectator camera path is applied per frame while active.
+    if (this.raceFinishReported || (me?.dnf ?? false)) {
+      this.spectateOrder = this.activeRivalIds(players);
+      if (this.spectateOrder.length > 0) {
+        if (!this.spectateUserId || !this.spectateOrder.includes(this.spectateUserId)) {
+          this.spectateIndex = 0;
+          this.spectateUserId = this.spectateOrder[0];
         }
+      } else {
+        this.spectateUserId = null;
       }
+    }
 
-      // Live attempt time for the rival's HUD: ~1 Hz, never per frame.
-      this.raceCurrentRunAccumulator += frameDelta;
-      if (this.raceCurrentRunAccumulator >= 1) {
-        this.raceCurrentRunAccumulator = 0;
-        void raceRoomService.reportCurrentRun(this.raceFinishReported ? 0 : currentRunUs);
+    // Checkpoint progress for everyone else: ~2 Hz progress broadcast.
+    this.raceProgressAccumulator += frameDelta;
+    if (this.raceProgressAccumulator >= 0.5 && this.racePhase === 'RACING' && !this.raceFinishReported) {
+      this.raceProgressAccumulator = 0;
+      const cpIndex = this.passedCheckpoints.size;
+      const cpTotal = this.currentTrack?.checkpoints.length ?? 0;
+      if (cpIndex !== this.raceLastProgress) {
+        this.raceLastProgress = cpIndex;
+        void raceRoomService.reportProgress(cpIndex, cpTotal);
       }
+    }
 
-      if (remainingMs <= 0) {
-        this.endRaceSession();
-        return;
-      }
+    // FINAL ROOM RESULTS: only once EVERY racer has finished or DNF'd.
+    if (room && room.state === 'FINISHED') {
+      this.maybeShowFinalResults(room, players);
     }
 
     // Ghost sample: presentation only. The game loop stores the latest local
@@ -3585,6 +3687,7 @@ export class Game {
     // and stamps the timestamp at send time. That separation is what keeps the
     // opponent visible when a background tab's animation loop is throttled.
     this.storeLocalTransform();
+    this.updateSpectatorHud();
   }
 
   /**
@@ -3599,6 +3702,10 @@ export class Game {
     const v = this.playerController.velocity;
     // Reused scratch object: the hot path must not allocate.
     const t = this.localTransformScratch;
+    const restoring = this.playerController.isRestoring;
+    if (restoring && !this.raceWasRestoring) this.raceTeleportId++;
+    this.raceWasRestoring = restoring;
+    t.teleportId = this.raceTeleportId;
     t.x = p.x;
     t.y = p.y;
     t.z = p.z;
@@ -3607,6 +3714,8 @@ export class Game {
     t.vx = v.x;
     t.vy = v.y;
     t.vz = v.z;
+    t.checkpointIndex = this.passedCheckpoints.size;
+    t.checkpointTotal = this.currentTrack?.checkpoints.length ?? 0;
     t.running = !this.raceFinishReported;
     raceRoomService.setLocalTransform(t);
   }
@@ -3621,6 +3730,130 @@ export class Game {
     if (!this.friendRaceWorld) return;
     this.storeLocalTransform();
     raceRoomService.publishNow();
+  }
+  /** 1-based placement by finish order (finishers), then active racers by progress. */
+  private computePlacement(players: readonly RacePlayer[], myId: string | null): number | null {
+    const myIndex = this.placementOrder(players).indexOf(myId ?? '');
+    return myIndex < 0 ? null : myIndex + 1;
+  }
+
+  private placementOrder(players: readonly RacePlayer[]): string[] {
+    const finishers = players
+      .filter((p) => !p.dnf && p.finishUs !== null && p.finishUs > 0)
+      .sort((a, b) => (a.finishUs! - b.finishUs!) || (a.joinedAt - b.joinedAt));
+    const running = players
+      .filter((p) => !p.dnf && p.finishUs === null)
+      .sort((a, b) => (b.progress - a.progress) || (a.joinedAt - b.joinedAt));
+    const dnf = players.filter((p) => p.dnf).sort((a, b) => a.joinedAt - b.joinedAt);
+    return [...finishers, ...running, ...dnf].map((p) => p.userId);
+  }
+
+  /** Delta in us to the current leader (finish time if finished, else progress). */
+  private buildRivalViews(players: readonly RacePlayer[], myId: string | null) {
+    const order = this.placementOrder(players);
+    const byId = new Map(players.map((p) => [p.userId, p]));
+    return order
+      .filter((id) => id !== myId)
+      .map((id) => byId.get(id)!)
+      .map((p) => ({
+        userId: p.userId,
+        displayName: p.displayName,
+        colorIndex: p.colorIndex,
+        finishTimeUs: p.finishUs,
+        dnf: p.dnf,
+        checkpointIndex: p.progress,
+        checkpointTotal: p.checkpointTotal,
+        connected: p.connected
+      }));
+  }
+
+  private activeRivalIds(players: readonly RacePlayer[]): string[] {
+    const myId = authService.getUserId();
+    return players
+      .filter((p) => p.userId !== myId && p.connected && !p.dnf && p.finishUs === null)
+      .sort((a, b) => (b.progress - a.progress) || (a.joinedAt - b.joinedAt))
+      .map((p) => p.userId);
+  }
+
+  /** Applies a fresh remote transform to the correct per-racer ghost. */
+  private onRemoteGhostSample(sample: import('../online/RaceRoomService').GhostSample): void {
+    this.raceGhosts?.setSample(sample);
+    this.rivalYaw.set(sample.userId, sample.yaw);
+    const racer = raceRoomService.getPlayers().find(p => p.userId === sample.userId);
+    if (racer) this.raceGhosts?.setDisplayName(racer.userId, racer.displayName);
+    // SPAWN VISIBILITY READINESS: remember each rival's reported checkpoint so
+    // the HUD has placement data even before the next room poll returns.
+    this.rivalProgress.set(sample.userId, {
+      index: sample.checkpointIndex,
+      total: sample.checkpointTotal
+    });
+  }
+
+  /** FINISH spectator NEXT / PREV. Returns true when the key was consumed. */
+  private handleSpectateKey(e: KeyboardEvent): boolean {
+    if (!this.raceFinishReported && !this.playerIsDnf()) return false;
+    if (this.spectateOrder.length === 0) return false;
+    if (e.code !== 'ArrowRight' && e.code !== 'ArrowLeft') return false;
+    e.preventDefault();
+    const delta = e.code === 'ArrowRight' ? 1 : -1;
+    this.spectateIndex =
+      (this.spectateIndex + delta + this.spectateOrder.length) % this.spectateOrder.length;
+    this.spectateUserId = this.spectateOrder[this.spectateIndex];
+    return true;
+  }
+
+  private playerIsDnf(): boolean {
+    const myId = authService.getUserId();
+    return raceRoomService.getPlayers().find((p) => p.userId === myId)?.dnf ?? false;
+  }
+
+  /**
+   * Isolated SPECTATOR camera path for a finished racer. It NEVER touches the
+   * frozen movement, the finish detector or the normal first-person camera feel:
+   * a completed racer cannot influence the live simulation from here.
+   */
+  private updateSpectatorCamera(frameDelta: number): void {
+    if (!this.spectateUserId) return;
+    if (!this.raceGhosts?.copyPosition(this.spectateUserId, this.spectatePosition)) return;
+    const rx = this.spectatePosition;
+    const speed = frameDelta > 0 ? 1 - Math.pow(0.001, frameDelta) : 1;
+    const cam = this.environment.camera;
+    const yaw = this.rivalYaw.get(this.spectateUserId) ?? 0;
+    cam.position.x += (rx.x + Math.sin(yaw) * 3 - cam.position.x) * speed;
+    cam.position.y += (rx.y + 2.2 - cam.position.y) * speed;
+    cam.position.z += (rx.z + Math.cos(yaw) * 3 - cam.position.z) * speed;
+    cam.lookAt(rx.x, rx.y + 1.2, rx.z);
+  }
+
+  /** Shows the final room results exactly once per race instance. */
+  private maybeShowFinalResults(room: RaceRoom, players: readonly RacePlayer[]): void {
+    if (this.raceResultsShownForRaceId === room.raceId) return;
+    if (!isRaceComplete(players)) return;
+    this.raceResultsShownForRaceId = room.raceId;
+    this.showRaceResults(computeRaceResults(players));
+  }
+
+  /** Update the FINISH spectator HUD text for the followed racer. */
+  private updateSpectatorHud(): void {
+    if (!this.raceFinishReported && !this.playerIsDnf()) {
+      this.ui.raceHud.setSpectating(null);
+      return;
+    }
+    const target = this.spectateUserId
+      ? raceRoomService.getPlayers().find((p) => p.userId === this.spectateUserId) ?? null
+      : null;
+    if (!target) {
+      this.ui.raceHud.setSpectating(null);
+      return;
+    }
+    const prog = this.rivalProgress.get(target.userId);
+    const index = prog?.index ?? target.progress;
+    const total = prog?.total ?? target.checkpointTotal;
+    this.ui.raceHud.setSpectating({
+      name: target.displayName,
+      checkpointIndex: index,
+      checkpointTotal: total
+    });
   }
 
   /**
@@ -3645,16 +3878,23 @@ export class Game {
     }
   }
 
+  /** First active REMOTE racer, for the DEV overlay + READY gate diagnostics. */
+  private primaryRival(): RacePlayer | null {
+    const myId = authService.getUserId();
+    return raceRoomService.getPlayers().find((p) => p.userId !== myId) ?? null;
+  }
+
   /**
-   * DEV snapshot of the friend-race ghost pipeline. Read-only.
+   * DEV snapshot of the multi-racer ghost pipeline. Read-only; the "ghost" field
+   * reports a representative remote racer so the DevOverlay line keeps working.
    */
   private raceGhostDiagnostics(): RaceGhostDiagnosticState {
     const camera = this.environment.camera;
-    const ghost = this.raceGhost?.getDiagnostics(Date.now(), camera) ?? null;
+    const states = this.raceGhosts?.states() ?? [];
+    const firstId = states[0]?.userId ?? null;
+    const ghost = this.raceGhosts?.diagnosticsFor(firstId ?? '', Date.now(), camera) ?? null;
     const net = raceRoomService.getGhostDiagnostics();
-    const myId = authService.getUserId();
-    const players = raceRoomService.getPlayers();
-    const rival = players.find((p) => p.userId !== myId) ?? null;
+    const rival = this.primaryRival();
     return {
       friendRace: this.friendRaceWorld,
       raceActive: this.raceActive,
@@ -3717,8 +3957,10 @@ export class Game {
     songTimeSec: number;
     elapsedSec: number;
     inGameReady: boolean;
-    ghost: ReturnType<RemoteGhostRenderer['getDiagnostics']> | null;
+    ghost: ReturnType<NonNullable<RemoteRacerGhosts['diagnosticsFor']>> | null;
     ghostStagingOffset: boolean;
+    ghosts: ReturnType<RemoteRacerGhosts['states']>;
+    spectateUserId: string | null;
     localPosition: { x: number; y: number; z: number };
   } {
     const camera = this.environment.camera;
@@ -3735,8 +3977,10 @@ export class Game {
         ? Math.max(0, (Date.now() + this.raceClockOffsetMs - this.raceStartAtMs) / 1000)
         : 0,
       inGameReady: this.raceInGameReady,
-      ghost: this.raceGhost?.getDiagnostics(Date.now(), camera) ?? null,
-      ghostStagingOffset: this.raceGhost?.isStagingOffsetEnabled() ?? false,
+      ghost: this.raceGhosts?.diagnosticsFor(this.raceGhosts?.states()[0]?.userId ?? '', Date.now(), camera) ?? null,
+      ghostStagingOffset: this.raceGhosts?.isStagingOffsetEnabled() ?? false,
+      ghosts: this.raceGhosts?.states() ?? [],
+      spectateUserId: this.spectateUserId,
       localPosition: {
         x: this.playerController.position.x,
         y: this.playerController.position.y,
@@ -3746,15 +3990,21 @@ export class Game {
   }
 
   private updateRaceGhost(frameDelta: number): void {
-    // PRESENCE AUTHORITY: a stale transform is not a departed opponent. The room
-    // tells us whether the rival still exists; only positive evidence removes
-    // the ghost, and a stale stream holds position instead.
-    if (this.raceGhost && this.friendRaceWorld) {
-      const myId = authService.getUserId();
-      const rival = raceRoomService.getPlayers().find((p) => p.userId !== myId) ?? null;
-      this.raceGhost.setRemotePresent(rival !== null && rival.connected);
-    }
-    this.raceGhost?.update(frameDelta, this.playerController.position);
+    if (!this.friendRaceWorld) return;
+    this.raceGhosts?.setLocalColorIndex(raceRoomService.getMyColorIndex());
+    this.raceGhosts?.setStaging(this.racePhase === 'WAITING' || this.racePhase === 'READY' || this.racePhase === 'COUNTDOWN', this.cameraController.yaw);
+    // PRESENCE AUTHORITY: a stale transform is not a departed racer. Only the
+    // room's connected flag may hide a ghost; a stale stream holds position.
+    this.raceGhosts?.update(frameDelta, this.playerController.position);
+  }
+
+  private clearRaceGhosts(): void {
+    this.raceGhosts?.clear();
+    this.rivalProgress.clear();
+    this.rivalYaw.clear();
+    this.spectateOrder = [];
+    this.spectateUserId = null;
+    this.spectateIndex = 0;
   }
 
   // ==========================================================================
@@ -4529,25 +4779,43 @@ export class Game {
   /** Called from restartTrack() so a full restart reports a new attempt. */
   private onRaceAttemptRestart(): void {
     if (!this.raceActive) return;
-    this.raceFinishReported = false;
-    // NOTE: the REMOTE ghost is deliberately NOT cleared here. It is driven by
-    // the opponent's live transforms, so a local restart must not affect it. The
-    // local spawn transform is republished by prepareTrackForRun() instead.
-    void raceRoomService.reportAttemptStart();
+    // A FIRST-TO-FINISH race is a single attempt: a mid-race local restart does
+    // NOT reset the attempt, the finish flag or the shared clock. The remote
+    // ghost is deliberately untouched; only the local spawn transform is
+    // republished by prepareTrackForRun().
   }
 
-  /** Called from handleFinishSequence() with the authoritative run time. */
+  /**
+   * LOCAL FINISH. The authoritative elapsed is derived SERVER-SIDE from the
+   * shared start epoch; the client reports the crossing and never declares its
+   * own winner or time. The existing ranked replay / PB / WR flow that runs in
+   * handleFinishSequence() is unchanged.
+   */
   private onRaceFinish(): void {
     if (!this.raceActive || this.raceFinishReported) return;
+    if (this.racePhase !== 'RACING') return;
     this.raceFinishReported = true;
-    // COMPETITIVE: the finish time is derived from the SHARED epoch so both
-    // clients' finish results are comparable on one timeline. Outside a
-    // synchronized race (no epoch) the personal run timer is used as before.
-    const timeUs = this.raceStartAtMs !== null
-      ? Math.max(1, Math.round((this.raceNowMs() - this.raceStartAtMs) * 1000))
-      : Math.round(this.runElapsedTime * 1_000_000);
-    this.raceLastLocalBestUs =
-      this.raceLastLocalBestUs === null ? timeUs : Math.min(this.raceLastLocalBestUs, timeUs);
-    void raceRoomService.reportFinish(timeUs);
+    const progress = {
+      checkpointIndex: this.passedCheckpoints.size,
+      checkpointTotal: this.currentTrack?.checkpoints.length ?? 0
+    };
+    const raceId = raceRoomService.getRaceId();
+    const report = async (): Promise<void> => {
+      if (!this.raceActive || raceRoomService.getRaceId() !== raceId) return;
+      const mine = raceRoomService.getPlayers().find(p => p.userId === authService.getUserId());
+      if (mine?.finishUs !== null && mine?.finishUs !== undefined) return;
+      if (raceRoomService.getRoom()?.state === 'COUNTDOWN') {
+        window.setTimeout(() => void report(), 100);
+        return;
+      }
+      if (raceRoomService.getRoom()?.state !== 'RUNNING') return;
+      const result = await raceRoomService.reportFinish(progress);
+      if (!result.ok && this.raceActive && raceRoomService.getRaceId() === raceId) {
+        this.ui.raceHud.showNotice(`FINISH PENDING // ${result.detail}`);
+        window.setTimeout(() => void report(), 2000);
+      }
+    };
+    void report();
+    this.endRaceSession();
   }
 }

@@ -78,6 +78,7 @@ export const STALE_OPACITY_SCALE = 0.65;
 /** Interpolation smoothing (higher = snappier). */
 const POSITION_LERP = 12;
 const YAW_LERP = 10;
+const STAGING_SLOTS = [0, 1.15, -1.15, 2.3, -2.3, 3.45, -3.45, 4.6] as const;
 
 /** Rival signal colour. Matches the rival HUD accent so the identity is one thing. */
 export const RIVAL_SIGNAL_COLOR = 0x9d8cff;
@@ -168,6 +169,10 @@ export class RemoteGhostRenderer {
   private currentYaw = 0;
   private lastSampleAt = 0;
   private samplesReceived = 0;
+  private lastSequence = -1;
+  private teleportId: number | undefined;
+  private readonly samples: { at: number; x: number; y: number; z: number; yaw: number }[] = [];
+  private interpolationAt = 0;
   private distanceM: number | null = null;
   private color = RIVAL_SIGNAL_COLOR;
   private effectScale = 1;
@@ -192,6 +197,10 @@ export class RemoteGhostRenderer {
    * time and never leaks into the stored transform, interpolation or network.
    */
   private stagingOffsetOn = false;
+  private stagingOffsetX = 1.15;
+  private stagingOffsetZ = 0;
+  private nameLabel: THREE.Sprite | null = null;
+  private displayName = '';
   public static readonly STAGING_LATERAL_OFFSET = 1.15;
 
   constructor(scene: THREE.Scene, color = RIVAL_SIGNAL_COLOR) {
@@ -219,6 +228,17 @@ export class RemoteGhostRenderer {
    */
   public setSample(sample: GhostSample): void {
     if (Math.abs(Date.now() - sample.t) > SAMPLE_REJECT_MS) return;
+    if (sample.sequence !== undefined && sample.sequence <= this.lastSequence) return;
+    if (sample.sequence !== undefined) this.lastSequence = sample.sequence;
+    const discontinuity = sample.teleportId !== undefined && sample.teleportId !== this.teleportId;
+    this.teleportId = sample.teleportId;
+    if (discontinuity) {
+      this.samples.length = 0;
+      this.hasTarget = false;
+    }
+    this.samples.push({ at: Date.now(), x: sample.x, y: sample.y, z: sample.z, yaw: sample.yaw });
+    if (this.samples.length === 1) this.interpolationAt = Date.now() - 100;
+    if (this.samples.length > 8) this.samples.shift();
 
     this.targetPos.set(sample.x, sample.y, sample.z);
     this.targetYaw = sample.yaw;
@@ -329,6 +349,17 @@ export class RemoteGhostRenderer {
 
   /** Moves the interpolated pose towards the newest received transform. */
   private advanceInterpolation(dt: number): void {
+    this.interpolationAt = Math.max(this.interpolationAt + Math.max(0, dt) * 1000, Date.now() - 100);
+    if (this.samples.length >= 2) {
+      const renderAt = this.interpolationAt;
+      while (this.samples.length > 2 && this.samples[1].at <= renderAt) this.samples.shift();
+      const a = this.samples[0], b = this.samples[1];
+      const alpha = Math.max(0, Math.min(1, (renderAt - a.at) / Math.max(1, b.at - a.at)));
+      this.currentPos.set(a.x + (b.x-a.x)*alpha, a.y + (b.y-a.y)*alpha, a.z + (b.z-a.z)*alpha);
+      const delta = Math.atan2(Math.sin(b.yaw-a.yaw), Math.cos(b.yaw-a.yaw));
+      this.currentYaw = a.yaw + delta * alpha;
+      return;
+    }
     const t = Math.min(1, dt * POSITION_LERP);
     this.currentPos.lerp(this.targetPos, t);
 
@@ -346,11 +377,11 @@ export class RemoteGhostRenderer {
   private applyRenderPosition(): void {
     const dx =
       (this.debugOffsetOn ? DEBUG_OFFSET_X : 0) +
-      (this.stagingOffsetOn ? RemoteGhostRenderer.STAGING_LATERAL_OFFSET : 0);
+      (this.stagingOffsetOn ? this.stagingOffsetX : 0);
     this.visual.setTransform(
       this.currentPos.x + dx,
       this.currentPos.y,
-      this.currentPos.z,
+      this.currentPos.z + (this.stagingOffsetOn ? this.stagingOffsetZ : 0),
       this.currentYaw
     );
   }
@@ -420,6 +451,37 @@ export class RemoteGhostRenderer {
   /** Enables the deterministic competitive staging offset (see field docs). */
   public setStagingOffset(enabled: boolean): void {
     this.stagingOffsetOn = enabled;
+  }
+
+  public setStagingOffsetX(x: number): void { this.stagingOffsetX = x; }
+  public setStagingOffsetZ(z: number): void { this.stagingOffsetZ = z; }
+  public copyInterpolatedPosition(out: THREE.Vector3): boolean {
+    if (!this.hasTarget) return false;
+    out.copy(this.currentPos);
+    return true;
+  }
+
+  public setDisplayName(name: string): void {
+    if (name === this.displayName || typeof document === 'undefined') return;
+    this.displayName = name;
+    if (this.nameLabel) {
+      this.group.remove(this.nameLabel);
+      this.nameLabel.material.map?.dispose();
+      this.nameLabel.material.dispose();
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 40;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#000000bb'; ctx.fillRect(0, 0, 256, 40);
+    ctx.font = '18px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#' + this.color.toString(16).padStart(6, '0');
+    ctx.fillText(name.slice(0, 24), 128, 27, 242);
+    const texture = new THREE.CanvasTexture(canvas);
+    this.nameLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: .75 }));
+    this.nameLabel.position.set(0, 2.1, 0);
+    this.nameLabel.scale.set(2.8, .44, 1);
+    this.group.add(this.nameLabel);
   }
 
   public isStagingOffsetEnabled(): boolean {
@@ -561,6 +623,9 @@ export class RemoteGhostRenderer {
   }
 
   public clear(): void {
+    this.samples.length = 0;
+    this.lastSequence = -1;
+    this.teleportId = undefined;
     this.hasTarget = false;
     this.samplesReceived = 0;
     this.distanceM = null;
@@ -574,7 +639,233 @@ export class RemoteGhostRenderer {
   }
 
   public dispose(): void {
+    if (this.nameLabel) {
+      this.nameLabel.material.map?.dispose();
+      this.nameLabel.material.dispose();
+      this.group.remove(this.nameLabel);
+      this.nameLabel = null;
+    }
     this.setDebugMarker(false);
     this.visual.dispose();
+  }
+}
+
+// ===========================================================================
+// ONLINE RACE 2.0 — MULTIPLE REMOTE RACERS
+//
+// A 2-8 player race needs up to SEVEN simultaneous remote racers. Each one is
+// the SAME cheap GhostVisual used for the single opponent, keyed by stable
+// userId and drawn with a distinct, stable accent so the racers never merge.
+// The manager owns presence, per-racer sampling, interpolation and cleanup; the
+// local simulation and the remote renderers never share state.
+// ===========================================================================
+
+/**
+ * Stable race accents, indexed by the server-assigned colour index (0..7).
+ * Chosen to stay readable against the track palette and to remain distinct from
+ * one another without relying on hue alone.
+ */
+export const RACE_ACCENT_COLORS: readonly number[] = [
+  0x00f0ff, // 0 signal cyan
+  0x9d8cff, // 1 violet
+  0x4dffb8, // 2 green
+  0xffb020, // 3 amber
+  0xff5d9d, // 4 pink
+  0xff6b3d, // 5 orange
+  0x7ad7ff, // 6 ice blue
+  0xd0ff4d // 7 acid lime
+];
+
+/** Deterministic accent for a colour index; wraps modulo the palette length. */
+export function accentColorFor(index: number): number {
+  const i = Number.isFinite(index) ? Math.abs(Math.floor(index)) : 0;
+  return RACE_ACCENT_COLORS[i % RACE_ACCENT_COLORS.length];
+}
+
+export interface RemoteRacerState {
+  userId: string;
+  colorIndex: number;
+  state: RemoteGhostState;
+  showing: boolean;
+  samplesReceived: number;
+}
+
+/**
+ * Owns one RemoteGhostRenderer per remote racer.
+ *
+ * Allocation discipline: the per-racer renderer is created once and reused for
+ * the whole race. A racer leaves and rejoins the same room reusing the SAME
+ * entry, so no churn occurs at 12 Hz. Everything here is presentation-only.
+ */
+export class RemoteRacerGhosts {
+  private readonly scene: THREE.Scene;
+  private readonly ghosts = new Map<string, RemoteGhostRenderer>();
+  private readonly colorIndexByUser = new Map<string, number>();
+  private localColorIndex = 0;
+  private effectScale = 1;
+  private staging = true;
+  private stagingYaw = 0;
+
+  constructor(scene: THREE.Scene) {
+    this.scene = scene;
+  }
+
+  /** Cheap: no sample is stored until the first real transform arrives. */
+  public setSample(sample: GhostSample): void {
+    const ghost = this.ensure(sample.userId, sample.colorIndex);
+    ghost.setSample(sample);
+  }
+
+  /** Presence authority from the room for one racer. */
+  public setRemotePresent(userId: string, present: boolean): void {
+    this.ghosts.get(userId)?.setRemotePresent(present);
+  }
+
+  public setLocalColorIndex(index: number): void { this.localColorIndex = index; }
+  public setStaging(active: boolean, yaw: number): void { this.staging = active; this.stagingYaw = yaw; }
+  public setDisplayName(userId: string, name: string): void { this.ghosts.get(userId)?.setDisplayName(name); }
+  public copyPosition(userId: string, out: THREE.Vector3): boolean {
+    return this.ghosts.get(userId)?.copyInterpolatedPosition(out) ?? false;
+  }
+
+  /** Positive evidence a racer left / DNF'd: hide their ghost immediately. */
+  public markRemoteLeft(userId: string): void {
+    const ghost = this.ghosts.get(userId);
+    if (!ghost) return;
+    ghost.markRemoteLeft();
+  }
+
+  /** Drops every renderer whose racer is no longer in the provided id set. */
+  public retainOnly(userIds: ReadonlySet<string>): void {
+    for (const [userId, ghost] of this.ghosts) {
+      if (!userIds.has(userId)) {
+        ghost.clear();
+        ghost.dispose();
+        this.ghosts.delete(userId);
+        this.colorIndexByUser.delete(userId);
+      }
+    }
+  }
+
+  public update(dt: number, localPosition?: THREE.Vector3): void {
+    for (const [id, ghost] of this.ghosts) {
+      const lateral = STAGING_SLOTS[this.colorIndexByUser.get(id) ?? 0] - STAGING_SLOTS[this.localColorIndex];
+      ghost.setStagingOffset(this.staging);
+      ghost.setStagingOffsetX(Math.cos(this.stagingYaw) * lateral - Math.sin(this.stagingYaw) * 4);
+      ghost.setStagingOffsetZ(-Math.sin(this.stagingYaw) * lateral - Math.cos(this.stagingYaw) * 4);
+      ghost.update(dt, localPosition);
+    }
+  }
+
+  public setEffectScale(scale: number): void {
+    this.effectScale = scale;
+    for (const ghost of this.ghosts.values()) ghost.setEffectScale(scale);
+  }
+
+  /** DEV: notifies every per-racer renderer of the probe switch (presentation only). */
+  public setDebugMarker(enabled: boolean): void {
+    for (const ghost of this.ghosts.values()) ghost.setDebugMarker(enabled);
+  }
+
+  public setDebugOffset(enabled: boolean): void {
+    for (const ghost of this.ghosts.values()) ghost.setDebugOffset(enabled);
+  }
+
+  public setForceVisible(enabled: boolean): void {
+    for (const ghost of this.ghosts.values()) ghost.setForceVisible(enabled);
+  }
+
+  public debugMarkerEnabled(): boolean {
+    for (const ghost of this.ghosts.values()) return ghost.isDebugMarkerEnabled();
+    return false;
+  }
+
+  public debugOffsetEnabled(): boolean {
+    for (const ghost of this.ghosts.values()) return ghost.isDebugOffsetEnabled();
+    return false;
+  }
+
+  public forceVisibleEnabled(): boolean {
+    for (const ghost of this.ghosts.values()) return ghost.isForceVisibleEnabled();
+    return false;
+  }
+
+  public isStagingOffsetEnabled(): boolean {
+    for (const ghost of this.ghosts.values()) return ghost.isStagingOffsetEnabled();
+    return true;
+  }
+
+  public isShowingAny(now = Date.now()): boolean {
+    for (const ghost of this.ghosts.values()) {
+      if (ghost.isShowing(now)) return true;
+    }
+    return false;
+  }
+
+  public hasSample(userId: string): boolean {
+    const ghost = this.ghosts.get(userId);
+    return ghost !== undefined && ghost.getDiagnostics().hasTarget;
+  }
+
+  /** Diagnostics for one racer, or null when that racer has no renderer. */
+  public diagnosticsFor(
+    userId: string,
+    now = Date.now(),
+    camera?: THREE.Camera | null
+  ): RemoteGhostDiagnostics | null {
+    return this.ghosts.get(userId)?.getDiagnostics(now, camera) ?? null;
+  }
+
+  public getCount(): number {
+    return this.ghosts.size;
+  }
+
+  public colorIndexFor(userId: string): number | null {
+    return this.colorIndexByUser.get(userId) ?? null;
+  }
+
+  public states(now = Date.now()): RemoteRacerState[] {
+    const out: RemoteRacerState[] = [];
+    for (const [userId, ghost] of this.ghosts) {
+      const diag = ghost.getDiagnostics(now);
+      out.push({
+        userId,
+        colorIndex: this.colorIndexByUser.get(userId) ?? 0,
+        state: diag.state,
+        showing: ghost.isShowing(now),
+        samplesReceived: diag.samplesReceived
+      });
+    }
+    return out;
+  }
+
+  public clear(): void {
+    for (const ghost of this.ghosts.values()) {
+      ghost.clear();
+      ghost.dispose();
+    }
+    this.ghosts.clear();
+    this.colorIndexByUser.clear();
+  }
+
+  private ensure(userId: string, colorIndex: number): RemoteGhostRenderer {
+    let ghost = this.ghosts.get(userId);
+    if (!ghost) {
+      ghost = new RemoteGhostRenderer(this.scene, accentColorFor(colorIndex));
+      // COMPETITIVE STAGING: racers may share the exact start node. A fixed
+      // deterministic lateral offset stops the identical capsules from
+      // overlapping into one indistinguishable blob. Presentation only.
+      ghost.setStagingOffset(true);
+      ghost.setEffectScale(this.effectScale);
+      this.ghosts.set(userId, ghost);
+      this.colorIndexByUser.set(userId, colorIndex);
+      return ghost;
+    }
+    // A colour index can only change before the race locks; re-check cheaply.
+    if (this.colorIndexByUser.get(userId) !== colorIndex) {
+      this.colorIndexByUser.set(userId, colorIndex);
+      ghost.setColor(accentColorFor(colorIndex));
+    }
+    return ghost;
   }
 }

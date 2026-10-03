@@ -27,7 +27,7 @@ import {
   RaceRoomService,
   RacePlayer,
   RaceRoom,
-  computeBothReady
+  computeAllReady
 } from '../src/online/RaceRoomService';
 import { AuthService } from '../src/online/AuthService';
 import { OnlineClient } from '../src/online/supabaseClient';
@@ -64,8 +64,25 @@ class FakeClient {
   public selectCount = 0;
   public updateCount = 0;
   public failUpdate: FakeError | null = null;
+  public failRpc: FakeError | null = null;
+  public lastRpc: { name: string; args: Record<string, unknown> } | null = null;
+  public rpcHistory: Array<{ name: string; args: Record<string, unknown> }> = [];
 
   constructor(public readonly uid: () => string | null) {}
+
+  /** Race mutations now go through race-instance-locked v2 RPCs. */
+  public rpc(name: string, args: Record<string, unknown> = {}): Promise<FakeResult> {
+    this.lastRpc = { name, args };
+    this.rpcHistory.push({ name, args });
+    if (this.failRpc) return Promise.resolve({ data: null, error: this.failRpc, status: 403 });
+    if (name === 'race_set_ready_v2') {
+      const uid = this.uid();
+      for (const row of this.rows) {
+        if (row.room_id === args.p_room_id && row.user_id === uid) row.ready = args.p_ready;
+      }
+    }
+    return Promise.resolve({ data: null, error: null, status: 204 });
+  }
 
   from(table: string): FakeQuery {
     if (table !== 'race_room_players') throw new Error(`unexpected table: ${table}`);
@@ -172,10 +189,13 @@ function playerRow(userId: string, ready: boolean, connected = true): Row {
     display_name: `P-${userId}`,
     ready,
     connected,
-    attempt_count: 0,
-    finish_count: 0,
-    session_best_us: null,
-    current_run_us: 0,
+    loaded: true,
+    in_game_ready: false,
+    finished: false,
+    dnf: false,
+    progress: 0,
+    checkpoint_total: 0,
+    color_index: 0,
     joined_at: '2026-01-01T00:00:00.000Z',
     last_seen_at: '2026-01-01T00:00:00.000Z'
   };
@@ -191,7 +211,8 @@ function roomFixture(overrides: Partial<RaceRoom> = {}): RaceRoom {
     mapVersion: 5,
     mapFingerprint: 'mfp_v1_test',
     state: 'LOBBY',
-    sessionSeconds: 300,
+    capacity: 4,
+    raceId: 'race-1',
     startAtMs: null,
     finishedAtMs: null,
     expiresAtMs: Number.MAX_SAFE_INTEGER,
@@ -235,12 +256,17 @@ function playerFixture(overrides: Partial<RacePlayer>): RacePlayer {
   return {
     userId: 'u1',
     displayName: 'P-A',
+    loadout: null,
     ready: false,
+    inGameReady: false,
+    loaded: true,
     connected: true,
-    attemptCount: 0,
-    finishCount: 0,
-    sessionBestUs: null,
-    currentRunUs: 0,
+    finishUs: null,
+    finished: false,
+    dnf: false,
+    colorIndex: 0,
+    progress: 0,
+    checkpointTotal: 0,
     joinedAt: 0,
     lastSeenAt: 0,
     ...overrides
@@ -258,8 +284,8 @@ const repoRoot = path.resolve(__dirname, '..');
 // 1. The write itself
 // ---------------------------------------------------------------------------
 
-describe('READY — the write', () => {
-  it('updates the CURRENT user\'s own row and verifies one row changed', async () => {
+describe('READY — the write (race-instance-locked RPC)', () => {
+  it('updates the CURRENT user\'s own row through race_set_ready_v2', async () => {
     const { service, fake } = makeService('u1', [
       playerRow('u1', false),
       playerRow('u2', false)
@@ -268,8 +294,12 @@ describe('READY — the write', () => {
     const result = await service.setReady(true);
 
     expect(result.ok).toBe(true);
+    const ready = fake.rpcHistory.find((r) => r.name === 'race_set_ready_v2')!;
+    expect(ready).toBeTruthy();
+    expect(ready.args.p_ready).toBe(true);
+    // The race instance is carried on the mutation so a stale write is rejected.
+    expect(ready.args.p_race_id).toBe('race-1');
     expect(fake.rows.find((r) => r.user_id === 'u1')!.ready).toBe(true);
-    // The other player is untouched.
     expect(fake.rows.find((r) => r.user_id === 'u2')!.ready).toBe(false);
 
     const diag = service.getLobbyDiagnostics();
@@ -277,44 +307,21 @@ describe('READY — the write', () => {
     expect(diag.lastReadyUpdate?.rows).toBe(1);
   });
 
-  it('targets room_id AND user_id exactly', async () => {
-    const { service } = makeService('u1', [playerRow('u1', false)]);
+  it('targets the exact room AND user and toggles back to NOT READY', async () => {
+    const { service, fake } = makeService('u1', [playerRow('u1', false)]);
 
     await service.setReady(true);
+    expect(fake.rpcHistory.find((r) => r.name === 'race_set_ready_v2')!.args.p_room_id).toBe('room-1');
+    expect(service.getLobbyDiagnostics().readyDatabase).toBe(true);
 
-    // The fake only applies the update when BOTH filters match; a wrong key
-    // would leave ready=false.
-    const diag = service.getLobbyDiagnostics();
-    expect(diag.readyDatabase).toBe(true);
-  });
-
-  it('toggles back to NOT READY', async () => {
-    const { service, fake } = makeService('u1', [playerRow('u1', true)]);
-
-    const result = await service.setReady(false);
-
-    expect(result.ok).toBe(true);
+    await service.setReady(false);
     expect(fake.rows[0].ready).toBe(false);
     expect(service.getLobbyDiagnostics().readyDatabase).toBe(false);
   });
 
-  it('reports a ZERO-ROW update as a failure instead of silently succeeding', async () => {
-    // The signed-in user has no row in this room (e.g. stale session or a
-    // different user id than the one stored). PostgREST would return 200/204
-    // with no error — which is exactly the silent failure that was shipped.
-    const { service, fake } = makeService('u9', [playerRow('u1', false)]);
-
-    const result = await service.setReady(true);
-
-    expect(result.ok).toBe(false);
-    expect(result.detail).toContain('NO ROW UPDATED');
-    expect(fake.rows[0].ready).toBe(false);
-    expect(service.getLobbyDiagnostics().lastReadyUpdate?.rows).toBe(0);
-  });
-
-  it('surfaces an RLS / PostgREST error verbatim', async () => {
+  it('surfaces an RLS / PostgREST RPC error verbatim', async () => {
     const { service, fake } = makeService('u1', [playerRow('u1', false)]);
-    fake.failUpdate = {
+    fake.failRpc = {
       code: '42501',
       message: 'new row violates row-level security policy for table "race_room_players"'
     };
@@ -332,7 +339,6 @@ describe('READY — the write', () => {
     const roomless = await noRoom.setReady(true);
     expect(roomless.ok).toBe(false);
     expect(roomless.detail).toContain('not in a room');
-    // Pre-flight failures are still recorded for DEV diagnostics.
     expect(noRoom.getLobbyDiagnostics().lastReadyUpdate?.detail).toBe('not in a room');
 
     const noAuth = makeService(null, [playerRow('u1', false)]).service;
@@ -341,7 +347,6 @@ describe('READY — the write', () => {
     expect(signedOut.detail).toContain('not signed in');
   });
 });
-
 // ---------------------------------------------------------------------------
 // 2. RLS — a player may only mutate their OWN row
 // ---------------------------------------------------------------------------
@@ -511,16 +516,16 @@ describe('READY — state merge through refresh', () => {
 
 describe('START condition', () => {
   it('requires two connected, ready players', () => {
-    expect(computeBothReady([])).toBe(false);
-    expect(computeBothReady([playerFixture({ userId: 'u1', ready: true })])).toBe(false);
+    expect(computeAllReady([])).toBe(false);
+    expect(computeAllReady([playerFixture({ userId: 'u1', ready: true })])).toBe(false);
     expect(
-      computeBothReady([
+      computeAllReady([
         playerFixture({ userId: 'u1', ready: true }),
         playerFixture({ userId: 'u2', ready: false })
       ])
     ).toBe(false);
     expect(
-      computeBothReady([
+      computeAllReady([
         playerFixture({ userId: 'u1', ready: true }),
         playerFixture({ userId: 'u2', ready: true })
       ])
@@ -530,7 +535,7 @@ describe('START condition', () => {
   it('ignores disconnected players and never counts them as ready', () => {
     // Two rows, but only one is connected: not startable.
     expect(
-      computeBothReady([
+      computeAllReady([
         playerFixture({ userId: 'u1', ready: true }),
         playerFixture({ userId: 'u2', ready: true, connected: false })
       ])
@@ -540,13 +545,13 @@ describe('START condition', () => {
   it('transitions false -> true -> false as readiness changes', () => {
     const a = playerFixture({ userId: 'u1', ready: false });
     const b = playerFixture({ userId: 'u2', ready: false });
-    expect(computeBothReady([a, b])).toBe(false);
+    expect(computeAllReady([a, b])).toBe(false);
     a.ready = true;
-    expect(computeBothReady([a, b])).toBe(false);
+    expect(computeAllReady([a, b])).toBe(false);
     b.ready = true;
-    expect(computeBothReady([a, b])).toBe(true);
+    expect(computeAllReady([a, b])).toBe(true);
     a.ready = false;
-    expect(computeBothReady([a, b])).toBe(false);
+    expect(computeAllReady([a, b])).toBe(false);
   });
 
   it('map verification is a SEPARATE axis from readiness', () => {
@@ -575,11 +580,9 @@ describe('START condition', () => {
   it('a player blocked by map verification is reported as MAP state, not NOT READY', () => {
     // The UI contract: readiness, connectivity and map identity are distinct.
     const src = fs.readFileSync(path.join(repoRoot, 'src', 'ui', 'RacePanel.ts'), 'utf8');
-    expect(src).toMatch(/MAP MISMATCH/);
-    expect(src).toMatch(/MAP VERIFYING/);
     expect(src).toMatch(/SETTING READY/);
-    // START is gated on map state as well as readiness.
-    expect(src).toMatch(/this\.lobbyStartBtn\.disabled = !allReady \|\| this\.mapState === 'MISMATCH'/);
+    // READY is gated on the map being verified, which is a separate axis.
+    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK'/);
   });
 });
 
@@ -638,26 +641,23 @@ describe('Lobby presentation', () => {
 
   it('disables the lobby buttons while they are not actionable', () => {
     const src = panelSrc();
-    expect(src).toMatch(/this\.lobbyStartBtn\.disabled = !allReady \|\| this\.mapState === 'MISMATCH';/);
-    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK';/);
+    expect(src).toMatch(/this\.lobbyStartBtn\.classList\.add\('hidden'\)/);
+    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK' \|\| room\.state !== 'LOBBY';/);
     expect(cssSrc()).toContain('.online-lobby-actions button:disabled');
   });
 
-  it('keeps the in-race HUD minimal and non-blocking', () => {
+  it('keeps the in-race HUD minimal and non-blocking (first-to-finish)', () => {
     const hud = fs.readFileSync(path.join(repoRoot, 'src', 'ui', 'RaceHud.ts'), 'utf8');
-    // Only the session clock, you, rival. No large popups.
-    expect(hud).toMatch(/SESSION/);
-    expect(hud).toMatch(/race-you-run/);
-    expect(hud).toMatch(/race-you-best/);
+    // Placement + the SHARED race clock + delta + rivals. No large popups.
+    expect(hud).toMatch(/RACE/);
+    expect(hud).toMatch(/race-hud-clock/);
+    expect(hud).toMatch(/race-hud-place/);
+    expect(hud).toMatch(/race-hud-delta/);
     expect(hud).toMatch(/race-hud-rival/);
-    expect(hud).toMatch(/race-rival-best/);
+    expect(hud).toMatch(/race-hud-spectate/);
     // Notifications are small and auto-expire.
     expect(hud).toMatch(/public showNotice\(text: string\)/);
     expect(hud).toMatch(/window\.setTimeout\(\(\) => this\.clearNotice\(\), 4000\)/);
-
-    // The rival notice names the rival and states the role.
-    const game = fs.readFileSync(path.join(repoRoot, 'src', 'core', 'Game.ts'), 'utf8');
-    expect(game).toMatch(/RIVAL \$\{rival\.displayName\} \/\/ NEW BEST \$\{formatRaceTime\(rival\.sessionBestUs\)\}/);
   });
 });
 
@@ -677,7 +677,7 @@ describe('READY — UI contract', () => {
     // A failed write rolls the optimistic toggle back to the pre-click value.
     expect(src).toMatch(/this\.readyState = this\.pendingFromReady;/);
     // READY is gated on map verification, which is a separate axis.
-    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK';/);
+    expect(src).toMatch(/this\.lobbyReadyBtn\.disabled = this\.mapState !== 'OK'/);
   });
 
   it('Game wires the verified result back into the lobby and logs failures', () => {

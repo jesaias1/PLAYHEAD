@@ -488,7 +488,7 @@ describe('Ghost race — lifecycle', () => {
       game.indexOf('public clearGhostRace()') + 300
     );
     expect(clearBlock).toMatch(/this\.ghostRace\.clear\(\)/);
-    expect(clearBlock).not.toMatch(/raceGhost/);
+    expect(clearBlock).not.toMatch(/this\.raceGhost\b/);
 
     // And the recorded-ghost modules never IMPORT multiplayer code.
     for (const file of [

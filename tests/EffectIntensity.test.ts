@@ -161,7 +161,7 @@ describe('Effect intensity — settings', () => {
     const game = read('src/core/Game.ts');
     expect(game).toMatch(/changedKeys\.has\('effectIntensity'\)/);
     expect(game).toMatch(/environment\.setEffectIntensity\(/);
-    expect(game).toMatch(/raceGhost\?\.setEffectScale\(/);
+    expect(game).toMatch(/raceGhosts\?\.setEffectScale\(/);
   });
 });
 

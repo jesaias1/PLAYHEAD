@@ -1,28 +1,30 @@
 /**
- * RACE ROOM SERVICE — shared BEST-TIME SESSION with a friend.
+ * RACE ROOM SERVICE — ONLINE RACE 2.0, a FIRST-TO-FINISH multiplayer race.
  *
- * NOT first-to-finish. This is a CS-surf/KZ style shared session:
+ * This is NOT the old best-time session. A room holds 2-8 simultaneous racers:
  *
- *   - Both players start the SAME canonical official map at the same
- *     synchronized session start.
- *   - There are TWO clocks:
- *       1. SESSION CLOCK  — shared, starts at synchronized GO, default 5:00,
- *                           NEVER resets when a player restarts.
- *       2. PERSONAL RUN TIMER — the existing authoritative PLAYHEAD run timer.
- *                           hold-R abandons the attempt and starts a fresh run;
- *                           tap-R checkpoint restore behaves exactly as normal
- *                           PLAYHEAD and does not reset run time.
- *   - Players are independent: A resetting or finishing never affects B.
- *   - Each attempt that completes records a SESSION BEST if faster.
- *   - At the end, LOWEST BEST VALID COMPLETION TIME wins. One finisher wins.
- *     Nobody finishing = NO FINISH. Exact equal microseconds = TIE.
+ *   - The room is created against an OFFICIAL Signal Pack track (host picks it).
+ *   - LOBBY READY      -> every connected member ready  -> LOADING (server lock)
+ *   - LOADING          -> every member reports CLIENT_LOADED -> IN_GAME
+ *   - IN_GAME          -> every member presses IN-GAME READY -> COUNTDOWN
+ *   - COUNTDOWN        -> server forges ONE shared start_at_ms epoch -> RUNNING
+ *   - RUNNING          -> every client derives raceElapsed = serverNow - start_at_ms
+ *   - FINISHED         -> standings (finish order first, DNF last), rematch
  *
- * Comparison always uses raw microsecond timer values, never formatted strings.
+ * The FIRST participant whose run reaches the finish gate wins. Players who
+ * finish keep spectating while the rest race. A single unified ROOM CLOCK is
+ * used for the start and the race timer, so a late packet can never give one
+ * player a permanent head start.
  *
- * AUTHORITY: Supabase handles presence, lobby, countdown, ghost presentation and
- * results communication ONLY. It never controls movement, collision, surf
- * physics, checkpoints or finish detection — the local 120 Hz simulation stays
- * authoritative for the local run.
+ * AUTHORITY: Supabase (SECURITY DEFINER functions + triggers) owns membership,
+ * phase, readiness, selected track, the shared start timestamp and the
+ * server-derived finish elapsed. The room is locked once LOADING begins, so no
+ * one can join a race mid-load. Every race message carries the room race_id;
+ * packets from a previous race instance are rejected.
+ *
+ * CLIENT: the local 120 Hz simulation stays authoritative for this client's
+ * movement, collision, surf physics, checkpoints and finish detection. The
+ * service only communicates race state and broadcasts presentation transforms.
  */
 
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -33,12 +35,20 @@ import { GeneratedTrack } from '../generation/GenerationTypes';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
 
-/** Default shared session length, in seconds. */
+/** Legacy session length kept only so a pre-2.0 room row still parses. */
 export const DEFAULT_SESSION_SECONDS = 300;
 /** How far ahead the synchronized GO is scheduled, in ms. */
 export const COUNTDOWN_LEAD_MS = 3800;
 /** Remote ghost broadcast rate (Hz). Never 120 Hz — this is not a game server. */
 export const GHOST_BROADCAST_HZ = 12;
+/** Unambiguous room-code alphabet: no 0/O/1/I/L to misread over voice. */
+export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+/** Default room code length. */
+export const ROOM_CODE_LENGTH = 6;
+/** Selectable room sizes; 4 is the recommended default. */
+export const RACE_CAPACITIES = [2, 3, 4, 6, 8] as const;
+export const DEFAULT_RACE_CAPACITY = 4;
+export const MIN_RACE_PLAYERS = 2;
 
 export type RoomState =
   | 'LOBBY'
@@ -63,7 +73,13 @@ export interface RaceRoom {
   mapVersion: number;
   mapFingerprint: string;
   state: RoomState;
-  sessionSeconds: number;
+  /** Maximum simultaneous racers (2/3/4/6/8). */
+  capacity: number;
+  /**
+   * Race instance. Recomputed on every rematch so stale messages from a
+   * previous race can never touch the new one.
+   */
+  raceId: string;
   /** Epoch ms of the synchronized GO. All clients count down to this. */
   startAtMs: number | null;
   finishedAtMs: number | null;
@@ -82,30 +98,37 @@ export interface RacePlayer {
   loadout: { knifeId: string; gloveId: string } | null;
   /** LOBBY READY: ready to load the race. */
   ready: boolean;
-  /**
-   * IN-GAME READY: the player has loaded AND pressed ready in-game. A distinct
-   * stage from 'ready'; the countdown requires both.
-   */
+  /** IN-GAME READY: the player has loaded AND pressed ready in-game. */
   inGameReady: boolean;
   /** CLIENT_LOADED: the player is inside the gameplay scene and initialised. */
   loaded: boolean;
   connected: boolean;
-  /** Attempts started in this session. */
-  attemptCount: number;
-  /** Completions in this session. */
-  finishCount: number;
-  /** Best VALID completion time in this session, in microseconds. */
-  sessionBestUs: number | null;
-  /** The attempt currently being run, in microseconds (live display only). */
-  currentRunUs: number;
+  /** Authoritative finish elapsed in microseconds; null until finished / DNF. */
+  finishUs: number | null;
+  /** True once the player has crossed the finish gate in this race. */
+  finished: boolean;
+  /** True when a disconnect / leave removed the player from the active race. */
+  dnf: boolean;
+  /** Stable per-race accent index (0..7). Assigned at join, frozen for the race. */
+  colorIndex: number;
   joinedAt: number;
   lastSeenAt: number;
+  /** Last checkpoint index this racer reported (placement + HUD only). */
+  progress: number;
+  /** Total checkpoints on the room's track, if the racer reported it. */
+  checkpointTotal: number;
 }
 
-/** Presentation-only remote ghost sample. Never collision, never authority. */
+/** Presentation-only remote racer sample. Never collision, never authority. */
 export interface GhostSample {
+  sequence?: number;
+  teleportId?: number;
   userId: string;
-  /** Local session clock time when the sample was produced (ms). */
+  /** Race instance this sample belongs to. Stale-race packets are rejected. */
+  raceId: string;
+  /** Stable per-race accent index (0..7). */
+  colorIndex: number;
+  /** Local wall-clock time when the sample was produced (ms). */
   t: number;
   x: number;
   y: number;
@@ -115,9 +138,11 @@ export interface GhostSample {
   vx: number;
   vy: number;
   vz: number;
-  /** Whether the remote player is mid-attempt or has reset to spawn. */
+  /** Route/checkpoint progress for placement and the HUD. */
+  checkpointIndex: number;
+  checkpointTotal: number;
+  /** False once the racer has finished (or DNF). */
   running: boolean;
-  attempt: number;
 }
 
 export interface ReadyUpdateResult {
@@ -128,83 +153,94 @@ export interface ReadyUpdateResult {
   detail: string;
 }
 
-export type RaceOutcome = 'WIN' | 'LOSS' | 'TIE' | 'NO_FINISH';
-
+/** Per-player result row. Order is authoritative: finish times first, DNF last. */
 export interface RaceResultRow {
   userId: string;
   displayName: string;
-  sessionBestUs: number | null;
-  attemptCount: number;
-  finishCount: number;
-  outcome: RaceOutcome;
-  /** Difference from the winner, in microseconds (null when no finish). */
+  /** Authoritative finish elapsed in microseconds; null for DNF / no finish. */
+  finishTimeUs: number | null;
+  dnf: boolean;
+  /** 1-based placement among finishers; null for DNF. */
+  place: number | null;
+  /** Difference to the winner in microseconds; null for DNF. */
   gapUs: number | null;
 }
 
 /**
- * Whether the lobby is actually startable.
- *
- * The host may start ONLY when two room-player rows exist, both are connected,
- * and both are ready. Pure so the rule is unit-testable and cannot drift from
- * the UI that renders it.
- *
- * Canonical MAP IDENTITY is deliberately a SEPARATE gate, checked before this
- * one: a player blocked by map verification is not "not ready", and the lobby
- * must say MAP VERIFYING / MAP MISMATCH rather than implying they never clicked.
+ * Whether the lobby is startable: at least MIN_RACE_PLAYERS connected members,
+ * all of them ready. Pure so the rule is unit-testable and cannot drift from
+ * the UI that renders it. Never requires the room to be FULL.
  */
-export function computeBothReady(players: readonly RacePlayer[]): boolean {
+export function computeAllReady(players: readonly RacePlayer[]): boolean {
   const connected = players.filter((p) => p.connected);
-  return connected.length >= 2 && connected.every((p) => p.ready);
+  return connected.length >= MIN_RACE_PLAYERS && connected.every((p) => p.ready);
 }
 
 /**
- * Ranks a finished session by BEST VALID COMPLETION TIME.
- * Pure function so it is unit-testable without any network.
+ * Whether the in-game stage is startable: at least MIN_RACE_PLAYERS connected
+ * members, all of them loaded AND in-game ready.
  */
-export function computeSessionResults(players: readonly RacePlayer[]): RaceResultRow[] {
-  const finishers = players.filter((p) => p.sessionBestUs !== null && p.sessionBestUs > 0);
-  const best = finishers.length > 0 ? Math.min(...finishers.map((p) => p.sessionBestUs!)) : null;
-  const winners = best === null ? [] : finishers.filter((p) => p.sessionBestUs === best);
-
-  const rows: RaceResultRow[] = players.map((p) => {
-    let outcome: RaceOutcome;
-    if (best === null) {
-      outcome = 'NO_FINISH';
-    } else if (p.sessionBestUs === null || p.sessionBestUs <= 0) {
-      outcome = 'LOSS';
-    } else if (winners.length > 1) {
-      outcome = 'TIE';
-    } else if (p.sessionBestUs === best) {
-      outcome = 'WIN';
-    } else {
-      outcome = 'LOSS';
-    }
-    return {
-      userId: p.userId,
-      displayName: p.displayName,
-      sessionBestUs: p.sessionBestUs,
-      attemptCount: p.attemptCount,
-      finishCount: p.finishCount,
-      outcome,
-      gapUs: best !== null && p.sessionBestUs !== null ? p.sessionBestUs - best : null
-    };
-  });
-
-  // Ascending by best time; non-finishers last, ordered by attempt count.
-  rows.sort((a, b) => {
-    if (a.sessionBestUs === null && b.sessionBestUs === null) return b.attemptCount - a.attemptCount;
-    if (a.sessionBestUs === null) return 1;
-    if (b.sessionBestUs === null) return -1;
-    return a.sessionBestUs - b.sessionBestUs;
-  });
-  return rows;
+export function computeInGameReady(players: readonly RacePlayer[]): boolean {
+  const connected = players.filter((p) => p.connected);
+  return connected.length >= MIN_RACE_PLAYERS && connected.every((p) => p.loaded && p.inGameReady);
 }
 
-/** Remaining session time in ms. Never negative; never resets on restart. */
-export function sessionRemainingMs(room: RaceRoom, nowMs: number): number {
-  if (room.startAtMs === null) return room.sessionSeconds * 1000;
-  const end = room.startAtMs + room.sessionSeconds * 1000;
-  return Math.max(0, end - nowMs);
+/**
+ * Ranks a race by FINISH ORDER (shared authoritative elapsed), with
+ * disconnects / DNF last. Pure function so it is unit-testable without network.
+ *
+ * Immutability rule: once a finisher's time is recorded it is never recomputed.
+ * The input already carries that frozen time.
+ */
+export function computeRaceResults(players: readonly RacePlayer[]): RaceResultRow[] {
+  const finishers = players
+    .filter((p) => !p.dnf && p.finishUs !== null && p.finishUs > 0)
+    .sort((a, b) => {
+      if (a.finishUs! !== b.finishUs!) return a.finishUs! - b.finishUs!;
+      return a.joinedAt - b.joinedAt;
+    });
+  const winner = finishers.length > 0 ? finishers[0].finishUs! : null;
+
+  const finisherRows: RaceResultRow[] = finishers.map((p, index) => ({
+    userId: p.userId,
+    displayName: p.displayName,
+    finishTimeUs: p.finishUs,
+    dnf: false,
+    place: index + 1,
+    gapUs: winner !== null && p.finishUs !== null ? p.finishUs - winner : null
+  }));
+
+  // DNF LAST: explicit DNF/disconnect first, then players who simply never
+  // finished, ordered by join time for stability.
+  const nonFinishers = players
+    .filter((p) => p.dnf || p.finishUs === null || p.finishUs <= 0)
+    .sort((a, b) => {
+      if (a.dnf !== b.dnf) return a.dnf ? 1 : -1;
+      return a.joinedAt - b.joinedAt;
+    });
+
+  const dnfRows: RaceResultRow[] = nonFinishers.map((p) => ({
+    userId: p.userId,
+    displayName: p.displayName,
+    finishTimeUs: null,
+    dnf: p.dnf || !p.connected,
+    place: null,
+    gapUs: null
+  }));
+
+  return [...finisherRows, ...dnfRows];
+}
+
+/** True once every active racer has finished or DNF'd. */
+export function isRaceComplete(players: readonly RacePlayer[]): boolean {
+  const active = players.filter((p) => p.connected && !p.dnf);
+  if (active.length === 0) return players.length > 0;
+  return active.every((p) => p.finished || p.finishUs !== null);
+}
+
+/** How many active racers are still running (not finished, not DNF). */
+export function activeRacerCount(players: readonly RacePlayer[]): number {
+  return players.filter((p) => p.connected && !p.dnf && !p.finished && p.finishUs === null).length;
 }
 
 export interface RaceRoomCallbacks {
@@ -217,26 +253,32 @@ export interface RaceRoomCallbacks {
 }
 
 /**
- * Whether an inbound ghost packet may drive the remote opponent ghost.
+ * Whether an inbound ghost packet may drive a remote racer ghost.
  *
- * Three rules, all load-bearing:
- *   1. The local player's OWN transform must never be rendered as a remote
- *      ghost. `broadcast: { self: false }` already prevents the echo, and this
- *      is the second, independent guard.
- *   2. Stale packets are dropped: a frozen ghost is worse than none.
- *   3. A sample with no local identity cannot be attributed, so it is refused.
+ * Rules, all load-bearing:
+ *   1. The local player's OWN transform is never rendered as a remote ghost.
+ *   2. A sample from a PREVIOUS race instance is rejected (raceId mismatch).
+ *   3. Genuinely stale packets are dropped: a frozen ghost is worse than none.
+ *   4. A sample with no local identity / race cannot be attributed, so it is
+ *      refused.
  *
  * Pure, so the rule is unit-testable without a live Realtime channel.
  */
 export function shouldAcceptRemoteGhost(
   sample: GhostSample | undefined,
   localUserId: string | null,
+  currentRaceId: string | null,
   nowMs: number = Date.now()
 ): boolean {
   if (!sample) return false;
   if (!localUserId) return false;
   if (sample.userId === localUserId) return false;
+  if (currentRaceId !== null && sample.raceId !== currentRaceId) return false;
   if (!Number.isFinite(sample.t)) return false;
+  for (const value of [sample.x, sample.y, sample.z, sample.yaw, sample.pitch, sample.vx, sample.vy, sample.vz]) {
+    if (!Number.isFinite(value) || Math.abs(value) > 10_000_000) return false;
+  }
+  if (sample.sequence !== undefined && (!Number.isSafeInteger(sample.sequence) || sample.sequence < 0)) return false;
   if (Math.abs(nowMs - sample.t) > 1000) return false;
   return true;
 }
@@ -252,16 +294,13 @@ export class RaceRoomService {
    *
    * The game loop stores the current transform here every active frame. The
    * BROADCAST CADENCE owns the packet: it stamps `t = Date.now()` at send time.
-   *
-   * This separation is what makes background throttling survivable. Previously
-   * the timestamp was stamped inside the rAF-driven game update, so when a
-   * background tab stopped animating its `t` froze and every re-sent packet was
-   * rejected as stale by the receiver — the opponent vanished even though the
-   * network was fine.
+   * That separation is what makes background throttling survivable.
    */
-  private myTransform: Omit<GhostSample, 'userId' | 't' | 'attempt'> | null = null;
-  /** Locally tracked attempt index, used to reset the remote ghost to spawn. */
-  private attemptIndex = 0;
+  private myTransform: Omit<GhostSample, 'userId' | 't' | 'raceId' | 'colorIndex'> | null = null;
+  /** Locally tracked finish state for the broadcast payload. */
+  private localRunning = true;
+  /** My assigned accent index for the current race. */
+  private myColorIndex = 0;
   /** DEV lobby diagnostics. */
   private lobbySyncTimer: number | null = null;
   private realtimePlayerEvents = 0;
@@ -273,13 +312,25 @@ export class RaceRoomService {
   private ghostRxCount = 0;
   private ghostRxAt = 0;
   private ghostRxUserId: string | null = null;
+  /** Recently seen remote user ids, for per-player ghost presence. */
+  private readonly remoteSeenAt = new Map<string, number>();
   /**
    * Offset from this browser's Date.now() to the AUTHORITATIVE server clock (ms).
-   * Adopted from race_server_now() on room refresh so every shared timestamp —
-   * countdown, session remaining, results — uses ONE authoritative timeline.
+   * Adopted from race_server_now() so every shared timestamp — countdown,
+   * start, race elapsed, song position, finish — uses ONE authoritative timeline.
    */
   private serverOffsetMs = 0;
   private serverOffsetAt = 0;
+  private clockSyncing = false;
+  private adoptRoom(row: Record<string, unknown>): void {
+    const next = RaceRoomService.rowToRoom(row);
+    if (this.room && this.room.raceId !== next.raceId) {
+      this.localRunning = true;
+      this.remoteSeenAt.clear();
+      this.myTransform = null;
+    }
+    this.room = next;
+  }
   /** DEV visibility diagnostics. */
   private lastVisibilityChangeAt = 0;
   private windowFocused = true;
@@ -299,27 +350,45 @@ export class RaceRoomService {
     return this.serverOffsetMs;
   }
 
-  /** Authoritative session time for a room: server-anchored wall clock. */
-  public getAuthoritativeNowMs(room: RaceRoom | null, nowMs: number = Date.now()): number {
-    if (!room) return nowMs + this.serverOffsetMs;
-    void room;
+  /** Authoritative "now" on the shared server timeline. */
+  public getAuthoritativeNowMs(nowMs: number = Date.now()): number {
     return nowMs + this.serverOffsetMs;
+  }
+
+  /**
+   * Shared race elapsed in microseconds, derived ONLY from the authoritative
+   * start timestamp. Zero before GO. Never a local wall-clock stopwatch.
+   */
+  public getRaceElapsedUs(nowMs: number = Date.now()): number {
+    if (!this.room || this.room.startAtMs === null) return 0;
+    return Math.max(0, Math.round((this.getAuthoritativeNowMs(nowMs) - this.room.startAtMs) * 1000));
   }
 
   /** Adopts the server clock. Cheap and idempotent; safe to call often. */
   private async adoptServerClock(): Promise<void> {
+    if (this.clockSyncing || (this.serverOffsetAt > 0 && Date.now() - this.serverOffsetAt < 10000)) return;
     const client = this.onlineClient.getClient();
     if (!client) return;
+    this.clockSyncing = true;
     try {
-      const { data, error } = await client.rpc('race_server_now');
-      if (error || data === null || data === undefined) return;
-      const ms = Number(data);
-      if (Number.isFinite(ms) && ms > 0) {
-        this.serverOffsetMs = ms - Date.now();
+      let bestRtt = Infinity, offset = this.serverOffsetMs;
+      for (let i = 0; i < (this.serverOffsetAt === 0 ? 3 : 1); i++) {
+        const sent = Date.now();
+        const { data, error } = await client.rpc('race_server_now');
+        const received = Date.now(), ms = Number(data);
+        if (!error && Number.isFinite(ms) && ms > 0 && received - sent < bestRtt) {
+          bestRtt = received - sent;
+          offset = ms - (sent + received) / 2;
+        }
+      }
+      if (Number.isFinite(bestRtt)) {
+        this.serverOffsetMs = offset;
         this.serverOffsetAt = Date.now();
       }
     } catch {
       /* clock adoption is best-effort; a local fallback still works */
+    } finally {
+      this.clockSyncing = false;
     }
   }
 
@@ -329,6 +398,18 @@ export class RaceRoomService {
 
   public getPlayers(): readonly RacePlayer[] {
     return this.players;
+  }
+
+  public getCapacity(): number {
+    return this.room?.capacity ?? DEFAULT_RACE_CAPACITY;
+  }
+
+  public getRaceId(): string | null {
+    return this.room?.raceId ?? null;
+  }
+
+  public getInviteCode(): string | null {
+    return this.room?.inviteCode ?? null;
   }
 
   public getInviteUrl(): string | null {
@@ -349,52 +430,93 @@ export class RaceRoomService {
     try {
       const parsed = new URL(target, 'http://localhost');
       const code = parsed.searchParams.get('room');
-      return code ? code.trim().toUpperCase() : null;
+      return code ? RaceRoomService.normalizeCode(code) : null;
     } catch {
       return null;
     }
   }
 
+  /** Uppercases, strips whitespace and maps common ambiguous characters. */
+  public static normalizeCode(raw: string): string {
+    return raw
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .replace(/O/g, '0')
+      .replace(/[IL]/g, '1');
+  }
+
+  /** Generates a shareable room code from the unambiguous alphabet. */
+  public static generateInviteCode(length = ROOM_CODE_LENGTH): string {
+    let code = '';
+    for (let i = 0; i < length; i++) {
+      code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
+    }
+    return code;
+  }
+
   // -- room lifecycle ------------------------------------------------------
 
-  /** Host: creates a room for an official track. */
+  /**
+   * Host: creates a room for an official track.
+   *
+   * The invitation code is generated CLIENT-SIDE from the unambiguous alphabet
+   * so it is always an unambiguous uppercase string; the race_rooms.code CHECK
+   * enforces the invariant in the database. A collision is retried.
+   */
   public async createRoom(params: {
     trackId: string;
     trackTitle: string;
     identity: MapIdentity;
-    sessionSeconds?: number;
+    capacity?: number;
   }): Promise<{ ok: true; room: RaceRoom } | { ok: false; detail: string }> {
     const client = this.onlineClient.getClient();
     const userId = this.auth.getUserId();
     if (!client || !userId) return { ok: false, detail: 'not connected / not signed in' };
 
-    const inviteCode = RaceRoomService.generateInviteCode();
-    const sessionSeconds = params.sessionSeconds ?? DEFAULT_SESSION_SECONDS;
+    const requested = Number(params.capacity ?? DEFAULT_RACE_CAPACITY);
+    const capacity = (RACE_CAPACITIES as readonly number[]).includes(requested)
+      ? requested
+      : DEFAULT_RACE_CAPACITY;
 
-    const { data, error } = await client
-      .from('race_rooms')
-      .insert({
-        invite_code: inviteCode,
-        host_user_id: userId,
-        track_id: params.trackId,
-        track_title: params.trackTitle,
-        map_version: params.identity.mapVersion,
-        map_fingerprint: params.identity.mapFingerprint,
-        state: 'LOBBY',
-        session_seconds: sessionSeconds,
-        expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
-      })
-      .select('*')
-      .single();
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const inviteCode = RaceRoomService.generateInviteCode();
+      const { data, error } = await client
+        .from('race_rooms')
+        .insert({
+          invite_code: inviteCode,
+          host_user_id: userId,
+          track_id: params.trackId,
+          track_title: params.trackTitle,
+          map_version: params.identity.mapVersion,
+          map_fingerprint: params.identity.mapFingerprint,
+          state: 'LOBBY',
+          capacity,
+          expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+        })
+        .select('*')
+        .single();
 
-    if (error || !data) return { ok: false, detail: error?.message ?? 'room insert failed' };
+      if (error) {
+        // 23505 = unique_violation: retry with a fresh code.
+        if ((error as { code?: string }).code === '23505') continue;
+        return { ok: false, detail: error.message };
+      }
+      if (!data) return { ok: false, detail: 'room insert returned no row' };
 
-    this.room = RaceRoomService.rowToRoom(data);
-    await this.joinRoomRow(this.room, true);
-    return { ok: true, room: this.room };
+      this.room = RaceRoomService.rowToRoom(data as Record<string, unknown>);
+      const joined = await this.joinRoomRow(this.room, true);
+      if (!joined.ok) {
+        await this.unsubscribe();
+        this.room = null;
+        return { ok: false, detail: joined.detail };
+      }
+      return { ok: true, room: this.room };
+    }
+    return { ok: false, detail: 'could not allocate a unique room code' };
   }
 
-  /** Guest: resolves an invite code to a room and joins it. */
+  /** Guest: resolves a code to a room and joins it. */
   public async joinByInviteCode(
     inviteCode: string
   ): Promise<{ ok: true; room: RaceRoom } | { ok: false; detail: string }> {
@@ -402,27 +524,35 @@ export class RaceRoomService {
     const userId = this.auth.getUserId();
     if (!client || !userId) return { ok: false, detail: 'not connected / not signed in' };
 
-    const { data, error } = await client
-      .from('race_rooms')
-      .select('*')
-      .eq('invite_code', inviteCode.toUpperCase())
-      .maybeSingle();
+    const code = RaceRoomService.normalizeCode(inviteCode);
+    if (code.length < 4) return { ok: false, detail: 'invalid room code' };
+
+    const { data, error } = await client.rpc('race_find_room_v2', { p_invite_code: code });
 
     if (error) return { ok: false, detail: error.message };
     if (!data) return { ok: false, detail: 'room not found' };
 
-    const room = RaceRoomService.rowToRoom(data);
+    const room = RaceRoomService.rowToRoom(data as Record<string, unknown>);
     if (room.expiresAtMs < Date.now()) return { ok: false, detail: 'room expired' };
+    if (isRaceStarted(room.state) || room.state === 'FINISHED') {
+      return { ok: false, detail: 'race already in progress' };
+    }
 
     this.room = room;
-    await this.joinRoomRow(room, false);
+    // ATOMIC join: the RPC takes a row lock, re-checks capacity and the phase,
+    // and rejects the join if the room filled or locked between read and now.
+    const joined = await this.joinRoomRow(room, false);
+    if (!joined.ok) {
+      this.room = null;
+      return { ok: false, detail: joined.detail };
+    }
     return { ok: true, room };
   }
 
   /**
-   * Verifies the local map matches the room before a session may start.
+   * Verifies the local map matches the room before a race may start.
    * A fingerprint mismatch MUST block the race: two different maps cannot be
-   * compared competitively.
+   * raced competitively.
    */
   public verifyLocalMap(track: GeneratedTrack): { ok: boolean; detail: string } {
     if (!this.room) return { ok: false, detail: 'no room' };
@@ -437,17 +567,21 @@ export class RaceRoomService {
       return {
         ok: false,
         detail:
-          `MAP VERSION MISMATCH // fingerprint\n` +
+          `TRACK VERSION MISMATCH // fingerprint\n` +
           `room  ${this.room.mapFingerprint}\nlocal ${local.mapFingerprint}`
       };
     }
     return { ok: true, detail: 'map identity matches' };
   }
 
-  private async joinRoomRow(room: RaceRoom, isHost: boolean): Promise<void> {
+  /** Joins (or re-joins) the local account via the atomic membership RPC. */
+  private async joinRoomRow(
+    room: RaceRoom,
+    _isHost: boolean
+  ): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     const userId = this.auth.getUserId();
-    if (!client || !userId) return;
+    if (!client || !userId) return { ok: false, detail: 'not connected / not signed in' };
 
     const profile = this.auth.getProfile();
     // LOADOUT METADATA: captured ONCE, here, from the authoritative cosmetic
@@ -457,34 +591,44 @@ export class RaceRoomService {
       knifeId: KarambitSkinSystem.getInstance().getEquippedSkinId(),
       gloveId: String(MasteryGloveSystem.getInstance().getEquippedGloveId())
     };
-    await client.from('race_room_players').upsert(
-      {
-        room_id: room.id,
-        user_id: userId,
-        display_name: profile?.displayName ?? 'PLAYER',
-        loadout,
-        ready: isHost,
-        connected: true,
-        attempt_count: 0,
-        finish_count: 0,
-        session_best_us: null,
-        current_run_us: 0,
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: 'room_id,user_id' }
-    );
 
+    let rpcError = '';
+    try {
+      const { error } = await client.rpc('race_join_room', {
+        p_room_id: room.id,
+        p_display_name: profile?.displayName ?? 'PLAYER',
+        p_loadout: loadout
+      });
+      if (error) rpcError = error.message;
+    } catch (err) {
+      rpcError = err instanceof Error ? err.message : String(err);
+    }
+
+    await this.adoptServerClock();
     await this.subscribe(room);
     await this.refreshPlayers();
+
+    const joined = this.players.some((p) => p.userId === userId);
+    if (joined) return { ok: true, detail: 'joined' };
+
+    // NO DIRECT-UPSERT FALLBACK: a membership row may only be created by the
+    // atomic, capacity-checked race_join_room RPC. A raw insert could otherwise
+    // bypass the room lock and the capacity limit entirely.
+    return { ok: false, detail: rpcError || 'join did not create a membership row' };
+  }
+
+  public isFull(): boolean {
+    return (
+      this.room !== null && this.players.filter((p) => p.connected).length >= this.room.capacity
+    );
   }
 
   /**
-   * Sets the local player's ready flag.
+   * Sets the local player's LOBBY ready flag.
    *
-   * This deliberately VERIFIES the write. A PostgREST UPDATE that is blocked by
-   * RLS, or whose filter matches nothing, returns 200 with an empty body and NO
-   * error — which is exactly how "clicking READY does nothing" presented. So we
-   * ask for the affected row back and treat zero rows as a failure.
+   * This deliberately VERIFIES the write: a PostgREST UPDATE blocked by RLS or
+   * matching no row returns 200 with no rows, which is exactly how "clicking
+   * READY does nothing" presented. Zero affected rows is treated as a failure.
    */
   public async setReady(ready: boolean): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
@@ -494,20 +638,13 @@ export class RaceRoomService {
     if (!this.room) return this.failReady(ready, 'not in a room');
 
     try {
-      const { data, error, status } = await client
-        .from('race_room_players')
-        .update({ ready, last_seen_at: new Date().toISOString() })
-        .eq('room_id', this.room.id)
-        .eq('user_id', userId)
-        .select('room_id, user_id, ready');
+      const { error, status } = await client.rpc('race_set_ready_v2', {
+        p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
+        p_ready: ready
+      });
 
-      this.lastReadyUpdate = {
-        at: Date.now(),
-        requested: ready,
-        ok: false,
-        rows: 0,
-        detail: ''
-      };
+      this.lastReadyUpdate = { at: Date.now(), requested: ready, ok: false, rows: 0, detail: '' };
 
       if (error) {
         this.lastReadyUpdate.detail = `${error.code ?? status}: ${error.message}`;
@@ -515,37 +652,16 @@ export class RaceRoomService {
         return { ok: false, detail: `READY FAILED // ${error.message}` };
       }
 
-      const rows = data?.length ?? 0;
-      this.lastReadyUpdate.rows = rows;
-      if (rows === 0) {
-        // Zero rows means the filter matched nothing: wrong room id, wrong user
-        // id, or RLS blocked it. Treat as an error instead of silently failing.
-        this.lastReadyUpdate.detail = 'zero rows updated (filter/RLS mismatch)';
-        await this.refreshPlayers();
-        return {
-          ok: false,
-          detail: 'READY FAILED // NO ROW UPDATED (SESSION OR RLS MISMATCH)'
-        };
-      }
-
+      this.lastReadyUpdate.rows = 1;
       this.lastReadyUpdate.ok = true;
-      this.lastReadyUpdate.detail = `updated ${rows} row`;
+      this.lastReadyUpdate.detail = 'updated 1 row';
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      this.lastReadyUpdate = {
-        at: Date.now(),
-        requested: ready,
-        ok: false,
-        rows: 0,
-        detail
-      };
+      this.lastReadyUpdate = { at: Date.now(), requested: ready, ok: false, rows: 0, detail };
       await this.refreshPlayers();
       return { ok: false, detail: `READY FAILED // ${detail}` };
     }
 
-    // Always reconcile from the database. On success this confirms the write; on
-    // failure it restores the true state instead of leaving our optimism on
-    // screen. This is the same path Realtime uses, so there is one truth.
     await this.refreshPlayers();
     return { ok: true, detail: 'READY' };
   }
@@ -554,11 +670,6 @@ export class RaceRoomService {
    * CLIENT_LOADED: reports that this client is actually inside the gameplay
    * scene and fully initialised. Server-authoritative; a client can only ever
    * mark itself. Never advances the countdown on its own.
-   *
-   * Returns the REAL write outcome so the caller can abort instead of silently
-   * sitting outside the readiness set. Deliberately does NOT clear myTransform:
-   * the 12 Hz broadcast must keep carrying the spawn pose so the opponent stays
-   * visible while both sides wait.
    */
   public async reportLoaded(loaded = true): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
@@ -567,8 +678,9 @@ export class RaceRoomService {
     if (!userId) return { ok: false, detail: 'not signed in' };
     if (!this.room) return { ok: false, detail: 'not in a room' };
     try {
-      const { error } = await client.rpc('race_report_loaded', {
+      const { error } = await client.rpc('race_report_loaded_v2', {
         p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
         p_loaded: loaded
       });
       if (error) {
@@ -584,10 +696,7 @@ export class RaceRoomService {
     return { ok: true, detail: 'LOADED' };
   }
 
-  /**
-   * IN-GAME READY (the SECOND ready stage). Writes this client's own row; the
-   * authoritative trigger derives the shared GO from the whole room.
-   */
+  /** IN-GAME READY (the SECOND ready stage). Server enforces the IN_GAME phase. */
   public async setInGameReady(ready: boolean): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     const userId = this.auth.getUserId();
@@ -596,10 +705,9 @@ export class RaceRoomService {
     if (!this.room) return { ok: false, detail: 'not in a room' };
 
     try {
-      // Server RPC: enforces the phase (IN_GAME only) and that the player has
-      // already reported LOADED, so a client can never skip straight to ready.
-      const { error } = await client.rpc('race_set_in_game_ready', {
+      const { error } = await client.rpc('race_set_in_game_ready_v2', {
         p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
         p_ready: ready
       });
       if (error) {
@@ -618,17 +726,13 @@ export class RaceRoomService {
 
   /**
    * Marks the race live once this client actually reaches GO (idempotent).
-   *
-   * The RPC sets the server's authorized-write flag itself, so the room guard
-   * accepts the transition. The RESULT is reported honestly: a failure is
-   * returned (and logged) instead of being silently swallowed, so a client is
-   * never left believing the race started when the server disagrees.
+   * The RPC flips COUNTDOWN -> RUNNING only after the authoritative instant.
    */
   public async markRunning(): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return { ok: false, detail: 'no room' };
     try {
-      const { error } = await client.rpc('race_mark_running', { p_room_id: this.room.id });
+      const { error } = await client.rpc('race_mark_running_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
       if (error) return { ok: false, detail: error.message };
       return { ok: true, detail: 'RUNNING' };
     } catch (err) {
@@ -641,7 +745,7 @@ export class RaceRoomService {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return;
     try {
-      await client.rpc('race_heartbeat', { p_room_id: this.room.id });
+      await client.rpc('race_heartbeat_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
     } catch {
       /* best effort: presence only */
     }
@@ -652,7 +756,7 @@ export class RaceRoomService {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return;
     try {
-      await client.rpc('race_mark_disconnected', { p_room_id: this.room.id });
+      await client.rpc('race_mark_disconnected_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
     } catch {
       /* best effort: presence only */
     }
@@ -666,19 +770,24 @@ export class RaceRoomService {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return;
     try {
-      await client.rpc('race_expire_stale_players', { p_room_id: this.room.id, p_grace_seconds: 20 });
+      await client.rpc('race_expire_stale_players_v2', {
+        p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
+        p_grace_seconds: 20
+      });
     } catch {
       /* best effort: presence only */
     }
   }
 
-  /** Marks the room EXPIRED / abandons the current session for this member. */
+  /** Marks the room EXPIRED / abandons the current race for this member. */
   public async abandonSession(reason: string): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return { ok: false, detail: 'no room' };
     try {
-      const { error } = await client.rpc('race_abandon_session', {
+      const { error } = await client.rpc('race_abandon_session_v2', {
         p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
         p_reason: reason
       });
       if (error) return { ok: false, detail: error.message };
@@ -686,18 +795,6 @@ export class RaceRoomService {
     } catch (err) {
       return { ok: false, detail: err instanceof Error ? err.message : String(err) };
     }
-  }
-
-  /** Records a pre-flight READY failure so DEV diagnostics can show why. */
-  private failReady(ready: boolean, detail: string): { ok: false; detail: string } {
-    this.lastReadyUpdate = {
-      at: Date.now(),
-      requested: ready,
-      ok: false,
-      rows: 0,
-      detail
-    };
-    return { ok: false, detail };
   }
 
   /** DEV diagnostics for the lobby. */
@@ -728,13 +825,10 @@ export class RaceRoomService {
   }
 
   /**
-   * Polling fallback for the lobby.
-   *
-   * Realtime `postgres_changes` is the primary path, but it depends on the table
-   * being in the `supabase_realtime` publication. If that is ever missing or the
-   * socket drops, the lobby would silently stop converging. A light poll while
-   * the room is still in LOBBY keeps both clients correct regardless; it stops
-   * polling once the session starts, and is cleared on leave/disconnect.
+   * Polling fallback for the lobby and the race. Realtime `postgres_changes` is
+   * the primary path, but it depends on the table being in the
+   * `supabase_realtime` publication. A light poll keeps every client correct
+   * regardless; it is cleared on leave/disconnect.
    */
   public startLobbySync(intervalMs = 2000): void {
     if (typeof window === 'undefined') return;
@@ -745,11 +839,12 @@ export class RaceRoomService {
       // stopped (a closed tab keeps no socket, so the survivor's poll notices).
       void this.heartbeat();
       void this.expireStalePlayers();
-      // Poll EVERY active phase, not just LOBBY. Realtime can miss events in
-      // LOADING/IN_GAME/COUNTDOWN/RUNNING too (throttled tab, dropped socket),
-      // which would otherwise freeze the two clients in disagreement about who
-      // is loaded, ready or finished.
-      if (isRaceStarted(this.room.state) || this.room.state === 'LOBBY') {
+      // Poll EVERY active phase, not just LOBBY.
+      if (
+        isRaceStarted(this.room.state) ||
+        this.room.state === 'LOBBY' ||
+        this.room.state === 'FINISHED'
+      ) {
         void this.refreshRoomAndPlayers();
       }
     }, intervalMs);
@@ -767,109 +862,128 @@ export class RaceRoomService {
   }
 
   /**
-   * Host starts the session. The GO is scheduled at a server-side timestamp
-   * sufficiently ahead of now that every client can align to it — we never send
-   * "GO NOW" and hope packet arrival timing is fair.
+   * Host: picks the OFFICIAL track before the room locks. Rejected once the
+   * race has started, both here and by the server guard.
    */
-  public async startSession(): Promise<{ ok: boolean; detail: string; startAtMs?: number }> {
+  public async selectTrack(
+    trackId: string,
+    trackTitle: string,
+    identity: MapIdentity
+  ): Promise<{ ok: boolean; detail: string }> {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return { ok: false, detail: 'no room' };
     if (!this.isHost()) return { ok: false, detail: 'host only' };
-
-    const everyoneReady = this.players.length >= 2 && this.players.every((p) => p.ready || !p.connected);
-    if (!everyoneReady) return { ok: false, detail: 'not all players ready' };
-
-    // In-game READY is required before the authoritative GO may be scheduled.
-    const loadedAndReady =
-      this.players.length >= 2 &&
-      this.players.every((p) => !p.connected || (p.loaded && p.inGameReady));
-    if (!loadedAndReady) return { ok: false, detail: 'not all players ready in-game' };
-
-    const startAtMs = Date.now() + COUNTDOWN_LEAD_MS;
-    const { error } = await client
-      .from('race_rooms')
-      .update({
-        state: 'COUNTDOWN',
-        started_at: new Date(startAtMs).toISOString(),
-        start_at_ms: startAtMs
-      })
-      .eq('id', this.room.id);
-
-    if (error) return { ok: false, detail: error.message };
-    return { ok: true, detail: 'countdown scheduled', startAtMs };
-  }
-
-  // -- per-attempt reporting ----------------------------------------------
-
-  /**
-   * Local player started (or restarted) an attempt.
-   * Increments the attempt counter and resets the remote ghost to spawn.
-   */
-  public async reportAttemptStart(): Promise<void> {
-    const client = this.onlineClient.getClient();
-    const userId = this.auth.getUserId();
-    if (!client || !userId || !this.room) return;
-
-    this.attemptIndex++;
-    // Full restart: the next published transform is the new spawn pose. The
-    // transform itself is refreshed by the game loop on the very next frame, so
-    // clearing it here can never leave the opponent without a position.
-    this.myTransform = null;
-
-    // RESTART ABORT GUARD: a restart may only begin a fresh attempt while the
-    // race is actually LIVE. Before GO (or after FINISHED) a restart must not
-    // touch the session record.
-    const state = this.room.state;
-    if (state !== 'RUNNING') return;
-
-    await client.rpc('race_report_attempt_start', {
-      p_room_id: this.room.id,
-      p_attempt_count: this.attemptIndex
-    });
-  }
-
-  /**
-   * Local player completed the map. Records a session best if faster.
-   * Uses the RAW microsecond timer value; never a formatted string.
-   */
-  public async reportFinish(timeUs: number): Promise<void> {
-    const client = this.onlineClient.getClient();
-    const userId = this.auth.getUserId();
-    if (!client || !userId || !this.room) return;
-    if (!Number.isFinite(timeUs) || timeUs <= 0) return;
-    // A finish is only meaningful while the shared race is live.
-    if (this.room.state !== 'RUNNING') return;
-
-    await client.rpc('race_report_finish', {
-      p_room_id: this.room.id,
-      p_time_us: Math.round(timeUs)
-    });
-  }
-
-  /** Low-frequency live attempt time for the opponent's HUD. */
-  public async reportCurrentRun(timeUs: number): Promise<void> {
-    const client = this.onlineClient.getClient();
-    const userId = this.auth.getUserId();
-    if (!client || !userId || !this.room) return;
-    await client
-      .from('race_room_players')
-      .update({ current_run_us: Math.round(Math.max(0, timeUs)), last_seen_at: new Date().toISOString() })
-      .eq('room_id', this.room.id)
-      .eq('user_id', userId);
-  }
-
-  /** Ends the session and produces the shared result table. */
-  public async finishSession(): Promise<RaceResultRow[]> {
-    const client = this.onlineClient.getClient();
-    const results = computeSessionResults(this.players);
-    if (client && this.room && this.isHost()) {
-      await client
-        .from('race_rooms')
-        .update({ state: 'FINISHED', finished_at: new Date().toISOString() })
-        .eq('id', this.room.id);
+    if (this.room.state !== 'LOBBY') return { ok: false, detail: 'track is locked' };
+    try {
+      const { error } = await client.rpc('race_select_track_v2', {
+        p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
+        p_track_id: trackId,
+        p_track_title: trackTitle,
+        p_map_version: identity.mapVersion,
+        p_map_fingerprint: identity.mapFingerprint
+      });
+      if (error) return { ok: false, detail: error.message };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
     }
-    this.callbacks.onFinished?.(results);
-    return results;
+    await this.refreshRoomAndPlayers();
+    return { ok: true, detail: 'track selected' };
+  }
+
+  /**
+   * Records that this racer crossed the finish gate. The SERVER derives the
+   * authoritative elapsed from the shared start epoch; the client value is a
+   * fallback only, so a client can never declare its own winner or time.
+   */
+  public async reportFinish(progress?: {
+    checkpointIndex?: number;
+    checkpointTotal?: number;
+  }): Promise<{ ok: boolean; detail: string }> {
+    const client = this.onlineClient.getClient();
+    const userId = this.auth.getUserId();
+    if (!client || !userId || !this.room) return { ok: false, detail: 'no room' };
+    if (this.room.state !== 'RUNNING') return { ok: false, detail: 'race is not running' };
+    try {
+      const { error } = await client.rpc('race_report_finish_v2', {
+        p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
+        p_progress: progress?.checkpointIndex ?? null
+      });
+      if (error) return { ok: false, detail: error.message };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    }
+    this.localRunning = false;
+    await this.refreshPlayers();
+    return { ok: true, detail: 'FINISHED' };
+  }
+
+  /**
+   * Checkpoint progress broadcast (~2 Hz, race-instance locked). Presentation
+   * and placement only; it is never a scoring or finish input. Fire-and-forget
+   * so a dropped progress packet can never affect movement or the race clock.
+   */
+  public async reportProgress(checkpointIndex: number, checkpointTotal: number): Promise<void> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return;
+    if (this.room.state !== 'RUNNING') return;
+    try {
+      await client.rpc('race_report_progress_v2', {
+        p_room_id: this.room.id,
+        p_race_id: this.room.raceId,
+        p_checkpoint: checkpointIndex,
+        p_total: checkpointTotal
+      });
+    } catch {
+      /* best effort: placement only */
+    }
+  }
+
+  /**
+   * Records this member's explicit mid-race DNF (leave / abandon). The server
+   * freezes a DNF flag; others keep racing.
+   */
+  public async reportDnf(): Promise<{ ok: boolean; detail: string }> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return { ok: false, detail: 'no room' };
+    try {
+      const { error } = await client.rpc('race_report_dnf_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
+      if (error) return { ok: false, detail: error.message };
+      return { ok: true, detail: 'DNF' };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** All remaining members reset the room for another race (rematch). */
+  public async requestRematch(): Promise<{ ok: boolean; detail: string }> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return { ok: false, detail: 'no room' };
+    if (this.room.state !== 'FINISHED') return { ok: false, detail: 'race is not finished' };
+    try {
+      const { error } = await client.rpc('race_request_rematch_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
+      if (error) return { ok: false, detail: error.message };
+    } catch (err) {
+      return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    }
+    this.localRunning = true;
+    await this.refreshRoomAndPlayers();
+    return { ok: true, detail: 'REMATCH' };
+  }
+
+  public async returnToLobby(): Promise<{ ok: boolean; detail: string }> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return { ok: false, detail: 'no room' };
+    const { error } = await client.rpc('race_return_lobby_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
+    if (error) return { ok: false, detail: error.message };
+    await this.refreshRoomAndPlayers();
+    return { ok: true, detail: 'LOBBY' };
+  }
+
+  /** True once every active racer has finished or DNF'd. */
+  public isComplete(): boolean {
+    return isRaceComplete(this.players);
   }
 
   // -- realtime ------------------------------------------------------------
@@ -885,25 +999,40 @@ export class RaceRoomService {
 
     channel.on('broadcast', { event: 'ghost' }, (payload) => {
       const sample = payload?.payload as GhostSample | undefined;
-      // Never render our own transform; drop stale packets. Presentation only.
-      if (!sample) return;
-      if (!shouldAcceptRemoteGhost(sample, this.auth.getUserId())) return;
+      // Never render our own transform; drop stale / previous-race packets.
+      if (!shouldAcceptRemoteGhost(sample, this.auth.getUserId(), this.room?.raceId ?? room.raceId, this.getAuthoritativeNowMs())) {
+        return;
+      }
+      const member = this.players.find(p => p.userId === sample!.userId && p.connected && !p.dnf);
+      if (!member) return;
+      sample!.colorIndex = member.colorIndex;
+      sample!.t = Date.now();
+      const now = Date.now();
       this.ghostRxCount++;
-      this.ghostRxAt = Date.now();
-      this.ghostRxUserId = sample.userId;
-      this.callbacks.onGhost?.(sample);
+      this.ghostRxAt = now;
+      this.ghostRxUserId = sample!.userId;
+      this.remoteSeenAt.set(sample!.userId, now);
+      this.callbacks.onGhost?.(sample!);
     });
 
-    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'race_room_players', filter: `room_id=eq.${room.id}` }, () => {
-      this.realtimePlayerEvents++;
-      void this.refreshPlayers();
-    });
-    channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'race_rooms', filter: `id=eq.${room.id}` }, (payload) => {
-      const updated = payload?.new as Record<string, unknown> | undefined;
-      if (!updated) return;
-      this.room = RaceRoomService.rowToRoom(updated);
-      this.callbacks.onRoomUpdate?.(this.room, this.players);
-    });
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'race_room_players', filter: `room_id=eq.${room.id}` },
+      () => {
+        this.realtimePlayerEvents++;
+        void this.refreshPlayers();
+      }
+    );
+    channel.on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'race_rooms', filter: `id=eq.${room.id}` },
+      (payload) => {
+        const updated = payload?.new as Record<string, unknown> | undefined;
+        if (!updated) return;
+        this.adoptRoom(updated);
+        if (this.room) this.callbacks.onRoomUpdate?.(this.room, this.players);
+      }
+    );
 
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
@@ -911,8 +1040,7 @@ export class RaceRoomService {
         // Resync on (re)connect: Realtime may have missed events while down.
         void this.refreshPlayers();
         this.startLobbySync();
-      }
-      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         this.onlineClient.setStatus('ERROR', `realtime ${status}`);
       }
     });
@@ -925,6 +1053,7 @@ export class RaceRoomService {
     this.ghostRxCount = 0;
     this.ghostRxAt = 0;
     this.ghostRxUserId = null;
+    this.remoteSeenAt.clear();
     this.lastVisibilityChangeAt = 0;
     this.windowFocused = typeof document === 'undefined' || document.hasFocus();
     this.attachVisibilityListeners();
@@ -935,9 +1064,9 @@ export class RaceRoomService {
    * The broadcast cadence is INDEPENDENT of requestAnimationFrame.
    *
    * A background tab throttles rAF to zero and timers to roughly 1 Hz, so this
-   * interval may fire far less often than 12 Hz while hidden. That is expected
-   * and acceptable: each tick still carries a FRESH timestamp and the last known
-   * transform, so the opponent holds position instead of disappearing.
+   * interval may fire far less often than 12 Hz while hidden. That is expected:
+   * each tick still carries a FRESH timestamp and the last known transform, so
+   * other racers hold position instead of vanishing.
    */
   private startGhostBroadcast(): void {
     if (typeof window === 'undefined') return;
@@ -956,22 +1085,23 @@ export class RaceRoomService {
   }
 
   /**
-   * Publishes the latest local transform immediately.
-   *
-   * Safe to call at any time: it no-ops without a channel or a stored transform.
-   * Used by the 12 Hz tick and by every visibility / focus transition, so a tab
-   * returning to the foreground never waits up to a full interval to reappear.
+   * Publishes the latest local transform immediately. Safe to call any time: it
+   * no-ops without a channel or a stored transform. Used by the 12 Hz tick and
+   * by every visibility / focus transition.
    */
   public publishNow(): void {
-    if (!this.channel || !this.myTransform) return;
+    if (!this.channel || !this.myTransform || !this.room) return;
     const userId = this.auth.getUserId();
     if (!userId) return;
     const hidden = typeof document !== 'undefined' && document.hidden === true;
     const payload: GhostSample = {
       ...this.myTransform,
+      sequence: this.ghostTxCount + 1,
       userId,
-      t: Date.now(),
-      attempt: this.attemptIndex
+      raceId: this.room.raceId,
+      colorIndex: this.myColorIndex,
+      t: this.getAuthoritativeNowMs(),
+      running: this.myTransform.running && this.localRunning
     };
     this.ghostTxCount++;
     this.ghostTxAt = Date.now();
@@ -990,7 +1120,7 @@ export class RaceRoomService {
    * no allocation. The broadcast tick only ever reads it.
    */
   public setLocalTransform(
-    sample: Omit<GhostSample, 'userId' | 't' | 'attempt'>
+    sample: Omit<GhostSample, 'userId' | 't' | 'raceId' | 'colorIndex'>
   ): void {
     if (!this.auth.getUserId()) return;
     if (this.myTransform) {
@@ -1000,12 +1130,21 @@ export class RaceRoomService {
     this.myTransform = { ...sample };
   }
 
+  /** My per-race accent index (0..7). */
+  public getMyColorIndex(): number {
+    return this.myColorIndex;
+  }
+
+  public isLocalRunning(): boolean {
+    return this.localRunning;
+  }
+
   /**
    * Foreground resync after a background pause or a focus change.
    *
    * Publishes immediately, then reconciles room membership so a socket that
-   * dropped while hidden cannot leave a phantom opponent. It never touches the
-   * session clock, the attempt timer, audio, the map or physics.
+   * dropped while hidden cannot leave a phantom racer. It never touches the
+   * race clock, the timer, audio, the map or physics.
    */
   public resyncRacePresence(): void {
     this.publishNow();
@@ -1024,7 +1163,6 @@ export class RaceRoomService {
         this.publishNow();
         return;
       }
-      // Coming back: publish at once and reconcile presence.
       this.resyncRacePresence();
     });
 
@@ -1036,7 +1174,6 @@ export class RaceRoomService {
       this.windowFocused = false;
     });
 
-    // Page Lifecycle: a frozen tab resumes with a full resync.
     document.addEventListener('resume', () => {
       this.lastVisibilityChangeAt = Date.now();
       this.resyncRacePresence();
@@ -1044,13 +1181,9 @@ export class RaceRoomService {
   }
 
   /**
-   * DEV diagnostics for the live ghost pipeline.
-   *
-   * Reports BOTH directions, because "the opponent is invisible" has two very
-   * different causes: nothing is being published, or nothing is being received.
-   * Also reports the visibility/focus state, because background throttling is
-   * the third cause and is invisible without it.
-   * Presentation only — never used by gameplay.
+   * DEV diagnostics for the live ghost pipeline. Reports BOTH directions,
+   * because "the racer is invisible" has two very different causes: nothing is
+   * being published, or nothing is being received.
    */
   public getGhostDiagnostics(): {
     txCount: number;
@@ -1081,12 +1214,18 @@ export class RaceRoomService {
     };
   }
 
+  /** Per-player ghost RX age (ms) — used to gate the in-game READY on evidence. */
+  public getRemoteRxAgeMs(userId: string, now = Date.now()): number {
+    const at = this.remoteSeenAt.get(userId);
+    return at === undefined ? -1 : now - at;
+  }
+
   /**
    * Poll fallback for BOTH room state and membership. Realtime can miss a room
-   * UPDATE while a tab is throttled or a socket dropped; without this the two
-   * clients could disagree about the phase and stall in LOADING/IN_GAME.
+   * UPDATE while a tab is throttled or a socket dropped; without this the
+   * clients could disagree about the phase and stall.
    */
-  private async refreshRoomAndPlayers(): Promise<void> {
+  public async refreshRoomAndPlayers(): Promise<void> {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return;
     try {
@@ -1096,7 +1235,7 @@ export class RaceRoomService {
         .eq('id', this.room.id)
         .maybeSingle();
       if (data) {
-        this.room = RaceRoomService.rowToRoom(data as Record<string, unknown>);
+        this.adoptRoom(data as Record<string, unknown>);
         this.callbacks.onRoomUpdate?.(this.room, this.players);
       }
     } catch {
@@ -1119,11 +1258,18 @@ export class RaceRoomService {
     const previous = new Map(this.players.map((p) => [p.userId, p]));
     this.players = (data ?? []).map((row) => RaceRoomService.rowToPlayer(row));
 
+    // Stable accent assignment: derive my index from my own persisted row.
+    const mine = this.players.find((p) => p.userId === this.auth.getUserId());
+    if (mine) this.myColorIndex = mine.colorIndex;
+
     for (const player of this.players) {
       if (!previous.has(player.userId)) this.callbacks.onPlayerJoined?.(player);
     }
     for (const [userId] of previous) {
-      if (!this.players.some((p) => p.userId === userId)) this.callbacks.onPlayerLeft?.(userId);
+      if (!this.players.some((p) => p.userId === userId)) {
+        this.remoteSeenAt.delete(userId);
+        this.callbacks.onPlayerLeft?.(userId);
+      }
     }
     this.callbacks.onRoomUpdate?.(this.room, this.players);
   }
@@ -1135,17 +1281,17 @@ export class RaceRoomService {
     if (client && this.room && userId) {
       // Clear BOTH readiness flags as well as connected: a stale READY on a
       // re-join (or a reload) must never count toward the next race's gate.
-      // Uses the server RPC because the direct-write guard blocks premature
-      // readiness flips (including clearing them) outside the authorized path.
       await this.markDisconnected();
     }
     await this.unsubscribe();
     this.room = null;
     this.players = [];
     this.myTransform = null;
-    this.attemptIndex = 0;
+    this.localRunning = true;
+    this.myColorIndex = 0;
     this.realtimePlayerEvents = 0;
     this.lastReadyUpdate = null;
+    this.remoteSeenAt.clear();
   }
 
   public async unsubscribe(): Promise<void> {
@@ -1160,40 +1306,43 @@ export class RaceRoomService {
 
   // -- helpers -------------------------------------------------------------
 
-  private static generateInviteCode(): string {
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += alphabet[Math.floor(Math.random() * alphabet.length)];
-    }
-    return code;
+  private failReady(ready: boolean, detail: string): { ok: false; detail: string } {
+    this.lastReadyUpdate = { at: Date.now(), requested: ready, ok: false, rows: 0, detail };
+    return { ok: false, detail };
   }
 
   private static rowToRoom(row: Record<string, unknown>): RaceRoom {
     return {
       id: row.id as string,
-      inviteCode: row.invite_code as string,
+      inviteCode: (row.invite_code as string) ?? '',
       hostUserId: row.host_user_id as string,
-      trackId: row.track_id as string,
+      trackId: (row.track_id as string) ?? '',
       trackTitle: (row.track_title as string) ?? '',
       mapVersion: Number(row.map_version ?? 0),
       mapFingerprint: (row.map_fingerprint as string) ?? '',
       state: (row.state as RoomState) ?? 'LOBBY',
-      sessionSeconds: Number(row.session_seconds ?? DEFAULT_SESSION_SECONDS),
-      startAtMs: row.start_at_ms === null || row.start_at_ms === undefined ? null : Number(row.start_at_ms),
+      capacity: Number(row.capacity ?? DEFAULT_RACE_CAPACITY),
+      raceId: (row.race_id as string) ?? 'race-1',
+      startAtMs:
+        row.start_at_ms === null || row.start_at_ms === undefined ? null : Number(row.start_at_ms),
       finishedAtMs: row.finished_at ? new Date(row.finished_at as string).getTime() : null,
-      expiresAtMs: row.expires_at ? new Date(row.expires_at as string).getTime() : Number.MAX_SAFE_INTEGER
+      expiresAtMs: row.expires_at
+        ? new Date(row.expires_at as string).getTime()
+        : Number.MAX_SAFE_INTEGER
     };
   }
 
   private static rowToPlayer(row: Record<string, unknown>): RacePlayer {
     const rawLoadout = row.loadout as { knifeId?: unknown; gloveId?: unknown } | null | undefined;
-    const loadout = rawLoadout && typeof rawLoadout === 'object'
-      ? {
-          knifeId: String(rawLoadout.knifeId ?? 'STANDARD_ISSUE'),
-          gloveId: String(rawLoadout.gloveId ?? 'STANDARD_ISSUE')
-        }
-      : null;
+    const loadout =
+      rawLoadout && typeof rawLoadout === 'object'
+        ? {
+            knifeId: String(rawLoadout.knifeId ?? 'STANDARD_ISSUE'),
+            gloveId: String(rawLoadout.gloveId ?? 'STANDARD_ISSUE')
+          }
+        : null;
+    const finishUs =
+      row.finish_us === null || row.finish_us === undefined ? null : Number(row.finish_us);
     return {
       userId: row.user_id as string,
       displayName: (row.display_name as string) ?? 'PLAYER',
@@ -1202,14 +1351,14 @@ export class RaceRoomService {
       inGameReady: row.in_game_ready === true,
       loaded: row.loaded === true,
       connected: row.connected !== false,
-      attemptCount: Number(row.attempt_count ?? 0),
-      finishCount: Number(row.finish_count ?? 0),
-      sessionBestUs: row.session_best_us === null || row.session_best_us === undefined
-        ? null
-        : Number(row.session_best_us),
-      currentRunUs: Number(row.current_run_us ?? 0),
+      finishUs,
+      finished: finishUs !== null || row.finished === true,
+      dnf: row.dnf === true,
+      colorIndex: Number(row.color_index ?? 0),
       joinedAt: row.joined_at ? new Date(row.joined_at as string).getTime() : 0,
-      lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at as string).getTime() : 0
+      lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at as string).getTime() : 0,
+      progress: Number(row.progress ?? 0),
+      checkpointTotal: Number(row.checkpoint_total ?? 0)
     };
   }
 }

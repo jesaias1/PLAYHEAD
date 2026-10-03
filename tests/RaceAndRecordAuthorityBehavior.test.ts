@@ -43,13 +43,14 @@ describe('Race RPC guard is not self-blocking', () => {
   });
 
   it('the client never writes readiness flags directly (uses server RPCs)', () => {
-    expect(race).toMatch(/race_set_in_game_ready/);
+    expect(race).toMatch(/race_set_in_game_ready_v2/);
     expect(race).not.toMatch(/update\(\{ in_game_ready/);
   });
 
   it('the obsolete manual START SESSION button is removed from the lobby', () => {
     expect(panel).not.toMatch(/onStartSession\(\)/);
-    expect(game).toMatch(/Obsolete manual START SESSION path/);
+    expect(panel).toMatch(/onRematch/);
+    expect(panel).toMatch(/onReturnToLobby/);
   });
 
   it('abort actually leaves the gameplay scene, not just the UI', () => {

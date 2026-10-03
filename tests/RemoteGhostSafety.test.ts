@@ -467,7 +467,7 @@ describe('Remote ghost diagnostics surface', () => {
 
   it('the game passes the gameplay camera into the diagnostics', () => {
     const src = readGame();
-    expect(src).toMatch(/this\.raceGhost\?\.getDiagnostics\(Date\.now\(\), camera\)/);
+    expect(src).toMatch(/this\.raceGhosts\?\.diagnosticsFor\(/);
     expect(src).toMatch(/const camera = this\.environment\.camera;/);
   });
 

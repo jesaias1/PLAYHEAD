@@ -22,9 +22,11 @@ import {
 } from '../src/online/MapIdentity';
 import { REGISTRY_READY, OFFICIAL_MAP_REGISTRY } from '../src/online/OfficialMapRegistry';
 import {
-  computeSessionResults,
-  sessionRemainingMs,
-  DEFAULT_SESSION_SECONDS,
+  computeRaceResults,
+  computeAllReady,
+  computeInGameReady,
+  isRaceComplete,
+  MIN_RACE_PLAYERS,
   RacePlayer,
   RaceRoom,
   RaceRoomService
@@ -75,12 +77,17 @@ function player(overrides: Partial<RacePlayer>): RacePlayer {
   return {
     userId: 'u1',
     displayName: 'PLAYER-A',
+    loadout: null,
     ready: true,
+    inGameReady: false,
+    loaded: false,
     connected: true,
-    attemptCount: 0,
-    finishCount: 0,
-    sessionBestUs: null,
-    currentRunUs: 0,
+    finishUs: null,
+    finished: false,
+    dnf: false,
+    colorIndex: 0,
+    progress: 0,
+    checkpointTotal: 0,
     joinedAt: 0,
     lastSeenAt: 0,
     ...overrides
@@ -97,7 +104,8 @@ function room(overrides: Partial<RaceRoom> = {}): RaceRoom {
     mapVersion: 5,
     mapFingerprint: 'mfp_v1_DEADBEEF',
     state: 'LOBBY',
-    sessionSeconds: DEFAULT_SESSION_SECONDS,
+    capacity: 4,
+    raceId: 'race-1',
     startAtMs: null,
     finishedAtMs: null,
     expiresAtMs: Number.MAX_SAFE_INTEGER,
@@ -195,86 +203,87 @@ describe('Map identity — canonical competitive identity', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('Friend session — shared BEST-TIME session (not first-to-finish)', () => {
-  it('ranks by best valid completion time, lowest first', () => {
-    const rows = computeSessionResults([
-      player({ userId: 'a', displayName: 'LINAS', sessionBestUs: 54_821_000, finishCount: 3, attemptCount: 7 }),
-      player({ userId: 'b', displayName: 'RANKO', sessionBestUs: 57_104_000, finishCount: 1, attemptCount: 4 })
+describe('Online Race 2.0 — FIRST-TO-FINISH lifecycle', () => {
+  it('ranks by finish order (shared authoritative elapsed), lowest first', () => {
+    const rows = computeRaceResults([
+      player({ userId: 'b', displayName: 'RANKO', finishUs: 57_104_000, finished: true }),
+      player({ userId: 'a', displayName: 'LINAS', finishUs: 54_821_000, finished: true })
     ]);
     expect(rows[0].displayName).toBe('LINAS');
-    expect(rows[0].outcome).toBe('WIN');
-    expect(rows[1].outcome).toBe('LOSS');
+    expect(rows[0].place).toBe(1);
+    expect(rows[1].place).toBe(2);
     expect(rows[1].gapUs).toBe(57_104_000 - 54_821_000);
   });
 
-  it('lets a later attempt beat an earlier finish (session best, not first finish)', () => {
-    // RANKO finished first but LINAS improved twice afterwards and wins.
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: 50_000_000, finishCount: 3 }),
-      player({ userId: 'b', sessionBestUs: 49_000_000, finishCount: 1 })
+  it('places a DNF racer last and marks them dnf', () => {
+    const rows = computeRaceResults([
+      player({ userId: 'a', finishUs: 60_000_000, finished: true }),
+      player({ userId: 'b', dnf: true, connected: false })
     ]);
-    expect(rows[0].userId).toBe('b');
-    expect(rows[0].outcome).toBe('WIN');
-  });
-
-  it('declares a single finisher the winner', () => {
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: 61_000_000, finishCount: 1 }),
-      player({ userId: 'b', sessionBestUs: null, attemptCount: 9 })
-    ]);
-    expect(rows[0].outcome).toBe('WIN');
-    expect(rows[1].outcome).toBe('LOSS');
+    expect(rows[0].place).toBe(1);
+    expect(rows[1].dnf).toBe(true);
+    expect(rows[1].place).toBeNull();
     expect(rows[1].gapUs).toBeNull();
   });
 
-  it('reports NO FINISH when neither player completes', () => {
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: null, attemptCount: 4 }),
-      player({ userId: 'b', sessionBestUs: null, attemptCount: 2 })
+  it('reports NO FINISH when nobody completes', () => {
+    const rows = computeRaceResults([
+      player({ userId: 'a' }),
+      player({ userId: 'b' })
     ]);
-    expect(rows.every((r) => r.outcome === 'NO_FINISH')).toBe(true);
-    expect(rows.every((r) => r.gapUs === null)).toBe(true);
+    expect(rows.every((r) => r.finishTimeUs === null)).toBe(true);
   });
 
-  it('reports TIE on exactly equal microsecond times', () => {
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: 55_000_000 }),
-      player({ userId: 'b', sessionBestUs: 55_000_000 })
+  it('breaks an exactly equal finish time by join time, never a formatted tie', () => {
+    const rows = computeRaceResults([
+      player({ userId: 'a', finishUs: 55_000_000, finished: true, joinedAt: 10 }),
+      player({ userId: 'b', finishUs: 55_000_000, finished: true, joinedAt: 5 })
     ]);
-    expect(rows.every((r) => r.outcome === 'TIE')).toBe(true);
-    expect(rows.every((r) => r.gapUs === 0)).toBe(true);
+    expect(rows[0].userId).toBe('b');
+    expect(rows[0].place).toBe(1);
   });
 
-  it('compares raw microsecond values, never formatted strings', () => {
-    // 59_999_999us and 60_000_000us both format as 01:00.000 at 3dp, but they
-    // are different times and must not tie.
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: 59_999_999 }),
-      player({ userId: 'b', sessionBestUs: 60_000_000 })
-    ]);
-    expect(rows[0].userId).toBe('a');
-    expect(rows[0].outcome).toBe('WIN');
-    expect(rows[1].outcome).toBe('LOSS');
+  it('requires ALL connected racers ready, and at least MIN_RACE_PLAYERS', () => {
+    expect(MIN_RACE_PLAYERS).toBe(2);
+    expect(computeAllReady([player({ userId: 'a', ready: true })])).toBe(false);
+    expect(computeAllReady([
+      player({ userId: 'a', ready: true }),
+      player({ userId: 'b', ready: true })
+    ])).toBe(true);
+    expect(computeAllReady([
+      player({ userId: 'a', ready: true }),
+      player({ userId: 'b', ready: false })
+    ])).toBe(false);
+    // A disconnected racer never blocks or counts toward the gate.
+    expect(computeAllReady([
+      player({ userId: 'a', ready: true }),
+      player({ userId: 'b', ready: true }),
+      player({ userId: 'c', ready: false, connected: false })
+    ])).toBe(true);
   });
 
-  it('keeps the session clock running and never resets it', () => {
-    const started = room({ startAtMs: 1_000_000, sessionSeconds: 300 });
-    expect(sessionRemainingMs(started, 1_000_000)).toBe(300_000);
-    expect(sessionRemainingMs(started, 1_120_000)).toBe(180_000);
-    // A player restarting does not touch the room, so remaining time is stable.
-    expect(sessionRemainingMs(started, 1_120_000)).toBe(180_000);
-    // Clamps at zero rather than going negative.
-    expect(sessionRemainingMs(started, 9_999_999)).toBe(0);
+  it('requires loaded AND in-game ready for every connected racer', () => {
+    expect(computeInGameReady([
+      player({ userId: 'a', loaded: true, inGameReady: true }),
+      player({ userId: 'b', loaded: true, inGameReady: false })
+    ])).toBe(false);
+    expect(computeInGameReady([
+      player({ userId: 'a', loaded: true, inGameReady: true }),
+      player({ userId: 'b', loaded: true, inGameReady: true })
+    ])).toBe(true);
   });
 
-  it('defaults to a 5 minute session', () => {
-    expect(DEFAULT_SESSION_SECONDS).toBe(300);
-    expect(room().sessionSeconds).toBe(300);
+  it('is complete only once every connected racer has finished or DNF\'d', () => {
+    expect(isRaceComplete([
+      player({ userId: 'a', finishUs: 1_000, finished: true }),
+      player({ userId: 'b' })
+    ])).toBe(false);
+    expect(isRaceComplete([
+      player({ userId: 'a', finishUs: 1_000, finished: true }),
+      player({ userId: 'b', dnf: true, connected: false })
+    ])).toBe(true);
   });
 });
-
-// ---------------------------------------------------------------------------
-
 describe('Friend session — invite codes and map gating', () => {
   it('parses ?room=CODE from a URL', () => {
     expect(RaceRoomService.readInviteCodeFromUrl('https://playhead.game/?room=ab12cd')).toBe('AB12CD');
@@ -304,7 +313,7 @@ describe('Friend session — invite codes and map gating', () => {
     });
     const mismatch = service.verifyLocalMap(track());
     expect(mismatch.ok).toBe(false);
-    expect(mismatch.detail).toContain('MAP VERSION MISMATCH');
+    expect(mismatch.detail).toContain('TRACK VERSION MISMATCH');
   });
 
   it('builds the invite URL from the current origin, never a hardcoded domain', () => {
@@ -533,7 +542,7 @@ describe('Leaderboard — submission gating and anti-cheat V1', () => {
 
 describe('Online UI — race time formatting', () => {
   it('formats microsecond values as MM:SS.mmm', async () => {
-    const { formatRaceTime, formatSessionClock } = await import('../src/ui/RaceHud');
+    const { formatRaceTime } = await import('../src/ui/RaceHud');
     expect(formatRaceTime(54_821_000)).toBe('00:54.821');
     expect(formatRaceTime(57_104_000)).toBe('00:57.104');
     expect(formatRaceTime(0)).toBe('00:00.000');
@@ -543,31 +552,27 @@ describe('Online UI — race time formatting', () => {
     expect(formatRaceTime(Number.NaN)).toBe('--:--.---');
   });
 
-  it('formats the shared session clock as MM:SS and clamps at zero', async () => {
-    const { formatSessionClock } = await import('../src/ui/RaceHud');
-    expect(formatSessionClock(300_000)).toBe('05:00');
-    expect(formatSessionClock(221_000)).toBe('03:41');
-    expect(formatSessionClock(0)).toBe('00:00');
-    expect(formatSessionClock(-5000)).toBe('00:00');
+  it('formats the shared race clock as MM:SS.mmm and clamps at zero', async () => {
+    const { formatRaceClock } = await import('../src/ui/RaceHud');
+    expect(formatRaceClock(300_000)).toBe('00:00.300');
+    expect(formatRaceClock(221_000)).toBe('00:00.221');
+    expect(formatRaceClock(0)).toBe('00:00.000');
+    expect(formatRaceClock(-5000)).toBe('00:00.000');
   });
 
-  it('never lets display rounding create a tie', async () => {
+  it('never lets display rounding create a tie (raw microseconds decide)', async () => {
     const { formatRaceTime } = await import('../src/ui/RaceHud');
-    // 59.999999 s displays as 00:59.999 and 60.000000 s as 01:00.000.
     expect(formatRaceTime(59_999_999)).toBe('00:59.999');
     expect(formatRaceTime(60_000_000)).toBe('01:00.000');
-    // Two values that DO format identically must still not tie, because
-    // comparison uses raw microseconds (see computeSessionResults).
-    const rows = computeSessionResults([
-      player({ userId: 'a', sessionBestUs: 60_000_000 }),
-      player({ userId: 'b', sessionBestUs: 60_000_001 })
+    const rows = computeRaceResults([
+      player({ userId: 'a', finishUs: 60_000_000, finished: true }),
+      player({ userId: 'b', finishUs: 60_000_001, finished: true })
     ]);
     expect(formatRaceTime(60_000_000)).toBe(formatRaceTime(60_000_001));
-    expect(rows[0].outcome).toBe('WIN');
-    expect(rows[1].outcome).toBe('LOSS');
+    expect(rows[0].place).toBe(1);
+    expect(rows[1].place).toBe(2);
   });
 });
-
 describe('Online UI — invite code parsing', () => {
   it('accepts the deployed-origin and localhost shapes alike', () => {
     expect(RaceRoomService.readInviteCodeFromUrl('https://playhead.vercel.app/?room=AB12CD')).toBe('AB12CD');
