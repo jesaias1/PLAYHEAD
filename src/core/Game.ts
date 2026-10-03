@@ -3438,7 +3438,7 @@ export class Game {
     const connected = players.filter((p) => p.connected);
     const lines = connected.map((p) => ({
       label: `${p.displayName}${p.userId === myId ? ' (YOU)' : ''} // ${
-        p.inGameReady ? 'READY' : p.loaded ? 'WAITING' : 'LOADING'
+        p.inGameReady ? 'READY' : p.loaded ? 'NOT READY' : 'LOADING'
       }`,
       ready: p.inGameReady
     }));
@@ -3448,6 +3448,7 @@ export class Game {
       : 'PRESS [SPACE] TO READY';
     const title = this.racePhase === 'COUNTDOWN' ? 'SIGNALS LOCKED' : 'SIGNAL CHECK';
     this.ui.raceHud.setPhase({
+      allLoaded: connected.length >= 2 && connected.every((p) => p.loaded),
       phase: this.racePhase,
       title,
       lines,

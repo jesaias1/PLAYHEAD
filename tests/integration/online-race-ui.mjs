@@ -377,6 +377,22 @@ try {
   const cd = await page.evaluate(() => document.querySelector('#race-countdown')?.textContent);
   record('HUD countdown reflects the authoritative seconds (3)', cd === '3', String(cd));
 
+  await page.evaluate(() => {
+    const hud = window.game.ui.raceHud;
+    hud.setCountdown(null);
+    hud.setPhase({phase:'WAITING', title:'SIGNAL CHECK', allLoaded:true,
+      lines:[{label:'LINAS // READY',ready:true},{label:'RANKO // READY',ready:true},
+        {label:'PLAYER3 // NOT READY',ready:false},{label:'PLAYER4 // READY',ready:true}],
+      prompt:'PRESS [SPACE] TO READY'});
+  });
+  await shot('synthetic-hud-loaded-not-ready-1440',1440,900);
+  record('all loaded is distinct from all ready', await page.evaluate(() =>
+    document.querySelector('#race-phase-title').textContent==='ALL SIGNALS ONLINE' &&
+    document.querySelector('#race-phase-count').textContent==='3 / 4 READY'));
+  await page.evaluate(() => window.game.ui.raceHud.setPhase({phase:'WAITING',title:'SIGNAL CHECK',allLoaded:false,
+    lines:[{label:'RACER // LOADING',ready:false}],prompt:'WAITING FOR SIGNAL'}));
+  record('loading cannot claim all signals online',await page.$eval('#race-phase-title',e=>e.textContent==='SIGNAL CHECK'));
+
   // --- RESULTS --------------------------------------------------------------
   await page.evaluate(() => {
     window.game.ui.importScreen.show();

@@ -199,6 +199,8 @@ export class RaceHud {
   public setPhase(state: {
     phase: 'WAITING' | 'READY' | 'COUNTDOWN' | 'RACING' | 'FINISHED';
     title: string;
+    /** Authoritative roster load confirmation, supplied by Game's UI projection. */
+    allLoaded?: boolean;
     lines: { label: string; ready: boolean }[];
     prompt: string;
   }): void {
@@ -207,12 +209,12 @@ export class RaceHud {
       return;
     }
     this.phaseElem.classList.remove('hidden');
-    // READY/COUNTDOWN are authoritative phases reached after loading; the
-    // readiness count is separate from that connection/load confirmation.
+    // Loading and readiness are separate facts: every racer can be online
+    // while some have not yet pressed READY.
     const readyCount = state.lines.filter((l) => l.ready).length;
     const allReady = state.lines.length > 0 && readyCount === state.lines.length;
-    this.phaseTitleElem.textContent = state.phase === 'READY' || state.phase === 'COUNTDOWN'
-      ? 'ALL SIGNALS ONLINE' : state.title;
+    const allLoaded = state.allLoaded ?? (state.phase === 'READY' || state.phase === 'COUNTDOWN');
+    this.phaseTitleElem.textContent = allLoaded ? 'ALL SIGNALS ONLINE' : state.title;
     this.phaseElem.classList.toggle('race-phase-all-ready', allReady);
     this.phaseCountElem.textContent =
       state.lines.length > 1 ? `${readyCount} / ${state.lines.length} READY` : '';
