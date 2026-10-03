@@ -911,6 +911,48 @@
 .armory-detail-status.equipped { color: var(--accent-color); }
 .armory-detail-status.owned { color: #4dffb8; }
 .armory-detail-status.locked { color: #6d7885; }
+.armory-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.armory-preview-stage {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  background: #05090f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.armory-preview-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.armory-preview-modes {
+  display: flex;
+  gap: 6px;
+}
+.armory-preview-mode-btn {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 5px 8px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #8a9bb2;
+  cursor: pointer;
+  transition: all var(--motion-fast);
+}
+.armory-preview-mode-btn:hover { color: #d7e3ef; border-color: rgba(255, 255, 255, 0.3); }
+.armory-preview-mode-btn.active {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+  background: var(--accent-dim);
+}
 .armory-detail-desc {
   font-size: 0.66rem;
   line-height: 1.4;

@@ -317,8 +317,11 @@ describe('Selected item detail panel', () => {
     expect(fn).toMatch(/item\.family === 'karambit'/);
     expect(fn).toMatch(/LOCKED \/\/ COMPLETE TO UNLOCK/);
     // Locked gloves keep the pre-existing preview affordance.
-    expect(fn).toMatch(/\[ PREVIEW \]/);
-    expect(fn).toMatch(/setDevPreview/);
+    expect(fn).toMatch(/\[ ITEM PREVIEW \]/);
+    // The preview is now the ISOLATED 3D ArmoryPreview; it must never touch
+    // masteryGloveSystem's gameplay dev-preview or ownership state.
+    expect(fn).toMatch(/armoryPreview/);
+    expect(fn).not.toMatch(/setDevPreview/);
   });
 
   it('is sticky below the global nav on wide screens', () => {

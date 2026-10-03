@@ -39,7 +39,7 @@ import { LeaderboardPanel } from './LeaderboardPanel';
 import { OnlineStatusBar } from './OnlineStatusBar';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { MenuBackdrop } from './MenuBackdrop';
-import { attachArtifactVideoPreview } from './ArtifactVideoPreview';
+import { ArmoryPreview } from './ArmoryPreview';
 
 export class ImportScreen {
   public element: HTMLElement;
@@ -172,36 +172,15 @@ export class ImportScreen {
   public selectArmoryItem(id: string): void {
     this.armorySelectedId = id;
     this.renderArmorySelection();
-    this.previewArmoryItem(id);
   }
 
   /**
-   * PREVIEW-ONLY material swap for the focused KARAMBIT.
-   *
-   * Uses the SAME material system the equipped skin and the reward reveal use,
-   * and it never persists or notifies: no premature real equip override, and a
-   * replay keeps its own ephemeral identity. Locked/unknown items preview
-   * nothing. Gloves preview through their own (dev-preview) path, so only a
-   * knife is handled here.
+   * Hides the isolated 3D preview when leaving the Armory. Preview state lives
+   * entirely on the preview instance, so this has NO gameplay side effects: the
+   * equipped cosmetic, replay preview and active gameplay video are untouched.
    */
-  private previewArmoryItem(id: string): void {
-    const item = this.armoryItems.find((i) => i.id === id);
-    if (!item || item.slot !== 'karambit') {
-      this.skinSystem.setReplaySkinPreview(null);
-      return;
-    }
-    const owned = this.skinSystem.isSkinUnlocked(item.id);
-    this.skinSystem.setReplaySkinPreview(owned ? item.id : null);
-  }
-
-  /** Clears the ephemeral preview when leaving the Armory. */
-  private releaseArtifactPreview?: () => void;
-
   public clearArmoryPreview(): void {
-    this.releaseArtifactPreview?.();
-    this.releaseArtifactPreview = undefined;
-    this.skinSystem.setReplaySkinPreview(null);
-    this.skinSystem.suspendActiveVideo();
+    this.armoryPreview.hide();
   }
 
   /**
@@ -290,6 +269,8 @@ export class ImportScreen {
   private previewCtx: AudioContext | null = null;
   private currentPreviewSource: AudioBufferSourceNode | null = null;
   private skinSystem = KarambitSkinSystem.getInstance();
+  /** ONE lazy 3D preview for the Armory detail panel (knives and gloves). */
+  private armoryPreview = new ArmoryPreview();
   private lastDecoderReward: OpenedSignalDrop | null = null;
   private decoderBusy = false;
 
@@ -1082,13 +1063,12 @@ export class ImportScreen {
    * progress and the actions. This is what keeps the grid scannable.
    */
   private renderArmoryDetail(visible: readonly ArmoryItem[]): void {
-    this.releaseArtifactPreview?.();
-    this.releaseArtifactPreview = undefined;
     if (!this.armoryDetailElem) return;
     const item = resolveSelection(visible, this.armorySelectedId);
     this.armorySelectedId = item?.id ?? null;
 
     if (!item) {
+      this.armoryPreview.hide();
       this.armoryDetailElem.innerHTML =
         `<div class="armory-detail-empty">SELECT AN ITEM TO INSPECT</div>`;
       return;
@@ -1111,6 +1091,7 @@ export class ImportScreen {
       `<div class="armory-detail-name">${item.name}</div>` +
       `<div class="armory-detail-codename">${item.codename}</div>` +
       `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +
+      `<div class="armory-preview-host"></div>` +
       `<div class="armory-detail-desc">${item.description}</div>` +
       `<div class="armory-detail-rows">` +
       rows
@@ -1123,22 +1104,41 @@ export class ImportScreen {
       `</div>`;
 
     this.renderArmoryDetailActions(item);
-    if (item.owned && item.isLive && item.slot === 'karambit' && !this.armoryPanel.classList.contains('hidden') && !this.decodeModal?.isVisible()) {
-      const path = this.skinSystem.getSkin(item.id).profile.videoPath;
-      if (path) {
-        this.skinSystem.suspendActiveVideo();
-        this.releaseArtifactPreview = attachArtifactVideoPreview(this.armoryDetailElem, path);
-      }
+    this.mountArmoryPreview(item);
+  }
+
+  /**
+   * Mounts the persistent preview canvas into the freshly rendered detail panel
+   * (the renderer/scene/rig are reused, never recreated) and updates it to the
+   * selected item. Both ITEM and LOADOUT resolve the selected slot override with
+   * the equipped other slot.
+   */
+  private mountArmoryPreview(item: ArmoryItem): void {
+    const host = this.armoryDetailElem.querySelector('.armory-preview-host') as HTMLElement | null;
+    if (!host) {
+      this.armoryPreview.hide();
+      return;
     }
+    this.armoryPreview.mount(host);
+    this.armoryPreview.update({
+      slot: item.slot,
+      itemId: item.id,
+      equippedKnifeId: this.skinSystem.getEquippedSkinId(),
+      equippedGloveId: masteryGloveSystem.getEquippedGloveId()
+    });
+    const panelVisible =
+      !this.element.classList.contains('hidden') &&
+      !this.armoryPanel.classList.contains('hidden') &&
+      !this.decodeModal?.isVisible();
+    if (panelVisible) this.armoryPreview.show();
+    else this.armoryPreview.hide();
   }
 
   /**
    * Detail actions.
    *
-   * The preview architecture is UNCHANGED: the app has exactly one viewmodel, so
-   * a cosmetic is previewed by being worn — no second scene, no eager asset load.
-   * Locked gloves keep the existing DEV-preview affordance; locked knives cannot
-   * be worn and say so rather than offering a fake action.
+   * Equipping still uses the gameplay ownership gates. Inspecting a locked
+   * glove uses the isolated preview and cannot grant or equip the item.
    */
   private renderArmoryDetailActions(item: ArmoryItem): void {
     const slot = this.armoryDetailElem?.querySelector('.armory-detail-actions') as HTMLElement;
@@ -1166,12 +1166,11 @@ export class ImportScreen {
       return;
     }
 
-    // Locked gloves remain previewable, exactly as before.
-    const previewId = masteryGloveSystem.getDevPreviewGloveId();
-    const isPreviewing = previewId === item.id;
+    // Locked gloves can be inspected without changing ownership or equip.
     slot.appendChild(
-      this.buildArmoryAction(isPreviewing ? '[ STOP PREVIEW ]' : '[ PREVIEW ]', false, () => {
-        masteryGloveSystem.setDevPreview(isPreviewing ? null : item.id);
+      this.buildArmoryAction('[ ITEM PREVIEW ]', false, () => {
+        this.armorySelectedId = item.id;
+        this.armoryPreview.setMode('item');
         this.renderArmorySelection();
       })
     );
@@ -1362,6 +1361,7 @@ export class ImportScreen {
   public show(): void {
     this.renderArmory();
     this.element.classList.remove('hidden');
+    if (!this.armoryPanel.classList.contains('hidden')) this.armoryPreview.show();
     this.element.classList.remove('menu-enter');
     void this.element.offsetWidth;
     this.element.classList.add('menu-enter');
@@ -1647,5 +1647,10 @@ export class ImportScreen {
     this.element.classList.toggle('import-screen--top', activeIndex === 3);
 
     if (activeIndex === 3) this.renderArmory();
+  }
+
+  /** Tears down the isolated Armory preview renderer on screen teardown. */
+  public dispose(): void {
+    this.armoryPreview.dispose();
   }
 }

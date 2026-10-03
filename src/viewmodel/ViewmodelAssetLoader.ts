@@ -61,7 +61,16 @@ export class ViewmodelAssetLoader {
   /**
    * Loads and constructs the complete viewmodel rig with arms and karambit
    */
-  public static async loadRig(accentColor: THREE.Color = new THREE.Color(0x00f0ff)): Promise<ViewmodelRigInstance> {
+  public static async loadRig(
+    accentColor: THREE.Color = new THREE.Color(0x00f0ff),
+    options?: { skinSystem?: KarambitSkinSystem; initialSkinId?: string }
+  ): Promise<ViewmodelRigInstance> {
+    // Gameplay defaults are unchanged: with no options this is the singleton
+    // and the currently equipped skin. A preview caller may inject an isolated
+    // KarambitSkinSystem plus a safe initial skin id so constructing the rig
+    // never decodes an unpreviewed video artifact.
+    const skinSystem = options?.skinSystem ?? KarambitSkinSystem.getInstance();
+    const initialSkinId = options?.initialSkinId;
     const loader = new GLTFLoader();
     const texLoader = new THREE.TextureLoader();
 
@@ -83,7 +92,7 @@ export class ViewmodelAssetLoader {
       gloveTexture = results[2];
     } catch (e) {
       console.warn('[ViewmodelAssetLoader] Failed to load GLB assets, building procedural fallback:', e);
-      return this.buildFallbackRig(accentColor);
+      return this.buildFallbackRig(accentColor, options);
     }
 
     const armsScene = armsGltf.scene as THREE.Group;
@@ -209,8 +218,8 @@ export class ViewmodelAssetLoader {
           cosmicMaterial.uniforms.tNormal.value = origMat.normalMap || null;
           cosmicMaterial.uniforms.tMetallicRoughness.value = origMat.metalnessMap || origMat.roughnessMap || null;
 
-          // Initialize with currently equipped skin from KarambitSkinSystem
-          KarambitSkinSystem.getInstance().applyToMaterial(cosmicMaterial);
+          // Initialize with the requested skin (preview) or the equipped skin.
+          skinSystem.applyToMaterial(cosmicMaterial, initialSkinId);
 
           mesh.material = cosmicMaterial;
           knifeMaterials.push(cosmicMaterial);
@@ -259,7 +268,7 @@ export class ViewmodelAssetLoader {
 
     const applySkin = (skinId: string) => {
       if (cosmicMaterial) {
-        KarambitSkinSystem.getInstance().applyToMaterial(cosmicMaterial, skinId);
+        skinSystem.applyToMaterial(cosmicMaterial, skinId);
       }
     };
 
@@ -271,7 +280,7 @@ export class ViewmodelAssetLoader {
       activeAccent.copy(col).lerp(canonicalCyan, 0.2);
 
       if (cosmicMaterial) {
-        const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
+        const equipped = skinSystem.getSkin(skinSystem.getActiveRenderSkinId());
         if (equipped.profile.isCanonical) {
           cosmicMaterial.uniforms.uRimColor.value.copy(activeAccent);
         } else if (equipped.profile.isVideoArtifact) {
@@ -391,7 +400,12 @@ export class ViewmodelAssetLoader {
   /**
    * Lightweight fallback rig for unit test environments or headless tests
    */
-  public static buildFallbackRig(accentColor: THREE.Color = new THREE.Color(0x00f0ff)): ViewmodelRigInstance {
+  public static buildFallbackRig(
+    accentColor: THREE.Color = new THREE.Color(0x00f0ff),
+    options?: { skinSystem?: KarambitSkinSystem; initialSkinId?: string }
+  ): ViewmodelRigInstance {
+    const skinSystem = options?.skinSystem ?? KarambitSkinSystem.getInstance();
+    const initialSkinId = options?.initialSkinId;
     const rootGroup = new THREE.Group();
     const armsScene = new THREE.Group();
     const handRBone = new THREE.Group();
@@ -409,7 +423,7 @@ export class ViewmodelAssetLoader {
     rootGroup.add(armsScene);
 
     const cosmicMat = new KarambitCosmicMaterial();
-    KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat);
+    skinSystem.applyToMaterial(cosmicMat, initialSkinId);
     const fallbackRim = new THREE.Color();
 
     // A real hand material so mastery glove treatments are exercised (and
@@ -440,11 +454,11 @@ export class ViewmodelAssetLoader {
       knifeMaterials: [cosmicMat],
       cosmicMaterial: cosmicMat,
       applySkin: (skinId: string) => {
-        KarambitSkinSystem.getInstance().applyToMaterial(cosmicMat, skinId);
+        skinSystem.applyToMaterial(cosmicMat, skinId);
       },
       accentColor: accentColor.clone(),
       setAccentColor: (col: THREE.Color) => {
-        const equipped = KarambitSkinSystem.getInstance().getEquippedSkin();
+        const equipped = skinSystem.getSkin(skinSystem.getActiveRenderSkinId());
         if (equipped.profile.isCanonical) {
           cosmicMat.uniforms.uRimColor.value.copy(col);
         } else if (equipped.profile.isVideoArtifact) {

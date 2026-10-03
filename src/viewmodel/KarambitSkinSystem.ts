@@ -959,6 +959,12 @@ export class KarambitSkinSystem {
    * Set only while a replay/review is on screen and cleared on exit.
    */
   private replayPreviewSkinId: string | null = null;
+  /**
+   * PREVIEW-ONLY selection (Armory / showcase instances). Mirrors the replay
+   * override shape but is scoped to a preview instance; it never reaches the
+   * gameplay singleton and never persists.
+   */
+  private previewSkinId: string | null = null;
   private listeners: Array<(skinId: string) => void> = [];
   private committedListeners: Array<() => void> = [];
   private skinTextures: Map<string, THREE.Texture> = new Map();
@@ -991,10 +997,31 @@ export class KarambitSkinSystem {
   private readonly STORAGE_KEY_RECORDS = 'playhead.karambit.trackRecords';
   private readonly STORAGE_KEY_EQUIPPED = 'playhead.karambit.equippedSkin';
   private readonly STORAGE_KEY_DEV = 'playhead.karambit.devPreview';
+  /**
+   * TRUE for an ephemeral preview instance (Armory / showcase). A preview
+   * instance owns ONLY the textures/video it explicitly previews: it never
+   * reads or writes localStorage, never touches the equipped skin, never
+   * retains the gameplay cosmetic, and its dispose()/suspendActiveVideo()
+   * affect only its own resources. Gameplay defaults are therefore untouched
+   * while an Armory preview is on screen.
+   */
+  private readonly previewOnly: boolean;
 
-  private constructor() {
-    this.loadState();
-    this.preloadTextures();
+  private constructor(previewOnly = false) {
+    this.previewOnly = previewOnly;
+    if (!previewOnly) {
+      this.loadState();
+      this.preloadTextures();
+    }
+  }
+
+  /**
+   * Creates an isolated, non-persistent KarambitSkinSystem for a preview
+   * surface. Same class, same shader/material paths and catalog; separate
+   * texture/video ownership so previewing can never disturb gameplay.
+   */
+  public static createPreviewInstance(): KarambitSkinSystem {
+    return new KarambitSkinSystem(true);
   }
 
   /**
@@ -1068,7 +1095,8 @@ export class KarambitSkinSystem {
   }
 
   private getEquippedVideoTexture(skin: KarambitSkin): THREE.VideoTexture | null {
-    if (!skin.profile.videoPath || skin.id !== this.equippedSkinId || typeof document === 'undefined') {
+    const allowed = skin.id === this.equippedSkinId || skin.id === this.previewSkinId;
+    if (!skin.profile.videoPath || !allowed || typeof document === 'undefined') {
       return null;
     }
     if (this.activeVideo?.skinId === skin.id && this.activeVideo.quality === this.videoQuality) {
@@ -1368,6 +1396,7 @@ export class KarambitSkinSystem {
   }
 
   private saveState(): void {
+    if (this.previewOnly) return;
     if (typeof localStorage === 'undefined') return;
     try {
       localStorage.setItem(this.STORAGE_KEY_RECORDS, JSON.stringify(this.trackRecords));
@@ -1437,6 +1466,60 @@ export class KarambitSkinSystem {
   /** The cosmetic the viewmodel should render right now (preview wins). */
   public getRenderSkinId(): string {
     return this.replayPreviewSkinId ?? this.equippedSkinId;
+  }
+
+  // -- PREVIEW-ONLY instances (Armory / showcase) --------------------------
+
+  /**
+   * Selects the skin a PREVIEW instance should render. Resolves unknown ids to
+   * the canonical skin (never throws), releases any static texture/video the
+   * PREVIOUS preview selection owned, and never touches equipped state.
+   */
+  public setPreviewSkin(id: string | null): void {
+    const resolved = id ? this.getSkin(id).id : null;
+    if (resolved === this.previewSkinId) return;
+    this.previewSkinId = resolved;
+    if (this.previewOnly) this.retainPreviewTextureFor(resolved);
+  }
+
+  public getPreviewSkinId(): string | null {
+    return this.previewSkinId;
+  }
+
+  /**
+   * The skin id an instance should apply to a material: the preview selection
+   * when one is set, otherwise the equipped skin. On a preview instance with no
+   * selection this is the safe canonical skin, never the player's equipped
+   * (possibly video-backed) cosmetic.
+   */
+  public getActiveRenderSkinId(): string {
+    if (this.previewSkinId) return this.previewSkinId;
+    return this.previewOnly ? 'SIGNAL_CYAN' : this.equippedSkinId;
+  }
+
+  /**
+   * Bounds preview-instance GPU memory to exactly the selected cosmetic: keeps
+   * the selected static texture resident and disposes every other cached one,
+   * and releases the active preview video when the selection changes away from
+   * it. Video-backed skins keep no static texture (same rule as gameplay).
+   */
+  private retainPreviewTextureFor(skinId: string | null): void {
+    if (!skinId) {
+      for (const texture of this.skinTextures.values()) texture.dispose();
+      this.skinTextures.clear();
+      this.releaseActiveVideoTexture();
+      return;
+    }
+    for (const [id, texture] of this.skinTextures) {
+      if (id === skinId) continue;
+      texture.dispose();
+      this.skinTextures.delete(id);
+    }
+    const skin = this.getSkin(skinId);
+    if (this.activeVideo?.skinId !== skinId) this.releaseActiveVideoTexture();
+    if (!skin.profile.videoPath && skin.profile.texturePath) {
+      this.getSkinTexture(skinId);
+    }
   }
 
   public isDevPreview(): boolean {
@@ -2449,7 +2532,7 @@ export class KarambitSkinSystem {
    * Applies skin material profile parameters to a KarambitCosmicMaterial
    */
   public applyToMaterial(mat: KarambitCosmicMaterial, skinId?: string): void {
-    const targetId = skinId || this.equippedSkinId;
+    const targetId = skinId || this.getActiveRenderSkinId();
     const skin = this.getSkin(targetId);
     const p = skin.profile;
 
