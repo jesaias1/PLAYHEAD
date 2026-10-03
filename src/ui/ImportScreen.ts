@@ -511,8 +511,8 @@ export class ImportScreen {
              their own modules and are mounted into these host slots. -->
         <div class="showcase-container showcase-panel hidden" id="panel-online" role="tabpanel" aria-labelledby="tab-btn-online" aria-hidden="true">
           <div class="online-subnav" role="tablist" aria-label="Online sections">
-            <button class="online-subnav-btn active" id="online-subnav-race" type="button" role="tab" aria-selected="true">[ RACE ]</button>
-            <button class="online-subnav-btn" id="online-subnav-leaderboard" type="button" role="tab" aria-selected="false">[ LEADERBOARD ]</button>
+            <button class="online-subnav-btn active" id="online-subnav-race" type="button" role="tab" aria-selected="true">RACE</button>
+            <button class="online-subnav-btn" id="online-subnav-leaderboard" type="button" role="tab" aria-selected="false">LEADERBOARD</button>
           </div>
           <div id="race-panel-host"></div>
           <div id="leaderboard-panel-host" class="hidden"></div>
@@ -596,7 +596,8 @@ export class ImportScreen {
       id: t.id,
       title: t.title,
       bpm: t.bpm,
-      difficultyLabel: t.difficultyLabel
+      difficultyLabel: t.difficultyLabel,
+      accentColor: t.accentColor
     }));
     this.racePanel.setCatalog(catalogEntries);
     this.leaderboardPanel.setCatalog(catalogEntries);

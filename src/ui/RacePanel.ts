@@ -17,7 +17,8 @@ import {
   RaceRoom,
   RaceResultRow,
   computeAllReady,
-  DEFAULT_RACE_CAPACITY
+  DEFAULT_RACE_CAPACITY,
+  RACE_CAPACITIES
 } from '../online/RaceRoomService';
 import { formatRaceTime } from './RaceHud';
 import { accentColorFor } from '../online/RemoteGhostRenderer';
@@ -27,6 +28,8 @@ export interface RaceCatalogEntry {
   title: string;
   bpm: number;
   difficultyLabel: string;
+  /** Real track accent from the official catalogue (optional, presentation only). */
+  accentColor?: string;
 }
 
 export interface RacePanelCallbacks {
@@ -49,8 +52,15 @@ export class RacePanel {
 
   private selectElem: HTMLSelectElement;
   private capacityElem: HTMLSelectElement;
+  private capacitySegElem: HTMLElement;
+  private createHeroElem: HTMLElement;
+  private createTitleElem: HTMLElement;
+  private createBpmElem: HTMLElement;
+  private createDiffElem: HTMLElement;
   private joinInput: HTMLInputElement;
   private errorElem: HTMLElement;
+  private catalog: RaceCatalogEntry[] = [];
+  private selectedTrackId = '';
 
   private selectView: HTMLElement;
   private lobbyView: HTMLElement;
@@ -89,57 +99,76 @@ export class RacePanel {
     this.element.innerHTML = `
       <div class="race-error hidden" id="race-error"></div>
 
-      <!-- View: CREATE / JOIN hub -->
-      <div id="race-select-view">
-        <div class="online-hub-title">ONLINE RACE</div>
-        <div class="online-hub-actions">
-          <div class="online-hub-card">
-            <div class="online-hub-card-label">CREATE ROOM</div>
-            <div class="online-row">
-              <label class="online-label" for="race-track-select">SIGNAL</label>
-              <select class="online-select" id="race-track-select"></select>
-            </div>
-            <div class="online-row">
-              <label class="online-label" for="race-capacity-select">RACERS</label>
-              <select class="online-select online-capacity-select" id="race-capacity-select">
-                <option value="2">2 RACERS</option>
-                <option value="3">3 RACERS</option>
-                <option value="4" selected>4 RACERS // RECOMMENDED</option>
-                <option value="6">6 RACERS</option>
-                <option value="8">8 RACERS</option>
-              </select>
-            </div>
-            <button class="btn-hero btn-terminal-exec" id="race-create-room" type="button">> CREATE ROOM</button>
-          </div>
-
-          <div class="online-hub-card">
-            <div class="online-hub-card-label">JOIN CODE</div>
-            <div class="online-row">
-              <label class="online-label" for="race-join-input">CODE</label>
-              <input class="online-input" id="race-join-input" type="text" maxlength="8"
-                     placeholder="ROOM CODE" autocomplete="off" spellcheck="false" />
-            </div>
-            <button class="btn-hero btn-terminal-exec" id="race-join-btn" type="button">> JOIN ROOM</button>
-          </div>
+      <!-- View: CREATE / JOIN hub (race landing) -->
+      <div id="race-select-view" class="race-landing">
+        <div class="race-landing-grid" aria-hidden="true"></div>
+        <div class="race-landing-head">
+          <h1 class="race-landing-title">ONLINE RACE</h1>
+          <p class="race-landing-tagline">RACE THE SIGNAL TOGETHER</p>
         </div>
-        <div class="online-hint">
+        <div class="race-landing-cols">
+          <section class="race-col race-col-create" aria-label="Create race">
+            <div class="race-col-head"><span class="race-col-index">01</span> CREATE RACE</div>
+            <div class="race-hero" id="race-create-hero">
+              <div class="race-hero-title" id="race-create-title">--</div>
+              <div class="race-hero-meta">
+                <span class="race-hero-bpm" id="race-create-bpm">-- BPM</span>
+                <span class="race-hero-diff" id="race-create-diff">--</span>
+              </div>
+            </div>
+            <label class="race-field-label" for="race-track-select">SIGNAL</label>
+            <select class="online-select race-track-select" id="race-track-select" aria-label="Selected signal"></select>
+            <span class="race-field-label race-racers-label" id="race-racers-label">RACERS</span>
+            <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
+            <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
+              <option value="2">2 RACERS</option>
+              <option value="3">3 RACERS</option>
+              <option value="4" selected>4 RACERS // RECOMMENDED</option>
+              <option value="6">6 RACERS</option>
+              <option value="8">8 RACERS</option>
+            </select>
+            <button class="btn-hero btn-terminal-exec race-cta" id="race-create-room" type="button">> CREATE RACE</button>
+          </section>
+          <section class="race-col race-col-join" aria-label="Join race">
+            <div class="race-col-head"><span class="race-col-index">02</span> JOIN RACE</div>
+            <label class="race-field-label" for="race-join-input">ROOM CODE</label>
+            <input class="race-code-input" id="race-join-input" type="text" maxlength="8"
+                   inputmode="text" placeholder="ENTER CODE" autocomplete="off"
+                   spellcheck="false" autocapitalize="characters" aria-label="Room code" />
+            <button class="btn-hero btn-terminal-exec race-cta" id="race-join-btn" type="button">> JOIN RACE</button>
+            <div class="race-join-hint">Ask the host for the room code, then press ENTER.</div>
+          </section>
+        </div>
+        <div class="online-hint race-landing-hint">
           First to the finish wins. 2-8 racers, official Signal Pack tracks only.
           Everyone starts on one synchronized clock.
         </div>
       </div>
 
       <!-- View: lobby -->
-      <div id="race-lobby-view" class="hidden">
-        <div class="online-lobby-head">
-          <div class="online-lobby-code">ROOM // <span id="race-lobby-code">------</span></div>
-          <div class="online-lobby-title" id="race-lobby-title">SIGNAL</div>
-          <div class="online-lobby-clock">CAPACITY <b id="race-lobby-capacity">4</b></div>
-        </div>
-
-        <div class="online-invite-row">
-          <span class="online-invite-label">INVITE LINK</span>
-          <input class="online-input online-invite-input" id="race-invite-input" readonly />
-          <button class="terminal-btn-subtle" id="race-copy-invite" type="button">COPY</button>
+      <div id="race-lobby-view" class="race-lobby hidden">
+        <div class="race-lobby-head">
+          <div class="race-lobby-track">
+            <h2 class="race-lobby-title" id="race-lobby-title">SIGNAL</h2>
+            <div class="race-lobby-meta">
+              <span class="race-lobby-bpm" id="race-lobby-bpm">-- BPM</span>
+              <span class="race-lobby-sep">//</span>
+              <span class="race-lobby-diff" id="race-lobby-diff">--</span>
+            </div>
+          </div>
+          <div class="race-lobby-code-block">
+            <div class="online-invite-label race-lobby-code-label">ROOM //</div>
+            <div class="race-lobby-code-line">
+              <span class="online-lobby-code" id="race-lobby-code">------</span>
+              <button class="race-copy-btn" id="race-copy-invite" type="button">COPY</button>
+            </div>
+            <input class="online-input online-invite-input" id="race-invite-input" readonly
+                   aria-hidden="true" tabindex="-1" />
+          </div>
+          <div class="race-lobby-count">
+            <span class="race-lobby-count-label">PLAYERS</span>
+            <span class="race-lobby-count-val"><b id="race-lobby-connected">0</b> / <b id="race-lobby-capacity">4</b></span>
+          </div>
         </div>
 
         <div class="online-host-track hidden" id="race-host-track-row">
@@ -147,10 +176,10 @@ export class RacePanel {
           <select class="online-select" id="race-host-track-select"></select>
         </div>
 
-        <div class="online-players" id="race-lobby-players"></div>
+        <div class="online-players race-player-grid" id="race-lobby-players"></div>
 
-        <div class="online-lobby-actions">
-          <button class="btn-hero btn-terminal-exec" id="race-ready-btn" type="button">> READY</button>
+        <div class="online-lobby-actions race-lobby-foot">
+          <button class="btn-hero btn-terminal-exec race-ready-btn" id="race-ready-btn" type="button">> READY</button>
           <button class="btn-hero btn-terminal-exec hidden" id="race-start-btn" type="button">> START RACE</button>
           <button class="terminal-btn-subtle" id="race-leave-btn" type="button">LEAVE ROOM</button>
         </div>
@@ -158,11 +187,14 @@ export class RacePanel {
       </div>
 
       <!-- View: results -->
-      <div id="race-results-view" class="hidden">
+      <div id="race-results-view" class="race-results hidden">
         <div class="online-results-title" id="race-results-title">RACE COMPLETE</div>
-        <div class="online-results" id="race-results"></div>
+        <div class="race-results-head" aria-hidden="true">
+          <span>RANK</span><span>RACER</span><span>TIME</span><span>GAP</span>
+        </div>
+        <div class="online-results race-results-grid" id="race-results"></div>
         <div class="online-lobby-status" id="race-rematch-note"></div>
-        <div class="online-lobby-actions">
+        <div class="online-lobby-actions race-results-actions">
           <button class="btn-hero btn-terminal-exec" id="race-results-rematch" type="button">> REMATCH</button>
           <button class="terminal-btn-subtle" id="race-results-lobby" type="button">RETURN TO LOBBY</button>
           <button class="terminal-btn-subtle" id="race-results-leave" type="button">LEAVE ROOM</button>
@@ -172,6 +204,11 @@ export class RacePanel {
 
     this.selectElem = this.element.querySelector('#race-track-select') as HTMLSelectElement;
     this.capacityElem = this.element.querySelector('#race-capacity-select') as HTMLSelectElement;
+    this.capacitySegElem = this.element.querySelector('#race-capacity-seg') as HTMLElement;
+    this.createHeroElem = this.element.querySelector('#race-create-hero') as HTMLElement;
+    this.createTitleElem = this.element.querySelector('#race-create-title') as HTMLElement;
+    this.createBpmElem = this.element.querySelector('#race-create-bpm') as HTMLElement;
+    this.createDiffElem = this.element.querySelector('#race-create-diff') as HTMLElement;
     this.joinInput = this.element.querySelector('#race-join-input') as HTMLInputElement;
     this.errorElem = this.element.querySelector('#race-error') as HTMLElement;
 
@@ -221,6 +258,18 @@ export class RacePanel {
         (this.element.querySelector('#race-join-btn') as HTMLButtonElement).click();
       }
     });
+    // Landing: keep the selected-track hero and the RACERS segmented control
+    // in sync with the authoritative select elements.
+    this.selectElem.addEventListener('change', () => {
+      this.selectedTrackId = this.selectElem.value;
+      this.renderCreateHero();
+    });
+    this.capacityElem.addEventListener('change', () => this.syncCapacitySegments());
+    // One uppercase, code-correct join field: real code alphabet only.
+    this.joinInput.addEventListener('input', () => {
+      const cleaned = this.joinInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (cleaned !== this.joinInput.value) this.joinInput.value = cleaned;
+    });
     this.lobbyHostTrackElem.addEventListener('change', () => {
       this.callbacks?.onHostPickTrack(this.lobbyHostTrackElem.value);
     });
@@ -262,20 +311,22 @@ export class RacePanel {
 
     (this.element.querySelector('#race-copy-invite') as HTMLButtonElement).addEventListener(
       'click',
-      () => {
+      async () => {
         const code = this.lastRoom?.inviteCode ?? '';
-        // Copy the CODE, not the link: it is what a friend can read back.
-        const copy = this.lobbyInviteInput.select();
-        void copy;
-        void navigator.clipboard?.writeText(code || this.lobbyInviteInput.value).catch(() => {
-          /* clipboard may be unavailable; the field is selectable as a fallback */
-        });
         const btn = this.element.querySelector('#race-copy-invite') as HTMLButtonElement;
-        const original = btn.textContent;
-        btn.textContent = 'COPIED';
-        window.setTimeout(() => {
-          btn.textContent = original;
-        }, 1400);
+        try {
+          if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+          await navigator.clipboard.writeText(code);
+          btn.textContent = 'COPIED';
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(this.lobbyCodeElem);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          btn.textContent = 'SELECTED';
+        }
+        window.setTimeout(() => { btn.textContent = 'COPY'; }, 1400);
       }
     );
   }
@@ -285,6 +336,7 @@ export class RacePanel {
   }
 
   public setCatalog(entries: RaceCatalogEntry[]): void {
+    this.catalog = entries;
     const options = entries
       .map(
         (t, i) =>
@@ -294,10 +346,64 @@ export class RacePanel {
       .join('');
     this.selectElem.innerHTML = options;
     this.lobbyHostTrackElem.innerHTML = options;
+    if (entries.length > 0 && !this.selectElem.value) this.selectElem.value = entries[0].id;
+    this.selectedTrackId = this.selectElem.value;
+    this.renderCapacitySegments();
+    this.syncCapacitySegments();
+    this.renderCreateHero();
   }
 
   public getSelectedTrack(): string {
     return this.selectElem.value;
+  }
+
+  /** Selected-track hero: real title, BPM, difficulty and accent. */
+  private renderCreateHero(): void {
+    const entry = this.catalog.find((t) => t.id === this.selectedTrackId) ?? this.catalog[0];
+    const accent = entry?.accentColor || 'var(--accent-color)';
+    this.createHeroElem.style.setProperty('--race-accent', accent);
+    this.createTitleElem.textContent = entry ? entry.title : '--';
+    this.createBpmElem.textContent = entry ? `${entry.bpm} BPM` : '-- BPM';
+    this.createDiffElem.textContent = entry ? entry.difficultyLabel : '--';
+    this.selectView.style.setProperty('--race-accent', accent);
+  }
+
+  /** RACERS segmented control, kept in sync with the hidden native select. */
+  private renderCapacitySegments(): void {
+    this.capacitySegElem.innerHTML = RACE_CAPACITIES.map((n) => {
+      const recommended = n === DEFAULT_RACE_CAPACITY;
+      return (
+        `<button class="race-cap-btn${recommended ? ' race-cap-recommended' : ''}"` +
+        ` type="button" data-capacity="${n}"` +
+        ` aria-pressed="false" aria-label="${n} racers${recommended ? ', recommended' : ''}">${n}</button>`
+      );
+    }).join('');
+    this.capacitySegElem.querySelectorAll<HTMLButtonElement>('.race-cap-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.capacityElem.value = btn.dataset.capacity ?? String(DEFAULT_RACE_CAPACITY);
+        this.syncCapacitySegments();
+      });
+      btn.addEventListener('keydown', (e) => {
+        const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1
+          : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+        if (!dir) return;
+        e.preventDefault();
+        const btns = [...this.capacitySegElem.querySelectorAll<HTMLButtonElement>('.race-cap-btn')];
+        const idx = btns.indexOf(btn);
+        const target = btns[(idx + dir + btns.length) % btns.length];
+        target.focus();
+        target.click();
+      });
+    });
+  }
+
+  /** Reflect the authoritative capacity select into the segmented buttons. */
+  private syncCapacitySegments(): void {
+    this.capacitySegElem.querySelectorAll<HTMLButtonElement>('.race-cap-btn').forEach((btn) => {
+      const on = btn.dataset.capacity === this.capacityElem.value;
+      btn.classList.toggle('race-cap-active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   public showSelect(): void {
@@ -367,6 +473,20 @@ export class RacePanel {
     this.lobbyCapacityElem.textContent = String(room.capacity);
     this.lobbyInviteInput.value = inviteUrl;
     this.joinInput.value = room.inviteCode;
+
+    // Track identity: real title + BPM // difficulty from the official catalog,
+    // painted with the real track accent. No track content change.
+    const track = this.catalog.find((t) => t.id === room.trackId);
+    const accent = track?.accentColor || 'var(--accent-color)';
+    this.lobbyView.style.setProperty('--race-accent', accent);
+    this.lobbyTitleElem.style.color = accent;
+    (this.element.querySelector('#race-lobby-bpm') as HTMLElement).textContent =
+      track ? `${track.bpm} BPM` : '';
+    (this.element.querySelector('#race-lobby-diff') as HTMLElement).textContent =
+      track ? track.difficultyLabel : '';
+    (this.element.querySelector('#race-lobby-connected') as HTMLElement).textContent = String(
+      players.filter((p) => p.connected).length
+    );
 
     // Host track picker: only visible, unlocked, host-only.
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
@@ -577,7 +697,7 @@ export class RacePanel {
         identityLine +
         `</span>` +
         `<span class="online-result-time">${formatRaceTime(row.finishTimeUs)}</span>` +
-        `<span class="online-result-meta">${outcome}${gap ? ' // ' + gap : ''}</span>`;
+        `<span class="online-result-meta">${outcome}${gap ? ' ' + gap : ''}</span>`;
       this.resultsElem.appendChild(line);
     });
 

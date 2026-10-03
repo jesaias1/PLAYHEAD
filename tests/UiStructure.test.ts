@@ -106,10 +106,10 @@ describe('Sticky global navigation', () => {
 // ---------------------------------------------------------------------------
 
 describe('Online section', () => {
-  it('contains an internal RACE / LEADERBOARD segmented control', () => {
+  it('contains an internal RACE / LEADERBOARD navigation', () => {
     expect(importScreen).toMatch(/class="online-subnav"/);
-    expect(importScreen).toMatch(/id="online-subnav-race"[^>]*>\[ RACE \]/);
-    expect(importScreen).toMatch(/id="online-subnav-leaderboard"[^>]*>\[ LEADERBOARD \]/);
+    expect(importScreen).toMatch(/id="online-subnav-race"[^>]*>RACE</);
+    expect(importScreen).toMatch(/id="online-subnav-leaderboard"[^>]*>LEADERBOARD</);
   });
 
   it('mounts both live panels inside the ONLINE panel', () => {

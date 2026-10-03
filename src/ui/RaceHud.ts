@@ -66,6 +66,7 @@ export class RaceHud {
   private phaseTitleElem: HTMLElement;
   private phaseLinesElem: HTMLElement;
   private phasePromptElem: HTMLElement;
+  private phaseCountElem: HTMLElement;
   private countdownElem: HTMLElement;
   private spectateElem: HTMLElement;
   private spectateNameElem: HTMLElement;
@@ -102,6 +103,7 @@ export class RaceHud {
 
       <div class="race-hud-phase hidden" id="race-phase">
         <div class="race-phase-title" id="race-phase-title">SIGNAL CHECK</div>
+        <div class="race-phase-count" id="race-phase-count"></div>
         <div class="race-phase-lines" id="race-phase-lines"></div>
         <div class="race-phase-prompt" id="race-phase-prompt">PRESS [SPACE] TO READY</div>
       </div>
@@ -117,6 +119,7 @@ export class RaceHud {
     this.phaseTitleElem = this.element.querySelector('#race-phase-title') as HTMLElement;
     this.phaseLinesElem = this.element.querySelector('#race-phase-lines') as HTMLElement;
     this.phasePromptElem = this.element.querySelector('#race-phase-prompt') as HTMLElement;
+    this.phaseCountElem = this.element.querySelector('#race-phase-count') as HTMLElement;
     this.countdownElem = this.element.querySelector('#race-countdown') as HTMLElement;
     this.spectateElem = this.element.querySelector('#race-spectate') as HTMLElement;
     this.spectateNameElem = this.element.querySelector('#race-spectate-name') as HTMLElement;
@@ -204,7 +207,15 @@ export class RaceHud {
       return;
     }
     this.phaseElem.classList.remove('hidden');
-    this.phaseTitleElem.textContent = state.title;
+    // READY/COUNTDOWN are authoritative phases reached after loading; the
+    // readiness count is separate from that connection/load confirmation.
+    const readyCount = state.lines.filter((l) => l.ready).length;
+    const allReady = state.lines.length > 0 && readyCount === state.lines.length;
+    this.phaseTitleElem.textContent = state.phase === 'READY' || state.phase === 'COUNTDOWN'
+      ? 'ALL SIGNALS ONLINE' : state.title;
+    this.phaseElem.classList.toggle('race-phase-all-ready', allReady);
+    this.phaseCountElem.textContent =
+      state.lines.length > 1 ? `${readyCount} / ${state.lines.length} READY` : '';
     this.phaseLinesElem.innerHTML = state.lines
       .slice(0, 8)
       .map(
@@ -221,10 +232,14 @@ export class RaceHud {
     if (seconds === null || seconds <= 0) {
       this.countdownElem.classList.add('hidden');
       this.countdownElem.textContent = '';
+      this.element.classList.remove('race-hud-counting');
       return;
     }
     this.countdownElem.classList.remove('hidden');
     this.countdownElem.textContent = String(seconds);
+    // While the authoritative countdown runs, keep the phase panel to its title
+    // only so the number never collides with the ready lines.
+    this.element.classList.add('race-hud-counting');
   }
 
   /** Post-finish spectator view. Pass null to hide. */

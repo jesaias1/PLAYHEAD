@@ -672,4 +672,25 @@
 }
 
 /* Keep the restart-hold notice clear of the bottom-centre speed readout. */
+
+/* ONLINE RACE 2.0 — in-game second READY presentation (additive, scoped). */
+
+/* While counting down, show only the phase title so the number never collides. */
+.race-hud.race-hud-counting .race-phase-count,
+.race-hud.race-hud-counting .race-phase-lines,
+.race-hud.race-hud-counting .race-phase-prompt,
+.race-hud.race-hud-counting .race-hud-rivals { display: none; }
+.race-hud.race-hud-counting .race-hud-countdown { position: fixed; top: 40vh; }
+.race-hud .race-phase-count {
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  color: #8d9baa;
+}
+.race-hud .race-phase-count:empty { display: none; }
+.race-hud-phase.race-phase-all-ready { border-color: var(--accent-color); box-shadow: 0 0 26px rgba(var(--accent-rgb), 0.3); }
+.race-hud-phase.race-phase-all-ready .race-phase-title { color: var(--accent-color); }
 #hud-restart-hold { bottom: 150px !important; }
+
+.race-hud .race-phase-line { font-size: 0.8rem; }
+.race-hud .race-phase-title { font-size: 0.82rem; }
+.race-hud .race-phase-count { font-size: 0.78rem; }
