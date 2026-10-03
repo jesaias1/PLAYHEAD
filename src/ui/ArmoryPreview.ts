@@ -57,6 +57,9 @@ export class ArmoryPreview {
   private rig: ViewmodelRigInstance | null = null;
   private socketHome: THREE.Object3D | null = null;
 
+  /** Preview bone rotations are restored before every selection and mode change. */
+  private previewPoseRestore: { bone: THREE.Object3D; position: THREE.Vector3; quaternion: THREE.Quaternion }[] = [];
+
   private readonly skinSystem = KarambitSkinSystem.createPreviewInstance();
   private selection: ArmoryPreviewSelection | null = null;
   private mode: ArmoryPreviewMode = 'item';
@@ -319,9 +322,9 @@ export class ArmoryPreview {
       rig.knifeGroup.visible = !isolateGloves;
     }
 
-    // GLOVE ITEM: authored relaxed pose, no knife grip, so the glove surfaces
-    // read naturally and both forearms fall outside the frame. LOADOUT and the
-    // knife ITEM keep the gameplay idle pose (the knife calibration needs it).
+    // GLOVE ITEM: authored relaxed pose, no knife grip. LOADOUT and the knife
+    // ITEM keep the gameplay idle pose (the knife calibration needs it).
+    this.resetPreviewPose();
     rig.poseTo(isolateGloves ? 'relax' : null);
 
     // Reset drift so a mode switch never inherits a stale rotation.
@@ -333,7 +336,50 @@ export class ArmoryPreview {
       this.contentRoot.updateMatrixWorld(true);
     }
 
+    if (!isolateKnife) {
+      this.applyPreviewGlovePose(isolateGloves);
+      this.contentRoot?.updateMatrixWorld(true);
+    }
     this.fitCamera(isolateKnife);
+  }
+
+  /**
+   * Restores every bone we nudged to its authored pose. Called before each
+   * layout so preview offsets never accumulate across selections or modes.
+   */
+  private resetPreviewPose(): void {
+    for (const entry of this.previewPoseRestore) {
+      entry.bone.position.copy(entry.position);
+      entry.bone.quaternion.copy(entry.quaternion);
+    }
+    this.previewPoseRestore = [];
+  }
+
+  /** Record the authored local transform once, then add a local-space offset. */
+  private nudgeBone(name: string, rotation: [number, number, number]): THREE.Object3D | null {
+    const rig = this.rig;
+    if (!rig) return null;
+    const bone = rig.armsScene.getObjectByName(name);
+    if (!bone) return null;
+    this.previewPoseRestore.push({ bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() });
+    bone.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation[0], rotation[1], rotation[2])));
+    return bone;
+  }
+
+  /** Bring both wrists inward; glove ITEM also exposes back and palm/side detail. */
+  private applyPreviewGlovePose(isolateGloves: boolean): void {
+    // Rotate around preview world Z to bring the wrists inward without stretching.
+    for (const [name, angle] of [['upper_armR', -0.35], ['upper_armL', 0.35]] as const) {
+      const bone = this.nudgeBone(name, [0, 0, 0]);
+      if (!bone) continue;
+      const axis = new THREE.Vector3(0, 0, 1).applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
+      bone.rotateOnAxis(axis, angle);
+      bone.updateWorldMatrix(false, true);
+    }
+    if (!isolateGloves) return;
+    this.nudgeBone('forearmR', [0, -2.0, 0]);
+    // Different forearm rolls provide complementary views of the glove.
+    this.nudgeBone('forearmL', [0, 0.35, 0]);
   }
 
   private fitCamera(isolateKnife: boolean): void {
@@ -356,22 +402,20 @@ export class ArmoryPreview {
       return;
     }
 
-    // HANDS (glove ITEM + LOADOUT): compose from the REAL posed bones rather
-    // than the whole-rig bind-pose bounds, which framed the severed elbows.
-    // The camera sits close to the hands so the forearms leave the frame at the
-    // edges instead of ending inside it.
+    // HANDS (glove ITEM + LOADOUT): frame from the REAL posed wrist bones.
+    // Aim above the wrists so the gloves fill the frame and arm ends stay below it.
     const handR = rig.handRBone.getWorldPosition(new THREE.Vector3());
     const handL = rig.handLBone.getWorldPosition(new THREE.Vector3());
     const handCenter = handR.clone().add(handL).multiplyScalar(0.5);
     const spread = Math.max(handR.distanceTo(handL), 0.05);
 
-    // Keep the elbows below the viewport while showing both complete gloves.
-    // These proportions were checked on the actual relaxed and knife-idle rigs.
+    // LOADOUT needs more room for the calibrated knife held by the right hand.
     const center = handCenter.clone();
-    center.y += spread * 0.5;
+    const isolateGloves = this.mode === 'item' && this.selection?.slot === 'gloves';
+    center.y += spread * (isolateGloves ? 0.32 : 0.40);
     this.cameraTarget.copy(center);
-    const radius = spread * 0.65 + 0.02;
-    const dir = new THREE.Vector3(0, 0.05, 1).normalize();
+    const radius = spread * (isolateGloves ? 0.52 : 0.72) + 0.02;
+    const dir = new THREE.Vector3(0, 0.02, 1).normalize();
     const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
 
     camera.position.copy(center).addScaledVector(dir, distance);
