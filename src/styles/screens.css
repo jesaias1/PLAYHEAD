@@ -723,6 +723,18 @@
   color: #55606e;
   white-space: nowrap;
 }
+.armory-collection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  letter-spacing: 0.12em;
+  color: #4a5563;
+  white-space: nowrap;
+}
+.armory-collection b { color: #aebccb; font-weight: 700; }
+.armory-collection span { color: #33404d; }
 
 /* --- 5. Compact mastery status (mastery gloves only) -------------------- */
 .armory-mastery-status {
@@ -870,6 +882,13 @@
   gap: 7px;
   padding: 12px;
   border-left: 3px solid var(--detail-accent, var(--accent-color));
+}
+/* WORLD RECORD PRESTIGE: restrained, not noisier. A cold near-black framing
+   that matches BLACKSTAR's authored restraint rather than brightening it. */
+.armory-detail-inner.world-record {
+  border-left-color: #00f0ff;
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, 0.14);
+  background: linear-gradient(180deg, rgba(0, 240, 255, 0.05), rgba(2, 3, 6, 0.35));
 }
 .armory-detail-empty {
   padding: 26px 12px;

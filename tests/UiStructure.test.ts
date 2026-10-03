@@ -292,9 +292,9 @@ describe('Selected item detail panel', () => {
   it('owns the long copy exactly once', () => {
     const fn = methodBody(importScreen, 'private renderArmoryDetail(', 2400);
     expect(fn).toMatch(/item\.description/);
-    expect(fn).toMatch(/SOURCE/);
-    expect(fn).toMatch(/REQUIREMENT/);
-    expect(fn).toMatch(/PROGRESS/);
+    // The source/requirement/progress hierarchy is metadata-driven and produced
+    // by the inventory model (armoryDetailRows) so there is exactly one copy.
+    expect(fn).toMatch(/armoryDetailRows\(item\)/);
     expect(fn).toMatch(/armory-detail-actions/);
   });
 

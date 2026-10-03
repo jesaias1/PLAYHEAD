@@ -1,5 +1,5 @@
 /**
- * ArmoryPreview â€” a single reusable 3D cosmetic preview for the Armory detail
+ * ArmoryPreview — a single reusable 3D cosmetic preview for the Armory detail
  * panel.
  *
  * ONE lazy renderer / scene / rig, reused for every selection and both modes.
@@ -28,7 +28,7 @@ export interface ArmoryPreviewSelection {
   equippedGloveId: string;
 }
 
-/** Known canonical catalog id â€” safe to construct the rig with, never a video. */
+/** Known canonical catalog id — safe to construct the rig with, never a video. */
 const SAFE_INITIAL_SKIN_ID = 'SIGNAL_CYAN';
 
 // Calibrated socket transform (must never be altered).
@@ -41,6 +41,7 @@ const MAX_FPS = 30;
 const MAX_DPR = 1.5;
 
 export class ArmoryPreview {
+  private static activePreview: ArmoryPreview | null = null;
   private readonly root: HTMLElement;
   private readonly canvasHost: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -146,6 +147,8 @@ export class ArmoryPreview {
   /** The panel is on screen and wants the preview live. */
   public show(): void {
     if (this.disposed) return;
+    if (ArmoryPreview.activePreview !== this) ArmoryPreview.activePreview?.hide();
+    ArmoryPreview.activePreview = this;
     this.visible = true;
     this.evaluate();
   }
@@ -153,6 +156,7 @@ export class ArmoryPreview {
   /** The panel is hidden: stop the loop and release this instance's video. */
   public hide(): void {
     if (this.disposed) return;
+    if (ArmoryPreview.activePreview === this) ArmoryPreview.activePreview = null;
     this.visible = false;
     this.evaluate();
   }
@@ -244,7 +248,6 @@ export class ArmoryPreview {
     if (!this.scene) return;
     this.rig = rig;
     this.socketHome = rig.handRBone;
-
     // Preserve the calibrated socket transform verbatim.
     rig.knifeGroup.position.copy(SOCKET_POSITION);
     rig.knifeGroup.rotation.copy(SOCKET_ROTATION);
@@ -316,10 +319,19 @@ export class ArmoryPreview {
       rig.knifeGroup.visible = !isolateGloves;
     }
 
+    // GLOVE ITEM: authored relaxed pose, no knife grip, so the glove surfaces
+    // read naturally and both forearms fall outside the frame. LOADOUT and the
+    // knife ITEM keep the gameplay idle pose (the knife calibration needs it).
+    rig.poseTo(isolateGloves ? 'relax' : null);
+
     // Reset drift so a mode switch never inherits a stale rotation.
     this.driftPhase = 0;
     if (this.knifeParent) this.knifeParent.rotation.set(0, 0, 0);
-    if (this.contentRoot) this.contentRoot.rotation.set(0, 0, 0);
+    if (this.contentRoot) {
+      // Preview parent only: orient the authored arms from below the eyeline.
+      this.contentRoot.rotation.set(isolateKnife ? 0 : -Math.PI / 2, 0, 0);
+      this.contentRoot.updateMatrixWorld(true);
+    }
 
     this.fitCamera(isolateKnife);
   }
@@ -329,37 +341,38 @@ export class ArmoryPreview {
     const camera = this.camera;
     if (!rig || !camera) return;
 
-    const box = new THREE.Box3();
+    // KNIFE ITEM: isolate the real knife at a hero three-quarter angle.
     if (isolateKnife) {
-      box.setFromObject(rig.knifeGroup);
-    } else {
-      box.setFromObject(rig.armsScene);
-      if (this.mode === 'loadout') {
-        // Frame the grip and hands rather than the elbows, like the gameplay
-        // viewmodel. The authored hand pose and calibrated socket stay intact.
-        const hands = new THREE.Box3().setFromObject(rig.knifeGroup);
-        hands.expandByPoint(rig.handRBone.getWorldPosition(new THREE.Vector3()));
-        hands.expandByPoint(rig.handLBone.getWorldPosition(new THREE.Vector3()));
-        hands.expandByScalar(box.getBoundingSphere(new THREE.Sphere()).radius * 0.12);
-        box.copy(hands);
-      }
+      const box = new THREE.Box3().setFromObject(rig.knifeGroup);
+      if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(0.3, 0.3, 0.3));
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      this.cameraTarget.copy(sphere.center);
+      const radius = Math.max(sphere.radius, 0.02);
+      const dir = new THREE.Vector3(1, 0.12, 0.12).normalize();
+      const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
+      camera.position.copy(sphere.center).addScaledVector(dir, distance);
+      camera.lookAt(sphere.center);
+      camera.updateProjectionMatrix();
+      return;
     }
-    if (box.isEmpty()) {
-      box.setFromCenterAndSize(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.3, 0.3, 0.3));
-    }
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const center = sphere.center.clone();
-    this.cameraTarget.copy(center);
-    const radius = Math.max(sphere.radius, 0.02);
 
-    // Knife: three-quarter hero angle. Gloves/loadout: near-frontal, close, so
-    // the actual hand/glove surfaces fill the frame.
-    const dir = isolateKnife
-      ? new THREE.Vector3(1, 0.12, 0.12).normalize()
-      : new THREE.Vector3(0.05, 0.65, 1).normalize();
-    const margin = isolateKnife ? 0.95 : 0.85;
-    const fovRad = THREE.MathUtils.degToRad(camera.fov);
-    const distance = (radius / Math.sin(fovRad / 2)) * margin;
+    // HANDS (glove ITEM + LOADOUT): compose from the REAL posed bones rather
+    // than the whole-rig bind-pose bounds, which framed the severed elbows.
+    // The camera sits close to the hands so the forearms leave the frame at the
+    // edges instead of ending inside it.
+    const handR = rig.handRBone.getWorldPosition(new THREE.Vector3());
+    const handL = rig.handLBone.getWorldPosition(new THREE.Vector3());
+    const handCenter = handR.clone().add(handL).multiplyScalar(0.5);
+    const spread = Math.max(handR.distanceTo(handL), 0.05);
+
+    // Keep the elbows below the viewport while showing both complete gloves.
+    // These proportions were checked on the actual relaxed and knife-idle rigs.
+    const center = handCenter.clone();
+    center.y += spread * 0.5;
+    this.cameraTarget.copy(center);
+    const radius = spread * 0.65 + 0.02;
+    const dir = new THREE.Vector3(0, 0.05, 1).normalize();
+    const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
 
     camera.position.copy(center).addScaledVector(dir, distance);
     camera.lookAt(center);
@@ -424,6 +437,7 @@ export class ArmoryPreview {
 
   public dispose(): void {
     if (this.disposed) return;
+    if (ArmoryPreview.activePreview === this) ArmoryPreview.activePreview = null;
     this.disposed = true;
     this.stopLoop();
     document.removeEventListener('visibilitychange', this.onDocumentVisibility);

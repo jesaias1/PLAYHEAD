@@ -23,6 +23,8 @@ import {
   filterArmoryItems,
   inventoryCountLabel,
   isEquippable,
+  armoryDetailRows,
+  collectionProgress,
   resolveSelection
 } from './ArmoryInventory';
 
@@ -210,6 +212,7 @@ export class ImportScreen {
   private armoryInventoryElem: HTMLElement;
   private armoryDetailElem: HTMLElement;
   private armoryCountElem: HTMLElement;
+  private armoryCollectionElem: HTMLElement;
   private armoryMasteryStatusElem: HTMLElement;
   private armoryMasteryRowsElem: HTMLElement;
   private armoryViewRewardBtn: HTMLButtonElement;
@@ -486,6 +489,7 @@ export class ImportScreen {
               <button class="armory-filter-btn" type="button" data-armory-sort="name">NAME</button>
             </div>
             <span class="armory-count" id="armory-count">00 ITEMS</span>
+            <span class="armory-collection" id="armory-collection" aria-label="Collection progress"></span>
           </div>
 
           <!-- 5. MASTERY STATUS: compact, and only while browsing mastery gloves. -->
@@ -578,6 +582,7 @@ export class ImportScreen {
     this.armoryInventoryElem = this.element.querySelector('#armory-inventory') as HTMLElement;
     this.armoryDetailElem = this.element.querySelector('#armory-detail') as HTMLElement;
     this.armoryCountElem = this.element.querySelector('#armory-count') as HTMLElement;
+    this.armoryCollectionElem = this.element.querySelector('#armory-collection') as HTMLElement;
     this.armoryMasteryStatusElem = this.element.querySelector(
       '#armory-mastery-status'
     ) as HTMLElement;
@@ -977,6 +982,20 @@ export class ImportScreen {
       this.armoryCountElem.textContent = inventoryCountLabel(visible.length);
     }
 
+    // CONCISE COLLECTION PROGRESS — metadata-driven, with the reserved WORLD
+    // RECORD prestige cosmetic excluded from the ordinary slot totals.
+    if (this.armoryCollectionElem) {
+      const p = collectionProgress(this.armoryItems);
+      const parts = [
+        `KNIVES <b>${pad2(p.karambit.owned)}/${pad2(p.karambit.total)}</b>`,
+        `GLOVES <b>${pad2(p.gloves.owned)}/${pad2(p.gloves.total)}</b>`
+      ];
+      if (p.worldRecord.total > 0 && p.worldRecord.owned > 0) {
+        parts.push(`WR <b>${pad2(p.worldRecord.owned)}/${pad2(p.worldRecord.total)}</b>`);
+      }
+      this.armoryCollectionElem.innerHTML = parts.join('<span>·</span>');
+    }
+
     this.renderArmoryMasteryStatus();
   }
 
@@ -1077,17 +1096,14 @@ export class ImportScreen {
     const statusLabel = item.equipped ? 'EQUIPPED' : item.owned ? 'OWNED' : 'LOCKED';
     const statusClass = item.equipped ? 'equipped' : item.owned ? 'owned' : 'locked';
 
-    const rows: Array<[string, string]> = [
-      ['SOURCE', item.source],
-      ['REQUIREMENT', item.requirement]
-    ];
-    if (item.progress) rows.push(['PROGRESS', item.progress]);
+    const rows = armoryDetailRows(item);
+    const rarityLine = displayRarity(item.rarity) +
+      (item.worldRecord ? ' // WORLD RECORD PRESTIGE' : '') +
+      (item.isLive ? ' // LIVE VIDEO ARTIFACT' : '');
 
     this.armoryDetailElem.innerHTML =
-      `<div class="armory-detail-inner" style="--detail-accent: ${item.swatch};">` +
-      `<div class="armory-detail-rarity">${displayRarity(item.rarity)}${
-        item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
-      }</div>` +
+      `<div class="armory-detail-inner${item.worldRecord ? ' world-record' : ''}" style="--detail-accent: ${item.swatch};">` +
+      `<div class="armory-detail-rarity">${rarityLine}</div>` +
       `<div class="armory-detail-name">${item.name}</div>` +
       `<div class="armory-detail-codename">${item.codename}</div>` +
       `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +

@@ -66,6 +66,12 @@ export interface ArmoryItem {
   swatch: string;
   /** True for cosmetics whose material is a live video artifact. */
   isLive: boolean;
+  /**
+   * True for the reserved WORLD RECORD prestige cosmetic (BLACKSTAR). It is the
+   * deliberate server-confirmed reward, never part of the normal Signal Drop
+   * pool, so collection progress excludes it from ordinary completion totals.
+   */
+  worldRecord: boolean;
 }
 
 export interface ArmoryInventoryInput {
@@ -147,6 +153,9 @@ export function paletteSwatch(paletteTag: string): string | null {
 
 /** Honest acquisition label for a knife, derived from its own requirement text. */
 export function knifeSource(skin: KarambitSkin): string {
+  // RESERVED PRESTIGE: BLACKSTAR is the server-confirmed WORLD RECORD reward,
+  // never a normal Signal Drop. The authoritative flag lives on its profile.
+  if (skin.profile?.isBlackstar) return 'WORLD RECORD';
   if (skin.shortRequirement === 'DEFAULT') return 'STANDARD ISSUE';
   if (skin.shortRequirement === 'SIGNAL DROP') return 'SIGNAL DROP';
   return 'SIGNAL PACK';
@@ -178,7 +187,8 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
       requirement: skin.unlockRequirement,
       progress: input.skinProgress(skin.id),
       swatch: paletteSwatch(skin.paletteTag) ?? rarityColor(skin.rarity),
-      isLive: !!skin.profile?.isVideoArtifact
+      isLive: !!skin.profile?.isVideoArtifact,
+      worldRecord: !!skin.profile?.isBlackstar
     });
     // UNDISCOVERED ARTIFACT: keep the rarity/category/locked signal honest but
     // seal the identity so the premium video skins stay a genuine discovery.
@@ -208,7 +218,8 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
       requirement: 'SIGNAL DROP // RANDOM REWARD',
       progress: '',
       swatch: rarityColor(glove.rarity),
-      isLive: false
+      isLive: false,
+      worldRecord: false
     });
   }
 
@@ -228,7 +239,8 @@ export function buildArmoryItems(input: ArmoryInventoryInput): ArmoryItem[] {
       requirement: d.requirementLabel,
       progress: status.progressLabel,
       swatch: masterySwatch(d.tier),
-      isLive: false
+      isLive: false,
+      worldRecord: false
     });
   }
 
@@ -339,7 +351,66 @@ export function ownershipTally(
   return { owned, locked: inSlot.length - owned, total: inSlot.length };
 }
 
+/**
+ * COLLECTION PROGRESS — concise per-slot ownership, derived entirely from item
+ * metadata. The reserved WORLD RECORD cosmetic (BLACKSTAR) is EXCLUDED from the
+ * ordinary totals because it is not part of the Signal Drop / Signal Pack
+ * completion loop; it is tracked as its own prestige line instead.
+ */
+export function collectionProgress(items: readonly ArmoryItem[]): {
+  karambit: { owned: number; total: number };
+  gloves: { owned: number; total: number };
+  worldRecord: { owned: number; total: number };
+} {
+  const tally = (pred: (i: ArmoryItem) => boolean) => {
+    const subset = items.filter(pred);
+    return { owned: subset.filter((i) => i.owned).length, total: subset.length };
+  };
+  return {
+    karambit: tally((i) => i.slot === 'karambit' && !i.worldRecord),
+    gloves: tally((i) => i.slot === 'gloves'),
+    worldRecord: tally((i) => i.worldRecord)
+  };
+}
+
 /** Can this item actually be equipped right now? Locked items never can. */
 export function isEquippable(item: ArmoryItem | null): boolean {
   return !!item && item.owned;
+}
+
+/**
+ * DETAIL ROWS — the concise info hierarchy for the single detail panel:
+ *
+ *   SOURCE   how it is earned (STANDARD ISSUE / SIGNAL DROP / SIGNAL PACK /
+ *            MASTERY / WORLD RECORD)
+ *   REQUIREMENT  only when it adds information beyond the source line
+ *   PROGRESS     live numbers when the acquisition is progress-based
+ *
+ * The requirement line is suppressed when it merely restates the source (the
+ * repeated `SIGNAL DROP` lines the UI used to print twice). This is metadata
+ * driven — no per-skin branches.
+ */
+export function armoryDetailRows(item: ArmoryItem): Array<[string, string]> {
+  const rows: Array<[string, string]> = [['SOURCE', item.source], ['TYPE', item.slot === 'karambit' ? 'KNIFE' : 'GLOVES']];
+
+  const requirement = item.requirement.trim();
+  if (requirement && !requirementRestatesSource(item.source, requirement)) {
+    rows.push(['REQUIREMENT', requirement]);
+  }
+  if (item.progress && !requirementRestatesSource(item.source, item.progress)) rows.push(['PROGRESS', item.progress]);
+  return rows;
+}
+
+/** True when a requirement line adds nothing beyond the source label. */
+function requirementRestatesSource(source: string, requirement: string): boolean {
+  const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const src = norm(source);
+  const req = norm(requirement);
+  if (!src || !req) return false;
+  if (src === req) return true;
+  if (src === 'STANDARD ISSUE' && req === 'STANDARD ISSUE UNLOCKED BY DEFAULT') return true;
+  // `SIGNAL DROP` source with any requirement that only talks about the drop.
+  if (req === 'SIGNAL DROP' || req === 'SIGNAL DROP RANDOM REWARD') return true;
+  if (req.includes('DISCOVERED THROUGH A SIGNAL DROP') && src === 'SIGNAL DROP') return true;
+  return false;
 }

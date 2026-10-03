@@ -50,6 +50,12 @@ export interface ViewmodelRigInstance {
   getActiveGloveTexture: () => THREE.Texture | null;
   /** Arm materials, exposed for DEV diagnostics and tests. */
   armMaterials: THREE.MeshStandardMaterial[];
+  /**
+   * PREVIEW-ONLY pose selector. Plays a named authored clip (e.g. relax) or
+   * returns to the gameplay idle clip when null. Does NOT alter the calibrated
+   * knife socket or the frozen gameplay viewmodel motion.
+   */
+  poseTo: (clipName: string | null) => void;
   dispose: () => void;
 }
 
@@ -242,11 +248,15 @@ export class ViewmodelAssetLoader {
     let mixer: THREE.AnimationMixer | null = null;
     let knifeIdleAction: THREE.AnimationAction | null = null;
     let knifeDrawAction: THREE.AnimationAction | null = null;
+    let idleClip: THREE.AnimationClip | null = null;
+    const clipsByName = new Map<string, THREE.AnimationClip>();
 
     if (armsGltf.animations && armsGltf.animations.length > 0) {
       mixer = new THREE.AnimationMixer(armsScene);
 
-      const idleClip = armsGltf.animations.find((a: THREE.AnimationClip) => a.name === 'knife_idle') ||
+      for (const clip of armsGltf.animations) clipsByName.set(clip.name, clip);
+
+      idleClip = armsGltf.animations.find((a: THREE.AnimationClip) => a.name === 'knife_idle') ||
         armsGltf.animations.find((a: THREE.AnimationClip) => a.name === 'guard_idle') ||
         armsGltf.animations[0];
 
@@ -263,6 +273,26 @@ export class ViewmodelAssetLoader {
         knifeDrawAction.clampWhenFinished = true;
       }
     }
+
+    /**
+     * PREVIEW-ONLY pose selector. `null` (or an unknown clip) restores the
+     * gameplay idle clip. Never touches the socket transform; gameplay never
+     * calls this, so the frozen viewmodel motion is unchanged.
+     */
+    const poseTo = (clipName: string | null): void => {
+      if (!mixer) return;
+      const clip = clipName ? clipsByName.get(clipName) : null;
+      const target = clip ?? idleClip;
+      if (!target) return;
+      mixer.stopAllAction();
+      const action = mixer.clipAction(target);
+      action.reset();
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.setEffectiveTimeScale(0.85);
+      action.play();
+      mixer.setTime(0.4);
+      mixer.update(0);
+    };
 
     rootGroup.add(armsScene);
 
@@ -390,6 +420,7 @@ export class ViewmodelAssetLoader {
       setAccentColor,
       setAudioPulse,
       applyGlove,
+      poseTo,
       getActiveGloveId: () => activeGloveId,
       getActiveGloveTexture: () => armMaterials[0]?.map ?? null,
       armMaterials,
@@ -492,6 +523,7 @@ export class ViewmodelAssetLoader {
           setGloveMask(mat, null, activeGloveTreatment.metalness, activeGloveTreatment.roughness);
         }
       },
+      poseTo: () => undefined,
       getActiveGloveId: () => activeGloveId,
       getActiveGloveTexture: () => armMaterials[0]?.map ?? null,
       armMaterials,

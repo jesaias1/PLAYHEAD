@@ -23,8 +23,10 @@ import {
   filterArmoryItems,
   inventoryCountLabel,
   isEquippable,
+  armoryDetailRows,
   resolveSelection
 } from './ArmoryInventory';
+import { ArmoryPreview } from './ArmoryPreview';
 
 export class ArmoryModal {
   public element: HTMLElement;
@@ -43,6 +45,13 @@ export class ArmoryModal {
   private onCloseCallback?: () => void;
   private skinSystem = KarambitSkinSystem.getInstance();
   private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
+  /**
+   * SHARED preview controller: the pause overlay reuses the SAME ArmoryPreview
+   * class as the main Armory (one lazy isolated renderer/scene/rig and its own
+   * preview-only skin instance). It is never the gameplay renderer, so a preview
+   * here cannot alter gameplay calibration, materials or equipped state.
+   */
+  private preview = new ArmoryPreview();
 
   private slot: ArmorySlot = 'karambit';
   private gloveFamily: GloveFamilyFilter = 'all';
@@ -155,10 +164,12 @@ export class ArmoryModal {
   public show(): void {
     this.render();
     this.element.classList.remove('hidden');
+    this.preview.show();
     this.closeBtn.focus();
   }
 
   public hide(): void {
+    this.preview.hide();
     this.element.classList.add('hidden');
   }
 
@@ -283,6 +294,7 @@ export class ArmoryModal {
     this.selectedId = item?.id ?? null;
 
     if (!item) {
+      this.preview.hide();
       this.detailElem.innerHTML = `<div class="armory-detail-empty">SELECT AN ITEM TO INSPECT</div>`;
       return;
     }
@@ -290,20 +302,18 @@ export class ArmoryModal {
     const statusLabel = item.equipped ? 'EQUIPPED' : item.owned ? 'OWNED' : 'LOCKED';
     const statusClass = item.equipped ? 'equipped' : item.owned ? 'owned' : 'locked';
 
-    const rows: Array<[string, string]> = [
-      ['SOURCE', item.source],
-      ['REQUIREMENT', item.requirement]
-    ];
-    if (item.progress) rows.push(['PROGRESS', item.progress]);
+    const rows = armoryDetailRows(item);
+    const rarityLine = item.rarity +
+      (item.worldRecord ? ' // WORLD RECORD PRESTIGE' : '') +
+      (item.isLive ? ' // LIVE VIDEO ARTIFACT' : '');
 
     this.detailElem.innerHTML =
-      `<div class="armory-detail-inner" style="--detail-accent: ${item.swatch};">` +
-      `<div class="armory-detail-rarity">${item.rarity}${
-        item.isLive ? ' // LIVE VIDEO ARTIFACT' : ''
-      }</div>` +
+      `<div class="armory-detail-inner${item.worldRecord ? ' world-record' : ''}" style="--detail-accent: ${item.swatch};">` +
+      `<div class="armory-detail-rarity">${rarityLine}</div>` +
       `<div class="armory-detail-name">${item.name}</div>` +
       `<div class="armory-detail-codename">${item.codename}</div>` +
       `<div class="armory-detail-status ${statusClass}">${statusLabel}</div>` +
+      `<div class="armory-preview-host"></div>` +
       `<div class="armory-detail-desc">${item.description}</div>` +
       `<div class="armory-detail-rows">` +
       rows
@@ -312,6 +322,23 @@ export class ArmoryModal {
       `</div>` +
       `<div class="armory-detail-actions"></div>` +
       `</div>`;
+
+    // Mount the SHARED preview controller (same class/renderer as the main
+    // Armory) into the freshly rendered panel without recreating it.
+    const host = this.detailElem.querySelector('.armory-preview-host') as HTMLElement | null;
+    if (host) {
+      this.preview.mount(host);
+      this.preview.update({
+        slot: item.slot,
+        itemId: item.id,
+        equippedKnifeId: this.skinSystem.getEquippedSkinId(),
+        equippedGloveId: masteryGloveSystem.getEquippedGloveId()
+      });
+      if (this.isVisible() && !this.decodeModal?.isVisible()) this.preview.show();
+      else this.preview.hide();
+    } else {
+      this.preview.hide();
+    }
 
     const slot = this.detailElem.querySelector('.armory-detail-actions') as HTMLElement;
     if (!slot) return;
@@ -330,11 +357,12 @@ export class ArmoryModal {
       slot.appendChild(this.buildAction('[ LOCKED // COMPLETE TO UNLOCK ]', true, () => undefined));
       return;
     }
-    const previewId = masteryGloveSystem.getDevPreviewGloveId();
-    const isPreviewing = previewId === item.id;
+    // Locked gloves are previewed through the isolated shared preview controller
+    // (ITEM mode) — never by wearing them on the gameplay rig. Ownership is not
+    // changed and EQUIP stays gated by the ownership check above.
     slot.appendChild(
-      this.buildAction(isPreviewing ? '[ STOP PREVIEW ]' : '[ PREVIEW ]', false, () => {
-        masteryGloveSystem.setDevPreview(isPreviewing ? null : item.id);
+      this.buildAction('[ ITEM PREVIEW ]', false, () => {
+        this.preview.setMode('item');
         this.render();
       })
     );
@@ -377,6 +405,7 @@ export class ArmoryModal {
 
     this.dropOpenBtn.addEventListener('click', () => {
       if (this.decodeModal) {
+        this.preview.hide();
         this.decodeModal.open(() => this.render());
         return;
       }

@@ -505,7 +505,8 @@ describe('Decoder and Armory presentation', () => {
     expect(model).toMatch(/source: 'SIGNAL DROP'/);
     expect(model).toMatch(/source: 'MASTERY'/);
     // The detail panel surfaces that source to the player.
-    expect(screen).toMatch(/\['SOURCE', item\.source\]/);
+    expect(screen).toMatch(/armoryDetailRows\(item\)/);
+    expect(model).toMatch(/\['SOURCE', item\.source\]/);
     expect(screen).toMatch(/id="armory-inventory"/);
     expect(screen).toMatch(/id="armory-detail"/);
   });

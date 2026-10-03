@@ -7,7 +7,7 @@ import { CosmeticRarity, KarambitSkinSystem, OpenedSignalDrop } from '../viewmod
 import { cosmeticKindLabel, displayRarity } from '../viewmodel/CosmeticDrop';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { SignalDecoderAudio } from '../audio/SignalDecoderAudio';
-import { attachArtifactVideoPreview } from './ArtifactVideoPreview';
+import { ArmoryPreview } from './ArmoryPreview';
 
 export class SignalDecodeModal {
   public element: HTMLElement;
@@ -32,7 +32,12 @@ export class SignalDecodeModal {
   private animFrameId: number | null = null;
   private activeReward: OpenedSignalDrop | null = null;
   private currentTargetOffset = 0;
-  private releaseArtifactPreview?: () => void;
+  /**
+   * SHARED preview controller (same class as the Armory): the reveal shows the
+   * LIVE material ON the knife, never a raw MP4 rectangle. It is metadata/rig
+   * only, so a decode reveal cannot alter equipped state.
+   */
+  private preview = new ArmoryPreview();
 
   constructor() {
     this.element = document.createElement('div');
@@ -88,7 +93,7 @@ export class SignalDecodeModal {
     this.closeBtn = this.element.querySelector('#btn-decode-modal-close') as HTMLButtonElement;
 
     this.skipBtn.addEventListener('click', () => this.skipReveal());
-    this.closeBtn.addEventListener('click', () => this.hide());
+    this.closeBtn.addEventListener('click', () => this.closeAndReturn());
 
     window.addEventListener('keydown', (e) => {
       if (!this.isVisible()) return;
@@ -98,7 +103,7 @@ export class SignalDecodeModal {
           this.skipReveal();
         }
       } else if (e.code === 'Escape') {
-        this.hide();
+        this.closeAndReturn();
       }
     });
   }
@@ -185,6 +190,7 @@ export class SignalDecodeModal {
 
   /** Explicit, retryable offline/error state. The drop is NOT consumed. */
   private showStructuredError(): void {
+    this.preview.hide();
     this.element.classList.remove('hidden');
     this.stripContainer.style.display = 'none';
     this.celebrationCard.classList.remove('hidden');
@@ -209,11 +215,12 @@ export class SignalDecodeModal {
       this.isOpening = false;
       this.open(this.onCompleteCallback);
     });
-    close?.addEventListener('click', () => this.hide());
+    close?.addEventListener('click', () => this.closeAndReturn());
     retry?.focus();
   }
 
   private showCollectionCompleteDialog(): void {
+    this.preview.hide();
     this.element.classList.remove('hidden');
     this.stripContainer.style.display = 'none';
     this.celebrationCard.classList.remove('hidden');
@@ -237,6 +244,7 @@ export class SignalDecodeModal {
   private startRollingReveal(reward: OpenedSignalDrop): void {
     this.isRolling = true;
     this.activeReward = reward;
+    this.preview.hide();
     this.element.classList.remove('hidden');
     this.stripContainer.style.display = 'block';
     this.celebrationCard.classList.add('hidden');
@@ -447,6 +455,7 @@ export class SignalDecodeModal {
       <div style="font-family: var(--font-mono); font-size: 0.72rem; color: #cbd5e1; margin-top: 10px; line-height: 1.45;">
         ${reward.kind === 'GLOVE' ? 'SIGNAL DROP GLOVE // EQUIP TO APPLY' : ''}
       </div>
+      <div class="decode-reveal-preview" style="margin-top: 14px;"></div>
       <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: flex-end;">
         <button id="btn-decode-equip" class="primary" style="padding: 8px 22px; font-family: var(--font-mono); font-size: 0.75rem; cursor: pointer;">
           > EQUIP NOW
@@ -458,11 +467,20 @@ export class SignalDecodeModal {
     `;
 
     const equipBtn = this.celebrationCard.querySelector('#btn-decode-equip') as HTMLButtonElement;
-    const path = reward.skin?.profile.videoPath;
-    if (reward.isLive && path) {
-      this.skinSystem.suspendActiveVideo();
-      this.releaseArtifactPreview?.();
-      this.releaseArtifactPreview = attachArtifactVideoPreview(this.celebrationCard, path);
+    // LIVE MATERIAL ON THE REAL MESH: the reward is shown through the shared
+    // preview controller, which streams the video INTO the knife shader (muted,
+    // looping, playsInline) instead of a raw MP4 panel.
+    const host = this.celebrationCard.querySelector('.decode-reveal-preview') as HTMLElement | null;
+    if (host) {
+      this.preview.mount(host);
+      this.preview.setMode('item');
+      this.preview.update({
+        slot: reward.kind === 'GLOVE' ? 'gloves' : 'karambit',
+        itemId: reward.item.id,
+        equippedKnifeId: this.skinSystem.getEquippedSkinId(),
+        equippedGloveId: masteryGloveSystem.getEquippedGloveId()
+      });
+      this.preview.show();
     }
     const claimBtn = this.celebrationCard.querySelector('#btn-decode-claim') as HTMLButtonElement;
 
@@ -492,13 +510,18 @@ export class SignalDecodeModal {
     if (reward.skin) this.skinSystem.equipSkin(reward.skin.id);
   }
 
+  private closeAndReturn(): void {
+    const reward = this.activeReward;
+    this.hide();
+    this.onCompleteCallback?.(reward);
+  }
+
   public hide(): void {
     // Cancels an in-flight server open: bumping the token makes its eventual
     // resolution a no-op. A mid-rolling hide is still refused (the reveal must
     // be finished or skipped explicitly).
     if (this.isRolling) return;
-    this.releaseArtifactPreview?.();
-    this.releaseArtifactPreview = undefined;
+    this.preview.hide();
     this.isOpening = false;
     this.openToken += 1;
     this.stopTickMonitor();

@@ -23,6 +23,8 @@ import {
   inventoryCountLabel,
   isEquippable,
   knifeSource,
+  armoryDetailRows,
+  collectionProgress,
   masteryRarity,
   ownershipTally,
   paletteSwatch,
@@ -143,10 +145,38 @@ describe('Source labelling', () => {
   it('labels a knife by how it is actually unlocked', () => {
     for (const skin of KARAMBIT_SKINS) {
       const source = knifeSource(skin);
+      if (skin.id === 'BLACKSTAR') {
+        expect(source).toBe('WORLD RECORD');
+        continue;
+      }
       if (skin.shortRequirement === 'DEFAULT') expect(source).toBe('STANDARD ISSUE');
       else if (skin.shortRequirement === 'SIGNAL DROP') expect(source).toBe('SIGNAL DROP');
       else expect(source).toBe('SIGNAL PACK');
     }
+  });
+
+  it('marks the reserved WORLD RECORD cosmetic and excludes it from slot totals', () => {
+    const items = build({ ownedKnives: ['SIGNAL_CYAN', 'BLACKSTAR'] });
+    const blackstar = items.find((i) => i.id === 'BLACKSTAR')!;
+    expect(blackstar.worldRecord).toBe(true);
+    expect(blackstar.source).toBe('WORLD RECORD');
+
+    const progress = collectionProgress(items);
+    expect(progress.worldRecord).toEqual({ owned: 1, total: 1 });
+    // BLACKSTAR never inflates the ordinary knife completion totals.
+    expect(progress.karambit.total).toBe(KARAMBIT_SKINS.length - 1);
+    expect(progress.karambit.owned).toBe(1);
+  });
+
+  it('suppresses a requirement row that only restates the source', () => {
+    const items = build({ ownedDrops: [] });
+    const drop = items.find((i) => i.family === 'drop')!;
+    const rows = armoryDetailRows(drop);
+    expect(rows.some(([k]) => k === 'REQUIREMENT')).toBe(false);
+    expect(rows[0]).toEqual(['SOURCE', 'SIGNAL DROP']);
+
+    const mastery = items.find((i) => i.family === 'mastery')!;
+    expect(armoryDetailRows(mastery).some(([k]) => k === 'REQUIREMENT')).toBe(true);
   });
 
   it('keeps the two glove families explicitly distinct', () => {
