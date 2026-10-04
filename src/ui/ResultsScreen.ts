@@ -604,6 +604,20 @@ export class ResultsScreen {
     this.element.classList.add('hidden');
   }
 
+  /**
+   * Re-shows the CURRENT report without re-running the reveal or any of the
+   * finish pipeline. Used when a WATCH REPLAY session exits back to the report
+   * it came from, so the player sees the same report rather than a blank menu.
+   */
+  public show(): void {
+    this.clearTimeouts();
+    this.element.classList.remove('hidden');
+    this.statsGrid.style.opacity = '1';
+    const rankGroup = this.element.querySelector('#res-rank-group') as HTMLElement | null;
+    if (rankGroup) rankGroup.style.opacity = '1';
+    this.actionsRow.style.opacity = '1';
+  }
+
   private clearTimeouts(): void {
     for (const t of this.revealTimeouts) {
       clearTimeout(t);

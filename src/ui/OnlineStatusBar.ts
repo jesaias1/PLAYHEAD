@@ -60,8 +60,12 @@ export class OnlineStatusBar {
     this.tagElem.textContent = tag;
     // The detail is available on hover rather than printed inline: this is a
     // restrained global indicator, not a diagnostics panel.
-    this.element.title = detail;
-    const offline = tag.includes('OFFLINE') || tag.includes('PENDING');
+    const failed = tag.includes('ERROR');
+    const pending = tag.includes('PENDING');
+    const offline = tag.includes('OFFLINE') || pending || failed;
+    this.element.title = failed ? '[NET] REQUEST FAILED // RETRY OR SIGN IN'
+      : pending ? '[NET] SYNC PENDING // RETRY'
+      : offline ? '[NET] OFFLINE // RETRY CONNECTION' : detail;
     this.tagElem.classList.toggle('online-status-offline', offline);
     // Only offer retry when there is something to retry.
     this.retryBtn.classList.toggle('hidden', !offline);

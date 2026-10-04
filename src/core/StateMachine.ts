@@ -46,7 +46,7 @@ export class StateMachine {
 
     const prevState = this.currentState;
     this.currentState = newState;
-    console.log(`[StateMachine] ${prevState} -> ${newState}`);
+    if ((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV) console.log(`[StateMachine] ${prevState} -> ${newState}`);
 
     for (const listener of this.listeners) {
       try {
@@ -99,7 +99,14 @@ export class StateMachine {
         return to === GameState.PLAYING || to === GameState.COUNTDOWN || to === GameState.IMPORT || to === GameState.MOVEMENT_LAB;
 
       case GameState.FINISHED:
-        return to === GameState.REPLAY || to === GameState.COUNTDOWN || to === GameState.IMPORT;
+        // RETRY: a fresh attempt on the same track restarts gameplay directly.
+        // (The finish pipeline that produced the report does not re-run.)
+        return (
+          to === GameState.PLAYING ||
+          to === GameState.REPLAY ||
+          to === GameState.COUNTDOWN ||
+          to === GameState.IMPORT
+        );
 
       case GameState.REPLAY:
         return to === GameState.FINISHED || to === GameState.COUNTDOWN || to === GameState.IMPORT;

@@ -265,6 +265,14 @@ export class Game {
   private replayMode: 'NONE' | 'POV' | 'LEGACY' = 'NONE';
   /** Glove previewed during POV replay; never the player's equipped glove. */
   private replayGlovePreviewId: string | null = null;
+  /**
+   * State to return to when a POV replay ends.
+   *
+   * A replay opened from the Run Report must return to that report, not dump the
+   * player on the main menu. A replay opened from a leaderboard entry (no local
+   * results to return to) ends at IMPORT. Set on ENTER, read on EXIT.
+   */
+  private replayReturnState: GameState = GameState.IMPORT;
   private lastFinalizedReplay: PovReplay | null = null;
   public ui: UIManager;
   public devOverlay: DevOverlay;
@@ -539,9 +547,7 @@ export class Game {
     };
 
     // Replay finished
-    this.replayPlayer.onCompleteCallback = () => {
-      this.stateMachine.transitionTo(GameState.FINISHED);
-    };
+    this.replayPlayer.onCompleteCallback = () => this.exitPovReplay();
 
     // Movement feedback (PRESENTATION ONLY). Detection/classification lives in
     // MovementFeedbackController; this wiring decides how each moment is shown.
@@ -759,6 +765,13 @@ export class Game {
           break;
 
         case GameState.FINISHED:
+          // Returning from a replay opened by the Run Report: re-show the report
+          // that is already built. Everything that produced it (PB save, drops,
+          // world submission) already ran, so re-running it would duplicate work.
+          if (prevState === GameState.REPLAY) {
+            this.returnFromReplayToReport();
+            break;
+          }
           this.cameraController.unlock();
           this.replayRecorder.stop();
           this.finishPovRecording();
@@ -885,6 +898,10 @@ export class Game {
               }
             }
 
+            // A WATCH REPLAY button is only meaningful when a first-person
+            // replay actually exists. Never offer an action that silently does
+            // nothing (custom audio and non-canonical maps record no replay).
+            this.ui.resultsScreen.setReplayAvailable(this.hasLocalReplay());
             this.ui.resultsScreen.showResults(
               results,
               this.currentTrack.seed,
@@ -926,6 +943,8 @@ export class Game {
         case GameState.REPLAY:
           this.ui.hideAllScreens();
           this.cameraController.unlock();
+          // Local WATCH returns to its existing report; leaderboard WATCH returns to the menu.
+          this.replayReturnState = prevState === GameState.FINISHED ? GameState.FINISHED : GameState.IMPORT;
           if (this.replayMode === 'POV') {
             // First-person replay: audio is seeked to the recorded song time by
             // updatePovReplay, so it must not be restarted from 0 here.
@@ -1974,6 +1993,16 @@ export class Game {
       return;
     }
 
+    // A restart without a loaded track has nothing to restart. Fall back to the
+    // menu instead of stranding the machine in FINISHED with a frozen run
+    // (prepareTrackForRun returns early on an empty route, so the restart would
+    // otherwise silently do nothing).
+    if (!this.currentTrack || !this.currentAnalysis || this.currentTrack.route.length === 0) {
+      this.isQuickRestarting = false;
+      this.returnToImport();
+      return;
+    }
+
     this.isQuickRestarting = true;
     this.audioEngine.stop();
     this.prepareTrackForRun();
@@ -1990,6 +2019,10 @@ export class Game {
     this.isFinished = false;
     this.audioEngine.play(0);
     this.replayRecorder.start();
+    // A RETRY is a fresh attempt: begin a new POV recording so this run has its
+    // own WATCH payload. The PLAYING transition deliberately skips recording
+    // when isQuickRestarting is set, so the restart must start it here.
+    this.startPovRecording();
     this.ghostManager.start();
     this.cameraController.lock();
 
@@ -2273,9 +2306,10 @@ export class Game {
           if (now - this.lastPauseTime < 250) return;
           this.resumeGame();
         } else if (this.stateMachine.is(GameState.REPLAY)) {
-          this.replayPlayer.stop();
-          this.audioEngine.stop();
-          this.stateMachine.transitionTo(GameState.FINISHED);
+          // ESC is the same exit as the overlay button: release the replay
+          // (audio, glove/knife preview, ghost) instead of a partial transition
+          // that would leave those resources held while the report is shown.
+          this.exitPovReplay();
         }
       } else if (e.code === 'KeyF' && !e.repeat) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
@@ -4037,6 +4071,10 @@ export class Game {
     // A fresh attempt: any previous run's upload must not leak into this run's
     // submission.
     this.pendingReplayUpload = null;
+    // A RETRY must not leave the previous attempt's replay attached: it would
+    // advertise a WATCH button for a run that did not produce a replay, and
+    // attach stale replay metadata to the new submission.
+    this.lastFinalizedReplay = null;
     const identity = this.currentMapIdentity();
     if (!identity) {
       // Custom audio and non-canonical maps are not competitively replayable.
@@ -4694,9 +4732,33 @@ export class Game {
     return { ok: true, detail: 'PLAYING' };
   }
 
-  /** ESC / EXIT: leaves replay cleanly and restores pointer lock behaviour. */
+  /**
+   * FINISHED arrived FROM a replay: re-show the report that is ALREADY built.
+   * The finish pipeline (PB save, drops, world submission) ran once when the
+   * run first finished; re-running it here would duplicate all of it. Falls
+   * back to the menu only if the report's source data is genuinely gone.
+   */
+  private returnFromReplayToReport(): void {
+    if (this.currentAnalysis && this.currentTrack) {
+      this.ui.resultsScreen.show();
+    } else {
+      this.stateMachine.transitionTo(GameState.IMPORT);
+    }
+  }
+
+  /**
+   * ESC / EXIT: leaves replay cleanly and restores pointer lock behaviour.
+   *
+   * Single teardown for BOTH replay modes. Releases the replay audio and any
+   * ephemeral knife/glove preview, then returns to the Run Report when the
+   * replay was opened from it, or the main menu otherwise.
+   */
   public exitPovReplay(): void {
     this.replayMode = 'NONE';
+    // Both replay modes own the audio; stopping here is what prevents the
+    // recorded song from leaking back into the menu or the results screen.
+    this.audioEngine.stop();
+    this.replayPlayer.stop();
     this.povPlayer.unload();
     this.ui.replayOverlay.hide();
     this.clearGhostRace();
@@ -4711,7 +4773,10 @@ export class Game {
       replaySkin.setReplaySkinPreview(null);
       this.viewmodelController.refreshRenderedSkin();
     }
-    this.stateMachine.transitionTo(GameState.IMPORT);
+    // FINISHED restores the existing report without submitting the run again.
+    this.stateMachine.transitionTo(
+      this.replayReturnState === GameState.FINISHED ? GameState.FINISHED : GameState.IMPORT
+    );
   }
 
   /** Per-frame POV replay presentation. */
