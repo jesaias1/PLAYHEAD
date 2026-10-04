@@ -223,6 +223,25 @@ async function main() {
       hidden: finished.replayBtnHidden
     });
     await page.screenshot({ path: path.join(evidenceDir, 'rc-03-results.png') });
+    for (const [width, height] of [[1280,720], [1440,900], [1920,1080]]) {
+      await page.setViewport({width,height});
+      const top = await page.evaluate(() => {
+        const screen = window.game.ui.resultsScreen.element;
+        screen.scrollTop = 0;
+        return screen.querySelector('.results-header').getBoundingClientRect().top;
+      });
+      record('K.layout', `results title reachable at ${width}x${height}`, top >= 0, top);
+      await page.screenshot({path:path.join(evidenceDir, `rc-results-top-${width}.png`)});
+      const bottom = await page.evaluate(() => {
+        const actions = window.game.ui.resultsScreen.element.querySelector('.results-actions');
+        actions.scrollIntoView({block:'end'});
+        return actions.getBoundingClientRect().bottom;
+      });
+      record('K.layout', `results actions reachable at ${width}x${height}`, bottom <= height + 1, bottom);
+      await page.screenshot({path:path.join(evidenceDir, `rc-results-actions-${width}.png`)});
+    }
+    await page.setViewport({width:1440,height:900});
+
 
     // ---- C. WATCH -> ESC -> SAME report ----------------------------------
     await page.click('#btn-res-replay');

@@ -2056,10 +2056,15 @@ button.secondary:hover {
    6. RESULTS SCREEN (Staged Editorial Reveal)
    ========================================================================== */
 
+/* Auto margins center short reports without making tall reports scroll above the viewport. */
+.results-screen { justify-content: flex-start; }
+
 .results-container {
   max-width: 780px;
   width: 100%;
   text-align: left;
+  flex-shrink: 0;
+  margin-block: auto;
 }
 
 .results-header {
