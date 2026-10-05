@@ -22,6 +22,13 @@ import {
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
+import { SignalPackCatalog } from '../audio/SignalPackCatalog';
+import {
+  describeNextRankTarget,
+  nextSignalAfter,
+  nextRankTarget,
+  pbImprovement
+} from '../mastery/SignalPackMastery';
 
 export class ResultsScreen {
   public element: HTMLElement;
@@ -65,16 +72,25 @@ export class ResultsScreen {
   private ghostRaceLabelElem: HTMLElement;
   private ghostRaceTimeElem: HTMLElement;
   private ghostRaceDeltaElem: HTMLElement;
+  private nextElem: HTMLElement;
+  private nextLineElem: HTMLElement;
+  private nextSignalBtn: HTMLButtonElement;
+  private retryPbBtn: HTMLButtonElement;
   private activeCandidate: LeaderboardSubmissionCandidate | null = null;
 
   private onReplayCallback?: () => void;
   private onAgainCallback?: () => void;
   private onNewTrackCallback?: () => void;
   private onArmoryCallback?: () => void;
+  private onRetryVsPbCallback?: () => Promise<{ ok: boolean; detail: string }>;
+  private onNextSignalCallback?: (trackId: string) => Promise<{ ok: boolean; detail: string }>;
 
   private revealTimeouts: number[] = [];
   /** Whether the CURRENT submission belongs to a registered account. */
   private registeredAccount = true;
+  /** True only when this run was the FIRST Diamond on the current official track. */
+  private lastDiamondMastered = false;
+  private navigationBusy = false;
 
   constructor() {
     this.element = document.createElement('div');
@@ -178,8 +194,17 @@ export class ResultsScreen {
 
         <div class="leaderboard-feedback-bar hidden" id="res-leaderboard-feedback"></div>
 
+        <div class="results-next hidden" id="res-next" aria-live="polite">
+          <div class="results-next-copy">
+            <div class="results-next-kicker" id="res-next-kicker">NEXT TARGET</div>
+            <div class="results-next-line" id="res-next-line">—</div>
+          </div>
+          <button class="btn-preview hidden" id="btn-res-next" type="button">[ NEXT SIGNAL ]</button>
+        </div>
+
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
+          <button class="btn-preview hidden" id="btn-res-retry-pb" title="Retry with your stored PB ghost armed.">[ RETRY VS PB ]</button>
           <button class="btn-preview hidden" id="btn-res-leaderboard">[ ADD TO LEADERBOARD ]</button>
           <button class="btn-preview" id="btn-res-replay" title="Watch your run back in first person.">[ WATCH REPLAY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
@@ -227,6 +252,21 @@ export class ResultsScreen {
     this.ghostRaceLabelElem = this.element.querySelector('#res-ghost-race-label') as HTMLElement;
     this.ghostRaceTimeElem = this.element.querySelector('#res-ghost-race-time') as HTMLElement;
     this.ghostRaceDeltaElem = this.element.querySelector('#res-ghost-race-delta') as HTMLElement;
+    this.nextElem = this.element.querySelector('#res-next') as HTMLElement;
+    this.nextLineElem = this.element.querySelector('#res-next-line') as HTMLElement;
+    this.nextSignalBtn = this.element.querySelector('#btn-res-next') as HTMLButtonElement;
+    this.retryPbBtn = this.element.querySelector('#btn-res-retry-pb') as HTMLButtonElement;
+
+    // Keep time, PB and local position primary; run diagnostics remain available.
+    const details = document.createElement('details');
+    details.className = 'results-run-data';
+    details.innerHTML = '<summary>RUN DATA</summary><div class="results-grid"></div>';
+    const dataGrid = details.querySelector('div')!;
+    Array.from(this.statsGrid.children).forEach((card, index) => {
+      if (index !== 0 && index !== 3 && index !== 4) dataGrid.appendChild(card);
+    });
+    this.statsGrid.after(details);
+    this.statsGrid.before(this.nextElem);
 
     this.initEvents();
   }
@@ -236,11 +276,15 @@ export class ResultsScreen {
     onAgain: () => void;
     onNewTrack: () => void;
     onArmory?: () => void;
+    onRetryVsPb?: () => Promise<{ ok: boolean; detail: string }>;
+    onNextSignal?: (trackId: string) => Promise<{ ok: boolean; detail: string }>;
   }): void {
     this.onReplayCallback = callbacks.onReplay;
     this.onAgainCallback = callbacks.onAgain;
     this.onNewTrackCallback = callbacks.onNewTrack;
     this.onArmoryCallback = callbacks.onArmory;
+    this.onRetryVsPbCallback = callbacks.onRetryVsPb;
+    this.onNextSignalCallback = callbacks.onNextSignal;
   }
 
   public showResults(
@@ -280,12 +324,31 @@ export class ResultsScreen {
     masteryInfo?: {
       progress: MasteryProgressDelta[];
       gloves: MasteryGloveId[];
+    },
+    /**
+     * CORE LOOP: authoritative context captured BEFORE the run was recorded.
+     * `priorPbTime` is the PB that existed before this run (seconds, or null when
+     * there was none), `diamondJustMastered` is the true first-Diamond moment and
+     * `pbGhostAvailable` says whether a compatible stored replay can be raced.
+     */
+    coreLoopInfo?: {
+      priorPbTime: number | null;
+      diamondJustMastered: boolean;
+      pbGhostAvailable: boolean;
+      pbGhostLabel?: string | null;
     }
   ): void {
     this.clearTimeouts();
+    this.navigationBusy = false;
+    this.againBtn.disabled = false;
+    this.newTrackBtn.disabled = false;
 
     this.trackTitleElem.textContent = trackTitle.toUpperCase();
-    const isNewPersonalBest = !overtimeInfo?.isOvertime && ghostInfo?.isNewPB === true;
+    const isNewPersonalBest = !overtimeInfo?.isOvertime && (
+      officialInfo?.isOfficial && coreLoopInfo
+        ? results.rank !== 'UNRANKED' && (coreLoopInfo.priorPbTime === null || results.completionTime < coreLoopInfo.priorPbTime)
+        : ghostInfo?.isNewPB === true
+    );
 
     // Personal Best and Local #1 Display
     const recSummary = officialInfo?.trackId
@@ -307,11 +370,17 @@ export class ResultsScreen {
       ? formatTime(localFirstTime)
       : '—';
 
-    if (officialInfo?.isNewLocalFirst && !overtimeInfo?.isOvertime) {
-      this.pbStatusElem.textContent = '[LOCAL #1] NEW LOCAL FIRST RECORD';
+    if (isNewPersonalBest) {
+      // Restrained PB delta: only when a previous PB actually existed. A first
+      // PB reads as a NEW PERSONAL BEST with no invented improvement number.
+      const prior = coreLoopInfo?.priorPbTime ?? null;
+      const delta = pbImprovement(prior, results.completionTime);
+      this.pbStatusElem.textContent = delta !== null && delta > 0.0005
+        ? `[PB] NEW PERSONAL BEST // -${delta.toFixed(3)}s`
+        : '[PB] NEW PERSONAL BEST';
       this.pbStatusElem.classList.remove('hidden');
-    } else if (isNewPersonalBest) {
-      this.pbStatusElem.textContent = '[PB] NEW PERSONAL BEST';
+    } else if (officialInfo?.isNewLocalFirst && !overtimeInfo?.isOvertime) {
+      this.pbStatusElem.textContent = '[LOCAL #1] NEW LOCAL FIRST RECORD';
       this.pbStatusElem.classList.remove('hidden');
     } else {
       this.pbStatusElem.classList.add('hidden');
@@ -366,6 +435,8 @@ export class ResultsScreen {
     if (progressionInfo?.registered !== undefined) {
       this.registeredAccount = progressionInfo.registered;
     }
+    this.lastDiamondMastered = coreLoopInfo?.diamondJustMastered === true;
+    if (this.lastDiamondMastered) this.rankSubElem.textContent = '// DIAMOND ACHIEVED // SIGNAL MASTERED';
     this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank, customRewardInfo);
 
     // Leaderboard Action Setup
@@ -423,6 +494,17 @@ export class ResultsScreen {
     // MASTERY: progress lines and a restrained unlock reveal.
     this.renderMasteryInfo(masteryInfo);
 
+    // CORE LOOP: one or two authoritative next targets, the optional PB duel
+    // action and the deterministic next official signal. Called last so it can
+    // read the already-rendered PB / ghost state.
+    this.renderCoreLoop(
+      results,
+      officialInfo,
+      overtimeInfo,
+      coreLoopInfo,
+      isNewPersonalBest
+    );
+
     // Staged Quick Reveal Sequence (Total ~700ms)
     this.element.classList.remove('hidden');
 
@@ -463,7 +545,8 @@ export class ResultsScreen {
       eligible: boolean;
       statusMessage: string;
       reason?: 'TOO_SHORT' | 'ALREADY_CLAIMED';
-    }
+    },
+    serverAcquired = false
   ): void {
     const skinSystem = KarambitSkinSystem.getInstance();
     const pending = skinSystem.getPendingDropCount();
@@ -490,8 +573,13 @@ export class ResultsScreen {
     if (skinSystem.hasStructuredDropPending()) {
       const stored = skinSystem.getUnopenedDropIds().length;
       this.signalDropPanel.classList.remove('hidden');
-      this.signalDropStatus.textContent = newlyAwardedCount > 0 ? 'DIAMOND ACHIEVED' : 'STORED SIGNAL READY';
-      this.signalDropReward.textContent = newlyAwardedCount > 0 ? '[ARM] SIGNAL DROP ACQUIRED' : 'UNOPENED SIGNAL DROP';
+      if (serverAcquired) {
+        this.signalDropStatus.textContent = 'FIRST DIAMOND // SIGNAL DROP ACQUIRED';
+        this.signalDropReward.textContent = '[ARM] SIGNAL DROP ACQUIRED';
+      } else {
+        this.signalDropStatus.textContent = 'STORED SIGNAL READY';
+        this.signalDropReward.textContent = 'UNOPENED SIGNAL DROP';
+      }
       this.signalDropCount.textContent = `${stored.toString().padStart(2, '0')} STORED SIGNAL${stored === 1 ? '' : 'S'}`;
       this.signalDropOpenBtn.textContent = 'OPEN IN ARMORY';
       this.signalDropOpenBtn.disabled = false;
@@ -501,7 +589,7 @@ export class ResultsScreen {
     if (pending <= 0) {
       // FIRST DIAMOND but NOT a registered account: the server will not store a
       // drop, so never silently promise a minted one. Tell the player plainly.
-      if (newlyAwardedCount > 0 && this.registeredAccount === false) {
+      if ((newlyAwardedCount > 0 || this.lastDiamondMastered) && this.registeredAccount === false) {
         this.signalDropPanel.classList.remove('hidden');
         this.signalDropStatus.textContent = 'DIAMOND ACHIEVED';
         this.signalDropReward.textContent = 'SIGN IN TO STORE DROP';
@@ -546,7 +634,7 @@ export class ResultsScreen {
    * instead of waiting for the next results visit.
    */
   public refreshSignalDropPanel(acquired = false): void {
-    this.prepareSignalDropPanel(acquired ? 1 : 0);
+    this.prepareSignalDropPanel(acquired ? 1 : 0, undefined, undefined, acquired);
   }
 
   private openSignalDrop(): void {
@@ -625,6 +713,113 @@ export class ResultsScreen {
     this.revealTimeouts = [];
   }
 
+  /**
+   * CORE LOOP: the run report must always answer "what next?" without becoming a
+   * spreadsheet. Shows AT MOST one rank/PB target line and, when it is a real
+   * official signal, the deterministic next official signal with an EXECUTE
+   * action that enters it through the existing official load path.
+   *
+   * `RETRY VS PB` is offered only when all three hold: an official track, a
+   * stored PB with a compatible recorded replay, and a normal (non-overtime)
+   * run. An explicitly chosen RETRY VS PB arms the ghost; a normal RETRY never
+   * does, so the ghost setting is respected.
+   */
+  private renderCoreLoop(
+    results: RunResults,
+    officialInfo?: { isOfficial: boolean; trackId: string; isNewLocalFirst?: boolean },
+    overtimeInfo?: { isOvertime: boolean; overtimeDuration: number },
+    coreLoopInfo?: { priorPbTime: number | null; diamondJustMastered: boolean; pbGhostAvailable: boolean; pbGhostLabel?: string | null },
+    isNewPersonalBest = false
+  ): void {
+    const isOvertime = overtimeInfo?.isOvertime === true;
+    const trackId = officialInfo?.trackId ?? null;
+
+    // NEXT TARGET: the next rank above this run, honest about time vs clean-run.
+    const target = nextRankTarget(
+      results.targetTime,
+      results.rank,
+      results.completionTime,
+      results.fallsCount + results.restartsCount
+    );
+
+    const lines: string[] = [];
+    if (target) {
+      lines.push(describeNextRankTarget(target));
+    } else {
+      const best = coreLoopInfo?.priorPbTime;
+      lines.push(!isNewPersonalBest && best != null && results.completionTime > best
+        ? `${(results.completionTime - best).toFixed(3)}s TO PB`
+        : 'CHASE YOUR PB // RACE THE SIGNAL');
+    }
+
+    // Only offer the deterministic next official signal for official runs.
+    let nextSignalId: string | null = null;
+    if (trackId && SignalPackCatalog.getTrackById(trackId)) {
+      // Authoritative ranks, exactly the ones mastery derives from.
+      const ranks = masteryGloveSystem.getProgress().ranks;
+      const next = nextSignalAfter(SignalPackCatalog.getTracks(), trackId, ranks);
+      if (next) {
+        nextSignalId = next.id;
+        lines.push(`NEXT SIGNAL // ${next.title}`);
+      }
+    }
+
+    if (lines.length === 0) {
+      this.nextElem.classList.add('hidden');
+    } else {
+      this.nextElem.classList.remove('hidden');
+      // At most two lines: a PB/rank target plus the journey step.
+      this.nextLineElem.innerHTML = lines
+        .slice(0, 2)
+        .map((l) => `<div class="results-next-item">${this.escape(l)}</div>`)
+        .join('');
+    }
+
+    if (nextSignalId && !isOvertime) {
+      this.nextSignalBtn.classList.remove('hidden');
+      this.nextSignalBtn.disabled = false;
+      this.nextSignalBtn.dataset.trackId = nextSignalId;
+      this.nextSignalBtn.textContent = '[ NEXT SIGNAL ]';
+    } else {
+      this.nextSignalBtn.classList.add('hidden');
+      delete this.nextSignalBtn.dataset.trackId;
+    }
+
+    // OPTIONAL PB DUEL: an explicit action, never the default RETRY.
+    const pbGhostAvailable = !!coreLoopInfo?.pbGhostAvailable;
+    const canRetryVsPb = !!trackId && pbGhostAvailable && !isOvertime;
+    this.retryPbBtn.classList.toggle('hidden', !canRetryVsPb);
+    this.retryPbBtn.disabled = !canRetryVsPb;
+    this.retryPbBtn.textContent = coreLoopInfo?.pbGhostLabel === 'BEST RECORDED GHOST'
+      ? '[ RACE BEST RECORDED GHOST ]' : '[ RETRY VS PB ]';
+    this.retryPbBtn.title = 'Retry with the compatible stored replay.';
+  }
+
+  private async navigateRun(action: (() => Promise<{ ok: boolean; detail: string }>) | undefined): Promise<void> {
+    if (!action || this.navigationBusy) return;
+    this.navigationBusy = true;
+    [this.againBtn, this.retryPbBtn, this.nextSignalBtn, this.newTrackBtn].forEach((button) => button.disabled = true);
+    try {
+      const result = await action();
+      if (!result.ok) {
+        this.nextLineElem.textContent = result.detail;
+        this.nextElem.classList.remove('hidden');
+      }
+    } catch {
+      this.nextLineElem.textContent = 'SIGNAL UNAVAILABLE // RETRY';
+      this.nextElem.classList.remove('hidden');
+    } finally {
+      this.navigationBusy = false;
+      [this.againBtn, this.retryPbBtn, this.nextSignalBtn, this.newTrackBtn].forEach((button) => button.disabled = false);
+    }
+  }
+
+  private escape(value: string): string {
+    return value.replace(/[&<>"']/g, (c) =>
+      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
+    );
+  }
+
   private savePersonalBest(seed: number, results: RunResults): void {
     try {
       const key = `trackrun_pb_${seedToHex(seed)}`;
@@ -644,6 +839,11 @@ export class ResultsScreen {
 
   private initEvents(): void {
     this.againBtn.addEventListener('click', () => this.onAgainCallback?.());
+    this.retryPbBtn.addEventListener('click', () => void this.navigateRun(this.onRetryVsPbCallback));
+    this.nextSignalBtn.addEventListener('click', () => {
+      const trackId = this.nextSignalBtn.dataset.trackId;
+      if (trackId) void this.navigateRun(this.onNextSignalCallback ? () => this.onNextSignalCallback!(trackId) : undefined);
+    });
     this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.newTrackBtn.addEventListener('click', () => this.onNewTrackCallback?.());
     this.signalDropOpenBtn.addEventListener('click', () => this.openSignalDrop());
@@ -679,6 +879,7 @@ export class ResultsScreen {
     this.masteryElem.classList.remove('hidden');
 
     this.masteryProgressElem.innerHTML = masteryInfo.progress
+      .filter((delta, index, all) => delta.label === 'SIGNAL MASTERY' || index === all.length - 1)
       .map(
         (d) =>
           `<div class="results-mastery-line"><span>${d.label}</span>` +

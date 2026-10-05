@@ -35,10 +35,18 @@ function pad2(n: number): string {
 import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
 import { createProgramFingerprint } from './SignalIdentity';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
+import { PresetLevelCache } from '../audio/PresetLevelCache';
 import { formatTime } from '../utils/math';
 import { RacePanel } from './RacePanel';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { OnlineStatusBar } from './OnlineStatusBar';
+import {
+  describeNextRankTarget,
+  journeyBand,
+  nextPackObjective,
+  nextRankTarget,
+  rankValue
+} from '../mastery/SignalPackMastery';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { MenuBackdrop } from './MenuBackdrop';
 import { ArmoryPreview } from './ArmoryPreview';
@@ -357,6 +365,10 @@ export class ImportScreen {
                 <div class="showcase-record-pill local-first">
                   <span class="record-label">LOCAL #1</span>
                   <span class="record-val" id="showcase-local-first">—</span>
+                </div>
+                <div class="showcase-record-pill next-tier">
+                  <span class="record-label">NEXT TIER</span>
+                  <span class="record-val" id="showcase-next-tier">—</span>
                 </div>
               </div>
 
@@ -708,6 +720,11 @@ export class ImportScreen {
       const summary = LeaderboardManager.getInstance().getRecordSummary(t.id);
       const bestRank = summary.bestRank;
       const rankClass = bestRank ? `rank-${bestRank.toLowerCase()}` : '';
+      const mastered = rankValue(bestRank) >= 4;
+      const officialIndex = this.catalog.filter((c) => c.id !== 'tutorial_00').indexOf(t);
+      const band = isTutorial
+        ? null
+        : journeyBand(Math.max(0, officialIndex), Math.max(1, this.catalog.filter((track) => track.id !== 'tutorial_00').length));
 
       const item = document.createElement('button');
       item.type = 'button';
@@ -722,7 +739,7 @@ export class ImportScreen {
       const tier = Math.max(1, Math.min(5, Math.round(t.difficulty)));
       const pips = '<i class="on"></i>'.repeat(tier) + '<i></i>'.repeat(5 - tier);
       item.style.setProperty('--row-accent', t.accentColor);
-      const recommended = t.id === 'track_1_signal_drift';
+      const recommended = t.id === this.catalog.find((track) => track.id !== 'tutorial_00')?.id;
       item.innerHTML = `
         <div class="strip-item-inner">
           <span class="strip-item-index">${displayIndex}</span>
@@ -731,7 +748,9 @@ export class ImportScreen {
             <div class="strip-item-header">
               <span class="strip-item-num">${isTutorial ? 'CALIBRATION' : t.difficultyLabel}</span>
               ${recommended ? '<span class="strip-item-recommended">RECOMMENDED FIRST SIGNAL</span>' : ''}
+              ${band ? `<span class="strip-item-band">${band}</span>` : ''}
               <span class="strip-item-pips" aria-label="Tier ${tier}">${pips}</span>
+              ${mastered ? '<span class="strip-item-mastered">MASTERED</span>' : ''}
               ${bestRank ? `<span class="strip-item-rank ${rankClass}">${bestRank}</span>` : ''}
             </div>
             <div class="strip-signal-bars" aria-hidden="true"></div>
@@ -814,6 +833,17 @@ export class ImportScreen {
       local1Elem.textContent = summary.localFirstTime !== null ? formatTime(summary.localFirstTime) : '—';
     }
 
+    // NEXT TIER: the authoritative next-rank threshold and the honest delta, or
+    // the clean-run gate when the time is already fast enough. MASTERED once
+    // Diamond is reached, so the card itself states the accomplishment.
+    this.renderNextTier(t.id, PresetLevelCache.get(t.id)?.analysis.duration ?? null);
+    if (t.id !== 'tutorial_00' && !PresetLevelCache.get(t.id)) {
+      // Request only the selected canonical signal and reuse its cache for play.
+      void PresetLevelCache.loadPreset(t.id).then((level) => {
+        if (this.selectedTrack.id === t.id) this.renderNextTier(t.id, level?.analysis.duration ?? null);
+      });
+    }
+
     // The whole Signal Pack deck takes the selected track's palette.
     this.showcasePanel.style.setProperty('--track-accent', t.accentColor);
     const slotElem = this.element.querySelector('#showcase-slot') as HTMLElement | null;
@@ -851,6 +881,28 @@ export class ImportScreen {
     container.replaceChildren(fragment);
   }
 
+  private renderNextTier(trackId: string, duration: number | null): void {
+    const element = this.element.querySelector('#showcase-next-tier') as HTMLElement | null;
+    if (!element) return;
+    const summary = LeaderboardManager.getInstance().getRecordSummary(trackId);
+    element.className = 'record-val';
+    if (rankValue(summary.bestRank) >= 4) {
+      element.textContent = 'MASTERED';
+      element.classList.add('mastered');
+      return;
+    }
+    if (duration === null) {
+      element.textContent = 'TARGET LOADS WITH SIGNAL';
+      return;
+    }
+    const target = nextRankTarget(duration, summary.bestRank, summary.pbTime ?? Number.POSITIVE_INFINITY);
+    if (!target) { element.textContent = 'TARGET UNAVAILABLE'; return; }
+    const need = target.cleanRunRequired ? describeNextRankTarget(target)
+      : summary.pbTime !== null ? `NEED -${target.deltaSeconds.toFixed(3)}s` : 'FIRST CLEAR';
+    element.textContent = `${target.rank} ${formatTime(target.timeSeconds)} // ${need}`;
+    element.classList.add(`rank-${target.rank.toLowerCase()}`);
+  }
+
   /**
    * Compact global mastery progress for the Signal Pack.
    *
@@ -871,13 +923,21 @@ export class ImportScreen {
       ['GOLD+', s.goldPlus, 'gold'],
       ['DIAMOND', s.diamond, 'diamond']
     ];
-    this.showcaseMasteryStripElem.innerHTML = parts
+    const chips = parts
       .map(
         ([label, n, cls]) =>
           `<span class="showcase-mastery-chip ${cls}"><span>${label}</span><b>${pad2(n)}<small>/${pad2(s.total)}</small></b>` +
           `<i style="--fill:${s.total > 0 ? n / s.total : 0}"></i></span>`
       )
       .join('');
+    // Deterministic next objective over the canonical catalog order. No locks,
+    // no recommendation engine, no separate progression page.
+    const objective = nextPackObjective(
+      this.catalog.map((t) => ({ id: t.id, title: t.title })),
+      masteryGloveSystem.getProgress().ranks
+    );
+    this.showcaseMasteryStripElem.innerHTML =
+      chips + `<div class="showcase-mastery-objective">${objective.label}</div>`;
   }
 
   // =========================================================================

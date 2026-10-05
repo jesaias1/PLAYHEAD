@@ -47,6 +47,12 @@ export interface LeaderboardView {
   entries: LeaderboardEntry[];
   /** The requesting player's own best, if any. */
   you: { timeUs: number; position: number | null; displayName: string } | null;
+  /**
+   * The run ranked directly above the player, when the player's position is
+   * known and is not already #1. A cheap, honest competitive target taken from
+   * the same fetched page — no extra query.
+   */
+  nextAbove: LeaderboardEntry | null;
   /** True when the backend could not be reached; entries must not be faked. */
   offline: boolean;
 }
@@ -115,7 +121,7 @@ export class LeaderboardService {
     limit = 25
   ): Promise<LeaderboardView> {
     const client = this.onlineClient.getClient();
-    const empty: LeaderboardView = { trackId, entries: [], you: null, offline: true };
+    const empty: LeaderboardView = { trackId, entries: [], you: null, nextAbove: null, offline: true };
     if (!client) return empty;
 
     try {
@@ -174,7 +180,14 @@ export class LeaderboardService {
         }
       }
 
-      return { trackId, entries, you, offline: false };
+      // NEXT ABOVE YOU: derived from the SAME page, only when the player's own
+      // position is known and they are not already #1. Never a second query.
+      const nextAbove =
+        you && you.position !== null && you.position > 1
+          ? entries.find((e) => e.rankPosition === you.position! - 1) ?? null
+          : null;
+
+      return { trackId, entries, you, nextAbove, offline: false };
     } catch {
       this.onlineClient.setStatus('ERROR');
       return empty;

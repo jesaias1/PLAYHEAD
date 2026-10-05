@@ -103,6 +103,9 @@ export class StateMachine {
         // (The finish pipeline that produced the report does not re-run.)
         return (
           to === GameState.PLAYING ||
+          // Results actions load the next canonical signal or a verified PB
+          // trajectory directly, without returning through the import screen.
+          to === GameState.ANALYSING ||
           to === GameState.REPLAY ||
           to === GameState.COUNTDOWN ||
           to === GameState.IMPORT

@@ -525,8 +525,28 @@ export class Game {
           if (!r.ok) console.warn('[REPLAY]', r.detail);
         });
       },
-      onAgain: () => this.restartTrack(),
+      onAgain: () => {
+        this.clearGhostRace();
+        this.restartTrack();
+      },
       onNewTrack: () => this.returnToImport(),
+      onRetryVsPb: () => {
+        // Explicit PB duel: only THIS action arms a ghost. A plain RETRY never
+        // does, so the ghost toggle is respected.
+        const trackId = this.currentOfficialTrackId;
+        if (!trackId || this.friendRaceWorld) return Promise.resolve({ ok: false, detail: 'PB DUEL UNAVAILABLE' });
+        return this.racePbGhostAndPlay(trackId);
+      },
+      onNextSignal: async (trackId) => {
+        // Direct next-signal entry through the existing official load path: no
+        // menu round-trip, no forcing a lock, deterministic catalog order.
+        const entry = MusicPack.getTrackById(trackId);
+        if (!entry || this.friendRaceWorld) return { ok: false, detail: 'NEXT SIGNAL UNAVAILABLE' };
+        await this.handleCatalogTrackSelected(entry);
+        if (!this.stateMachine.is(GameState.READY)) return { ok: false, detail: 'SIGNAL LOAD FAILED // RETRY' };
+        this.stateMachine.transitionTo(GameState.COUNTDOWN);
+        return { ok: true, detail: 'SIGNAL READY' };
+      },
       onArmory: () => {
         // Results -> ARMORY: land on the real drops inventory, then the player
         // opens the stored drop there (results never runs the full reveal).
@@ -823,8 +843,15 @@ export class Game {
             } | undefined;
             let masteryProgress: MasteryProgressDelta[] = [];
             let newlyEarnedGloves: MasteryGloveId[] = [];
+            // The authoritative PB BEFORE this run is what makes a "PB DELTA"
+            // honest. Read once, before recordOfficialRun can overwrite it.
+            let priorPbTime: number | null = null;
+            let diamondJustMastered = false;
 
             if (this.currentOfficialTrackId) {
+              priorPbTime = LeaderboardManager.getInstance().getRecordSummary(
+                this.currentOfficialTrackId
+              ).pbTime;
               const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
               const progressionKey = this.currentOfficialTrackId;
               // MASTERY: capture authoritative progress before and after the run
@@ -847,6 +874,10 @@ export class Game {
               const masteryAfter = masteryGloveSystem.evaluate();
               masteryProgress = masteryProgressDeltas(masteryBefore.summary, masteryAfter.summary);
               newlyEarnedGloves = newlySatisfiedGloves(masteryBefore, masteryAfter);
+              // First DIAMOND on this official track == the signal is mastered.
+              diamondJustMastered =
+                results.rank === 'DIAMOND' &&
+                masteryBefore.summary.diamond < masteryAfter.summary.diamond;
               if (newlyEarnedGloves.length > 0) {
                 // Recognise them so the Armory shows them without a reveal burst.
                 masteryGloveSystem.reconcile();
@@ -902,6 +933,16 @@ export class Game {
             // replay actually exists. Never offer an action that silently does
             // nothing (custom audio and non-canonical maps record no replay).
             this.ui.resultsScreen.setReplayAvailable(this.hasLocalReplay());
+            const pbGhost = this.resolvePbGhostAvailable(this.currentOfficialTrackId);
+            if (this.friendRaceWorld && this.currentOfficialTrackId) {
+              this.ui.importScreen.racePanel.setRunFeedback({
+                rank: results.rank,
+                time: results.completionTime,
+                priorPbTime,
+                isNewPb: !isOvertime && results.rank !== 'UNRANKED' && (priorPbTime === null || results.completionTime < priorPbTime),
+                diamondJustMastered
+              });
+            }
             this.ui.resultsScreen.showResults(
               results,
               this.currentTrack.seed,
@@ -921,7 +962,13 @@ export class Game {
               this.lastSubmissionState ?? { state: 'NOT_OFFICIAL' },
               masteryProgress.length > 0 || newlyEarnedGloves.length > 0
                 ? { progress: masteryProgress, gloves: newlyEarnedGloves }
-                : undefined
+                : undefined,
+              {
+                priorPbTime,
+                diamondJustMastered,
+                pbGhostAvailable: pbGhost.available,
+                pbGhostLabel: pbGhost.label
+              }
             );
 
             // WORLD SUBMISSION: runs independently of the results screen so the
@@ -3075,7 +3122,7 @@ export class Game {
     // The board is scoped to the canonical identity of the local map.
     const level = await PresetLevelCache.loadPreset(trackId);
     if (!level) {
-      panel.render({ trackId, entries: [], you: null, offline: true }, title);
+      panel.render({ trackId, entries: [], you: null, nextAbove: null, offline: true }, title);
       return;
     }
     const identity = computeMapIdentity(trackId, level.track, level.analysis);
@@ -3516,6 +3563,7 @@ export class Game {
   private async beginRaceFromSchedule(startAtMs: number): Promise<void> {
     if (this.raceActive || this.raceLoading) return;
     this.raceLoading = true;
+    this.ui.importScreen.racePanel.setRunFeedback(null);
     // FRIEND RACE and GHOST RACE are separate lifecycles. A live multiplayer
     // session must never inherit a recorded solo ghost.
     this.clearGhostRace();
@@ -4684,6 +4732,36 @@ export class Game {
 
   public hasLocalReplay(): boolean {
     return this.lastFinalizedReplay !== null && this.currentMapIdentity() !== null;
+  }
+
+  /**
+   * Whether a compatible stored replay exists for this track, so the results
+   * screen can offer RETRY VS PB. Delegates to the SAME authoritative ghost
+   * resolution the Signal Pack showcase uses — no second source of truth.
+   */
+  private resolvePbGhostAvailable(trackId: string | null): { available: boolean; label: string | null } {
+    if (!trackId) return { available: false, label: null };
+    return LeaderboardManager.getInstance().resolveGhostAvailability(
+      trackId,
+      this.canonicalFingerprintFor(trackId),
+      (finishTimeUs) => replayStorageService.getLocal(trackId, finishTimeUs) !== null
+    );
+  }
+
+  /**
+   * RETRY VS PB — the explicit PB duel chosen from the results screen.
+   *
+   * Loads the validated PB/BEST-recorded ghost through the existing flow and
+   * then starts the run in ONE step, so the report does not round-trip through
+   * the menu. It NEVER runs for a plain RETRY: only an explicit selection arms a
+   * ghost, so the player's ghost toggle is respected.
+   */
+  public async racePbGhostAndPlay(trackId: string): Promise<{ ok: boolean; detail: string }> {
+    const raced = await this.racePbGhost(trackId);
+    if (!raced.ok) return raced;
+    if (!this.stateMachine.is(GameState.READY)) return { ok: false, detail: 'SIGNAL LOAD FAILED // RETRY' };
+    this.stateMachine.transitionTo(GameState.COUNTDOWN);
+    return raced;
   }
 
   private async enterPovReplay(

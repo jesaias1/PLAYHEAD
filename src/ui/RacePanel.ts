@@ -22,6 +22,16 @@ import {
 } from '../online/RaceRoomService';
 import { formatRaceTime } from './RaceHud';
 import { accentColorFor } from '../online/RemoteGhostRenderer';
+import { pbImprovement } from '../mastery/SignalPackMastery';
+import type { RunResultRank } from '../player/PlayerStats';
+
+export interface RaceRunFeedback {
+  rank: RunResultRank;
+  time: number;
+  priorPbTime: number | null;
+  isNewPb: boolean;
+  diamondJustMastered: boolean;
+}
 
 export interface RaceCatalogEntry {
   id: string;
@@ -49,6 +59,7 @@ export class RacePanel {
   public element: HTMLElement;
 
   private callbacks: RacePanelCallbacks | null = null;
+  private runFeedback: RaceRunFeedback | null = null;
 
   private selectElem: HTMLSelectElement;
   private capacityElem: HTMLSelectElement;
@@ -659,6 +670,10 @@ export class RacePanel {
     this.rematchNoteElem.textContent = text;
   }
 
+  public setRunFeedback(feedback: RaceRunFeedback | null): void {
+    this.runFeedback = feedback;
+  }
+
   public renderResults(
     rows: readonly RaceResultRow[],
     myUserId: string | null,
@@ -700,6 +715,28 @@ export class RacePanel {
         `<span class="online-result-meta">${outcome}${gap ? ' ' + gap : ''}</span>`;
       this.resultsElem.appendChild(line);
     });
+
+    const me = rows.find((row) => row.userId === myUserId && !row.dnf && row.finishTimeUs !== null);
+    if (me && this.runFeedback) {
+      const feedback = document.createElement('div');
+      feedback.className = 'race-run-feedback';
+      const run = this.runFeedback;
+      const gain = pbImprovement(run.priorPbTime, run.time);
+      const pb = run.isNewPb
+        ? `NEW PB${gain !== null ? ` // -${gain.toFixed(3)}s` : ''}`
+        : `PB ${formatRaceTime(run.priorPbTime === null ? null : Math.round(run.priorPbTime * 1_000_000))}`;
+      feedback.textContent = `${run.rank} // ${pb}${run.diamondJustMastered ? ' // DIAMOND ACHIEVED // SIGNAL MASTERED' : ''}`;
+      this.resultsElem.appendChild(feedback);
+    }
+    if (me && finishers.length > 1) {
+      const rival = finishers.filter((row) => row.userId !== myUserId)
+        .sort((a, b) => Math.abs(a.finishTimeUs! - me.finishTimeUs!) - Math.abs(b.finishTimeUs! - me.finishTimeUs!))[0];
+      const difference = (me.finishTimeUs! - rival.finishTimeUs!) / 1_000_000;
+      const target = document.createElement('div');
+      target.className = 'race-rival-target';
+      target.textContent = `RIVAL // ${rival.displayName} // ${difference >= 0 ? '+' : '-'}${Math.abs(difference).toFixed(3)}s`;
+      this.resultsElem.appendChild(target);
+    }
 
     this.resultsElem.querySelectorAll<HTMLButtonElement>('.online-result-name-btn').forEach((btn) => {
       btn.addEventListener('click', () => {

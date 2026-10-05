@@ -182,13 +182,39 @@ export class LeaderboardPanel {
     }
 
     if (view.you) {
+      // NEXT ABOVE YOU: a cheap, honest competitive target derived from the same
+      // fetched page. RACE GHOST reuses the existing event-driven replay path.
+      const above = view.nextAbove;
+      const gapUs = above ? view.you.timeUs - above.timeUs : null;
+      const aboveBlock = above
+        ? `<div class="online-lb-above">` +
+          `<div class="online-lb-you-label">NEXT ABOVE YOU</div>` +
+          `<div class="online-lb-above-row">` +
+          `<span class="online-lb-above-name">#${above.rankPosition} ${this.escape(above.displayName)}</span>` +
+          `<span class="online-lb-above-time">${formatRaceTime(above.timeUs)}</span>` +
+          `<span class="online-lb-above-gap">${gapUs !== null ? '+' + formatRaceTime(Math.max(0, gapUs)) : ''}</span>` +
+          (
+            above.replayVersion !== null
+              ? `<button class="online-lb-race-btn" type="button" data-run-id="${this.escape(above.runId)}" title="Race this recorded run as a ghost.">RACE GHOST</button>`
+              : ''
+          ) +
+          `</div></div>`
+        : '';
       this.youElem.innerHTML =
         `<div class="online-lb-you-block">` +
         `<div class="online-lb-you-label">YOUR PB</div>` +
         `<div class="online-lb-you-time">${formatRaceTime(view.you.timeUs)}</div>` +
         `<div class="online-lb-you-label">WORLD POSITION</div>` +
         `<div class="online-lb-you-pos">${view.you.position === null ? 'UNRANKED' : '#' + view.you.position}</div>` +
-        `</div>`;
+        `</div>` +
+        aboveBlock;
+      // The NEXT-ABOVE RACE GHOST uses the SAME callback as the row buttons.
+      this.youElem.querySelectorAll<HTMLButtonElement>('.online-lb-race-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const runId = btn.dataset.runId;
+          if (runId) this.callbacks?.onRaceRun(runId);
+        });
+      });
     } else {
       this.youElem.innerHTML =
         `<div class="online-lb-you-block online-lb-empty">NO PERSONAL BEST ON THIS MAP</div>`;

@@ -3483,3 +3483,73 @@ option:hover, option:focus, option:checked {
   #panel-race .race-lobby-head { flex-wrap: wrap; gap: 18px; }
   #panel-race .race-results-head, #panel-race .online-result-row { grid-template-columns: 32px minmax(100px,1fr) 105px 105px; }
 }
+
+/* --- CORE LOOP PASS: next target / mastery / leaderboard -------------------- */
+
+/* NEXT TIER pill on the Signal Pack hero card. */
+.showcase-record-pill.next-tier .record-val { font-size: 0.95rem; letter-spacing: 0.04em; }
+.showcase-record-pill.next-tier .record-val.mastered { color: #00f0ff; text-shadow: 0 0 8px rgba(0, 240, 255, 0.45); }
+.showcase-record-pill.next-tier .record-val.rank-bronze { color: #cd7f32; }
+.showcase-record-pill.next-tier .record-val.rank-silver { color: #d1d5db; }
+.showcase-record-pill.next-tier .record-val.rank-gold { color: #ffd700; }
+.showcase-record-pill.next-tier .record-val.rank-diamond { color: #00f0ff; }
+
+/* Journey band + MASTERED marker on catalogue cards (labels only, no border). */
+.strip-item-band {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.14em;
+  color: #6d7885;
+}
+.strip-item-mastered {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #041014;
+  background: #00f0ff;
+  padding: 1px 4px;
+  line-height: 1;
+}
+
+/* Deterministic next objective under the mastery chips. */
+.showcase-mastery-objective {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: #8fa0b3;
+}
+
+/* Results NEXT TARGET row. */
+.results-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: -4px 0 14px;
+  padding: 10px 14px;
+  background: rgba(8, 12, 18, 0.9);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-color);
+}
+.results-next.hidden { display: none; }
+.results-next-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.results-next-kicker { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.24em; color: #5d6a7a; }
+.results-next-line { display: flex; flex-direction: column; gap: 3px; }
+.results-next-item { font-family: var(--font-mono); font-size: 0.86rem; letter-spacing: 0.05em; color: #d7e3ef; }
+.results-next-item:first-child { color: #eaf6ff; }
+
+/* Leaderboard NEXT ABOVE YOU block. */
+.online-lb-above { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.online-lb-above-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; font-family: var(--font-mono); font-size: 0.74rem; }
+.online-lb-above-name { color: #d7e3ef; }
+.online-lb-above-time { color: #9fb0c8; }
+.online-lb-above-gap { color: #ff9f68; }
+.results-run-data { margin: 0 0 14px; }
+.results-run-data summary { cursor: pointer; font-family: var(--font-mono); font-size: .65rem; letter-spacing: .14em; color: #8fa0b3; padding: 8px 0; }
+.results-run-data .results-grid { margin-top: 8px; }
+.race-run-feedback, .race-rival-target { font-family: var(--font-mono); font-size: .74rem; color: #00f0ff; padding: 10px 0; }
+.race-rival-target { color: #9fb0c8; padding-top: 0; }
