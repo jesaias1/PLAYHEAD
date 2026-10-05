@@ -176,6 +176,16 @@ export function pbImprovement(prior: number | null, time: number): number | null
 }
 
 /**
+ * Honest gap (microseconds) from the player's time to a target ABOVE them on the
+ * board. Invalid times or a target below the player do not supply a target.
+ */
+export function competitionGapUs(youTimeUs: number, aboveTimeUs: number): number | null {
+  if (!Number.isFinite(youTimeUs) || !Number.isFinite(aboveTimeUs) ||
+      aboveTimeUs <= 0 || youTimeUs < aboveTimeUs) return null;
+  return youTimeUs - aboveTimeUs;
+}
+
+/**
  * Position-derived journey band for the canonical 14-track order. Labels only —
  * never used to lock or reorder anything.
  */

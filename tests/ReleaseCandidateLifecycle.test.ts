@@ -111,7 +111,7 @@ describe('RETRY — fresh POV recording', () => {
       pauseScreen: { hide() {} },
       settingsModal: { hide() {} },
       armoryModal: { hide() {} },
-      resultsScreen: { hide() {} },
+      resultsScreen: { hide() {}, setCompetitionContext() {} },
       hud: { show() {}, setRestartHoldProgress() {} }
     };
     game.replayRecorder = { start() {} };

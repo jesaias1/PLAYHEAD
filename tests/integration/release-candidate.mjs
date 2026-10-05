@@ -244,6 +244,7 @@ async function main() {
 
 
     // ---- C. WATCH -> ESC -> SAME report ----------------------------------
+    await page.click('.results-secondary-actions summary');
     await page.click('#btn-res-replay');
     await page.waitForFunction(() => window.game.stateMachine.getState() === 'REPLAY', { timeout: 15000 });
     await sleep(800);

@@ -75,3 +75,73 @@ large-bundle advisory; `npx vitest run` passed all 1,407 tests. The core-loop br
 harness passed 14 checks with no page exceptions. The existing release-candidate
 browser regression passed 41/41, including result/replay restoration, reachable
 actions at 1280/1440/1920 widths, custom audio, Academy and loadout reload.
+
+## Follow-up audit — results to competition (2026-10-05)
+
+Scope: connect an official solo result directly to the SAME canonical track's
+existing competition, without a new system or a menu hunt. No submission,
+rewards, movement, Custom Audio, Academy, race-sync or Armory-renderer change.
+
+Audit findings (all preserved unless noted):
+
+- Rank goals — `SignalPackMastery.nextRankTarget` / `describeNextRankTarget`
+  already read the authoritative `PlayerStats` multipliers and mistake gates;
+  unchanged.
+- First-Diamond / reward attribution — the results screen already derives
+  `diamondJustMastered` from authoritative mastery progress and shows the drop
+  only from the server-minted id; unchanged. Guests still see SIGNAL MASTERED
+  without a fabricated mint.
+- Full-pack SIGNAL_MASTER glove — `masteryGloveSystem` already derives it from
+  Diamond on every canonical signal; unchanged, BLACKSTAR remains WR-exclusive.
+- Next signal — `nextSignalAfter` follows authored order and revisits unfinished
+  mastery after the last signal; unchanged.
+- Online Race rematch / shared progression — the room already feeds the shared
+  official finish context and clears run feedback between scheduled races;
+  unchanged.
+- Custom Audio — never sets `currentOfficialTrackId`, so it can never publish to
+  a world board, earn a Signal Drop or write official mastery; unchanged.
+- Account hydration — `CloudProgression` + `authService.refreshAccountIdentity`
+  already reconcile PB/rank/drop state; unchanged.
+
+Narrow fix added (the only meaningful gap):
+
+- Results now carry a compact world-PB line (accepted PB time/position + nearest
+  opponent's name/time/gap) plus a secondary `[ VIEW LEADERBOARD ]`
+  action that opens the SAME canonical track's existing board (select aimed at
+  the current signal, then the normal tab refresh). It is offered only for an
+  official, non-overtime, non-Custom-Audio run and is distinct from the existing
+  optional `[ ADD TO LEADERBOARD ]` offline local queue action.
+- `RACE GHOST` appears only when the nearest-above entry actually carries an
+  accepted replay with supported version, path, hash and run ID. The payload is fetched only
+  inside the existing `raceLeaderboardGhost` path, i.e. after the explicit click,
+  and the run enters the normal countdown/play directly
+  (`raceLeaderboardGhostAndPlay`, reusing the PB-duel flow).
+- The board is fetched ONCE per eligible finish, chained AFTER the submission
+  settles so the player's own position is accurate. A monotonic token plus a
+  track/screen guard discards stale replies. The generation is captured BEFORE
+  submission, so a delayed submission from an older same-track finish cannot
+  launch a new request against the later report. Retry, next signal, custom audio,
+  track selection, menu return and a new finish invalidate and hide it.
+- Offline, guest-with-no-board and no-replay cases hide the block or the target
+  row; no rank or opponent is invented. The panel run-lookup cache is primed by
+  the same fetched page so `RACE GHOST` resolves without a second fetch.
+- RETRY and the PB duel remain prominent. Board browsing, local submission,
+  replay viewing and return are grouped under keyboard-accessible MORE OPTIONS.
+  Ghost loading locks competing navigation until it settles, reports failures
+  visibly and restores the previous enabled states. Unknown world position is
+  labelled POSITION UNAVAILABLE; invalid time data supplies no invented target.
+
+Limits: an authenticated account is required for a real world position on the
+live backend; the local harness runs offline with aborted network calls, so it
+verifies the honest offline/guest presentation, the replay gate and the lazy
+click only. Real human movement feel, legal competitive times and live
+cross-account ranking remain human-only validation.
+
+Follow-up local acceptance: `npx tsc --noEmit` passed; `npm run build` passed with
+the existing large-bundle advisory; the focused 12-file vitest set passed 357/357;
+`tests/integration/core-loop.mjs` passed 29 checks with no page exceptions,
+including delayed-submission regressions, failed/duplicate navigation, replay
+return and reachable secondary controls at 1280x720 and 1440x900. A real accepted
+Signal Drift leaderboard payload was verified on production. The live two-browser
+race lifecycle passed 15 checks including controlled finish reports and rematch;
+those reports bypass ranked progression and never enter the world leaderboard.

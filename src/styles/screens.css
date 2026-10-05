@@ -3543,6 +3543,30 @@ option:hover, option:focus, option:checked {
 .results-next-item { font-family: var(--font-mono); font-size: 0.86rem; letter-spacing: 0.05em; color: #d7e3ef; }
 .results-next-item:first-child { color: #eaf6ff; }
 
+/* Results COMPETITION context — one compact line, never a second spreadsheet. */
+.results-competition {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: -6px 0 14px;
+  padding: 8px 14px;
+  background: rgba(8, 12, 18, 0.62);
+  border: 1px solid var(--border-subtle);
+}
+.results-competition.hidden { display: none; }
+.results-competition-row { display: flex; align-items: baseline; gap: 10px; }
+.results-competition-label { font-family: var(--font-mono); font-size: 0.56rem; letter-spacing: 0.24em; color: #5d6a7a; }
+.results-competition-value { font-family: var(--font-mono); font-size: 0.86rem; color: #eaf6ff; }
+.results-competition-target { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.results-competition-target.hidden { display: none; }
+.results-competition-above { font-family: var(--font-mono); font-size: 0.74rem; color: #d7e3ef; }
+.results-competition-gap { font-family: var(--font-mono); font-size: 0.74rem; color: #ff9f68; }
+.results-secondary-actions { flex: 1 0 100%; }
+.results-secondary-actions summary { cursor: pointer; font-family: var(--font-mono); font-size: .65rem; letter-spacing: .14em; color: #8fa0b3; padding: 8px 0; }
+.results-secondary-actions > div { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 8px; }
+
 /* Leaderboard NEXT ABOVE YOU block. */
 .online-lb-above { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .online-lb-above-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; font-family: var(--font-mono); font-size: 0.74rem; }

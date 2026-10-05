@@ -39,7 +39,7 @@ import {
   isRaceComplete
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
-import type { RunSubmission } from '../online/LeaderboardService';
+import type { LeaderboardView, RunSubmission } from '../online/LeaderboardService';
 import { authService } from '../online/AuthService';
 import { validateDisplayName } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
@@ -88,6 +88,7 @@ import {
 } from '../mastery/MasteryLadder';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { getMasteryGlove } from '../mastery/MasteryLadder';
+import { competitionGapUs } from '../mastery/SignalPackMastery';
 import { playerProfileService } from '../online/PlayerProfileService';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
@@ -164,6 +165,13 @@ export class Game {
   private raceIdentities = new Map<string, { gloveName: string; knifeName: string }>();
   /** Result of the most recent official submission attempt, for the results UI. */
   private lastSubmissionState: SubmissionFeedback | null = null;
+  /**
+   * Result-screen competition fetch bookkeeping. A single event-driven board
+   * fetch per official finish; `resultBoardToken` invalidates any in-flight
+   * response when the run/track/screen changes (retry, next signal, custom
+   * audio, race start, menu return).
+   */
+  private resultBoardToken = 0;
   /**
    * Upload promise from the run that just finished, so the submission can carry
    * the replay metadata. Reset at the start of every recording.
@@ -552,7 +560,18 @@ export class Game {
         // opens the stored drop there (results never runs the full reveal).
         this.returnToImport();
         this.ui.importScreen.openArmoryTab();
-      }
+      },
+      onViewLeaderboard: () => {
+        // Contextual competition: open the SAME canonical track's existing board
+        // without a menu hunt. The select is aimed first so the tab-open refresh
+        // targets this signal; no board state is duplicated.
+        const trackId = this.currentOfficialTrackId;
+        if (!trackId) return;
+        this.ui.importScreen.leaderboardPanel.setSelectedTrack(trackId);
+        this.returnToImport();
+        this.ui.importScreen.openLeaderboardTab();
+      },
+      onRaceGhost: (runId) => this.raceLeaderboardGhostAndPlay(runId)
     });
 
     // Player fall / restore / full restart
@@ -973,9 +992,21 @@ export class Game {
 
             // WORLD SUBMISSION: runs independently of the results screen so the
             // player is never blocked, and reports the REAL outcome as it lands.
+            this.invalidateResultCompetition();
+            const boardToken = this.resultBoardToken;
             this.lastSubmissionState = { state: 'SUBMITTING' };
             if (this.currentOfficialTrackId) {
-              void this.submitOfficialRun(results, officialInfo?.candidate);
+              const boardTrackId = this.currentOfficialTrackId;
+              // ONE event-driven board fetch per eligible finish, chained AFTER
+              // the submission settles so the player's own position is accurate.
+              // Never for overtime/unranked (their time is not comparable) and
+              // never for a non-canonical map (no canonical identity).
+              const boardIdentity = !isOvertime && results.rank !== 'UNRANKED'
+                ? this.fullMapIdentity()
+                : null;
+              void this.submitOfficialRun(results, officialInfo?.candidate).finally(() => {
+                if (boardIdentity) void this.refreshResultCompetition(boardTrackId, boardIdentity, boardToken);
+              });
             } else {
               this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
             }
@@ -1069,6 +1100,9 @@ export class Game {
     this.pendingGhostRun = ghostRun;
     this.lastGhostComparison = null;
     this.ghostRace.clear();
+    // Any track change (retry, next signal, custom audio, menu selection)
+    // supersedes a result-board fetch still in flight.
+    this.invalidateResultCompetition();
     try {
       this.currentOfficialTrackId = trackEntry.id;
       this.currentCustomAudioBuffer = null;
@@ -2060,6 +2094,7 @@ export class Game {
     this.ui.settingsModal.hide();
     this.ui.armoryModal.hide();
     this.ui.resultsScreen.hide();
+    this.invalidateResultCompetition();
     this.ui.hud.show();
     this.ui.hud.setRestartHoldProgress(null);
 
@@ -2087,6 +2122,7 @@ export class Game {
   private returnToImport(): void {
     this.audioEngine.stop();
     this.world.dispose();
+    this.invalidateResultCompetition();
     // Leaving the world ALWAYS ends friend-race ghost mode, so a race can never
     // leak "solo ghosts disabled" into the next solo Signal.
     this.setFriendRaceWorld(false);
@@ -3128,6 +3164,67 @@ export class Game {
     const identity = computeMapIdentity(trackId, level.track, level.analysis);
     const view = await leaderboardService.fetchLeaderboard(trackId, identity);
     panel.render(view, title);
+  }
+
+  /**
+   * One event-driven board fetch for the JUST-FINISHED official run.
+   *
+   * Called after the world submission has settled, so the player's own position
+   * is accurate. The response is discarded when the token is stale or the screen
+   * has moved on, so a slow reply can never overwrite a later run's context. The
+   * fetched entries are also cached on the leaderboard panel so the results
+   * RACE GHOST action can resolve a run id without a second fetch. Offline or
+   * empty responses simply hide the competition block — no rank is invented.
+   */
+  private async refreshResultCompetition(trackId: string, identity: MapIdentity, token: number): Promise<void> {
+    const isCurrent = () => token === this.resultBoardToken &&
+      this.stateMachine.is(GameState.FINISHED) && this.currentOfficialTrackId === trackId &&
+      !this.friendRaceWorld && !this.ui.resultsScreen.element.classList.contains('hidden');
+    if (!isCurrent()) return;
+    try {
+      const view: LeaderboardView = await leaderboardService.fetchLeaderboard(trackId, identity);
+      if (!isCurrent()) return;
+
+      if (view.offline || !view.you || !Number.isFinite(view.you.timeUs) || view.you.timeUs <= 0) {
+        this.ui.resultsScreen.setCompetitionContext(null);
+        return;
+      }
+
+      // Prime the run lookup cache only; the panel is not rendered here.
+      this.ui.importScreen.leaderboardPanel.setEntries(view.entries);
+
+      const above = view.nextAbove;
+      const gapUs = above ? competitionGapUs(view.you.timeUs, above.timeUs) : null;
+      this.ui.resultsScreen.setCompetitionContext({
+        position: view.you.position,
+        timeUs: view.you.timeUs,
+        nextAbove: above && gapUs !== null
+          ? {
+              rankPosition: above.rankPosition,
+              displayName: above.displayName,
+              timeUs: above.timeUs,
+              gapUs,
+              runId: above.runId,
+              raceable: above.verificationState === 'accepted' && above.replayVersion === POV_REPLAY_VERSION &&
+                !!above.replayPath && !!above.replayHash && !!above.runId
+            }
+          : null
+      });
+    } catch {
+      if (!isCurrent()) return;
+      this.ui.resultsScreen.setCompetitionContext(null);
+    }
+  }
+
+  /**
+   * Invalidates any pending/visible result-screen competition and hides it. Used
+   * whenever the run/screen changes (retry, next signal, custom audio, track
+   * selection, menu return, a new finish) so a late async reply cannot attach
+   * the previous run's position to the current report.
+   */
+  private invalidateResultCompetition(): void {
+    this.resultBoardToken++;
+    this.ui.resultsScreen.setCompetitionContext(null);
   }
 
   // -- race lifecycle -------------------------------------------------------
@@ -4704,6 +4801,23 @@ export class Game {
 
     await this.handleCatalogTrackSelected(catalogEntry, built.run);
     return { ok: true, detail: 'GHOST // VERIFIED' };
+  }
+
+  /**
+   * RACE A WORLD LEADERBOARD RUN from the results screen — one step.
+   *
+   * Reuses the SAME validated ghost flow as the leaderboard panel, then enters
+   * the normal countdown/play directly instead of returning to the menu. The
+   * replay payload is fetched only inside `raceLeaderboardGhost`, i.e. after the
+   * player's explicit RACE GHOST click.
+   */
+  public async raceLeaderboardGhostAndPlay(runId: string): Promise<{ ok: boolean; detail: string }> {
+    if (this.friendRaceWorld) return { ok: false, detail: 'GHOST RACE UNAVAILABLE DURING ONLINE RACE' };
+    const raced = await this.raceLeaderboardGhost(runId);
+    if (!raced.ok) return raced;
+    if (!this.stateMachine.is(GameState.READY)) return { ok: false, detail: 'SIGNAL LOAD FAILED // RETRY' };
+    this.stateMachine.transitionTo(GameState.COUNTDOWN);
+    return raced;
   }
 
   /**

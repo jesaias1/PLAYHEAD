@@ -17,7 +17,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, browser;
 try {
   const url = process.env.CORE_LOOP_URL ?? 'http://127.0.0.1:4197';
-  if (!process.env.CORE_LOOP_URL) server = await preview({ preview: { host: '127.0.0.1', port: 4197, strictPort: true } });
+  if (!process.env.CORE_LOOP_URL) server = await preview({ configLoader: 'runner', preview: { host: '127.0.0.1', port: 4197, strictPort: true } });
   browser = await launch({ executablePath: process.env.CHROME_PATH ?? 'C:/Users/lin4s/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe', headless: true,
     args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-background-timer-throttling'] });
   const page = await browser.newPage();
@@ -54,6 +54,8 @@ try {
     next: document.querySelector('#res-next-line').textContent,
     nextId: document.querySelector('#btn-res-next').dataset.trackId,
     duel: !document.querySelector('#btn-res-retry-pb').classList.contains('hidden'),
+    viewBoard: !document.querySelector('#btn-res-view-leaderboard').classList.contains('hidden'),
+    competition: document.querySelector('#res-competition').textContent,
     drop: document.querySelector('#res-signal-drop').textContent,
     awarded: window.game.ui.importScreen.skinSystem.getAwardedDiamondDropKeys().length
   }));
@@ -61,6 +63,7 @@ try {
   const first = await report();
   check('first finish reports PB and Diamond without claiming a minted guest drop', first.pb.includes('NEW PERSONAL BEST') && first.diamond.includes('SIGNAL MASTERED') && !first.drop.includes('DROP ACQUIRED'), first);
   check('first finish offers Flow State and a compatible PB duel', first.nextId === ids[1] && first.duel, first.next);
+  check('official finish offers a contextual VIEW LEADERBOARD action', first.viewBoard, first.viewBoard);
   check('details are secondary', await page.$eval('.results-run-data', element => !element.open));
   await page.screenshot({ path: path.join(evidence, 'first-diamond-results.png') });
   await page.click('#btn-res-again');
@@ -78,6 +81,13 @@ try {
   check('explicit PB duel loads verified trajectory and starts play', await page.evaluate(() => window.game.ghostRace.getRun().kind === 'PB'));
   await finish(2200);
   check('Diamond replay gives a PB goal', (await report()).next.includes('TO PB'));
+  await page.click('.results-secondary-actions summary');
+  await page.click('#btn-res-replay');
+  await page.waitForFunction(() => window.game.stateMachine.getState() === 'REPLAY');
+  check('secondary WATCH REPLAY still opens the current run', true);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.game.stateMachine.getState() === 'FINISHED');
+  check('WATCH exit restores the same report without awarding another Diamond', (await report()).awarded === first.awarded);
   await page.click('#btn-res-next');
   await page.waitForFunction(id => window.game.currentOfficialTrackId === id && window.game.stateMachine.getState() === 'PLAYING', { timeout: 60000 }, ids[1]);
   check('next signal enters play without a menu round trip', true);
@@ -124,6 +134,89 @@ try {
     return { lazy, requested, text: target.textContent };
   }, ids[0]);
   check('next-above opponent action is lazy and shows the real gap (fixture)', leaderboard.lazy && leaderboard.requested === 'opponent' && leaderboard.text.includes('00:00.697'), leaderboard);
+  // Contextual competition on the RESULTS screen. Fixture-invoked, offline, and
+  // never a live fetch or upload; it proves the presentation/guard contract only.
+  const competition = await page.evaluate(id => {
+    const game = window.game, screen = game.ui.resultsScreen;
+    window.coreLoopBoardCallback = screen.onViewLeaderboardCallback;
+    const result = { completionTime: 44, targetTime: 50, rank: 'DIAMOND', maxSpeed: 20, averageSpeed: 10, strafeEfficiency: 90, fallsCount: 0, restartsCount: 0, syncDelta: -6, score: 100 };
+    screen.showResults(result, 1, { isNewPB: true }, 'SIGNAL FIXTURE', undefined, { dropsAwarded: 0, registered: true }, { isOfficial: true, trackId: id }, undefined, undefined, undefined, undefined, { priorPbTime: 40, diamondJustMastered: false, pbGhostAvailable: false });
+    const shownByDefault = !document.querySelector('#res-competition').classList.contains('hidden');
+    screen.setCompetitionContext({ position: 3, timeUs: 44809000, nextAbove: { rankPosition: 2, displayName: 'RANKO', timeUs: 44118000, gapUs: 691000, runId: 'opponent', raceable: true } });
+    const text = document.querySelector('#res-competition').textContent;
+    const ghostVisible = !document.querySelector('#btn-res-race-ghost').classList.contains('hidden');
+    screen.setCompetitionContext({ position: 3, timeUs: 44809000, nextAbove: { rankPosition: 2, displayName: 'RANKO', timeUs: 44118000, gapUs: 691000, runId: 'opponent', raceable: false } });
+    const ghostHiddenNoReplay = document.querySelector('#btn-res-race-ghost').classList.contains('hidden');
+    screen.setCompetitionContext(null);
+    const hidden = document.querySelector('#res-competition').classList.contains('hidden');
+    // A custom-audio / non-official report must never offer VIEW LEADERBOARD.
+    screen.showResults(result, 1, { isNewPB: true }, 'CUSTOM', undefined, undefined, undefined, { isCustomAudio: true, eligible: true, statusMessage: 'CUSTOM' });
+    const customNoBoard = document.querySelector('#btn-res-view-leaderboard').classList.contains('hidden');
+    // RACE GHOST click is the ONLY thing that reaches the game callback (lazy).
+    screen.showResults(result, 1, { isNewPB: true }, 'SIGNAL FIXTURE', undefined, { dropsAwarded: 0, registered: true }, { isOfficial: true, trackId: id });
+    screen.setCompetitionContext({ position: 2, timeUs: 44809000, nextAbove: { rankPosition: 1, displayName: 'RANKO', timeUs: 44118000, gapUs: 691000, runId: 'opponent', raceable: true } });
+    let requested = null;
+    screen.setCallbacks({ onReplay() {}, onAgain() {}, onNewTrack() {}, onRaceGhost: async rid => { requested = rid; return { ok: true, detail: "READY" }; } });
+    const beforeClick = requested === null;
+    document.querySelector('#btn-res-race-ghost').click();
+    return { shownByDefault, text, ghostVisible, ghostHiddenNoReplay, hidden, customNoBoard, beforeClick, requested };
+  }, ids[0]);
+  check('results competition is honest, lazy and replay-gated (fixture)', !competition.shownByDefault && competition.text.includes('#2 RANKO') && competition.text.includes('00:00.691') && competition.ghostVisible && competition.ghostHiddenNoReplay && competition.hidden && competition.customNoBoard && competition.beforeClick && competition.requested === 'opponent', competition);
+
+  const navigation = await page.evaluate(async () => {
+    const screen = window.game.ui.resultsScreen;
+    let calls = 0, retries = 0, resolve;
+    screen.setCallbacks({ onReplay() {}, onAgain() { retries++; }, onNewTrack() {},
+      onRaceGhost: () => { calls++; return new Promise(done => { resolve = done; }); } });
+    const ghost = document.querySelector('#btn-res-race-ghost');
+    ghost.click(); ghost.click();document.querySelector('#btn-res-again').click();
+    const locked = screen.navigationBusy && ghost.disabled && document.querySelector('#btn-res-view-leaderboard').disabled;
+    resolve({ ok: false, detail: 'GHOST // REPLAY UNAVAILABLE' });
+    await new Promise(done => setTimeout(done, 0));
+    const recovered = !screen.navigationBusy && !ghost.disabled && !document.querySelector('#btn-res-again').disabled;
+    const message = document.querySelector('#res-next-line').textContent;
+    screen.setCallbacks({ onReplay() {}, onAgain() {}, onNewTrack() {}, onRaceGhost: async () => { throw Error('network'); } });
+    ghost.click();await new Promise(done => setTimeout(done, 0));
+    return { calls, retries, locked, recovered, message, rejected: !screen.navigationBusy && document.querySelector('#res-next-line').textContent.includes('RETRY') };
+  });
+  check('ghost loading locks duplicate and competing navigation, then recovers visibly', navigation.calls === 1 && navigation.retries === 0 && navigation.locked && navigation.recovered && navigation.message.includes('REPLAY UNAVAILABLE') && navigation.rejected, navigation);
+
+  const copy = await page.evaluate(() => {
+    const screen = window.game.ui.resultsScreen;
+    screen.setCompetitionContext({ position: null, timeUs: 44809000,
+      nextAbove: { rankPosition: 1, displayName: 'RANKO & CO', timeUs: 44112000, gapUs: 697000, runId: 'target', raceable: false } });
+    return document.querySelector('#res-competition').textContent;
+  });
+  check('board PB and target times are explicit; unknown position and names stay honest', copy.includes('WORLD PB') && copy.includes('POSITION UNAVAILABLE') && copy.includes('00:44.809') && copy.includes('00:44.112') && copy.includes('RANKO & CO') && !copy.includes('&amp;'), copy);
+
+  for (const [width, height] of [[1280, 720], [1440, 900]]) {
+    await page.setViewport({ width, height });
+    await page.evaluate(id => {
+      const screen = window.game.ui.resultsScreen;
+      const result = { completionTime: 106, targetTime: 100, rank: 'GOLD', maxSpeed: 20, averageSpeed: 10, strafeEfficiency: 90, fallsCount: 0, restartsCount: 0, syncDelta: 6, score: 100 };
+      screen.showResults(result, 1, {}, 'SIGNAL FIXTURE', undefined, { dropsAwarded: 0, registered: true }, { isOfficial: true, trackId: id }, undefined, undefined, undefined, undefined, { priorPbTime: 107, diamondJustMastered: false, pbGhostAvailable: true });
+      screen.setReplayAvailable(true);
+      screen.setCompetitionContext({ position: 2, timeUs: 44809000, nextAbove: { rankPosition: 1, displayName: 'RANKO', timeUs: 44112000, gapUs: 697000, runId: 'target', raceable: true } });
+    }, ids[0]);
+    await sleep(750);
+    const primary = await page.evaluate(() => ({ count: [...document.querySelectorAll('#res-actions > button')].filter(b => !b.classList.contains('hidden')).length, collapsed: !document.querySelector('.results-secondary-actions').open, target: document.querySelector('#res-next-line').textContent }));
+    check(`rank goal and restrained primary actions at ${width}x${height}`, primary.count === 2 && primary.collapsed && primary.target.includes('2.00s'), primary);
+    await page.click('.results-secondary-actions summary');
+    for (const id of ['btn-res-view-leaderboard', 'btn-res-replay', 'btn-res-new']) {
+      const reachable = await page.$eval(`#${id}`, b => { b.scrollIntoView({ block: 'center' }); b.focus(); const r = b.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth && document.activeElement === b; });
+      check(`${id} is reachable at ${width}x${height}`, reachable);
+    }
+    await page.screenshot({ path: path.join(evidence, `competition-${width}.png`) });
+  }
+
+  await page.evaluate(id => {
+    const game = window.game, screen = game.ui.resultsScreen;
+    game.currentOfficialTrackId = id;
+    screen.setCallbacks({ onReplay() {}, onAgain() {}, onNewTrack() {}, onViewLeaderboard: window.coreLoopBoardCallback });
+  }, ids[0]);
+  await page.click('#btn-res-view-leaderboard');
+  await page.waitForFunction(id => window.game.stateMachine.getState() === 'IMPORT' && !window.game.ui.importScreen.leaderboardPanel.element.classList.contains('hidden') && window.game.ui.importScreen.leaderboardPanel.getSelectedTrack() === id, {}, ids[0]);
+  check('VIEW LEADERBOARD opens the actual board for the just-finished canonical signal', true);
   check('no browser exceptions', errors.length === 0, errors);
 } catch (error) { checks.push({ name: 'harness completion', ok: false, detail: error.stack }); console.error(error); process.exitCode = 1; }
 finally { fs.writeFileSync(path.join(evidence, 'checks.json'), JSON.stringify(checks, null, 2)); await browser?.close(); await server?.close(); }

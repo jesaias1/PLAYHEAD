@@ -99,6 +99,29 @@ export class LeaderboardPanel {
     return this.currentEntries.find((e) => e.runId === runId);
   }
 
+  /**
+   * Primes the run lookup cache WITHOUT rendering the panel. The results screen
+   * fetches the same canonical board through the existing service and needs
+   * RACE GHOST to resolve an entry by run id without a second fetch or a
+   * visible board render.
+   */
+  public setEntries(entries: LeaderboardView['entries']): void {
+    this.currentEntries = entries;
+  }
+
+  /**
+   * Preselects a signal in the dropdown WITHOUT triggering the change callback.
+   * The caller is responsible for refreshing the board (the results screen's
+   * VIEW LEADERBOARD action sets the track, then opens the tab which already
+   * refreshes the selected board).
+   */
+  public setSelectedTrack(trackId: string): void {
+    const options = Array.from(this.selectElem.options);
+    if (options.some((option) => option.value === trackId)) {
+      this.selectElem.value = trackId;
+    }
+  }
+
   /** Restrained status line, used to report a refused ghost race. */
   public setStatus(message: string): void {
     this.statusElem.textContent = message;

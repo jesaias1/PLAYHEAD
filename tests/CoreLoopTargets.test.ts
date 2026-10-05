@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateRunRank, type RunRank } from '../src/player/PlayerStats';
 import { SignalPackCatalog } from '../src/audio/SignalPackCatalog';
 import { GameState, StateMachine } from '../src/core/StateMachine';
-import { describeNextRankTarget, nextRankTarget, nextSignalAfter, pbImprovement } from '../src/mastery/SignalPackMastery';
+import { competitionGapUs, describeNextRankTarget, nextRankTarget, nextSignalAfter, pbImprovement } from '../src/mastery/SignalPackMastery';
 
 describe('actionable mastery goals', () => {
   it('can load and play from a run report without an import-screen transition', () => {
@@ -48,5 +48,11 @@ describe('actionable mastery goals', () => {
     expect(pbImprovement(40, 44)).toBeNull();
     expect(pbImprovement(44, 44)).toBeNull();
     expect(pbImprovement(null, 44)).toBeNull();
+  });
+  it('reports an honest, non-negative gap to the player above', () => {
+    expect(competitionGapUs(44_809_000, 44_112_000)).toBe(697_000);
+    expect(competitionGapUs(44_000_000, 44_500_000)).toBeNull();
+    expect(competitionGapUs(44_000_000, 0)).toBeNull();
+    expect(competitionGapUs(Number.NaN, 44_000_000)).toBeNull();
   });
 });

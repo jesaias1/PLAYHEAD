@@ -76,6 +76,13 @@ export class ResultsScreen {
   private nextLineElem: HTMLElement;
   private nextSignalBtn: HTMLButtonElement;
   private retryPbBtn: HTMLButtonElement;
+  private viewLeaderboardBtn: HTMLButtonElement;
+  private competitionElem: HTMLElement;
+  private competitionPosElem: HTMLElement;
+  private competitionTargetElem: HTMLElement;
+  private competitionAboveElem: HTMLElement;
+  private competitionGapElem: HTMLElement;
+  private raceGhostBtn: HTMLButtonElement;
   private activeCandidate: LeaderboardSubmissionCandidate | null = null;
 
   private onReplayCallback?: () => void;
@@ -84,6 +91,8 @@ export class ResultsScreen {
   private onArmoryCallback?: () => void;
   private onRetryVsPbCallback?: () => Promise<{ ok: boolean; detail: string }>;
   private onNextSignalCallback?: (trackId: string) => Promise<{ ok: boolean; detail: string }>;
+  private onViewLeaderboardCallback?: () => void;
+  private onRaceGhostCallback?: (runId: string) => Promise<{ ok: boolean; detail: string }>;
 
   private revealTimeouts: number[] = [];
   /** Whether the CURRENT submission belongs to a registered account. */
@@ -202,10 +211,23 @@ export class ResultsScreen {
           <button class="btn-preview hidden" id="btn-res-next" type="button">[ NEXT SIGNAL ]</button>
         </div>
 
+        <div class="results-competition hidden" id="res-competition" aria-live="polite">
+          <div class="results-competition-row">
+            <span class="results-competition-label">WORLD PB</span>
+            <span class="results-competition-value" id="res-competition-pos">--</span>
+          </div>
+          <div class="results-competition-target hidden" id="res-competition-target">
+            <span class="results-competition-above" id="res-competition-above">--</span>
+            <span class="results-competition-gap" id="res-competition-gap">--</span>
+            <button class="btn-preview hidden" id="btn-res-race-ghost" type="button" title="Race this accepted run as a ghost.">[ RACE GHOST ]</button>
+          </div>
+        </div>
+
         <div class="results-actions" id="res-actions">
           <button class="btn-hero" id="btn-res-again">[ RETRY ]</button>
           <button class="btn-preview hidden" id="btn-res-retry-pb" title="Retry with your stored PB ghost armed.">[ RETRY VS PB ]</button>
           <button class="btn-preview hidden" id="btn-res-leaderboard">[ ADD TO LEADERBOARD ]</button>
+          <button class="btn-preview hidden" id="btn-res-view-leaderboard" title="Open this signal's world board.">[ VIEW LEADERBOARD ]</button>
           <button class="btn-preview" id="btn-res-replay" title="Watch your run back in first person.">[ WATCH REPLAY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
         </div>
@@ -256,6 +278,13 @@ export class ResultsScreen {
     this.nextLineElem = this.element.querySelector('#res-next-line') as HTMLElement;
     this.nextSignalBtn = this.element.querySelector('#btn-res-next') as HTMLButtonElement;
     this.retryPbBtn = this.element.querySelector('#btn-res-retry-pb') as HTMLButtonElement;
+    this.viewLeaderboardBtn = this.element.querySelector('#btn-res-view-leaderboard') as HTMLButtonElement;
+    this.competitionElem = this.element.querySelector('#res-competition') as HTMLElement;
+    this.competitionPosElem = this.element.querySelector('#res-competition-pos') as HTMLElement;
+    this.competitionTargetElem = this.element.querySelector('#res-competition-target') as HTMLElement;
+    this.competitionAboveElem = this.element.querySelector('#res-competition-above') as HTMLElement;
+    this.competitionGapElem = this.element.querySelector('#res-competition-gap') as HTMLElement;
+    this.raceGhostBtn = this.element.querySelector('#btn-res-race-ghost') as HTMLButtonElement;
 
     // Keep time, PB and local position primary; run diagnostics remain available.
     const details = document.createElement('details');
@@ -268,6 +297,13 @@ export class ResultsScreen {
     this.statsGrid.after(details);
     this.statsGrid.before(this.nextElem);
 
+    const options = document.createElement('details');
+    options.className = 'results-secondary-actions';
+    options.innerHTML = '<summary>MORE OPTIONS</summary><div></div>';
+    [this.leaderboardBtn, this.viewLeaderboardBtn, this.replayBtn, this.newTrackBtn]
+      .forEach(button => options.querySelector('div')!.appendChild(button));
+    this.actionsRow.appendChild(options);
+
     this.initEvents();
   }
 
@@ -278,6 +314,8 @@ export class ResultsScreen {
     onArmory?: () => void;
     onRetryVsPb?: () => Promise<{ ok: boolean; detail: string }>;
     onNextSignal?: (trackId: string) => Promise<{ ok: boolean; detail: string }>;
+    onViewLeaderboard?: () => void;
+    onRaceGhost?: (runId: string) => Promise<{ ok: boolean; detail: string }>;
   }): void {
     this.onReplayCallback = callbacks.onReplay;
     this.onAgainCallback = callbacks.onAgain;
@@ -285,6 +323,8 @@ export class ResultsScreen {
     this.onArmoryCallback = callbacks.onArmory;
     this.onRetryVsPbCallback = callbacks.onRetryVsPb;
     this.onNextSignalCallback = callbacks.onNextSignal;
+    this.onViewLeaderboardCallback = callbacks.onViewLeaderboard;
+    this.onRaceGhostCallback = callbacks.onRaceGhost;
   }
 
   public showResults(
@@ -442,6 +482,16 @@ export class ResultsScreen {
     // Leaderboard Action Setup
     this.activeCandidate = officialInfo?.candidate || null;
     this.leaderboardFeedbackElem.classList.add('hidden');
+
+    // Contextual competition is fetched asynchronously by the game AFTER this
+    // run has settled; reset to the honest empty state on every new report.
+    this.setCompetitionContext(null);
+    (this.element.querySelector('.results-secondary-actions') as HTMLDetailsElement).open = false;
+    const viewable = officialInfo?.isOfficial === true &&
+      !overtimeInfo?.isOvertime &&
+      customRewardInfo?.isCustomAudio !== true;
+    this.viewLeaderboardBtn.classList.toggle('hidden', !viewable);
+    this.viewLeaderboardBtn.disabled = !viewable;
 
     if (
       officialInfo?.isOfficial &&
@@ -690,6 +740,8 @@ export class ResultsScreen {
   public hide(): void {
     this.clearTimeouts();
     this.element.classList.add('hidden');
+    // A hidden report can never show stale competition from a previous run.
+    this.setCompetitionContext(null);
   }
 
   /**
@@ -798,7 +850,10 @@ export class ResultsScreen {
   private async navigateRun(action: (() => Promise<{ ok: boolean; detail: string }>) | undefined): Promise<void> {
     if (!action || this.navigationBusy) return;
     this.navigationBusy = true;
-    [this.againBtn, this.retryPbBtn, this.nextSignalBtn, this.newTrackBtn].forEach((button) => button.disabled = true);
+    const buttons = [this.againBtn, this.retryPbBtn, this.nextSignalBtn, this.newTrackBtn,
+      this.raceGhostBtn, this.viewLeaderboardBtn, this.replayBtn, this.leaderboardBtn];
+    const disabled = buttons.map(button => button.disabled);
+    buttons.forEach(button => button.disabled = true);
     try {
       const result = await action();
       if (!result.ok) {
@@ -810,7 +865,7 @@ export class ResultsScreen {
       this.nextElem.classList.remove('hidden');
     } finally {
       this.navigationBusy = false;
-      [this.againBtn, this.retryPbBtn, this.nextSignalBtn, this.newTrackBtn].forEach((button) => button.disabled = false);
+      buttons.forEach((button, index) => button.disabled = disabled[index]);
     }
   }
 
@@ -847,6 +902,12 @@ export class ResultsScreen {
     this.replayBtn.addEventListener('click', () => this.onReplayCallback?.());
     this.newTrackBtn.addEventListener('click', () => this.onNewTrackCallback?.());
     this.signalDropOpenBtn.addEventListener('click', () => this.openSignalDrop());
+    this.viewLeaderboardBtn.addEventListener('click', () => this.onViewLeaderboardCallback?.());
+    this.raceGhostBtn.addEventListener('click', () => {
+      const runId = this.raceGhostBtn.dataset.runId;
+      if (!runId) return;
+      void this.navigateRun(this.onRaceGhostCallback ? () => this.onRaceGhostCallback!(runId) : undefined);
+    });
     this.leaderboardBtn.addEventListener('click', () => {
       if (!this.activeCandidate) return;
       // Manual retry path: queue locally so the existing offline flush can carry
@@ -910,6 +971,59 @@ export class ResultsScreen {
       this.masteryEquipBtn.textContent = equipped ? '[ EQUIPPED ]' : '[ LOCKED ]';
       this.masteryEquipBtn.disabled = true;
     };
+  }
+
+  /**
+   * Contextual world competition for this run's canonical track.
+   *
+   * `null` (offline, guest with no board, or a screen that has moved on) hides
+   * the block entirely. An accepted PB outside the page has no known position,
+   * and the next-above row is omitted when there is no honest target. The RACE
+   * GHOST action appears only for an accepted run that actually carries a replay.
+   */
+  public setCompetitionContext(
+    context: {
+      position: number | null;
+      timeUs: number;
+      nextAbove: {
+        rankPosition: number;
+        displayName: string;
+        timeUs: number;
+        /** Honest own-time minus target-time gap, computed by the caller. */
+        gapUs: number;
+        runId: string;
+        raceable: boolean;
+      } | null;
+    } | null
+  ): void {
+    delete this.raceGhostBtn.dataset.runId;
+    this.raceGhostBtn.classList.add('hidden');
+
+    if (!context) {
+      this.competitionElem.classList.add('hidden');
+      return;
+    }
+
+    this.competitionElem.classList.remove('hidden');
+    this.competitionPosElem.textContent =
+      `${formatTime(context.timeUs / 1_000_000)} // ${context.position === null ? 'POSITION UNAVAILABLE' : `#${context.position}`}`;
+
+    const above = context.nextAbove;
+    if (!above) {
+      this.competitionTargetElem.classList.add('hidden');
+      return;
+    }
+
+    this.competitionTargetElem.classList.remove('hidden');
+    this.competitionAboveElem.textContent = `#${above.rankPosition} ${above.displayName} // ${formatTime(above.timeUs / 1_000_000)}`;
+    // Display-only and clamped: the target is above the player, so the honest
+    // gap can never be negative.
+    this.competitionGapElem.textContent = `+${formatTime(Math.max(0, above.gapUs) / 1_000_000)}`;
+
+    if (above.raceable) {
+      this.raceGhostBtn.classList.remove('hidden');
+      this.raceGhostBtn.dataset.runId = above.runId;
+    }
   }
 
   /**
