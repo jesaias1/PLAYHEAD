@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Game } from '../src/core/Game';
 import { GameState, StateMachine } from '../src/core/StateMachine';
 import { leaderboardService, type LeaderboardView } from '../src/online/LeaderboardService';
+import { authService } from '../src/online/AuthService';
+import { LeaderboardManager } from '../src/leaderboard/LeaderboardManager';
 
 const trackId = 'track_1_signal_drift';
 const identity = { trackId, mapVersion: 1, mapFingerprint: 'test', movementVersion: 'test' };
@@ -31,6 +33,34 @@ function deferred<T>() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('results competition lifecycle', () => {
+  it('submits the finished attempt snapshot and ignores its response after retry', async () => {
+    const game = host(), upload = deferred<{ ok: boolean; path: string; hash: string }>();
+    const recordGhost = vi.fn().mockReturnValue(false);
+    vi.spyOn(LeaderboardManager, 'getInstance').mockReturnValue({ recordGhostReplay: recordGhost } as any);
+    vi.spyOn(authService, 'getUserId').mockReturnValue('player');
+    const submit = vi.spyOn(leaderboardService, 'submitRun').mockResolvedValue({
+      ok: true, isPersonalBest: true,
+    } as any);
+    game.ui.resultsScreen.setSubmissionState = vi.fn();
+    game.ui.resultsScreen.refreshSignalDropPanel = vi.fn();
+    game.fullMapIdentity = () => identity;
+    game.pendingReplayUpload = upload.promise;
+    game.lastFinalizedReplay = { finishTimeUs: 10_000_000 };
+    game.passedCheckpoints = new Set([1, 2]);
+    game.movementLab = null;
+    game.isOvertime = false;
+    const pending = game.submitOfficialRun({ completionTime: 10, rank: 'BRONZE', restartsCount: 0 }, {});
+    game.invalidateResultCompetition();
+    game.passedCheckpoints.clear();
+    game.lastFinalizedReplay = { finishTimeUs: 20_000_000 };
+    game.movementLab = {};
+    upload.resolve({ ok: true, path: 'finished-replay', hash: 'finished-hash' });
+    await pending;
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ checkpointCount: 2, devMode: false }));
+    expect(recordGhost).toHaveBeenCalledWith(trackId, 10_000_000, 'finished-replay', 'finished-hash', identity.mapFingerprint);
+    expect(game.ui.resultsScreen.setSubmissionState.mock.calls).toEqual([['SUBMITTING', undefined]]);
+    expect(game.ui.resultsScreen.refreshSignalDropPanel).toHaveBeenCalledTimes(1);
+  });
   it('rejects an old same-track submission before fetching after a newer finish', async () => {
     const game = host(), submission = deferred<void>();
     const fetch = vi.spyOn(leaderboardService, 'fetchLeaderboard').mockResolvedValue(board());

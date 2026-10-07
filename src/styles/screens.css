@@ -1919,6 +1919,23 @@
   .analysis-footer #btn-enter-track { flex: 1 1 auto; }
 }
 
+/* SURF_ONBOARDING: one concise, mode-specific control hint on the Surf
+   WORLD READY readout. Subdued instrumentation copy, deliberately NOT a hero
+   banner and never the generic countdown WASD/SPACE overlay. Surf-only; it is
+   hidden again on normal mode, re-analysis, Back and reset. */
+.surf-onboarding-hint {
+  margin: 0 0 20px 0;
+  padding: 9px 14px;
+  border-left: 2px solid #6f68c8;
+  background: rgba(23, 26, 48, 0.55);
+  color: #b9b3ff;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.surf-onboarding-hint[hidden] { display: none; }
 /* ==========================================================================
    3. COUNTDOWN SCREEN
    ========================================================================== */

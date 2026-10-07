@@ -19,6 +19,7 @@ export class AnalysisScreen {
   private waveformCanvas: HTMLCanvasElement;
   private enterBtn: HTMLButtonElement;
   private surfBtn: HTMLButtonElement;
+  private surfHintElem: HTMLElement;
   private onSurfCallback?: () => void;
   private surfVariant = false;
 
@@ -82,6 +83,10 @@ export class AnalysisScreen {
           </div>
         </div>
 
+        <div class="surf-onboarding-hint" id="analysis-surf-hint" hidden>
+          JUMP ONTO THE RAMP // HOLD A / D INTO THE SLOPE // STEER WITH THE MOUSE
+        </div>
+
         <div class="analysis-footer">
           <div id="analysis-variant" aria-live="polite">NORMAL_MODE</div>
           <button class="btn-hero btn-surf" id="btn-ready-surf" hidden disabled>PLAY SURF_MODE</button>
@@ -98,6 +103,7 @@ export class AnalysisScreen {
     this.waveformCanvas = this.element.querySelector('#analysis-waveform') as HTMLCanvasElement;
     this.enterBtn = this.element.querySelector('#btn-enter-track') as HTMLButtonElement;
     this.surfBtn = this.element.querySelector('#btn-ready-surf') as HTMLButtonElement;
+    this.surfHintElem = this.element.querySelector('#analysis-surf-hint') as HTMLElement;
     this.surfBtn.addEventListener('click', () => {
       if (this.surfBtn.disabled) return;
       this.surfBtn.disabled = true;
@@ -144,6 +150,7 @@ export class AnalysisScreen {
     (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = true;
     this.enterBtn.disabled = true;
     this.surfBtn.disabled = true;
+    this.hideSurfHint();
     this.setStage('[SYS] ENTERING...', 1);
     // 1. Contracting animation: collapse waveform to 2px signal line
     this.element.classList.add('contracting');
@@ -167,6 +174,16 @@ export class AnalysisScreen {
     this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'NORMAL_MODE';
     this.surfBtn.hidden = surf || this.enterBtn.disabled;
     this.surfBtn.disabled = this.enterBtn.disabled;
+    this.syncSurfHint();
+  }
+
+  /** The Surf onboarding hint is Surf-only and only visible once the world is ready. */
+  private syncSurfHint(): void {
+    this.surfHintElem.hidden = !(this.surfVariant && !this.enterBtn.disabled);
+  }
+
+  private hideSurfHint(): void {
+    this.surfHintElem.hidden = true;
   }
 
   public addStageLog(text: string): void {
@@ -214,6 +231,9 @@ export class AnalysisScreen {
     this.enterBtn.textContent = '[SYS] ENTER WORLD';
     this.surfBtn.hidden = true;
     this.surfBtn.disabled = true;
+    // Re-analysis / Back / reset leaves the previous Surf copy behind: the hint
+    // is only re-armed by a SURF variant on a ready world.
+    this.hideSurfHint();
     if (!reset) return;
     if (this.logElem) {
       this.logElem.innerHTML = '';
@@ -228,6 +248,7 @@ export class AnalysisScreen {
       cancelAnimationFrame(this.animScanFrame);
       this.animScanFrame = 0;
     }
+    this.hideSurfHint();
     this.element.classList.add('hidden');
     this.element.classList.remove('contracting');
   }
@@ -263,6 +284,7 @@ export class AnalysisScreen {
     (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = false;
     this.surfBtn.hidden = this.surfVariant;
     this.surfBtn.disabled = false;
+    this.syncSurfHint();
     this.enterBtn.focus();
   }
 

@@ -1075,7 +1075,10 @@ export class Game {
                   void this.refreshResultCompetition(surfInfo!.boardTrackId, surfIdentity, boardToken);
                 });
               } else {
-                this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
+                const state: SubmissionState = !surfIdentity ? 'RUN_INELIGIBLE_NON_CANONICAL'
+                  : isOvertime ? 'RUN_INELIGIBLE_OVERTIME' : 'RUN_INELIGIBLE_UNRANKED';
+                this.lastSubmissionState = { state };
+                this.ui.resultsScreen.setSubmissionState(state);
               }
             } else {
               this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
@@ -1495,6 +1498,7 @@ export class Game {
     this.movementSfx.reset();
     this.runElapsedTime = 0;
     this.isOvertime = false;
+    this.lastSubmissionState = null;
     this.ui.hud.setOvertimeStatus(false);
 
     // A full restart abandons the current attempt and starts a fresh personal
@@ -4506,10 +4510,14 @@ export class Game {
     const trackId = override?.trackId ?? this.currentOfficialTrackId;
     if (!trackId) return;
     const submissionUserId = authService.getUserId();
+    const reportToken = this.resultBoardToken;
+    const replay = this.lastFinalizedReplay;
+    const checkpointCount = this.passedCheckpoints.size;
+    const devMode = this.movementLab !== null;
     let signalDropAcquired = false;
 
     const publish = (state: SubmissionState, detail?: string): void => {
-      if (authService.getUserId() !== submissionUserId) return;
+      if (authService.getUserId() !== submissionUserId || this.resultBoardToken !== reportToken) return;
       this.lastSubmissionState = { state, detail };
       this.ui.resultsScreen.setSubmissionState(state, detail);
       // The drop panel was drawn BEFORE the submit answer. Re-render it now so a
@@ -4539,7 +4547,6 @@ export class Game {
     publish('SUBMITTING');
     const uploaded = await (this.pendingReplayUpload ?? Promise.resolve(null));
     if (authService.getUserId() !== submissionUserId) return;
-    const replay = this.lastFinalizedReplay;
 
     // 3. Ghost bookkeeping FIRST, so ghost racing works even if the world
     //    submission is rejected. The FASTEST recorded replay wins; a slower run
@@ -4560,9 +4567,9 @@ export class Game {
       identity,
       timeUs: Math.round(results.completionTime * 1_000_000),
       rank: results.rank,
-      checkpointCount: this.passedCheckpoints.size,
+      checkpointCount,
       resetCount: Math.max(0, results.restartsCount),
-      devMode: this.movementLab !== null,
+      devMode,
       replayVersion: uploaded?.ok ? POV_REPLAY_VERSION : undefined,
       replayHash: uploaded?.ok ? uploaded.hash : undefined,
       replayPath: uploaded?.ok ? uploaded.path : undefined
