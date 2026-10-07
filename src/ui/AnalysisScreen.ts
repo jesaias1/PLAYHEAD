@@ -30,6 +30,7 @@ export class AnalysisScreen {
   private paletteElem: HTMLElement;
 
   private onEnterTrackCallback?: () => void;
+  private onBackCallback?: () => void;
   private animScanFrame = 0;
   private scanProgress = 0;
   private lastStageLabel = '';
@@ -40,7 +41,7 @@ export class AnalysisScreen {
     this.element.innerHTML = `
       <div class="analysis-container">
         <div class="analysis-header">
-          <div class="analysis-kicker">[SIGNAL] AUDIO-TO-SPACE COMPILER</div>
+          <div class="analysis-kicker">[SIGNAL] AUDIO-TO-SPACE COMPILER <button id="btn-ready-back" type="button" hidden>[ESC] BACK</button></div>
           <h2 class="analysis-track-title" id="analysis-title">SIGNAL LOADING...</h2>
           <div class="analysis-stage-row">
             <div class="analysis-stage" id="analysis-stage" aria-live="polite">[SIGNAL] STANDING BY</div>
@@ -83,8 +84,8 @@ export class AnalysisScreen {
 
         <div class="analysis-footer">
           <div id="analysis-variant" aria-live="polite">NORMAL_MODE</div>
+          <button class="btn-hero btn-surf" id="btn-ready-surf" hidden disabled>PLAY SURF_MODE</button>
           <button class="btn-hero" id="btn-enter-track" disabled>[SYS] ENTER WORLD</button>
-          <button class="btn-hero" id="btn-ready-surf" hidden disabled>PLAY SURF_MODE</button>
         </div>
       </div>
     `;
@@ -115,6 +116,11 @@ export class AnalysisScreen {
   }
 
   private initEvents(): void {
+    const backBtn = this.element.querySelector('#btn-ready-back') as HTMLButtonElement;
+    const goBack = () => {
+      if (!this.enterBtn.disabled && !this.element.classList.contains('hidden')) this.onBackCallback?.();
+    };
+    backBtn.addEventListener('click', goBack);
     const handleEnter = () => {
       if (this.enterBtn.disabled) return;
       this.triggerTransition();
@@ -124,7 +130,8 @@ export class AnalysisScreen {
 
     window.addEventListener('keydown', (e) => {
       if (!this.element.classList.contains('hidden') && !this.enterBtn.disabled) {
-        if (e.target === this.surfBtn) return;
+        if (e.code === 'Escape') { e.preventDefault(); goBack(); return; }
+        if (e.target === this.surfBtn || e.target === backBtn) return;
         if (e.code === 'Space' || e.code === 'Enter') {
           e.preventDefault();
           handleEnter();
@@ -134,6 +141,7 @@ export class AnalysisScreen {
   }
 
   private triggerTransition(): void {
+    (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = true;
     this.enterBtn.disabled = true;
     this.surfBtn.disabled = true;
     this.setStage('[SYS] ENTERING...', 1);
@@ -149,6 +157,8 @@ export class AnalysisScreen {
   public setOnEnterTrack(callback: () => void): void {
     this.onEnterTrackCallback = callback;
   }
+
+  public setOnBack(callback: () => void): void { this.onBackCallback = callback; }
 
   public setOnSurf(callback: () => void): void { this.onSurfCallback = callback; }
 
@@ -197,6 +207,7 @@ export class AnalysisScreen {
   }
 
   public show(reset = true): void {
+    (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = true;
     this.element.classList.remove('hidden');
     this.element.classList.remove('contracting');
     this.enterBtn.disabled = true;
@@ -249,6 +260,7 @@ export class AnalysisScreen {
     this.animateWaveformSweep(analysis);
 
     this.enterBtn.disabled = false;
+    (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = false;
     this.surfBtn.hidden = this.surfVariant;
     this.surfBtn.disabled = false;
     this.enterBtn.focus();

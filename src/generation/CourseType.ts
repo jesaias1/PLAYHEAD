@@ -51,4 +51,4 @@ export function courseTypeKeySuffix(courseType: CourseType): string {
  * replay identity; the normal PLAYHEAD identity is byte-compatible and never
  * changes.
  */
-export const SURF_GENERATION_VERSION = 1003;
+export const SURF_GENERATION_VERSION = 1004;

@@ -101,6 +101,17 @@ export type ObstaclePhraseKind =
 export type ObstacleDifficulty = 'LOW' | 'MEDIUM' | 'HIGH';
 
 /**
+ * SURF-only obstacle phrase vocabulary. Long banked ribbons carry deliberate
+ * small solids anchored to a REAL shared ribbon station basis; each phrase is a
+ * readable lane choice rather than a random blocker.
+ */
+export type SurfObstaclePhraseKind =
+  | 'SURF_RIB'      // one partial rib on the upper lane -> take the lower lane
+  | 'SURF_STAGGER'  // two ribs staggered from opposite edges -> one lateral read
+  | 'SURF_SLALOM'   // three ribs alternating sides -> a sustained weave
+  | 'SURF_WEAVE';   // four ribs alternating sides -> a tightening line
+
+/**
  * Deterministic lateral oscillation for moving obstacles (shutters, sweep
  * beams). Purely a function of song time, so the same track always produces
  * the same motion. Never used for audio-reactive jitter.
@@ -176,6 +187,27 @@ export interface RouteNode {
   obstacleMotion?: ObstacleMotion;
   /** Section theme at generation time (DEV diagnostics only). */
   obstacleMusicTheme?: string;
+  /**
+   * SURF-only obstacle phrase kind (the authored ribbon read). Present only on
+   * solids emitted by SurfObstacleGenerator; `obstaclePhraseKind` carries the
+   * shared movement vocabulary so presentation/telegraphing stays consistent.
+   */
+  obstacleSurfPhraseKind?: SurfObstaclePhraseKind;
+  /**
+   * SURF-only: width of the safe lane left open beside this solid, measured on
+   * the REAL station cross-section (metres). A broad lane always remains.
+   */
+  obstacleSafeLaneWidth?: number;
+  /**
+   * SURF-only: ribbon-local lateral centre of that safe lane, measured on the
+   * station right axis, so a test can verify capsule clearance on the actual
+   * banked station rather than on a conservation proxy.
+   */
+  obstacleSafeLaneLateral?: number;
+  /** SURF-only: shared station index this solid is anchored to (source metadata). */
+  obstacleHostStationIndex?: number;
+  /** SURF-only: ribbon id owning that shared station (source metadata). */
+  obstacleHostRibbonId?: number;
   /** Set on nodes that belong to a fork's mastery branch. */
   forkBranchType?: ForkType;
   /**

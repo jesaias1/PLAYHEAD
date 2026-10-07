@@ -219,6 +219,22 @@ export function buildMapIdentityString(track: GeneratedTrack, analysis?: TrackAn
           .map(v=>v ? [q(v.x),q(v.y),q(v.z)].join(',') : '-').join('|')+`|${q(station.halfWidth)}`);
       }
     }
+    // SURF-only authored obstacles: lane metadata and the REAL host station are
+    // part of the canonical map, so any layout/lane change opens a fresh board.
+    for (const node of track.obstacles ?? []) {
+      if (!node.obstacleSurfPhraseKind) continue;
+      const fields = [
+        node.id,
+        node.obstacleSurfPhraseKind,
+        node.obstacleSafeLane ?? '-',
+        node.obstacleSafeLaneWidth === undefined ? '-' : q(node.obstacleSafeLaneWidth),
+        node.obstacleSafeLaneLateral === undefined ? '-' : q(node.obstacleSafeLaneLateral),
+        node.obstacleHostStationIndex === undefined ? '-' : node.obstacleHostStationIndex,
+        node.obstacleHostRibbonId === undefined ? '-' : node.obstacleHostRibbonId,
+        node.obstacleSourceNodeId === undefined ? '-' : node.obstacleSourceNodeId
+      ];
+      parts.push('sfo:' + fields.join(','));
+    }
   }
   return parts.join('\n');
 }

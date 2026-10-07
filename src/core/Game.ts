@@ -491,7 +491,10 @@ export class Game {
 
     // Analysis Screen
     this.ui.analysisScreen.setOnEnterTrack(() => {
-      this.stateMachine.transitionTo(GameState.COUNTDOWN);
+      if (this.stateMachine.is(GameState.READY)) this.stateMachine.transitionTo(GameState.COUNTDOWN);
+    });
+    this.ui.analysisScreen.setOnBack(() => {
+      if (this.stateMachine.is(GameState.READY)) this.returnToImport();
     });
     this.ui.analysisScreen.setOnSurf(() => { void this.switchReadyToSurf(); });
 
@@ -2191,12 +2194,12 @@ export class Game {
     if (!this.cameraController.getIsLocked()) {
       this.awaitingResumeLock = true;
       this.cameraController.lock();
-      // Fallback: if the browser neither confirms nor errors (rare), resume
-      // anyway so the player is never trapped on the pause screen.
+      // A silent lock failure must leave gameplay paused. The button remains
+      // available for another user gesture; only a confirmed lock can resume.
       window.setTimeout(() => {
         if (!this.awaitingResumeLock) return;
         this.awaitingResumeLock = false;
-        this.finalizeResume();
+        if (this.cameraController.getIsLocked()) this.finalizeResume();
       }, 600);
       return;
     }
@@ -2477,8 +2480,8 @@ export class Game {
     // deferred resume. A failure keeps the game paused (cursor stays free).
     this.cameraController.onLockChange = (locked) => {
       if (!this.awaitingResumeLock) return;
+      this.awaitingResumeLock = false;
       if (locked) {
-        this.awaitingResumeLock = false;
         this.finalizeResume();
       }
       // On failure: intentionally do nothing. The pause screen stays up, so it

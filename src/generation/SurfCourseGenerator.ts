@@ -38,6 +38,7 @@ import {
   ribbonSegmentNodes,
 } from './SurfRibbon';
 import { climbFeasibility, SURF_SPEED_ENVELOPE, SurfCourseValidator, snapPlatformChain } from './SurfCourseValidator';
+import { SurfObstacleGenerator } from './SurfObstacleGenerator';
 import { SURF_GRAVITY } from './SurfCourseValidator';
 import {
   clampDescentDrop,
@@ -504,6 +505,11 @@ export class SurfCourseGenerator {
     } else if (forceTransfer) {
       // Genuine release -> opposite catch, mandatory at the global cadence.
       kind = traits.intensity > 0.6 && phraseIndex % 2 === 1 ? 'PRECISION_TRANSFER' : 'TRANSFER';
+    } else if (phraseIndex % 6 === 4) {
+      // Deterministic modest S_CURVE cadence: every sixth GLOBAL phrase (never a
+      // mandatory-transfer slot, which is %6 in {2,5}) is a real S-curve, so a
+      // uniform song still gets genuine route variety instead of an RNG-only S.
+      kind = 'S_CURVE';
     } else if (opensSection || (lowDensity && phraseIndex % 3 === 0)) {
       kind = 'CRUISE';
     } else if (targetMeters <= 60) {
@@ -1211,6 +1217,16 @@ function fakeSection(): AnalysisSection {
 
 
 function finalizeSurfTrack(track: GeneratedTrack, analysis: TrackAnalysis): GeneratedTrack {
+  // SURF-ONLY AUTHORED OBSTACLES.
+  //
+  // Authored LAST, after every phrase has been emitted and every platform
+  // transition snapped, so the solids are anchored to the FINAL shared ribbon
+  // stations the player actually rides. They are real gameplay RouteNodes
+  // (PhysicsWorld consumes them as colliders), never decoration, and they are
+  // included in the fingerprint below, so any layout change opens a fresh
+  // competitive board.
+  const obstacles = SurfObstacleGenerator.generate(track.route, analysis, track.checkpoints.map(cp => cp.routeNodeId));
+  if (obstacles.length > 0) track.obstacles = obstacles;
   const audioIdentity = analysis.customSource?.contentHash ?? `seed-${analysis.seed >>> 0}`;
   track.courseIdentity = `surf-v${SURF_GENERATION_VERSION}:${audioIdentity}:${computeMapFingerprint(track, analysis)}`;
   return track;

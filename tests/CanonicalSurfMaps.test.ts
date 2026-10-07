@@ -62,6 +62,7 @@ describe('Canonical SURF maps — namespacing', () => {
     for (const track of SignalPackCatalog.getTracks()) {
       const level = loadFresh(track.id);
       const surfTrack = TrackGenerator.generate(level.analysis, 'SURF');
+      expect(surfTrack.obstacles?.length ?? 0, `${track.id} authored Surf challenges`).toBeGreaterThan(0);
       const identity = computeSurfMapIdentity(track.id, surfTrack, level.analysis);
       expect(identity.trackId.startsWith(`surf:${track.id}:`)).toBe(true);
       expect(identity.trackId).toBe(surfBoardTrackId(track.id, identity.mapFingerprint));

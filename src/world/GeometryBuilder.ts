@@ -680,7 +680,11 @@ export class GeometryBuilder {
         const mesh = new THREE.Mesh(geom, bodyMaterial);
         mesh.name = `RouteObstacle:${obstacle.obstacleType}:${obstacle.id}`;
         mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
-        mesh.rotation.set(0, obstacle.yaw, 0, 'YXZ');
+        // Rendered box uses the SAME YXZ pitch/yaw/roll as the BoxCollider, so
+        // an authored banked SURF rib draws exactly the solid it collides.
+        // Normal-mode obstacles carry pitch = roll = 0, so their mesh is
+        // byte-identical to before.
+        mesh.rotation.set(obstacle.pitch || 0, obstacle.yaw, obstacle.roll || 0, 'YXZ');
         mesh.userData.routeObstacleId = obstacle.id;
         // Obstacles are authoritative gameplay solids (they collide), so they
         // are never candidates for world-safety rejection.
