@@ -13,6 +13,7 @@
 
 import { RouteNode } from '../generation/GenerationTypes';
 import { getPlatformMaxHalfWidth } from '../generation/PlatformShape';
+import { buildRibbonSurfaceMesh } from '../generation/SurfRibbon';
 
 export interface RouteVoidVolume {
   x1: number;
@@ -63,6 +64,27 @@ export class RouteVoidEnvelope {
 
     // 1. Process all physical platform/ramp nodes
     for (const node of allNodes) {
+      // SURF ribbon nodes: the void minimum must equal the FINAL sampled ribbon
+      // vertices, not a pitch/half-length proxy.
+      if (node.ribbon) {
+        const a = node.ribbon.stations[0];
+        const b = node.ribbon.stations[1];
+        const minimum = buildRibbonSurfaceMesh(node)!.minY;
+        const aBottom = minimum;
+        const bBottom = minimum;
+        if (aBottom < this.lowestGeometryY) this.lowestGeometryY = aBottom;
+        if (bBottom < this.lowestGeometryY) this.lowestGeometryY = bBottom;
+        this.volumes.push({
+          x1: a.center.x,
+          z1: a.center.z,
+          y1: aBottom,
+          x2: b.center.x,
+          z2: b.center.z,
+          y2: bBottom,
+          halfWidth: Math.max(a.halfWidth, b.halfWidth) + RouteVoidEnvelope.LATERAL_MARGIN
+        });
+        continue;
+      }
       const halfLen = (node.dimensions.z || 0) * 0.5;
       const fwdX = Math.sin(node.yaw);
       const fwdZ = Math.cos(node.yaw);
@@ -131,6 +153,16 @@ export class RouteVoidEnvelope {
     for (let i = 0; i < nodes.length - 1; i++) {
       const curr = nodes[i];
       const next = nodes[i + 1];
+
+      // Within one continuously sampled ribbon the shared station guarantees
+      // contact, so no flight-path volume is needed (and an artificial one would
+      // only inflate the envelope).
+      if (
+        curr.ribbon && next.ribbon &&
+        curr.ribbonId !== undefined && curr.ribbonId === next.ribbonId
+      ) {
+        continue;
+      }
 
       const halfLenCurr = (curr.dimensions.z || 0) * 0.5;
       const fwdXCurr = Math.sin(curr.yaw);

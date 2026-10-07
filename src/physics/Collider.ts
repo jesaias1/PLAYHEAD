@@ -9,6 +9,7 @@ import {
   interpolatePlatformCenterOffset,
   interpolatePlatformHalfWidth
 } from '../generation/PlatformShape';
+import { buildRibbonChainSurface, RibbonSurfaceTriangle } from '../generation/SurfRibbon';
 
 export interface CollisionResult {
   hasContact: boolean;
@@ -173,4 +174,191 @@ export class BoxCollider {
       boostSpeed: this.boostSpeed
     };
   }
+}
+
+
+/**
+ * SURF RIBBON SURFACE COLLIDER.
+ *
+ * A dedicated collider for sampled curved/banked ribbon sections. It replaces
+ * the per-segment OBB proxy for surf ribbon nodes because a rotated box is NOT
+ * the surface the player rides once bank/heading change across the segment.
+ *
+ * The collider is defined by the SAME world-space triangles the renderer
+ * draws, merged across the whole continuous ribbon from its ordered stations. It supports sphere
+ * closest-point contact against the top face, the underside and the two OUTER
+ * lateral faces. The internal entry/exit end faces are deliberately excluded so
+ * adjacent segments in one continuous ribbon never form an internal slab wall
+ * that could snag or eject a high-speed player.
+ *
+ * Physics RESPONSE is unchanged: this only supplies a different contact
+ * normal / penetration, and PhysicsWorld consumes it exactly like any other
+ * collider.
+ */
+export class RibbonSurfaceCollider extends BoxCollider {
+  /**
+   * Exact finite triangles the player can touch: the sampled TOP face, the
+   * underside, and the two OUTER lateral faces. The travel-perpendicular
+   * entry/exit caps are deliberately absent, so a continuous ribbon never forms
+   * an internal slab wall that could snag or eject a high-speed player.
+   */
+  private readonly triangles: RibbonSurfaceTriangle[];
+  /** Per-triangle bounding spheres for a cheap broad reject (parallel arrays). */
+  private readonly triangleCenters: THREE.Vector3[] = [];
+  private readonly triangleRadii: number[] = [];
+  private readonly outwardNormal = new THREE.Vector3(0, 1, 0);
+  private readonly topCenter = new THREE.Vector3();
+
+  constructor(nodes: RouteNode | RouteNode[]) {
+    const ordered = Array.isArray(nodes) ? nodes : [nodes];
+    super(ordered[0]);
+    // One collider per CONTINUOUS ribbon: the whole ordered chain is merged into
+    // a single finite-triangle surface. Adjacent segments share an exact boundary
+    // edge, so the union has no internal walls and produces no duplicated
+    // correction at a shared seam.
+    const chain = buildRibbonChainSurface(ordered);
+    this.triangles = chain ? chain.collisionTriangles : [];
+    for (const tri of this.triangles) {
+      const c = tri.a.clone().add(tri.b).add(tri.c).multiplyScalar(1 / 3);
+      const r = Math.sqrt(Math.max(
+        tri.a.distanceToSquared(c),
+        tri.b.distanceToSquared(c),
+        tri.c.distanceToSquared(c)
+      ));
+      this.triangleCenters.push(c);
+      this.triangleRadii.push(r);
+    }
+    if (chain) {
+      this.outwardNormal.copy(chain.topNormal);
+      this.topCenter.copy(chain.center);
+      // Authoritative centre and radius come from the exact sampled vertices.
+      this.center.copy(chain.center);
+      this.boundingRadius = chain.boundingRadius;
+    }
+  }
+
+  /**
+   * Exact closest-point contact against the finite sampled slab.
+   *
+   * There is NO averaged-plane fast path and no interior side test: a sphere
+   * contacts only when it is within `radius` of a real face, so a point beyond
+   * the end or side of the quad never reports contact (even when it lies inside
+   * a broad bounding sphere), and a sphere well below the underside is not
+   * dragged up toward the top plane.
+   */
+  public override testSphere(sphereCenter: THREE.Vector3, radius: number): CollisionResult {
+    if (this.triangles.length === 0) return this.noContact();
+
+    const broad = this.boundingRadius + radius;
+    if (sphereCenter.distanceToSquared(this.center) > broad * broad) return this.noContact();
+
+    const rSq = radius * radius;
+    let bestDistSq = Infinity;
+    let bestPoint: THREE.Vector3 | null = null;
+    let bestTri: RibbonSurfaceTriangle | null = null;
+    for (let i = 0; i < this.triangles.length; i++) {
+      // Cheap per-triangle bounding-sphere reject before the exact closest-point.
+      const reach = this.triangleRadii[i] + radius;
+      if (sphereCenter.distanceToSquared(this.triangleCenters[i]) > reach * reach) continue;
+      const tri = this.triangles[i];
+      const p = closestPointOnTriangle(sphereCenter, tri.a, tri.b, tri.c);
+      const dSq = p.distanceToSquared(sphereCenter);
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        bestPoint = p;
+        bestTri = tri;
+      }
+    }
+
+    if (bestPoint === null || bestTri === null || bestDistSq > rSq) return this.noContact();
+
+    // Outward normal comes from the WINNING triangle ONLY, never an average over
+    // the whole chain. On an exact shared interior edge the closest point lies on
+    // both adjacent triangles; each side's outward normal points the same way, so
+    // the push is single, stable and along the true surface - never a wall.
+    // The face normal is the STABLE default; the exact `away` direction is used
+    // only when the sphere centre clearly lies outside the face, so a near-zero
+    // closest distance can never flip the push direction.
+    const outward = bestTri.normal;
+    let normal: THREE.Vector3 = outward.clone();
+    if (bestDistSq > 1e-10) {
+      const dist = Math.sqrt(bestDistSq);
+      const away = sphereCenter.clone().sub(bestPoint);
+      if (away.dot(outward) > 0.5 * dist) normal = away.normalize();
+    }
+    const dist = Math.sqrt(Math.max(0, bestDistSq));
+    return this.contact(bestPoint.clone(), normal, Math.max(0, radius - dist));
+  }
+
+  private noContact(): CollisionResult {
+    return {
+      hasContact: false,
+      contactPoint: new THREE.Vector3(),
+      normal: new THREE.Vector3(),
+      penetration: 0,
+      isSurf: this.isSurf,
+      isBoost: this.isBoost,
+      boostSpeed: this.boostSpeed
+    };
+  }
+
+  private contact(point: THREE.Vector3, normal: THREE.Vector3, penetration: number): CollisionResult {
+    return {
+      hasContact: true,
+      contactPoint: point,
+      normal,
+      penetration,
+      isSurf: this.isSurf,
+      isBoost: this.isBoost,
+      boostSpeed: this.boostSpeed
+    };
+  }
+}
+
+/** Ericson: closest point on a triangle to p (Real-Time Collision Detection). */
+function closestPointOnTriangle(
+  p: THREE.Vector3,
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  c: THREE.Vector3
+): THREE.Vector3 {
+  const ab = b.clone().sub(a);
+  const ac = c.clone().sub(a);
+  const ap = p.clone().sub(a);
+  const d1 = ab.dot(ap);
+  const d2 = ac.dot(ap);
+  if (d1 <= 0 && d2 <= 0) return a.clone();
+
+  const bp = p.clone().sub(b);
+  const d3 = ab.dot(bp);
+  const d4 = ac.dot(bp);
+  if (d3 >= 0 && d4 <= d3) return b.clone();
+
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return a.clone().add(ab.clone().multiplyScalar(v));
+  }
+
+  const cp = p.clone().sub(c);
+  const d5 = ab.dot(cp);
+  const d6 = ac.dot(cp);
+  if (d6 >= 0 && d5 <= d6) return c.clone();
+
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return a.clone().add(ac.clone().multiplyScalar(w));
+  }
+
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return b.clone().add(c.clone().sub(b).multiplyScalar(w));
+  }
+
+  const denom = 1 / (va + vb + vc);
+  const v = vb * denom;
+  const w = vc * denom;
+  return a.clone().add(ab.clone().multiplyScalar(v)).add(ac.clone().multiplyScalar(w));
 }

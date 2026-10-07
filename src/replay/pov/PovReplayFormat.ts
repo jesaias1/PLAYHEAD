@@ -51,6 +51,12 @@ export interface PovReplayIdentity {
   mapVersion: number;
   mapFingerprint: string;
   movementVersion: string;
+  /**
+   * Course style this replay was recorded against. Optional and ADDITIVE: a
+   * legacy replay with no value is treated as PLAYHEAD. Official competitive
+   * runs are always PLAYHEAD and the fingerprint is unchanged.
+   */
+  courseType?: 'PLAYHEAD' | 'SURF';
 }
 
 export interface PovReplayCosmetic {

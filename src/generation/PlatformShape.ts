@@ -21,6 +21,14 @@ export function getPlatformFootprint(node: RouteNode): PlatformFootprint {
 }
 
 export function getPlatformMaxHalfWidth(node: RouteNode): number {
+  // SURF ribbon nodes: the real sampled width is authoritative (a banked quad
+  // can extend further than the trapezoid proxy), so exclusion, void and
+  // presentation all protect the ACTUAL ribbon bounds.
+  if (node.ribbon) {
+    let maxHalf = 0;
+    for (const s of node.ribbon.stations) maxHalf = Math.max(maxHalf, s.halfWidth);
+    return maxHalf * 1.25;
+  }
   const shape = getPlatformFootprint(node);
   return Math.max(
     shape.entryHalfWidth,

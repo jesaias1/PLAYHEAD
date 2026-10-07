@@ -1,3 +1,4 @@
+import { SURF_GENERATION_VERSION } from '../generation/CourseType';
 /**
  * CustomAnalysisCache: versioned, bounded, content-addressed cache of compact
  * custom-audio analysis + generated route. Keyed by the content hash (never the
@@ -11,9 +12,11 @@
  */
 
 import { AnalysisSection, AnalysisFrame, CustomSourceMeta, OnsetEvent, TrackAnalysis } from './AudioFeatures';
-import { CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteFork, RouteNode } from '../generation/GenerationTypes';
+import { CheckpointDefinition, FinishDefinition, GeneratedTrack, RouteFork, RouteNode, SurfRibbonStation } from '../generation/GenerationTypes';
 import { RouteConnectivityValidator } from '../generation/RouteConnectivityValidator';
 import { ROUTE_GENERATION_VERSION } from '../generation/RouteGenerator';
+import { SurfCourseValidator } from '../generation/SurfCourseValidator';
+import { CourseType, normalizeCourseType } from '../generation/CourseType';
 
 /**
  * Bumped whenever hashing, sectioning or cache encoding changes so a stale
@@ -118,7 +121,8 @@ function validateTrack(track: unknown): track is GeneratedTrack {
   if (!track || typeof track !== 'object') return false;
   const t = track as Partial<GeneratedTrack>;
   if (!isFiniteNumber(t.seed) || !isFiniteNumber(t.totalDistance) || !isFiniteNumber(t.targetDuration)) return false;
-  if (t.generationVersion !== ROUTE_GENERATION_VERSION) return false;
+  if (t.courseType !== undefined && t.courseType !== 'PLAYHEAD' && t.courseType !== 'SURF') return false;
+  if (t.generationVersion !== (t.courseType === 'SURF' ? SURF_GENERATION_VERSION : ROUTE_GENERATION_VERSION)) return false;
   if (!Array.isArray(t.route) || t.route.length < 2) return false;
 
   const lengths: number[] = [];
@@ -128,6 +132,12 @@ function validateTrack(track: unknown): track is GeneratedTrack {
     if (!isFiniteNumber(n.time) || !isFiniteNumber(n.arcLength)) return false;
     if (!isFiniteVec3(n.position) || !isFiniteVec3(n.dimensions)) return false;
     if (![n.id, n.yaw, n.pitch, n.roll, n.sectionIndex].every(isFiniteNumber)) return false;
+    if (t.courseType === 'SURF' && n.ribbon) {
+      if (!Array.isArray(n.ribbon.stations) || n.ribbon.stations.length !== 2) return false;
+      for (const station of n.ribbon.stations) {
+        if (!isFiniteVec3(station.center) || !isFiniteVec3(station.normal) || !isFiniteVec3(station.right) || !isFiniteVec3(station.tangent) || !isFiniteNumber(station.halfWidth) || station.halfWidth <= 0) return false;
+      }
+    }
     lengths.push(n.arcLength as number);
   }
   // Arc length must be monotonically non-decreasing.
@@ -188,8 +198,28 @@ function cloneNode(node: RouteNode): RouteNode {
     position: { ...node.position },
     dimensions: { ...node.dimensions },
     surfNormal: node.surfNormal ? { ...node.surfNormal } : undefined,
+    ribbon: node.ribbon
+      ? {
+          ribbonId: node.ribbon.ribbonId,
+          kind: node.ribbon.kind,
+          stations: [
+            cloneStation(node.ribbon.stations[0]),
+            cloneStation(node.ribbon.stations[1])
+          ]
+        }
+      : undefined,
     signalSpineHostGap: node.signalSpineHostGap ? { ...node.signalSpineHostGap } : undefined,
     obstacleMotion: node.obstacleMotion ? { ...node.obstacleMotion } : undefined
+  };
+}
+
+function cloneStation(station: SurfRibbonStation): SurfRibbonStation {
+  return {
+    center: { ...station.center },
+    normal: { ...station.normal },
+    halfWidth: station.halfWidth,
+    right: station.right ? { ...station.right } : undefined,
+    tangent: station.tangent ? { ...station.tangent } : undefined
   };
 }
 
@@ -218,20 +248,32 @@ function cloneLevel(level: CachedCustomLevel): CachedCustomLevel {
 export class CustomAnalysisCache {
   private static memory = new Map<string, CachedCustomLevel>();
 
-  public static buildKey(contentHash: string, analysisVersion = CUSTOM_ANALYSIS_CACHE_VERSION): string {
-    return `${analysisVersion}:${contentHash}`;
+  /**
+   * Cache key. PLAYHEAD (the default) returns the legacy `<version>:<hash>`
+   * unchanged, so every existing persisted entry is still found. SURF is
+   * namespaced with a `surf:` prefix so it can never collide with a normal
+   * course generated from the same audio.
+   */
+  public static buildKey(
+    contentHash: string,
+    courseTypeOrVersion: CourseType | number = 'PLAYHEAD',
+    analysisVersion = CUSTOM_ANALYSIS_CACHE_VERSION
+  ): string {
+    const type = typeof courseTypeOrVersion === 'number' ? 'PLAYHEAD' : normalizeCourseType(courseTypeOrVersion);
+    const version = typeof courseTypeOrVersion === 'number' ? courseTypeOrVersion : analysisVersion;
+    return `${type === 'SURF' ? `surf:${SURF_GENERATION_VERSION}:` : ''}${version}:${contentHash}`;
   }
 
-  public static load(contentHash: string): CachedCustomLevel | null {
+  public static load(contentHash: string, courseType: CourseType = 'PLAYHEAD'): CachedCustomLevel | null {
     try {
-      return this.loadValidated(contentHash);
+      return this.loadValidated(contentHash, courseType);
     } catch {
       return null;
     }
   }
 
-  private static loadValidated(contentHash: string): CachedCustomLevel | null {
-    const key = this.buildKey(contentHash);
+  private static loadValidated(contentHash: string, courseType: CourseType): CachedCustomLevel | null {
+    const key = this.buildKey(contentHash, courseType);
     const mem = this.memory.get(key);
     if (mem) return cloneLevel(mem);
 
@@ -255,10 +297,14 @@ export class CustomAnalysisCache {
         e &&
         e.hash === key &&
         e.version === CUSTOM_ANALYSIS_CACHE_VERSION &&
-        e.generationVersion === ROUTE_GENERATION_VERSION
+        e.generationVersion === (courseType === 'SURF' ? SURF_GENERATION_VERSION : ROUTE_GENERATION_VERSION)
     );
     if (!entry) return null;
     if (!validateAnalysis(entry.analysis) || !validateTrack(entry.track)) return null;
+    // Identity guard: a cached entry must belong to the SAME course type that
+    // requested it (PLAYHEAD entries default to PLAYHEAD), so a normal course
+    // can never be served as a SURF course or vice versa.
+    if (normalizeCourseType(entry.track.courseType) !== courseType) return null;
 
     // Reconstruct the Float32Array waveform (JSON round-trip loses the type)
     // and re-validate the connectivity on the exact reconstructed route.
@@ -270,13 +316,17 @@ export class CustomAnalysisCache {
       track: entry.track
     };
     if (!validateTrack(rebuilt.track) || !RouteConnectivityValidator.validate(rebuilt.track).isValid) return null;
+    // SURF entries are validated by the SURF-specific validator on the exact
+    // reconstructed geometry, not the normal platform validator.
+    if (courseType === 'SURF' && !SurfCourseValidator.validate(rebuilt.track).isValid) return null;
 
     this.rememberEntries([{ key, level: rebuilt }]);
     return cloneLevel(rebuilt);
   }
 
-  public static save(contentHash: string, level: CachedCustomLevel): boolean {
-    const key = this.buildKey(contentHash);
+  public static save(contentHash: string, level: CachedCustomLevel, courseType: CourseType = 'PLAYHEAD'): boolean {
+    const key = this.buildKey(contentHash, courseType);
+    if (normalizeCourseType(level.track.courseType) !== courseType || !validateTrack(level.track)) return false;
     const stored = cloneLevel(level);
     this.memory.set(key, stored);
     this.pruneMemory();
@@ -307,7 +357,7 @@ export class CustomAnalysisCache {
     next.unshift({
       hash: key,
       version: CUSTOM_ANALYSIS_CACHE_VERSION,
-      generationVersion: ROUTE_GENERATION_VERSION,
+      generationVersion: stored.track.generationVersion ?? ROUTE_GENERATION_VERSION,
       savedAt: Date.now(),
       analysis: stored.analysis,
       track: stored.track
@@ -369,7 +419,7 @@ export class CustomAnalysisCache {
   private static isExpiredOrInvalid(entry: CustomCacheEntry): boolean {
     try {
     if (entry.version !== CUSTOM_ANALYSIS_CACHE_VERSION) return true;
-    if (entry.generationVersion !== ROUTE_GENERATION_VERSION) return true;
+    if (entry.generationVersion !== (entry.track.courseType === 'SURF' ? SURF_GENERATION_VERSION : ROUTE_GENERATION_VERSION)) return true;
     if (!validateAnalysis(entry.analysis)) return true;
     if (!validateTrack(entry.track)) return true;
     return false;

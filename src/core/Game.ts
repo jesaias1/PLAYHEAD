@@ -17,6 +17,7 @@ import { estimateRouteTiming } from '../generation/CustomTimingEstimate';
 import { resolveCustomAudioLevel } from '../generation/CustomPipeline';
 import { TrackGenerator } from '../generation/TrackGenerator';
 import { GeneratedTrack, CheckpointDefinition } from '../generation/GenerationTypes';
+import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { Environment } from '../world/Environment';
 import { World } from '../world/World';
 import { CameraController } from '../player/CameraController';
@@ -292,6 +293,12 @@ export class Game {
   private currentAnalysis: TrackAnalysis | null = null;
   private currentTrack: GeneratedTrack | null = null;
   private currentOfficialTrackId: string | null = null;
+  /**
+   * Course style of the currently loaded custom run. PLAYHEAD is the default
+   * and is the legacy identity; SURF namespaces the custom cache, PB ghost and
+   * replay metadata so the two styles can never mix.
+   */
+  private currentCourseType: CourseType = DEFAULT_COURSE_TYPE;
 
   private currentCheckpoint: CheckpointDefinition | null = null;
   private passedCheckpoints = new Set<number>();
@@ -451,7 +458,7 @@ export class Game {
   private setupCallbacks(): void {
     // Import Screen
     this.ui.importScreen.setCallbacks(
-      (file) => this.handleFileSelected(file),
+      (file, courseType) => this.handleFileSelected(file, courseType),
       (genre) => this.handleDevTrackSelected(genre),
       (err) => alert(err),
       (trackId) => this.enterMovementLab(trackId),
@@ -838,7 +845,8 @@ export class Game {
                 this.currentAnalysis.filename || 'PLAYHEAD TRACK',
                 results.completionTime,
                 results.score,
-                this.replayRecorder.frames
+                this.replayRecorder.frames,
+                this.currentCourseType
               );
             }
 
@@ -1106,6 +1114,9 @@ export class Game {
     try {
       this.currentOfficialTrackId = trackEntry.id;
       this.currentCustomAudioBuffer = null;
+      // Official Signal Pack courses are PLAYHEAD; a surf selection can never leak
+      // its identity into an official run.
+      this.currentCourseType = DEFAULT_COURSE_TYPE;
       this.isFirstContactCourse = !!trackEntry.isFirstContact;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(trackEntry.title);
@@ -1182,9 +1193,10 @@ export class Game {
     }
   }
 
-  private async handleFileSelected(file: File): Promise<void> {
+  private async handleFileSelected(file: File, courseType: CourseType = DEFAULT_COURSE_TYPE): Promise<void> {
     try {
       this.currentOfficialTrackId = null;
+      this.currentCourseType = normalizeCourseType(courseType);
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(file.name);
@@ -1194,7 +1206,8 @@ export class Game {
       this.currentCustomAudioBuffer = buffer;
       this.ui.analysisScreen.setStage('[AUDIO] PCM DECODED', 0.08);
       await this.processBuffer(buffer, filename, {
-        custom: { source: 'FILE', encodedBytes: encodedBytes }
+        custom: { source: 'FILE', encodedBytes: encodedBytes },
+        courseType: this.currentCourseType
       });
     } catch (err: unknown) {
       this.currentCustomAudioBuffer = null;
@@ -1243,9 +1256,14 @@ export class Game {
   private async processBuffer(
     buffer: AudioBuffer,
     filename: string,
-    options?: { custom?: { source: CustomSourceMeta['source']; encodedBytes?: ArrayBuffer | null } }
+    options?: {
+      custom?: { source: CustomSourceMeta['source']; encodedBytes?: ArrayBuffer | null };
+      courseType?: CourseType;
+    }
   ): Promise<void> {
     const isCustom = options?.custom != null;
+    const courseType: CourseType = normalizeCourseType(options?.courseType);
+    this.currentCourseType = courseType;
     if (isCustom) this.ui.importScreen.setCustomStatus(null);
 
     await this.audioEngine.init();
@@ -1268,21 +1286,22 @@ export class Game {
         filename,
         identity,
         options!.custom!,
-        { analyze: AudioAnalyzer.analyze, generate: (value) => TrackGenerator.generate(value) },
+        { analyze: AudioAnalyzer.analyze, generate: (value, type) => TrackGenerator.generate(value, type) },
+        courseType,
         (stage, progress) => this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68)
       );
       analysis = resolved.analysis;
       track = resolved.track;
       this.ui.analysisScreen.setStage(
-        resolved.cacheHit ? '[MAP] CACHED MOVEMENT PHRASES RESTORED' : '[MAP] MOVEMENT PHRASES',
+        courseType === 'SURF' ? (resolved.cacheHit ? '[MAP] CACHED SURF PHRASES RESTORED' : '[MAP] SURF PHRASES') : (resolved.cacheHit ? '[MAP] CACHED MOVEMENT PHRASES RESTORED' : '[MAP] MOVEMENT PHRASES'),
         0.82
       );
     } else {
       analysis = await AudioAnalyzer.analyze(buffer, filename, (stage, progress) => {
         this.ui.analysisScreen.setStage(stage, 0.1 + progress * 0.68);
       });
-      this.ui.analysisScreen.setStage('[MAP] MOVEMENT PHRASES', 0.82);
-      track = TrackGenerator.generate(analysis);
+      this.ui.analysisScreen.setStage(courseType === 'SURF' ? '[MAP] SURF PHRASES' : '[MAP] MOVEMENT PHRASES', 0.82);
+      track = TrackGenerator.generate(analysis, courseType);
     }
 
     this.currentAnalysis = analysis;
@@ -4208,7 +4227,10 @@ export class Game {
       trackId: identity.trackId,
       mapVersion: identity.mapVersion,
       mapFingerprint: identity.mapFingerprint,
-      movementVersion: identity.movementVersion
+      movementVersion: identity.movementVersion,
+      // Official Signal Pack courses are PLAYHEAD; this keeps competitive
+      // identity explicit without altering any fingerprint.
+      courseType: normalizeCourseType(identity.courseType)
     };
   }
 
@@ -4906,7 +4928,8 @@ export class Game {
       loadedIdentity.trackId !== expected.trackId ||
       loadedIdentity.mapVersion !== expected.mapVersion ||
       loadedIdentity.mapFingerprint !== expected.mapFingerprint ||
-      loadedIdentity.movementVersion !== expected.movementVersion
+      loadedIdentity.movementVersion !== expected.movementVersion ||
+      normalizeCourseType(loadedIdentity.courseType) !== normalizeCourseType(expected.courseType)
     ) {
       this.povPlayer.unload();
       return { ok: false, detail: 'REPLAY MAP IDENTITY MISMATCH' };

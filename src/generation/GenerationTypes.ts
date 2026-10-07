@@ -2,6 +2,8 @@
  * Generation interfaces and data types for procedural courses
  */
 
+import type { CourseType } from './CourseType';
+
 export interface Vector3Like {
   x: number;
   y: number;
@@ -176,6 +178,25 @@ export interface RouteNode {
   obstacleMusicTheme?: string;
   /** Set on nodes that belong to a fork's mastery branch. */
   forkBranchType?: ForkType;
+  /**
+   * SURF MODE: sampled ribbon segment this node contributes. Present only on
+   * nodes emitted by the surf course generator. Collision and rendering read
+   * the SAME stations; ribbonStationIndex orders the samples along the ribbon.
+   */
+  ribbon?: SurfRibbonSegment;
+  /** Shared ribbon id across every node of one continuous surf ribbon. */
+  ribbonId?: number;
+  /** Index of this node's segment within its ribbon (0 = first). */
+  ribbonStationIndex?: number;
+  /**
+   * SURF MODE only: the INTENDED relationship between this node and the node
+   * that PRECEDES it in the route. AIR marks a designed airborne transfer
+   * (wall / canyon / drop / bhop gap) whose real gap and position must be
+   * preserved verbatim; CONNECTED (or absent) means the entry edge is meant to
+   * meet the previous exit edge and may be snapped flush. Normal PLAYHEAD
+   * nodes never carry this field, so their repair behaviour is unchanged.
+   */
+  surfTransition?: 'AIR' | 'CONNECTED';
 }
 
 export interface CheckpointDefinition {
@@ -196,6 +217,10 @@ export interface FinishDefinition {
 
 export interface GeneratedTrack {
   generationVersion?: number;
+  /** Explicit course style identity. Absent/PLAYHEAD is the legacy default. */
+  courseType?: CourseType;
+  /** Versioned audio and exact geometry identity for custom SURF ghosts. */
+  courseIdentity?: string;
   seed: number;
   route: RouteNode[];
   optionalRamps?: RouteNode[];
@@ -209,4 +234,47 @@ export interface GeneratedTrack {
   totalDistance: number;
   targetDuration: number;
   repairedJumpsCount: number;
+}
+/**
+ * Surf ribbon geometry types.
+ *
+ * A surf ribbon is a sampled, banked, curved corridor. The EXACT same sampled
+ * stations drive both collision and rendering, so the surface the player rides
+ * and the surface they see can never disagree.
+ *
+ * Each RouteNode that belongs to a ribbon owns the two stations bounding its
+ * own segment; adjacent segments SHARE the boundary station (identical values),
+ * which is what makes the sampled surface C0-continuous: the exit edge of one
+ * segment is byte-identical to the entry edge of the next, so a player can
+ * never catch a seam.
+ */
+export interface SurfRibbonStation {
+  /** Centre point of the ribbon cross-section, world space. */
+  center: Vector3Like;
+  /** Unit surface normal of the playable face at this station. */
+  normal: Vector3Like;
+  /** Half width of the ribbon at this station (metres). */
+  halfWidth: number;
+  /**
+   * Shared unit centreline TANGENT at this station (central-difference of the
+   * sampled path). The segment exit uses the LAST station tangent and the next
+   * segment entry uses the SAME shared station, so launch direction is exact.
+   */
+  tangent?: Vector3Like;
+  /**
+   * Shared unit right axis of the top face at this station. Derived from the
+   * local centreline tangent (not the chord between samples), so the exit edge
+   * of one segment and the entry edge of the next are built from the SAME axis
+   * and are therefore geometrically identical.
+   */
+  right?: Vector3Like;
+}
+
+export interface SurfRibbonSegment {
+  /** Shared identifier for every node of one continuous ribbon. */
+  ribbonId: number;
+  /** Phrase role this ribbon serves (diagnostics / validation only). */
+  kind: string;
+  /** Exactly two stations: entry and exit of this segment. */
+  stations: [SurfRibbonStation, SurfRibbonStation];
 }

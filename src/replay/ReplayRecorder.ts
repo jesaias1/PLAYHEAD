@@ -44,6 +44,11 @@ export interface ReplayIdentity {
   movementVersion: string;
   /** Replay payload schema version. */
   replayVersion: number;
+  /**
+   * Course style. Optional and ADDITIVE; a legacy replay with no value is
+   * treated as PLAYHEAD. Official competitive fingerprints are unchanged.
+   */
+  courseType?: 'PLAYHEAD' | 'SURF';
 }
 
 export class ReplayRecorder {

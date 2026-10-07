@@ -11,10 +11,12 @@ import { CustomSourceMeta, TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack } from './GenerationTypes';
 import { CustomAnalysisCache } from '../audio/CustomAnalysisCache';
 import { CustomContentIdentity } from '../utils/hash';
+import { CourseType, normalizeCourseType } from './CourseType';
 
 export interface CustomAnalyzeOptions {
   custom: { source: CustomSourceMeta['source']; encodedBytes?: ArrayBuffer | null };
   contentIdentity?: CustomContentIdentity;
+  courseType?: CourseType;
 }
 
 export interface CustomPipelineDeps {
@@ -24,7 +26,7 @@ export interface CustomPipelineDeps {
     onProgress: ((stage: string, progress: number) => void) | undefined,
     options: CustomAnalyzeOptions
   ) => Promise<TrackAnalysis>;
-  generate: (analysis: TrackAnalysis) => GeneratedTrack;
+  generate: (analysis: TrackAnalysis, courseType: CourseType) => GeneratedTrack;
 }
 
 export interface CustomPipelineResult {
@@ -39,9 +41,18 @@ export async function resolveCustomAudioLevel(
   identity: CustomContentIdentity,
   custom: { source: CustomSourceMeta['source']; encodedBytes?: ArrayBuffer | null },
   deps: CustomPipelineDeps,
-  onProgress?: (stage: string, progress: number) => void
+  courseTypeOrProgress?: CourseType | ((stage: string, progress: number) => void),
+  onProgressMaybe?: (stage: string, progress: number) => void
 ): Promise<CustomPipelineResult> {
-  const cached = CustomAnalysisCache.load(identity.contentHash);
+  // Backward compatibility: legacy callers passed the progress callback as the
+  // 6th argument (before courseType existed). A function there is treated as the
+  // callback and the course type defaults to PLAYHEAD.
+  const legacyProgress = typeof courseTypeOrProgress === 'function' ? courseTypeOrProgress : undefined;
+  const type = normalizeCourseType(
+    typeof courseTypeOrProgress === 'function' ? 'PLAYHEAD' : courseTypeOrProgress
+  );
+  const onProgress = onProgressMaybe ?? legacyProgress;
+  const cached = CustomAnalysisCache.load(identity.contentHash, type);
   if (cached) {
     onProgress?.('[CACHE] ANALYSIS AND VALIDATED ROUTE RESTORED', 1);
     // Provenance reflects the NEW filename; the cached entry is not mutated.
@@ -57,10 +68,11 @@ export async function resolveCustomAudioLevel(
 
   const analysis = await deps.analyze(buffer, filename, onProgress, {
     custom,
-    contentIdentity: identity
+    contentIdentity: identity,
+    courseType: type
   });
   onProgress?.('[MAP] COMPOSING TRAVERSAL', 1);
-  const track = deps.generate(analysis);
-  CustomAnalysisCache.save(identity.contentHash, { analysis, track });
+  const track = deps.generate(analysis, type);
+  CustomAnalysisCache.save(identity.contentHash, { analysis, track }, type);
   return { analysis, track, cacheHit: false };
 }

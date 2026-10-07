@@ -8,6 +8,8 @@
 import * as THREE from 'three';
 import { RouteFork, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { getPlatformMaxHalfWidth } from '../generation/PlatformShape';
+import { buildRibbonSurfaceMesh } from '../generation/SurfRibbon';
+import { ballisticTransferCheck, SURF_SPEED_ENVELOPE, SURF_GRAVITY } from '../generation/SurfCourseValidator';
 
 export interface ObjectBoundingVolume {
   position: THREE.Vector3;
@@ -117,6 +119,7 @@ export class RouteExclusionCorridor {
 
   private mainRoute: RouteNode[];
   private independentNodes: RouteNode[];
+  private surfTravelVolumes: Array<{box: THREE.Box3; nodeId: number}> = [];
 
   constructor(route: RouteNode[], secondaryNodes?: RouteNode[]) {
     if (secondaryNodes) {
@@ -131,6 +134,36 @@ export class RouteExclusionCorridor {
         } else {
           this.mainRoute.push(n);
         }
+      }
+    }
+    const nodes = [...this.mainRoute, ...this.independentNodes];
+    for (const node of nodes) {
+      if (!node.ribbon) continue;
+      const mesh = buildRibbonSurfaceMesh(node)!;
+      const box = new THREE.Box3();
+      for (let j=0;j<mesh.positions.length;j+=3) box.expandByPoint(new THREE.Vector3(mesh.positions[j],mesh.positions[j+1],mesh.positions[j+2]));
+      box.expandByScalar(3);
+      box.max.y += JUMP_CORRIDOR_ABOVE;
+      box.min.y -= JUMP_CORRIDOR_BELOW;
+      this.surfTravelVolumes.push({box,nodeId:node.id});
+    }
+    for (let i=1;i<this.mainRoute.length;i++) {
+      const target=this.mainRoute[i], launch=this.mainRoute[i-1];
+      if (target.surfTransition !== 'AIR') continue;
+      const catchNodes: RouteNode[] = [];
+      for (let j=i;j<this.mainRoute.length && this.mainRoute[j].ribbonId===target.ribbonId;j++) catchNodes.push(this.mainRoute[j]);
+      for (const speed of Object.values(SURF_SPEED_ENVELOPE)) {
+        const arc=ballisticTransferCheck(launch,target,speed,catchNodes.length ? catchNodes : [target]).trajectory;
+        if (!arc) continue;
+        const box=new THREE.Box3();
+        for(let k=0;k<=24;k++) {
+          const time=arc.duration*k/24;
+          box.expandByPoint(new THREE.Vector3(arc.start.x+arc.velocity.x*time,
+            arc.start.y+arc.velocity.y*time-0.5*SURF_GRAVITY*time*time,arc.start.z+arc.velocity.z*time));
+        }
+        box.expandByScalar(4);
+        box.max.y += 2;
+        this.surfTravelVolumes.push({box,nodeId:target.id});
       }
     }
   }
@@ -324,6 +357,13 @@ export class RouteExclusionCorridor {
       if (isWorseViolation(candidate, worst)) worst = candidate;
     };
 
+    // Exact sampled surfaces and real airborne catch trajectories augment the
+    // same authoritative corridor. Legacy routes add no extra volumes.
+    for (const volume of this.surfTravelVolumes) {
+      if (volume.nodeId !== excludeNodeId && volume.box.intersectsBox(box)) {
+        consider('SURF_CORRIDOR', 1, allNodes.findIndex(n=>n.id===volume.nodeId));
+      }
+    }
     // 1. Evaluate against all individual platform geometries
     for (let i = 0; i < allNodes.length; i++) {
       const node = allNodes[i];

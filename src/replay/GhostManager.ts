@@ -10,6 +10,7 @@ import { GhostStorage, SavedGhostRun } from './GhostStorage';
 import { AuthorGhostGenerator, AuthorGhostRun } from './AuthorGhostGenerator';
 import { ReplayFrame } from './ReplayRecorder';
 import { SettingsManager, GhostMode } from '../core/Settings';
+import { CourseType, normalizeCourseType } from '../generation/CourseType';
 
 export interface SplitResult {
   checkpointIndex: number;
@@ -43,6 +44,7 @@ export class GhostManager {
 
   public playerCheckpointTimes: number[] = [];
   public currentTrackTitle = '';
+  private courseIdentity?: string;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -72,6 +74,7 @@ export class GhostManager {
    */
   public prepareTrack(track: GeneratedTrack, trackTitle?: string): void {
     this.releaseGhosts();
+    this.courseIdentity = track.courseIdentity;
 
     this.currentTrackTitle = trackTitle || 'PLAYHEAD TRACK';
     this.playerCheckpointTimes = [];
@@ -86,8 +89,9 @@ export class GhostManager {
     });
     this.rivalGhost.setFrames(this.activeRivalData.frames);
 
-    // 2. Load PB ghost if saved in localStorage
-    this.activePBData = GhostStorage.loadPB(track.seed);
+    // 2. Load PB ghost if saved in localStorage. Identity is course-type aware:
+    //    a normal PLAYHEAD PB (absent metadata) can never appear in a SURF course.
+    this.activePBData = GhostStorage.loadPB(track.seed, normalizeCourseType(track.courseType), track.courseIdentity);
     if (this.activePBData) {
       const pbFrames = GhostStorage.decompressFrames(this.activePBData.frames);
       this.pbGhost = new GhostRunner(this.scene, {
@@ -197,7 +201,8 @@ export class GhostManager {
     trackTitle: string,
     completionTime: number,
     score: number,
-    frames: ReplayFrame[]
+    frames: ReplayFrame[],
+    courseType: CourseType = 'PLAYHEAD'
   ): boolean {
     return GhostStorage.savePB(
       seed,
@@ -205,7 +210,9 @@ export class GhostManager {
       completionTime,
       score,
       frames,
-      this.playerCheckpointTimes
+      this.playerCheckpointTimes,
+      normalizeCourseType(courseType),
+      this.courseIdentity
     );
   }
 

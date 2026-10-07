@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { GeneratedTrack, RouteNode, RouteNodeType } from '../generation/GenerationTypes';
 import { createPlatformGeometry } from '../generation/PlatformShape';
+import { buildRibbonSurfaceMesh } from '../generation/SurfRibbon';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { patchEmbeddedSignal } from './EmbeddedSignal';
 import { VisualAccent } from '../audio/AudioFeatures';
@@ -423,6 +424,7 @@ export class GeometryBuilder {
     // route costs a handful of draw calls instead of one per platform/pylon.
     const platformGeoms: THREE.BufferGeometry[] = [];
     const surfPlatformGeoms: THREE.BufferGeometry[] = [];
+    const ribbonEdgeGroups = new Map<number, {geometries: THREE.BufferGeometry[]; node: RouteNode}>();
     const finishPlatformGeoms: THREE.BufferGeometry[] = [];
     const pylonGeoms: THREE.BufferGeometry[] = [];
     const pylonComponents: Array<{
@@ -441,6 +443,22 @@ export class GeometryBuilder {
     // route and by route-fork mastery branches so a fork costs geometry, never
     // one draw call per platform.
     const addPlatformNode = (node: RouteNode): void => {
+      // SURF ribbon nodes render their EXACT sampled top mesh (the same world
+      // corners the RibbonSurfaceCollider collides against), not a trapezoid
+      // proxy, so the visual face and the ridden face are identical.
+      if (node.ribbon && node.isSurf) {
+        const ribbonGeom = createRibbonSurfaceGeometry(node);
+        if (ribbonGeom) {
+          addFaceSizeAttribute(ribbonGeom, node);
+          const ribbonEdges = new THREE.EdgesGeometry(ribbonGeom);
+          const ribbonId = node.ribbonId ?? node.id;
+          const group = ribbonEdgeGroups.get(ribbonId) ?? {geometries: [], node};
+          group.geometries.push(ribbonEdges);
+          ribbonEdgeGroups.set(ribbonId, group);
+          surfPlatformGeoms.push(ribbonGeom);
+          return;
+        }
+      }
       // Rendering and collision consume the same authoritative footprint.
       const geom = createPlatformGeometry(node);
       addFaceSizeAttribute(geom, node);
@@ -615,6 +633,19 @@ export class GeometryBuilder {
       rootGroup.add(mesh);
     };
     addBatched(platformGeoms, platformMaterial, 'RoutePlatformsMerged');
+    for (const group of ribbonEdgeGroups.values()) {
+      const merged = mergeGeometries(group.geometries);
+      for (const geometry of group.geometries) geometry.dispose();
+      if (!merged) continue;
+      // One independently reactive trim per musical ribbon, rather than one
+      // material and draw call for every tiny collision sample.
+      const material = new THREE.LineBasicMaterial({color:secondaryCol,transparent:true,opacity:0.98});
+      const line = new THREE.LineSegments(merged, material);
+      tagWorldRole(line,'VISUAL_ONLY','GeometryBuilder.RouteEdgeTrim',false);
+      rootGroup.add(line);
+      edgeLines.push(line);
+      routeEdgeItems.push({mesh:line,nodeArcLength:group.node.arcLength,nodeTime:group.node.time});
+    }
     addBatched(surfPlatformGeoms, surfMaterial, 'RouteSurfPlatformsMerged');
     addBatched(finishPlatformGeoms, finishMaterial, 'RouteFinishMerged');
     addBatched(keelGeoms, keelMaterial, 'RouteKeelsMerged', 'VISUAL_ONLY');
@@ -1149,6 +1180,7 @@ function createSurfFlank(
  * [+X, -X, +Y, -Y, +Z, -Z] with 4 vertices each.
  */
 function addFaceSizeAttribute(geom: THREE.BufferGeometry, node: RouteNode): void {
+  if (geom.hasAttribute('aFace')) return;
   const pos = geom.getAttribute('position');
   const data = new Float32Array(pos.count * 3);
   const w = node.dimensions.x;
@@ -1313,4 +1345,33 @@ function patchKeel(material: THREE.MeshStandardMaterial, accent: THREE.Color): v
       );
   };
   material.needsUpdate = true;
+}
+
+
+
+/**
+ * Builds the visual geometry for a SURF ribbon segment DIRECTLY from its
+ * stored, world-space sampled corners. Collision (RibbonSurfaceCollider) reads
+ * the identical corners, so the rendered surface and the ridden surface can
+ * never diverge. Returns null if the node carries no ribbon samples.
+ */
+function createRibbonSurfaceGeometry(node: RouteNode): THREE.BufferGeometry | null {
+  // The visual mesh and the RibbonSurfaceCollider consume the SAME shared
+  // triangulation of the SAME four sampled corners, so the surface drawn and
+  // the surface ridden are identical by construction. The mesh is INDEXED with
+  // 36 correct outward-facing triangle indices (two per quad): without them
+  // WebGL would draw triangles straight across the face boundaries.
+  const mesh = buildRibbonSurfaceMesh(node);
+  if (!mesh) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setIndex(mesh.indices);
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(mesh.normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(mesh.uvs, 2));
+  const faceData = mesh.faceRoles.flatMap(role => role === 0 || role === 2
+    ? [node.dimensions.x,node.dimensions.z,role] : [node.dimensions.z,node.dimensions.y,role]);
+  geometry.setAttribute('aFace', new THREE.Float32BufferAttribute(faceData, 3));
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }

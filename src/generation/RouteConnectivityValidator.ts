@@ -48,9 +48,21 @@ export interface RouteConnectivityResult {
  * Calculates the exact exit anchor (front edge center) of a node in 3D world space.
  */
 export function getNodeExitAnchor(node: RouteNode): RouteAnchor {
+  if (node.ribbon) {
+    const station = node.ribbon.stations[1];
+    const tangent = station.tangent ?? {
+      x: node.ribbon.stations[1].center.x - node.ribbon.stations[0].center.x,
+      y: node.ribbon.stations[1].center.y - node.ribbon.stations[0].center.y,
+      z: node.ribbon.stations[1].center.z - node.ribbon.stations[0].center.z
+    };
+    return {
+      position: { ...station.center }, yaw: Math.atan2(tangent.x, tangent.z),
+      elevation: station.center.y, arcLength: node.arcLength + node.dimensions.z * 0.5
+    };
+  }
   const euler = new THREE.Euler(node.pitch || 0, node.yaw || 0, node.roll || 0, 'YXZ');
   const halfLen = (node.dimensions.z || 0) * 0.5;
-  const localOffset = new THREE.Vector3(node.exitLateralOffset ?? 0, 0, halfLen).applyEuler(euler);
+  const localOffset = new THREE.Vector3(node.exitLateralOffset ?? 0, node.surfTransition ? node.dimensions.y * 0.5 : 0, halfLen).applyEuler(euler);
 
   const pos: Vector3Like = {
     x: node.position.x + localOffset.x,
@@ -70,9 +82,21 @@ export function getNodeExitAnchor(node: RouteNode): RouteAnchor {
  * Calculates the exact entry anchor (back edge center) of a node in 3D world space.
  */
 export function getNodeEntryAnchor(node: RouteNode): RouteAnchor {
+  if (node.ribbon) {
+    const station = node.ribbon.stations[0];
+    const tangent = station.tangent ?? {
+      x: node.ribbon.stations[1].center.x - station.center.x,
+      y: node.ribbon.stations[1].center.y - station.center.y,
+      z: node.ribbon.stations[1].center.z - station.center.z
+    };
+    return {
+      position: { ...station.center }, yaw: Math.atan2(tangent.x, tangent.z),
+      elevation: station.center.y, arcLength: Math.max(0, node.arcLength - node.dimensions.z * 0.5)
+    };
+  }
   const euler = new THREE.Euler(node.pitch || 0, node.yaw || 0, node.roll || 0, 'YXZ');
   const halfLen = (node.dimensions.z || 0) * 0.5;
-  const localOffset = new THREE.Vector3(0, 0, -halfLen).applyEuler(euler);
+  const localOffset = new THREE.Vector3(0, node.surfTransition ? node.dimensions.y * 0.5 : 0, -halfLen).applyEuler(euler);
 
   const pos: Vector3Like = {
     x: node.position.x + localOffset.x,
@@ -115,7 +139,6 @@ export class RouteConnectivityValidator {
     for (let i = 0; i < route.length - 1; i++) {
       const curr = route[i];
       const next = route[i + 1];
-
       // 1. Check coordinate finiteness
       if (
         !Number.isFinite(curr.position.x) ||

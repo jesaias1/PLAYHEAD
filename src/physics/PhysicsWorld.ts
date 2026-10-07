@@ -4,7 +4,8 @@
 
 import * as THREE from 'three';
 import { RouteNode } from '../generation/GenerationTypes';
-import { BoxCollider } from './Collider';
+import { BoxCollider, RibbonSurfaceCollider } from './Collider';
+import { buildRibbonSurfaceMesh } from '../generation/SurfRibbon';
 import { SurfState, SurfaceClassification } from '../player/SurfState';
 
 import { RouteVoidEnvelope } from './RouteVoidEnvelope';
@@ -104,39 +105,34 @@ export class PhysicsWorld {
     this.obstacleColliders = [];
     let lowestY = Infinity;
 
-    for (const node of route) {
-      const col = new BoxCollider(node);
-      this.colliders.push(col);
-
-      const bottomY = node.position.y - node.dimensions.y * 0.5;
+    // Continuous surf ribbons are collided as ONE RibbonSurfaceCollider per
+    // ribbonId, built from the ORDERED node chain. A per-segment collider would
+    // duplicate the correction at every shared seam; one finite mesh over the
+    // whole chain resolves a single nearest contact instead.
+    const ribbonGroups = new Map<number, RouteNode[]>();
+    const addSurface = (ordered: RouteNode[]): void => {
+      this.colliders.push(new RibbonSurfaceCollider(ordered));
+    };
+    const addRouteNode = (node: RouteNode): void => {
+      const bottomY = node.ribbon ? buildRibbonSurfaceMesh(node)!.minY : node.position.y - node.dimensions.y * 0.5;
       if (bottomY < lowestY) lowestY = bottomY;
-    }
-
-    if (optionalRamps) {
-      for (const ramp of optionalRamps) {
-        const col = new BoxCollider(ramp);
-        this.colliders.push(col);
-        const bottomY = ramp.position.y - ramp.dimensions.y * 0.5;
-        if (bottomY < lowestY) lowestY = bottomY;
+      if (node.ribbon && node.isSurf && node.ribbonId !== undefined) {
+        const list = ribbonGroups.get(node.ribbonId) ?? [];
+        list.push(node);
+        ribbonGroups.set(node.ribbonId, list);
+        return;
       }
-    }
+      this.colliders.push(createRouteCollider(node));
+    };
 
-    if (recoveryShelves) {
-      for (const shelf of recoveryShelves) {
-        const col = new BoxCollider(shelf);
-        this.colliders.push(col);
-        const bottomY = shelf.position.y - shelf.dimensions.y * 0.5;
-        if (bottomY < lowestY) lowestY = bottomY;
-      }
-    }
+    for (const node of route) addRouteNode(node);
+    if (optionalRamps) for (const ramp of optionalRamps) addRouteNode(ramp);
+    if (recoveryShelves) for (const shelf of recoveryShelves) addRouteNode(shelf);
+    if (signalSpines) for (const spine of signalSpines) addRouteNode(spine);
 
-    if (signalSpines) {
-      for (const spine of signalSpines) {
-        const col = new BoxCollider(spine);
-        this.colliders.push(col);
-        const bottomY = spine.position.y - spine.dimensions.y * 0.5;
-        if (bottomY < lowestY) lowestY = bottomY;
-      }
+    for (const list of ribbonGroups.values()) {
+      list.sort((a, b) => (a.ribbonStationIndex ?? 0) - (b.ribbonStationIndex ?? 0));
+      addSurface(list);
     }
 
     // Route-fork mastery branches are authoritative gameplay geometry: they
@@ -392,4 +388,20 @@ export class PhysicsWorld {
     this.dynamicObstacles = [];
     this.obstacleColliders = [];
   }
+}
+
+
+
+/**
+ * Authoritative route collider factory.
+ *
+ * Sampled surf ribbon nodes collide through the dedicated RibbonSurfaceCollider
+ * so the ridden surface is the exact sampled top mesh (not a rotated box proxy).
+ * Every other node keeps the official BoxCollider unchanged.
+ */
+function createRouteCollider(node: RouteNode): BoxCollider {
+  if (node.ribbon && node.isSurf) {
+    return new RibbonSurfaceCollider(node);
+  }
+  return new BoxCollider(node);
 }

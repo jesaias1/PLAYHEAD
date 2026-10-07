@@ -1,3 +1,4 @@
+import { SURF_GENERATION_VERSION } from '../generation/CourseType';
 /**
  * CANONICAL MAP IDENTITY — the hard prerequisite for competitive online play.
  *
@@ -135,6 +136,12 @@ export interface MapIdentity {
   /** Canonical analysis identity the map was generated from. */
   analysisVersion: number;
   analysisFingerprint: string;
+  /**
+   * Course style. SURF adds its geometry and generation version to the canonical
+   * fingerprint. Legacy PLAYHEAD and official fingerprints remain byte-identical.
+   * Official Signal Pack runs are PLAYHEAD.
+   */
+  courseType?: 'PLAYHEAD' | 'SURF';
 }
 
 /** Quantise a coordinate to 0.1 mm so cross-engine float noise cannot matter. */
@@ -201,6 +208,18 @@ export function buildMapIdentityString(track: GeneratedTrack, analysis?: TrackAn
     for (const node of fork.masteryNodes) pushNode(parts, node, 'b');
   }
 
+  if (track.courseType === 'SURF') {
+    parts.push(`course:SURF:${track.generationVersion ?? SURF_GENERATION_VERSION}`);
+    for (const node of track.route) {
+      parts.push(`transition:${node.id}:${node.surfTransition ?? '-'}`);
+      if (!node.ribbon) continue;
+      parts.push(`ribbon:${node.ribbonId}:${node.ribbonStationIndex}:${node.ribbon.kind}`);
+      for (const station of node.ribbon.stations) {
+        parts.push([station.center,station.normal,station.right,station.tangent]
+          .map(v=>v ? [q(v.x),q(v.y),q(v.z)].join(',') : '-').join('|')+`|${q(station.halfWidth)}`);
+      }
+    }
+  }
   return parts.join('\n');
 }
 
@@ -222,12 +241,13 @@ export function computeMapIdentity(
   const analysisIdentity = analysis ? computeAnalysisIdentity(analysis) : null;
   return {
     trackId,
-    mapVersion: ROUTE_GENERATION_VERSION,
+    mapVersion: track.courseType === 'SURF' ? SURF_GENERATION_VERSION : ROUTE_GENERATION_VERSION,
     mapFingerprint: computeMapFingerprint(track),
     movementVersion: MOVEMENT_VERSION,
-    generatorVersion: GENERATOR_VERSION,
+    generatorVersion: track.courseType === 'SURF' ? `surf_gen_${SURF_GENERATION_VERSION}` : GENERATOR_VERSION,
     analysisVersion: ANALYSIS_ALGORITHM_VERSION,
-    analysisFingerprint: analysisIdentity?.analysisFingerprint ?? 'anfp_unbound'
+    analysisFingerprint: analysisIdentity?.analysisFingerprint ?? 'anfp_unbound',
+    courseType: track.courseType === 'SURF' ? 'SURF' : 'PLAYHEAD'
   };
 }
 

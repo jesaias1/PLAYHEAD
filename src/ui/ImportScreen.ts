@@ -7,6 +7,7 @@
  */
 
 import { AudioLoader } from '../audio/AudioLoader';
+import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
@@ -252,6 +253,8 @@ export class ImportScreen {
   // Custom Drop Elements
   private dropZone: HTMLElement;
   private customStatusElem: HTMLElement | null = null;
+  private courseTypeBtns: HTMLButtonElement[] = [];
+  private selectedCourseType: CourseType = DEFAULT_COURSE_TYPE;
   private fileInput: HTMLInputElement;
   private browseBtn: HTMLButtonElement;
 
@@ -285,7 +288,7 @@ export class ImportScreen {
   private lastDecoderReward: OpenedSignalDrop | null = null;
   private decoderBusy = false;
 
-  private onFileSelectedCallback?: (file: File) => void;
+  private onFileSelectedCallback?: (file: File, courseType: CourseType) => void;
   private onCatalogTrackCallback?: (track: TrackCatalogEntry) => void;
   private onRacePbGhostCallback?: (trackId: string) => void;
   private onDevTrackCallback?: (genre?: SyntheticGenre) => void;
@@ -408,7 +411,20 @@ export class ImportScreen {
             <div class="drop-meta">[ FLAC / WAV / MP3 / OGG ]</div>
           </div>
 
-          <div class="custom-actions">
+          <div class="custom-course-type" id="custom-course-type" role="radiogroup" aria-label="Course type">
+            <span class="course-type-label">COURSE TYPE</span>
+            <button type="button" class="course-type-btn active" id="btn-course-playhead" role="radio" aria-checked="true" data-course-type="PLAYHEAD">PLAYHEAD<span>MIXED MOVEMENT</span></button>
+            <button type="button" class="course-type-btn" id="btn-course-surf" role="radio" aria-checked="false" data-course-type="SURF">SURF<span>FLOW / TRANSFERS / VERTICALITY</span></button>
+          </div>
+
+          <div class="custom-actions">          <style>
+            .custom-course-type { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+            .custom-course-type .course-type-label { font-size: 10px; letter-spacing: 2px; opacity: 0.7; margin-right: 4px; }
+            .custom-course-type .course-type-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 12px; font-size: 11px; letter-spacing: 1px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.14); color: inherit; cursor: pointer; }
+            .custom-course-type .course-type-btn span { font-size: 8px; opacity: 0.55; letter-spacing: 1px; }
+            .custom-course-type .course-type-btn.active { border-color: currentColor; background: rgba(255,255,255,0.10); }
+          </style>
+
             <button class="btn-hero btn-terminal-exec" id="btn-browse-file">[ BROWSE AUDIO FILE ]</button>
           </div>
           <div class="custom-status" id="custom-status" role="status" aria-live="polite" hidden></div>
@@ -641,6 +657,7 @@ export class ImportScreen {
     // Custom drop elements
     this.dropZone = this.element.querySelector('#import-drop-zone') as HTMLElement;
     this.customStatusElem = this.element.querySelector('#custom-status') as HTMLElement | null;
+    this.courseTypeBtns = Array.from(this.element.querySelectorAll('#custom-course-type .course-type-btn')) as HTMLButtonElement[];
     this.fileInput = this.element.querySelector('#import-file-input') as HTMLInputElement;
     this.browseBtn = this.element.querySelector('#btn-browse-file') as HTMLButtonElement;
 
@@ -1381,7 +1398,7 @@ export class ImportScreen {
   }
 
   public setCallbacks(
-    onFileSelected: (file: File) => void,
+    onFileSelected: (file: File, courseType: CourseType) => void,
     onDevTrack: (genre?: SyntheticGenre) => void,
     onError: (err: string) => void,
     onMovementLab?: (trackId?: string) => void,
@@ -1406,6 +1423,20 @@ export class ImportScreen {
    * Compact, human-readable custom-audio status/error notice on the import
    * page. Never receives raw decoder output or stack traces.
    */
+  /** Compact course-type selection for Custom Audio (default PLAYHEAD). */
+  public getCourseType(): CourseType {
+    return this.selectedCourseType;
+  }
+
+  public setCourseType(courseType: CourseType): void {
+    this.selectedCourseType = normalizeCourseType(courseType);
+    for (const btn of this.courseTypeBtns) {
+      const active = btn.dataset.courseType === this.selectedCourseType;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    }
+  }
+
   public setCustomStatus(message: string | null, kind: 'info' | 'error' = 'info'): void {
     if (!this.customStatusElem) return;
     if (!message) {
@@ -1665,10 +1696,17 @@ export class ImportScreen {
       this.dropZone,
       (file) => {
         this.stopPreview();
-        this.onFileSelectedCallback?.(file);
+        this.onFileSelectedCallback?.(file, this.selectedCourseType);
       },
       (err) => this.onErrorCallback?.(err)
     );
+
+    for (const btn of this.courseTypeBtns) {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.courseType === 'SURF' ? 'SURF' : 'PLAYHEAD';
+        this.setCourseType(type);
+      });
+    }
 
     this.dropZone.addEventListener('click', () => {
       this.fileInput.click();
@@ -1689,7 +1727,7 @@ export class ImportScreen {
       if (this.fileInput.files && this.fileInput.files.length > 0) {
         const file = this.fileInput.files[0];
         this.stopPreview();
-        this.onFileSelectedCallback?.(file);
+        this.onFileSelectedCallback?.(file, this.selectedCourseType);
       }
     });
   }
