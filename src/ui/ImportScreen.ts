@@ -33,19 +33,6 @@ import {
 function pad2(n: number): string {
   return Math.max(0, Math.floor(n)).toString().padStart(2, '0');
 }
-
-/** Safe audio MIME fallback for a File synthesized from a built-in track. */
-function mimeTypeForFilename(filename: string): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith('.mp3')) return 'audio/mpeg';
-  if (lower.endsWith('.wav')) return 'audio/wav';
-  if (lower.endsWith('.flac')) return 'audio/flac';
-  if (lower.endsWith('.m4a')) return 'audio/mp4';
-  if (lower.endsWith('.aac')) return 'audio/aac';
-  if (lower.endsWith('.webm')) return 'audio/webm';
-  if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return 'audio/ogg';
-  return 'audio/ogg';
-}
 import { KarambitSkinSystem, OpenedSignalDrop } from '../viewmodel/KarambitSkinSystem';
 import { createProgramFingerprint } from './SignalIdentity';
 import { LeaderboardManager } from '../leaderboard/LeaderboardManager';
@@ -271,13 +258,6 @@ export class ImportScreen {
   private fileInput: HTMLInputElement;
   private browseBtn: HTMLButtonElement;
 
-  // SURF MODE entry: prominent main-menu button, built-in track section.
-  private surfEntryBtn: HTMLButtonElement;
-  private surfBuiltinSection: HTMLElement;
-  private surfTrackSelect: HTMLSelectElement;
-  private surfPlayBtn: HTMLButtonElement;
-  private surfLaunchPending = false;
-
   // Armory Elements
   private masteryDevPreviewBtn: HTMLButtonElement;
   private showcaseMasteryStripElem: HTMLElement;
@@ -345,13 +325,6 @@ export class ImportScreen {
           <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // ARMORY ]</button>
           <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
         </div>
-
-        <!-- SURF MODE: prominent direct entry, OUTSIDE the tablist so the
-             five module tabs (and their numeric/aria contract) stay intact. -->
-        <button class="surf-mode-entry" id="btn-surf-mode-entry" type="button">
-          <span class="surf-mode-entry-title">SURF MODE</span>
-          <span class="surf-mode-entry-sub">RIDE THE SIGNAL // FLOW / TRANSFERS / VERTICALITY</span>
-        </button>
 
         <!-- 01: THE SIGNAL PACK PANEL: hero deck (selected signal) + catalog list. -->
         <div class="showcase-container showcase-panel" id="panel-showcase" role="tabpanel" aria-labelledby="tab-btn-showcase">
@@ -430,15 +403,6 @@ export class ImportScreen {
 
         <!-- 02: CUSTOM AUDIO PANEL -->
         <div class="custom-panel terminal-panel hidden" id="panel-custom" role="tabpanel" aria-labelledby="tab-btn-custom" aria-hidden="true">
-          <section class="surf-builtin hidden" id="surf-builtin" aria-label="SURF MODE">
-            <div class="terminal-panel-header">// SURF MODE // CHOOSE MUSIC</div>
-            <div class="surf-builtin-row">
-              <label class="settings-label" for="surf-track-select">BUILT-IN TRACK</label>
-              <select class="settings-select surf-track-select" id="surf-track-select"></select>
-              <button class="btn-hero btn-terminal-exec surf-play-btn" id="btn-surf-play" type="button">[ PLAY SURF ]</button>
-            </div>
-            <div class="surf-builtin-hint">PICK A BUILT-IN TRACK, OR USE YOUR OWN MUSIC BELOW.</div>
-          </section>
           <div class="terminal-panel-header">// IMPORT YOUR OWN MUSIC</div>
           <div class="import-drop-zone terminal-drop-zone" id="import-drop-zone" role="button" tabindex="0" aria-label="Choose or drop an audio file">
             <div class="drop-icon terminal-glow-icon">⤓</div>
@@ -696,10 +660,6 @@ export class ImportScreen {
     this.courseTypeBtns = Array.from(this.element.querySelectorAll('#custom-course-type .course-type-btn')) as HTMLButtonElement[];
     this.fileInput = this.element.querySelector('#import-file-input') as HTMLInputElement;
     this.browseBtn = this.element.querySelector('#btn-browse-file') as HTMLButtonElement;
-    this.surfEntryBtn = this.element.querySelector('#btn-surf-mode-entry') as HTMLButtonElement;
-    this.surfBuiltinSection = this.element.querySelector('#surf-builtin') as HTMLElement;
-    this.surfTrackSelect = this.element.querySelector('#surf-track-select') as HTMLSelectElement;
-    this.surfPlayBtn = this.element.querySelector('#btn-surf-play') as HTMLButtonElement;
 
     // Armory elements
     this.masteryDevPreviewBtn = this.element.querySelector('#btn-mastery-dev-preview') as HTMLButtonElement;
@@ -718,10 +678,8 @@ export class ImportScreen {
 
     this.buildStrip();
     this.buildLabSelect();
-    this.buildSurfSelect();
     this.updateShowcaseCard(this.selectedTrack);
     this.initEvents();
-    this.updateSurfSectionVisibility();
 
     // The ONE global connection indicator lives in the footer, not inside any
     // feature panel, so it never duplicates online controls on unrelated pages.
@@ -745,76 +703,6 @@ export class ImportScreen {
       opt.textContent = `[${(idx + 1).toString().padStart(2, '0')}] ${t.title} (${t.bpm} BPM // ${t.difficultyLabel})`;
       this.labMusicSelect.appendChild(opt);
     });
-  }
-
-  /**
-   * Built-in SURF soundtrack choices. Only MusicPack tracks that carry a real
-   * public audioUrl can be streamed, so synthetic-only entries are excluded.
-   * "WAVE SURFING" is preferred when present; otherwise the first available.
-   */
-  private buildSurfSelect(): void {
-    this.surfTrackSelect.innerHTML = '';
-    const streamable = this.catalog.filter((t) => !!t.audioUrl);
-    const preferred = streamable.find((t) => /WAVE SURFING/i.test(t.title)) ?? streamable[0];
-    streamable.forEach((t) => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.textContent = `${t.title} (${t.bpm} BPM // ${t.difficultyLabel})`;
-      if (preferred && t.id === preferred.id) opt.selected = true;
-      this.surfTrackSelect.appendChild(opt);
-    });
-  }
-
-  /** Single source of truth for built-in SURF section visibility. */
-  private updateSurfSectionVisibility(): void {
-    this.surfBuiltinSection.classList.toggle('hidden', this.selectedCourseType !== 'SURF');
-  }
-
-  /** Prominent main-menu entry: open Custom Audio with SURF pre-selected. */
-  public openSurfMode(): void {
-    this.switchModule(1);
-    this.setCourseType('SURF');
-  }
-
-  /**
-   * Streams a built-in track and hands it to the SAME custom-audio pipeline as a
-   * user file, so content hashing, analysis and SURF course identity are reused.
-   * A busy guard blocks double-clicks; errors stay inline and retryable.
-   */
-  private async playSurfBuiltin(): Promise<void> {
-    if (this.surfLaunchPending) return;
-    const entry = this.catalog.find((t) => t.id === this.surfTrackSelect.value);
-    if (!entry || !entry.audioUrl) {
-      this.setCustomStatus('BUILT-IN TRACK UNAVAILABLE — CHOOSE ANOTHER', 'error');
-      return;
-    }
-
-    this.surfLaunchPending = true;
-    this.surfPlayBtn.disabled = true;
-    const originalLabel = this.surfPlayBtn.textContent;
-    this.surfPlayBtn.textContent = '[ LOADING... ]';
-    this.setCustomStatus('LOADING BUILT-IN TRACK...', 'info');
-    try {
-      const response = await fetch(entry.audioUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const bytes = await response.arrayBuffer();
-      const rawName = decodeURIComponent((entry.audioUrl.split('/').pop() || '').trim());
-      const filename = rawName || `${entry.title}.ogg`;
-      const file = new File([bytes], filename, { type: mimeTypeForFilename(filename) });
-      this.stopPreview();
-      this.setCustomStatus(null);
-      this.onFileSelectedCallback?.(file, 'SURF');
-    } catch (err: unknown) {
-      const raw = err instanceof Error ? err.message : '';
-      console.warn('[SURF] built-in track load failed:', raw || err);
-      this.setCustomStatus('BUILT-IN TRACK COULD NOT LOAD — CHECK CONNECTION AND RETRY', 'error');
-    } finally {
-      this.surfLaunchPending = false;
-      this.surfPlayBtn.disabled = false;
-      this.surfPlayBtn.textContent = originalLabel;
-    }
   }
 
   private buildStrip(): void {
@@ -1547,7 +1435,6 @@ export class ImportScreen {
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-checked', active ? 'true' : 'false');
     }
-    this.updateSurfSectionVisibility();
   }
 
   public setCustomStatus(message: string | null, kind: 'info' | 'error' = 'info'): void {
@@ -1820,14 +1707,6 @@ export class ImportScreen {
         this.setCourseType(type);
       });
     }
-
-    this.surfEntryBtn.addEventListener('click', () => {
-      this.openSurfMode();
-    });
-
-    this.surfPlayBtn.addEventListener('click', () => {
-      void this.playSurfBuiltin();
-    });
 
     this.dropZone.addEventListener('click', () => {
       this.fileInput.click();

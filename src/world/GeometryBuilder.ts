@@ -641,6 +641,7 @@ export class GeometryBuilder {
       // material and draw call for every tiny collision sample.
       const material = new THREE.LineBasicMaterial({color:secondaryCol,transparent:true,opacity:0.98});
       const line = new THREE.LineSegments(merged, material);
+      line.userData.surfRibbonTrim = true;
       tagWorldRole(line,'VISUAL_ONLY','GeometryBuilder.RouteEdgeTrim',false);
       rootGroup.add(line);
       edgeLines.push(line);

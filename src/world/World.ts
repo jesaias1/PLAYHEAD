@@ -5,6 +5,7 @@
  */
 
 import * as THREE from 'three';
+import { surfTrimPulse } from './SurfTrimPulse';
 import { TrackAnalysis } from '../audio/AudioFeatures';
 import { GeneratedTrack, RouteNode } from '../generation/GenerationTypes';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
@@ -513,6 +514,15 @@ export class World {
 
     // Update playhead temporality (Future / Present / Past)
     this.playheadSystem.update(playerPos, progress.arcProgress, playerYaw, vState);
+    if (this.track?.courseType === 'SURF' && this.builtAssets) {
+      const pulse = surfTrimPulse(vState.onsetPulse, vState.bass, effectEmissiveScale, reduceMotion);
+      for (const line of this.builtAssets.edgeLines) {
+        if (!line.userData.surfRibbonTrim) continue;
+        const material = line.material as THREE.LineBasicMaterial;
+        material.color.copy(vState.palette.secondary).lerp(vState.palette.highlight, pulse.mix);
+        material.opacity = pulse.opacity;
+      }
+    }
 
     const syncDelta = songTime - progress.targetSongTime;
 

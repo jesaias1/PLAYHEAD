@@ -39,9 +39,30 @@ import {
 } from './SurfRibbon';
 import { climbFeasibility, SURF_SPEED_ENVELOPE, SurfCourseValidator, snapPlatformChain } from './SurfCourseValidator';
 import { SURF_GRAVITY } from './SurfCourseValidator';
+import {
+  clampDescentDrop,
+  sectionTravelWeights,
+  surfBudgetMeters,
+  surfTraits,
+  SurfTraitProfile
+} from './SurfPacing';
 
 /** Salt keeps SURF geometry deterministic but distinct from a PLAYHEAD course. */
 const SURF_SEED_SALT = 0x53555246; // 'SURF'
+
+/** Phrase vocabulary selected per budgeted phrase by musical traits. */
+type SurfPhraseKind =
+  | 'CRUISE'
+  | 'S_CURVE'
+  | 'CANYON'
+  | 'DESCENT'
+  | 'DESCENT_BIG'
+  | 'CLIMB'
+  | 'TRANSFER'
+  | 'PRECISION_TRANSFER'
+  | 'SPIRAL'
+  | 'INTERLUDE'
+  | 'RUNWAY';
 
 interface Cursor {
   pos: Vector3Like;
@@ -56,6 +77,15 @@ interface PhraseResult {
   checkpoint?: CheckpointDefinition;
 }
 
+interface BudgetedPhraseResult {
+  nodes: RouteNode[];
+  checkpoint?: CheckpointDefinition;
+  /** True when this phrase contains a real release/flick -> opposite catch. */
+  transferFired: boolean;
+  /** Surf length actually committed, in metres. */
+  length: number;
+}
+
 const PLATFORM_THICKNESS = 2.0;
 
 function advance(pos: Vector3Like, yaw: number, dist: number): Vector3Like {
@@ -64,6 +94,27 @@ function advance(pos: Vector3Like, yaw: number, dist: number): Vector3Like {
 
 function right(yaw: number): Vector3Like {
   return { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
+}
+
+/**
+ * Re-stamp a phrase's node times to a monotonic sub-window of the song.
+ *
+ * Phrase builders emit their OWN internal ordering (a launch before its catch),
+ * but several builders stamped the ENTIRE section on each sub-ribbon, which made
+ * node.time non-monotonic across a multi-phrase section. Spreading this phrase's
+ * nodes evenly across the [start, end] window it actually owns restores strict
+ * chronology and keeps checkpoint / finish times consistent with the song.
+ */
+function stampWindow(nodes: RouteNode[], start: number, end: number): void {
+  if (nodes.length === 0) return;
+  const span = Math.max(0, end - start);
+  if (nodes.length === 1) {
+    nodes[0].time = start;
+    return;
+  }
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].time = start + (span * i) / (nodes.length - 1);
+  }
 }
 
 export class SurfCourseGenerator {
@@ -105,52 +156,158 @@ export class SurfCourseGenerator {
     cursor.pos = advance(cursor.pos, cursor.yaw, startLen);
     cursor.arcLength += startLen;
 
-    // 2. One phrase per musical section, chosen by theme.
-    const sections = analysis.sections;
+    // 2. ADAPTIVE, DURATION-BUDGETED SURF BODY.
+    //
+    // Each musical section owns a REAL traversal budget (metres of surf) derived
+    // from the song duration and that section's musical weight. Within its budget
+    // a section emits MULTIPLE coherent phrases: long banked cruise ribbons, S
+    // curves, energy-conserving climbs, descents, switchback canyons and genuine
+    // flick/release -> opposite catch transfers, plus short runway breathers. A
+    // phrase that cannot be validated is simplified, then omitted, and unused
+    // budget is carried into the next section so the route still spans the song.
+    const sections = analysis.sections.length ? analysis.sections : [{ ...fakeSection(), end: analysis.duration }];
+    const pacing = surfBudgetMeters(analysis);
+    const weights = sectionTravelWeights(sections, analysis.bpm);
+    const traitProfiles = sections.map((sec) => surfTraits(analysis, sec));
+    let remainder = 0;
+    let gapCounter = 0;
+    // GLOBAL phrase index and a global time cursor. Both deliberately survive
+    // section boundaries: a short section resetting its own index is exactly
+    // what made every section open on a repeated first-CRUISE and never select
+    // a climb or transfer.
+    let globalPhraseIndex = 0;
+    let timeCursor = 0;
+    // Every Nth surviving phrase is a MANDATORY genuine release -> opposite
+    // catch, decided GLOBALLY so uniform FLOW / DROP songs still receive several
+    // real airborne transfers instead of one long repeated line per section.
+    const TRANSFER_CADENCE = 3;
+
     for (let s = 0; s < sections.length; s++) {
       const section = sections[s];
-      const isLast = s === sections.length - 1;
       const theme = section.theme;
+      const traits = traitProfiles[s];
+      // Budget = this section's share of the song, plus any carried remainder.
+      const share = (weights[s] ?? 1 / Math.max(1, sections.length)) * pacing.targetDistance;
+      let remaining = share + remainder;
+      const sectionBudget = Math.max(1, remaining);
+      remainder = 0;
 
-      // A short checkpoint / runway breather every few sections, always on a
-      // platform (never mid-surf), with enough room to reach entry speed.
-      const wantsBreather = s > 0 && (s % 3 === 2) && theme !== 'DROP';
+      // A short checkpoint / runway breather between sections (never mid-drop),
+      // always on a platform with enough room to reach entry speed.
+      const wantsBreather = s > 0 && theme !== 'DROP' && traits.intensity < 0.85 && s % 2 === 1;
       if (wantsBreather) {
-        const res = this.emitRunway(cursor, 22.0, 12.0, section, rng);
+        const res = this.emitRunway(cursor, 24.0, 12.0, section, rng);
         nodes.push(...res.nodes);
         checkpoints.push(this.checkpointFor(res.nodes[0], section.index, section.start, cursor.yaw));
+        remaining -= res.nodes.reduce((sum, node) => sum + node.dimensions.z, 0);
       }
 
-      // Build the phrase with local rollback: a phrase that fails validation is
-      // retried with a simpler variant, and omitted if it still cannot be
-      // validated. Impossible content is never committed.
-      const before: Cursor = { ...cursor };
-      let phrase = this.buildPhrase(theme, s, isLast, cursor, section, rng, false);
-      if (!SurfCourseValidator.validatePhrase(phrase.nodes).ok) {
-        // SIMPLIFY: retry with the deterministic conservative variant.
-        Object.assign(cursor, before);
-        phrase = this.buildPhrase(theme, s, isLast, cursor, section, rng, true);
-        if (!SurfCourseValidator.validatePhrase(phrase.nodes).ok) {
-          // OMIT: roll the cursor back and skip this musical phrase entirely.
+      let phraseIndex = 0;
+      // Hard cap on phrases per section so a pathological budget cannot spawn an
+      // unbounded number of geometry groups, but still roomy enough that a long
+      // section can emit many varied phrases and keep the transfer cadence.
+      const maxPhrasesPerSection = Math.max(6, Math.min(20, Math.ceil(sectionBudget / 110)));
+      const sectionDuration = Math.max(0.5, section.end - section.start);
+      let safety = 0;
+
+      while (remaining > 150 && phraseIndex < maxPhrasesPerSection && safety++ < 80) {
+        const before: Cursor = { ...cursor, pos: { ...cursor.pos } };
+        // Chronological sub-window for THIS phrase, proportional to the budget
+        // it is about to spend. This is what keeps node.time monotonic within a
+        // section instead of stamping the entire section on every phrase.
+        const slotsLeft = Math.max(1, maxPhrasesPerSection - phraseIndex);
+        const nominal = Math.min(remaining, 320, remaining / slotsLeft);
+        const windowStart = timeCursor;
+        const windowEnd = Math.min(
+          section.end,
+          windowStart + (nominal / sectionBudget) * sectionDuration
+        );
+        const forceTransfer = globalPhraseIndex > 0 && globalPhraseIndex % TRANSFER_CADENCE === TRANSFER_CADENCE - 1;
+        const built = this.emitBudgetedPhrase({
+          cursor, section, traits, rng,
+          phraseIndex: globalPhraseIndex,
+          targetMeters: remaining,
+          gapCounter,
+          forceTransfer,
+          window: { start: windowStart, end: Math.max(windowStart + 0.25, windowEnd) }
+        });
+        if (!SurfCourseValidator.validatePhrase(built.nodes).ok) {
           Object.assign(cursor, before);
-          continue;
+          // Reject the invalid phrase, but FIRST try the KNOWN-VALID transfer
+          // template (phraseTransfer worked at 12/20/30m/s) so a transfer that
+          // failed to build is replaced by a genuinely valid transfer rather
+          // than by a cruise, preserving route variety.
+          let fallback = built.transferFired
+            ? this.phraseTransfer(cursor, section, rng, remaining)
+            : this.phraseLongLine(cursor, section, rng, true);
+          if (!SurfCourseValidator.validatePhrase(fallback.nodes).ok) {
+            Object.assign(cursor, before);
+            fallback = this.phraseLongLine(cursor, section, rng, true);
+          }
+          if (!SurfCourseValidator.validatePhrase(fallback.nodes).ok) {
+            // Cannot place anything more here: stop and carry the budget on.
+            break;
+          }
+          stampWindow(fallback.nodes, windowStart, windowEnd);
+          const spent = fallback.nodes.reduce((sum, n) => sum + n.dimensions.z, 0);
+          nodes.push(...fallback.nodes);
+          if (fallback.checkpoint) checkpoints.push(fallback.checkpoint);
+          remaining -= spent;
+        } else {
+          stampWindow(built.nodes, windowStart, windowEnd);
+          const spent = built.nodes.reduce((sum, n) => sum + n.dimensions.z, 0);
+          nodes.push(...built.nodes);
+          if (built.checkpoint) checkpoints.push(built.checkpoint);
+          remaining -= spent;
+          if (built.transferFired) gapCounter++;
+        }
+        phraseIndex++;
+        globalPhraseIndex++;
+        // Advance the global time cursor by the window this phrase actually
+        // consumed, so the NEXT phrase starts where this one ended.
+        timeCursor = Math.min(section.end, Math.max(timeCursor, windowEnd));
+      }
+
+      // Never leave the song's final stretch unconsumed: push any large unspent
+      // budget into a genuine final transfer for this section.
+      if (remaining > 240) {
+        const before: Cursor = { ...cursor };
+        const tail = this.phraseTransfer(cursor, section, rng, remaining);
+        if (SurfCourseValidator.validatePhrase(tail.nodes).ok) {
+          stampWindow(tail.nodes, timeCursor, section.end);
+          nodes.push(...tail.nodes);
+          if (tail.checkpoint) checkpoints.push(tail.checkpoint);
+          remaining -= tail.nodes.reduce((sum, n) => sum + n.dimensions.z, 0);
+          globalPhraseIndex++;
+        } else {
+          Object.assign(cursor, before);
         }
       }
 
-      nodes.push(...phrase.nodes);
-      if (phrase.checkpoint) checkpoints.push(phrase.checkpoint);
+      // Carry the unspent budget FORWARD (retained, never halved away) so a
+      // long/quiet section still spends its full share; only a pathological
+      // overshoot is clamped so one loud section cannot unbalance the song.
+      remainder = remaining;
+    }
+
+    // Spend any final unallocated metres on a broad continuous line.
+    while (remainder > 150) {
+      const section = sections[sections.length - 1];
+      const tail = this.phraseCruise(cursor, section, rng, globalPhraseIndex++, traitProfiles[traitProfiles.length - 1], remainder, true);
+      nodes.push(...tail.nodes);
+      remainder -= tail.nodes.reduce((sum, node) => sum + node.dimensions.z, 0);
     }
 
     // 3. Natural finish: a long final surf release into a large finish platform.
     const finishRelease = this.emitRibbon(cursor, rng, {
       kind: 'FINAL_RELEASE',
-      length: 52,
+      length: 110,
       startHalfWidth: 6.5,
       endHalfWidth: 8.0,
       startBank: 0.55,
       endBank: 0.18,
       headingChange: 0,
-      verticalDelta: -10,
+      verticalDelta: -18,
       timeStart: analysis.duration - 10,
       timeEnd: analysis.duration - 3,
       sectionIndex: Math.max(0, sections.length - 1),
@@ -185,12 +342,16 @@ export class SurfCourseGenerator {
     // 5. Repair only non-surf platform transitions, exactly like normal mode.
     const { nodes: repairedNodes, repairsCount } = snapPlatformChain(nodes);
 
+    const routeDistance = repairedNodes.reduce((sum, node) => sum + node.dimensions.z, 0);
+    for (const node of repairedNodes) node.time = analysis.duration * node.arcLength / routeDistance;
+
     // Sync checkpoints to repaired positions.
     for (const cp of checkpoints) {
       const node = repairedNodes.find((n) => n.id === cp.routeNodeId);
       if (node) {
         cp.position = { ...node.position };
         cp.yaw = node.yaw;
+        cp.time = node.time;
       }
     }
 
@@ -247,12 +408,13 @@ export class SurfCourseGenerator {
     checkpoints.push({ id: 1, routeNodeId: nodes[0].id, time: 0, position: { ...startCenter }, yaw: 0, sectionIndex: 0 });
     cursor.pos = advance(cursor.pos, cursor.yaw, startLen);
 
-    const count = Math.max(2, Math.min(6, Math.floor(analysis.duration / 24)));
+    const bodyDistance = surfBudgetMeters(analysis).targetDistance;
+    const count = Math.max(2, Math.min(64, Math.ceil(bodyDistance / 350)));
     for (let i = 0; i < count; i++) {
       const bankSign = rng.nextBool() ? 1 : -1;
       const ribbon = this.emitRibbon(cursor, rng, {
         kind: 'SAFE_LINE',
-        length: 40,
+        length: Math.max(40, bodyDistance / count - 24),
         startHalfWidth: 6.5,
         endHalfWidth: 6.5,
         startBank: bankSign * 0.85,
@@ -267,7 +429,7 @@ export class SurfCourseGenerator {
       nodes.push(...ribbon.nodes);
       cursor.pos = ribbon.exitPos;
       cursor.yaw = ribbon.exitYaw;
-      cursor.arcLength += 40;
+      cursor.arcLength += bodyDistance / count - 24;
       const deck = this.emitCatchDeck(cursor, analysis.sections[Math.min(i, analysis.sections.length - 1)] ?? fakeSection(), rng, 20);
       nodes.push(...deck.nodes);
     }
@@ -303,38 +465,251 @@ export class SurfCourseGenerator {
    * conservative, always-validatable long line is used; this is the
    * SIMPLIFY fallback when a richer phrase fails validation.
    */
-  private static buildPhrase(
-    theme: AnalysisSection['theme'],
-    s: number,
-    isLast: boolean,
+  /**
+   * Emit ONE coherent phrase sized to the remaining budget of a section.
+   *
+   * Deterministic selection mixes the musical trait profile (theme, intensity,
+   * rhythmic density, bpm and onset rate) with the running phrase index so a
+   * uniform FLOW/DROP song still receives long cruises, S curves, canyons,
+   * descents, climbs and genuine AIR transfers rather than one repeated line.
+   * No RNG is consumed when nothing is emitted, so retries stay deterministic.
+   */
+  private static emitBudgetedPhrase(ctx: {
+    cursor: Cursor;
+    section: AnalysisSection;
+    traits: SurfTraitProfile;
+    rng: SeededRandom;
+    phraseIndex: number;
+    /** Remaining section budget in metres; phrases are sized to fit it. */
+    targetMeters: number;
+    gapCounter: number;
+    /** Global cadence: this phrase MUST be a genuine release/catch transfer. */
+    forceTransfer: boolean;
+    /** Chronological sub-window this phrase owns, in song seconds. */
+    window: { start: number; end: number };
+  }): BudgetedPhraseResult {
+    const { cursor, section, traits, rng, phraseIndex, targetMeters, forceTransfer, window } = ctx;
+    // HARD INVARIANT: a GLOBAL section boundary always opens on a long cruise so
+    // the course has long sweeping surf even on the quietest, most uniform song.
+    // But it is only the FIRST phrase of a section, never `targetMeters <= 600`
+    // (which forced EVERY mid-section phrase to a cruise and starved the pool).
+    const opensSection = phraseIndex === 0;
+    // Varied climbs / S-curves are chosen INDEPENDENTLY of a short-section reset.
+    const lowDensity = traits.density < 0.45 || traits.onsetRate < 1.6;
+    let kind: SurfPhraseKind;
+    if (phraseIndex % 6 === 1) {
+      kind = 'CLIMB';
+    } else if (phraseIndex % 6 === 3) {
+      kind = 'DESCENT';
+    } else if (forceTransfer) {
+      // Genuine release -> opposite catch, mandatory at the global cadence.
+      kind = traits.intensity > 0.6 && phraseIndex % 2 === 1 ? 'PRECISION_TRANSFER' : 'TRANSFER';
+    } else if (opensSection || (lowDensity && phraseIndex % 3 === 0)) {
+      kind = 'CRUISE';
+    } else if (targetMeters <= 60) {
+      kind = 'TRANSFER';
+    } else {
+      const pool: SurfPhraseKind[] = ['CRUISE', 'S_CURVE'];
+      if (traits.intensity > 0.4) pool.push('CANYON');
+      if (traits.intensity > 0.3) pool.push('DESCENT');
+      if (traits.intensity < 0.8) pool.push('CLIMB', 'CLIMB');
+      if (traits.onsetRate > 1.9 && phraseIndex % 3 === 2) pool.push('SPIRAL');
+      if (traits.intensity < 0.5 && traits.density < 0.55) pool.push('INTERLUDE');
+      if (traits.intensity > 0.6 && phraseIndex % 3 === 1) pool.push('PRECISION_TRANSFER');
+      // Occasional real transfer even off the cadence so songs are lively.
+      if (phraseIndex % 4 === 1) pool.push('TRANSFER');
+      if (traits.intensity > 0.85 && rng.nextBool(0.3)) kind = 'DESCENT_BIG';
+      else kind = pool[Math.floor(rng.next() * pool.length) % pool.length];
+    }
+    return this.buildBudgetedKind(kind, cursor, section, rng, phraseIndex, traits, targetMeters, window);
+  }
+
+  private static buildBudgetedKind(
+    kind: SurfPhraseKind,
     cursor: Cursor,
     section: AnalysisSection,
     rng: SeededRandom,
-    simple: boolean
-  ): PhraseResult {
-    if (simple) return this.phraseLongLine(cursor, section, rng, true);
-    switch (theme) {
-      case 'BUILDUP':
-        return this.phraseClimb(cursor, section, rng);
-      case 'DROP':
-        return this.phraseDescent(cursor, section, rng, true);
-      case 'BREATH':
-        return this.phraseInterlude(cursor, section, rng);
-      case 'PRECISION':
-        return this.phraseTransfer(cursor, section, rng);
-      case 'ASCENT':
-        return this.phraseClimb(cursor, section, rng);
-      case 'DESCENT':
-        return this.phraseDescent(cursor, section, rng, false);
-      case 'SPEED':
-        return s % 2 === 0 ? this.phraseSCurve(cursor, section, rng) : this.phraseCanyon(cursor, section, rng);
-      case 'SURF':
-        return s % 3 === 0 ? this.phraseSpiral(cursor, section, rng) : this.phraseLongLine(cursor, section, rng);
-      case 'FLOW':
+    phraseIndex: number,
+    traits: SurfTraitProfile,
+    targetMeters: number,
+    window: { start: number; end: number }
+  ): BudgetedPhraseResult {
+    switch (kind) {
+      case 'S_CURVE': return { ...this.phraseSCurve(cursor, section, rng, targetMeters, window), transferFired: false, length: 0 };
+      case 'CANYON': return { ...this.phraseCanyon(cursor, section, rng, targetMeters), transferFired: true, length: 0 };
+      case 'DESCENT': return { ...this.phraseDescent(cursor, section, rng, false, targetMeters), transferFired: false, length: 0 };
+      case 'DESCENT_BIG': return { ...this.phraseDescent(cursor, section, rng, true, targetMeters), transferFired: false, length: 0 };
+      case 'CLIMB': return { ...this.phraseClimb(cursor, section, rng, targetMeters, window), transferFired: false, length: 0 };
+      case 'TRANSFER': return { ...this.phraseFlickTransfer(cursor, section, rng, traits, targetMeters, window), transferFired: true, length: 0 };
+      case 'PRECISION_TRANSFER': return { ...this.phraseTransfer(cursor, section, rng, targetMeters, window), transferFired: true, length: 0 };
+      case 'SPIRAL': return { ...this.phraseSpiral(cursor, section, rng, targetMeters), transferFired: false, length: 0 };
+      case 'INTERLUDE': return { ...this.phraseInterlude(cursor, section, rng), transferFired: false, length: 0 };
+      case 'RUNWAY': return { ...this.phraseRunwayBreak(cursor, section, rng), transferFired: false, length: 0 };
+      case 'CRUISE':
       default:
-        if (isLast) return this.phraseLongLine(cursor, section, rng);
-        return rng.nextBool(0.5) ? this.phraseLongLine(cursor, section, rng) : this.phraseSCurve(cursor, section, rng);
+        return { ...this.phraseCruise(cursor, section, rng, phraseIndex, traits, targetMeters, false, window), transferFired: false, length: 0 };
     }
+  }
+
+  /**
+   * Long sweeping banked CRUISE ribbon (150-350m) + a catch deck.
+   *
+   * This is the backbone of a song-length surf course: several of these per
+   * song are what make the route last roughly the track duration instead of a
+   * few short hops. Vertical drop is clamped per metre so even a 350m descent
+   * cannot pump the player to unbounded speed.
+   */
+  private static phraseCruise(
+    cursor: Cursor,
+    section: AnalysisSection,
+    rng: SeededRandom,
+    phraseIndex: number,
+    _traits: SurfTraitProfile,
+    targetMeters: number,
+    simple = false,
+    window?: { start: number; end: number }
+  ): PhraseResult {
+    const bankSign = rng.nextBool() ? 1 : -1;
+    // Sized to the remaining section budget (minus the catch deck), bounded to a
+    // long sweeping 150-350m cruise. The small +-jitter keeps repeated cruises
+    // from reading as one identical ribbon.
+    const jitter = ((phraseIndex % 3) - 1) * 18;
+    const rawLength = targetMeters - 24 + (simple ? 0 : jitter);
+    const length = Math.max(150, Math.min(simple ? 1200 : 350, rawLength));
+    const headingChange = simple ? 0 : bankSign * rng.nextFloat(0.5, 1.1);
+    const drop = clampDescentDrop(-(6 + length * 0.022), length);
+    const timeStart = window?.start ?? section.start;
+    const timeEnd = window?.end ?? section.end;
+    const ribbon = this.emitRibbon(cursor, rng, {
+      kind: 'CRUISE',
+      length,
+      startHalfWidth: 7.0,
+      endHalfWidth: 6.0,
+      startBank: bankSign * 0.9,
+      endBank: bankSign * 1.0,
+      headingChange,
+      headingBend: simple ? 0 : bankSign * rng.nextFloat(-0.12, 0.12),
+      verticalDelta: drop,
+      timeStart,
+      timeEnd,
+      sectionIndex: section.index,
+      intensity: section.intensity
+    });
+    cursor.pos = ribbon.exitPos;
+    cursor.yaw = ribbon.exitYaw;
+    cursor.arcLength += length;
+    const deck = this.emitCatchDeck(cursor, section, rng);
+    return { nodes: [...ribbon.nodes, ...deck.nodes] };
+  }
+
+  /**
+   * Genuine FLICK / RELEASE -> OPPOSITE CATCH transfer.
+   *
+   * A banked launch ribbon curls outward and releases (a real horizontal gap
+   * with a lateral offset) onto an opposite-banked catch ribbon. Unlike a
+   * theme-gated transfer this is selected by musical traits, so uniform
+   * FLOW/DROP songs still contain several real airborne catches.
+   */
+  private static phraseFlickTransfer(
+    cursor: Cursor,
+    section: AnalysisSection,
+    rng: SeededRandom,
+    _traits: SurfTraitProfile,
+    targetMeters: number,
+    window?: { start: number; end: number }
+  ): PhraseResult {
+    const firstSign = rng.nextBool() ? 1 : -1;
+    const budget = Math.max(180, Math.min(600, targetMeters - 30));
+    const launchLen = budget * 0.45;
+    const flick = firstSign * rng.nextFloat(0.5, 0.95);
+    const ws = window?.start ?? section.start;
+    const we = window?.end ?? section.end;
+    const first = this.emitRibbon(cursor, rng, {
+      kind: 'FLICK_LAUNCH',
+      length: launchLen,
+      startHalfWidth: 7.0,
+      endHalfWidth: 5.5,
+      startBank: firstSign * 0.85,
+      endBank: firstSign * 1.15,
+      headingChange: flick,
+      headingBend: flick * 0.4,
+      verticalDelta: clampDescentDrop(-(6 + launchLen * 0.03), launchLen),
+      timeStart: ws,
+      timeEnd: ws + (we - ws) * 0.4,
+      sectionIndex: section.index,
+      intensity: section.intensity
+    });
+    // Release: a real horizontal + lateral gap to the opposite wall.
+    const gap = rng.nextFloat(9.0, 13.0);
+    const lateral = -firstSign * rng.nextFloat(4.0, 6.5);
+    const r = right(first.exitYaw);
+    const targetPos: Vector3Like = {
+      x: first.exitPos.x + Math.sin(first.exitYaw) * gap + r.x * lateral,
+      y: first.exitPos.y - 2.4,
+      z: first.exitPos.z + Math.cos(first.exitYaw) * gap + r.z * lateral
+    };
+    const target = this.emitRibbonAt(
+      cursor,
+      rng,
+      {
+        kind: 'FLICK_CATCH',
+        length: budget * 0.45,
+        startHalfWidth: 11.0,
+        endHalfWidth: 9.0,
+        startBank: -firstSign * 1.1,
+        endBank: -firstSign * 0.9,
+        headingChange: -flick,
+        verticalDelta: -8
+      },
+      targetPos,
+      first.exitYaw,
+      {
+        timeStart: ws + (we - ws) * 0.45,
+        timeEnd: we,
+        sectionIndex: section.index,
+        intensity: section.intensity
+      }
+    );
+    // Preserve the real airborne gap: this is an intended catch, NOT a snap.
+    target.nodes[0].surfTransition = 'AIR';
+    cursor.pos = target.exitPos;
+    cursor.yaw = target.exitYaw;
+    cursor.arcLength += launchLen + gap + target.length;
+    const deck = this.emitCatchDeck(cursor, section, rng, 24);
+    return {
+      nodes: [...first.nodes, ...target.nodes, ...deck.nodes],
+      checkpoint: this.checkpointFor(deck.nodes[0], section.index, section.start, cursor.yaw)
+    };
+  }
+
+  /** Short runway break: a checkpoint platform that relaunches into a line. */
+  private static phraseRunwayBreak(
+    cursor: Cursor,
+    section: AnalysisSection,
+    rng: SeededRandom
+  ): PhraseResult {
+    const runway = this.emitRunway(cursor, 22.0, 12.0, section, rng);
+    const launch = this.emitRibbon(cursor, rng, {
+      kind: 'BREAK_LAUNCH',
+      length: 80,
+      startHalfWidth: 6.5,
+      endHalfWidth: 6.0,
+      startBank: (rng.nextBool() ? 1 : -1) * 0.9,
+      endBank: (rng.nextBool() ? 1 : -1) * 1.0,
+      headingChange: rng.nextFloat(-0.3, 0.3),
+      verticalDelta: -8,
+      timeStart: section.start,
+      timeEnd: section.end,
+      sectionIndex: section.index,
+      intensity: section.intensity
+    });
+    cursor.pos = launch.exitPos;
+    cursor.yaw = launch.exitYaw;
+    cursor.arcLength += launch.length;
+    return {
+      nodes: [...runway.nodes, ...launch.nodes],
+      checkpoint: this.checkpointFor(runway.nodes[0], section.index, section.start, cursor.yaw)
+    };
   }
 
   /** One continuous ribbon + a catch deck. */
@@ -368,25 +743,27 @@ export class SurfCourseGenerator {
   }
 
   /** S curve: three contiguous ribbons (right bank -> neutral -> left bank). */
-  private static phraseSCurve(cursor: Cursor, section: AnalysisSection, rng: SeededRandom): PhraseResult {
+  private static phraseSCurve(cursor: Cursor, section: AnalysisSection, rng: SeededRandom, targetMeters: number, window?: { start: number; end: number }): PhraseResult {
     const nodes: RouteNode[] = [];
     const turn = rng.nextFloat(0.30, 0.44);
+    const total = Math.max(120, Math.min(540, targetMeters - 22));
+    const leg = total / 3;
     const specs: RibbonSpec[] = [
       {
-        kind: 'S_CURVE_A', length: 26, startHalfWidth: 6.5, endHalfWidth: 6.0,
-        startBank: 0.6, endBank: 1.0, headingChange: turn, verticalDelta: -4
+        kind: 'S_CURVE_A', length: leg, startHalfWidth: 6.5, endHalfWidth: 6.0,
+        startBank: 0.6, endBank: 1.0, headingChange: turn, verticalDelta: clampDescentDrop(-leg * 0.10, leg)
       },
       {
-        kind: 'S_CURVE_B', length: 30, startHalfWidth: 6.0, endHalfWidth: 6.0,
-        startBank: 1.0, endBank: -1.0, headingChange: -2 * turn, verticalDelta: -5
+        kind: 'S_CURVE_B', length: leg, startHalfWidth: 6.0, endHalfWidth: 6.0,
+        startBank: 1.0, endBank: -1.0, headingChange: -2 * turn, verticalDelta: clampDescentDrop(-leg * 0.12, leg)
       },
       {
-        kind: 'S_CURVE_C', length: 26, startHalfWidth: 6.0, endHalfWidth: 6.5,
-        startBank: -1.0, endBank: -0.6, headingChange: turn, verticalDelta: -4
+        kind: 'S_CURVE_C', length: leg, startHalfWidth: 6.0, endHalfWidth: 6.5,
+        startBank: -1.0, endBank: -0.6, headingChange: turn, verticalDelta: clampDescentDrop(-leg * 0.10, leg)
       }
     ];
-    let sub = section.start;
-    const subStep = (section.end - section.start) / specs.length;
+    let sub = window?.start ?? section.start;
+    const subStep = ((window?.end ?? section.end) - sub) / specs.length;
     for (const spec of specs) {
       const r = this.emitRibbon(cursor, rng, {
         ...spec,
@@ -410,11 +787,14 @@ export class SurfCourseGenerator {
     cursor: Cursor,
     section: AnalysisSection,
     rng: SeededRandom,
-    big: boolean
+    big: boolean,
+    _targetMeters: number
   ): PhraseResult {
     const bankSign = rng.nextBool() ? 1 : -1;
-    const length = big ? 64 : 52;
-    const drop = big ? -(20 + section.intensity * 6) : -(11 + section.intensity * 4);
+    const length = big ? 90 : 45;
+    // Drop is clamped per metre travelled so a long plunge cannot inject
+    // unbounded speed while still reading as a real descent.
+    const drop = big ? -30 : -16;
     const ribbon = this.emitRibbon(cursor, rng, {
       kind: big ? 'DESCENT_BIG' : 'DESCENT',
       length,
@@ -440,12 +820,12 @@ export class SurfCourseGenerator {
   }
 
   /** Feasible climb: a rising banked ribbon within the speed envelope. */
-  private static phraseClimb(cursor: Cursor, section: AnalysisSection, rng: SeededRandom): PhraseResult {
+  private static phraseClimb(cursor: Cursor, section: AnalysisSection, rng: SeededRandom, targetMeters: number, window?: { start: number; end: number }): PhraseResult {
     const bankSign = rng.nextBool() ? 1 : -1;
-    const length = 42 + section.intensity * 10;
+    const length = Math.max(60, Math.min(180, targetMeters - 20));
     // Keep the climb within the expected-speed energy budget (gravity is 24).
     const available = (SURF_SPEED_ENVELOPE.minimum * SURF_SPEED_ENVELOPE.minimum) / (2 * SURF_GRAVITY);
-    const rise = Math.min(2.7, available * 0.85);
+    const rise = Math.min(2.0, available * 0.65);
     const feasibility = climbFeasibility(SURF_SPEED_ENVELOPE.expected, rise, length);
     const adjustedRise = feasibility.feasible ? rise : Math.max(1.5, rise - 2.0);
     const ribbon = this.emitRibbon(cursor, rng, {
@@ -457,8 +837,8 @@ export class SurfCourseGenerator {
       endBank: bankSign * 1.0,
       headingChange: (rng.nextBool() ? 1 : -1) * rng.nextFloat(0.2, 0.4),
       verticalDelta: adjustedRise,
-      timeStart: section.start,
-      timeEnd: section.end,
+      timeStart: window?.start ?? section.start,
+      timeEnd: window?.end ?? section.end,
       sectionIndex: section.index,
       intensity: section.intensity
     });
@@ -469,20 +849,27 @@ export class SurfCourseGenerator {
     return { nodes: [...ribbon.nodes, ...deck.nodes] };
   }
 
-  /** Left -> right (or right -> left) wall transfer with a real catch wall. */
-  private static phraseTransfer(cursor: Cursor, section: AnalysisSection, rng: SeededRandom): PhraseResult {
+  /**
+   * Left -> right (or right -> left) wall transfer with a real catch wall.
+   * Kept as a distinct deterministic PRECISION-style transfer; the budgeted
+   * body uses `phraseFlickTransfer` for trait-driven catches.
+   */
+  private static phraseTransfer(cursor: Cursor, section: AnalysisSection, rng: SeededRandom, targetMeters: number, window?: { start: number; end: number }): PhraseResult {
     const firstSign = rng.nextBool() ? 1 : -1;
+    const budget = Math.max(120, Math.min(400, targetMeters - 30));
+    const ws = window?.start ?? section.start;
+    const we = window?.end ?? section.end;
     const first = this.emitRibbon(cursor, rng, {
       kind: 'TRANSFER_A',
-      length: 30,
+      length: budget * 0.45,
       startHalfWidth: 6.0,
       endHalfWidth: 5.5,
       startBank: firstSign * 0.9,
       endBank: firstSign * 1.05,
       headingChange: 0,
-      verticalDelta: -5,
-      timeStart: section.start,
-      timeEnd: section.start + (section.end - section.start) * 0.45,
+      verticalDelta: -6,
+      timeStart: ws,
+      timeEnd: ws + (we - ws) * 0.45,
       sectionIndex: section.index,
       intensity: section.intensity
     });
@@ -498,13 +885,13 @@ export class SurfCourseGenerator {
     };
     const targetSpec: RibbonSpec = {
       kind: 'TRANSFER_B',
-      length: 34,
+      length: budget * 0.5,
       startHalfWidth: 10.0,
       endHalfWidth: 10.0,
       startBank: -firstSign * 1.05,
       endBank: -firstSign * 0.9,
       headingChange: 0,
-      verticalDelta: -5
+      verticalDelta: -6
     };
     const target = this.emitRibbonAt(
       cursor,
@@ -513,8 +900,8 @@ export class SurfCourseGenerator {
       targetPos,
       first.exitYaw,
       {
-        timeStart: section.start + (section.end - section.start) * 0.5,
-        timeEnd: section.end,
+        timeStart: ws + (we - ws) * 0.5,
+        timeEnd: we,
         sectionIndex: section.index,
         intensity: section.intensity
       }
@@ -524,23 +911,24 @@ export class SurfCourseGenerator {
     target.nodes[0].surfTransition = 'AIR';
     cursor.pos = target.exitPos;
     cursor.yaw = target.exitYaw;
-    cursor.arcLength += 30 + gap + 34;
+    cursor.arcLength += budget * 0.95 + gap;
     const deck = this.emitCatchDeck(cursor, section, rng, 26);
     return { nodes: [...first.nodes, ...target.nodes, ...deck.nodes] };
   }
 
   /** Canyon: two opposite surf walls across a deep void, transfer between. */
-  private static phraseCanyon(cursor: Cursor, section: AnalysisSection, rng: SeededRandom): PhraseResult {
+  private static phraseCanyon(cursor: Cursor, section: AnalysisSection, rng: SeededRandom, targetMeters: number): PhraseResult {
     const firstSign = rng.nextBool() ? 1 : -1;
+    const budget = Math.max(160, Math.min(700, targetMeters - 30));
     const first = this.emitRibbon(cursor, rng, {
       kind: 'CANYON_LEFT',
-      length: 34,
+      length: budget * 0.42,
       startHalfWidth: 6.5,
       endHalfWidth: 6.0,
       startBank: firstSign * 1.0,
       endBank: firstSign * 1.1,
       headingChange: 0,
-      verticalDelta: -7,
+      verticalDelta: -14,
       timeStart: section.start,
       timeEnd: section.start + (section.end - section.start) * 0.4,
       sectionIndex: section.index,
@@ -558,8 +946,8 @@ export class SurfCourseGenerator {
       cursor,
       rng,
       {
-        kind: 'CANYON_RIGHT', length: 40, startHalfWidth: 12.0, endHalfWidth: 12.0,
-        startBank: -firstSign * 1.1, endBank: -firstSign * 1.0, headingChange: 0, verticalDelta: -8
+        kind: 'CANYON_RIGHT', length: budget * 0.52, startHalfWidth: 12.0, endHalfWidth: 11.0,
+        startBank: -firstSign * 1.1, endBank: -firstSign * 1.0, headingChange: 0, verticalDelta: -16
       },
       targetPos,
       first.exitYaw,
@@ -574,7 +962,7 @@ export class SurfCourseGenerator {
     target.nodes[0].surfTransition = 'AIR';
     cursor.pos = target.exitPos;
     cursor.yaw = target.exitYaw;
-    cursor.arcLength += 34 + gap + 40;
+    cursor.arcLength += budget * 0.94 + gap;
     const deck = this.emitCatchDeck(cursor, section, rng, 28);
     return {
       nodes: [...first.nodes, ...target.nodes, ...deck.nodes],
@@ -583,9 +971,9 @@ export class SurfCourseGenerator {
   }
 
   /** Gentle descending partial spiral (wide radius, readable). */
-  private static phraseSpiral(cursor: Cursor, section: AnalysisSection, rng: SeededRandom): PhraseResult {
+  private static phraseSpiral(cursor: Cursor, section: AnalysisSection, rng: SeededRandom, targetMeters: number): PhraseResult {
     const dirSign = rng.nextBool() ? 1 : -1;
-    const length = 56;
+    const length = Math.max(80, Math.min(300, targetMeters - 24));
     const ribbon = this.emitRibbon(cursor, rng, {
       kind: 'SPIRAL',
       length,
@@ -717,7 +1105,7 @@ export class SurfCourseGenerator {
   ): { nodes: RouteNode[] } {
     // Platforms serve surf flow: keep them short so they never dominate the
     // course's traversal distance (surf must stay 75-90% of the run).
-    length = Math.max(10, Math.min(14, length));
+    length = Math.max(18, Math.min(24, length));
     const width = 20 + rng.nextFloat(0, 4);
     const gap = 5.0;
     const center = advance(cursor.pos, cursor.yaw, gap + length * 0.5);

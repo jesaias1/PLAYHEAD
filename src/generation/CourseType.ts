@@ -38,4 +38,12 @@ export function courseTypeKeySuffix(courseType: CourseType): string {
 }
 
 /** Independent identity for the sampled SURF course format. */
-export const SURF_GENERATION_VERSION = 1001;
+/**
+ * Independent identity for the sampled SURF course format.
+ *
+ * 1002: song-length-budgeted multi-phrase surf body (long cruises, trait-driven
+ * flick/release transfers), and the menu surf variant entry. Bumping this
+ * invalidates every older SURF cache entry, PB ghost and replay identity; the
+ * normal PLAYHEAD identity is byte-compatible and never changes.
+ */
+export const SURF_GENERATION_VERSION = 1002;

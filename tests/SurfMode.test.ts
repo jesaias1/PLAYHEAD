@@ -57,6 +57,29 @@ function mock(seed: number, duration: number, bpm: number, themes: SectionTheme[
 
 const ENERGETIC: SectionTheme[] = ['FLOW', 'BUILDUP', 'DROP', 'SPEED', 'DROP', 'PRECISION', 'DESCENT', 'ASCENT', 'DROP', 'FLOW'];
 
+describe('song-length SURF pacing', () => {
+  for (const duration of [30, 90, 180, 300]) {
+    for (const themes of [[], ['FLOW'], ENERGETIC] as SectionTheme[][]) {
+      it(`spends the ${duration}s budget with ${themes.length} sections`, () => {
+        const track = SurfCourseGenerator.generate(mock(42, duration, 128, themes));
+        const seconds = track.totalDistance / 37;
+        expect(seconds).toBeGreaterThan(duration * 0.85);
+        expect(seconds).toBeLessThan(duration * 1.18);
+        expect(track.route.every((node, i) => i === 0 || node.time >= track.route[i - 1].time)).toBe(true);
+        const ribbons = new Map<number, number>();
+        for (const node of track.route) if (node.ribbonId !== undefined) ribbons.set(node.ribbonId, (ribbons.get(node.ribbonId) ?? 0) + node.dimensions.z);
+        expect(Math.max(...ribbons.values())).toBeGreaterThan(140);
+        console.log('[SURF-PACING]', { duration, sections: themes.length, metres: Math.round(track.totalDistance), seconds: +seconds.toFixed(1), nodes: track.route.length });
+      });
+    }
+  }
+  it('keeps the safe fallback proportional to a long song', () => {
+    const track = SurfCourseGenerator.generateSafeFallback(mock(42, 300, 128, ['FLOW']));
+    expect(track.totalDistance / 37).toBeGreaterThan(300 * 0.85);
+    expect(SurfCourseValidator.validate(track).isValid).toBe(true);
+  });
+});
+
 describe('SURF generation across musical structures', () => {
   it('produces a valid, surf-dominant course for an energetic track', () => {
     const track = SurfCourseGenerator.generate(mock(0x12345, 180, 128, ENERGETIC), 'SURF');

@@ -84,6 +84,7 @@ export class StateMachine {
         return to === GameState.READY || to === GameState.IMPORT;
 
       case GameState.READY:
+        if (to === GameState.ANALYSING) return true;
         // WATCH: canonical playback preparation (audio + world restored from the
         // baked preset) finishes in READY, so READY must be able to enter REPLAY.
         // FINISHED -> REPLAY stays valid for local results.

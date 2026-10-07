@@ -18,6 +18,9 @@ export class AnalysisScreen {
   private logElem: HTMLElement;
   private waveformCanvas: HTMLCanvasElement;
   private enterBtn: HTMLButtonElement;
+  private surfBtn: HTMLButtonElement;
+  private onSurfCallback?: () => void;
+  private surfVariant = false;
 
   private durElem: HTMLElement;
   private bpmElem: HTMLElement;
@@ -79,7 +82,9 @@ export class AnalysisScreen {
         </div>
 
         <div class="analysis-footer">
+          <div id="analysis-variant" aria-live="polite">NORMAL_MODE</div>
           <button class="btn-hero" id="btn-enter-track" disabled>[SYS] ENTER WORLD</button>
+          <button class="btn-hero" id="btn-ready-surf" hidden disabled>PLAY SURF_MODE</button>
         </div>
       </div>
     `;
@@ -91,6 +96,13 @@ export class AnalysisScreen {
     this.logElem = this.element.querySelector('#analysis-log') as HTMLElement;
     this.waveformCanvas = this.element.querySelector('#analysis-waveform') as HTMLCanvasElement;
     this.enterBtn = this.element.querySelector('#btn-enter-track') as HTMLButtonElement;
+    this.surfBtn = this.element.querySelector('#btn-ready-surf') as HTMLButtonElement;
+    this.surfBtn.addEventListener('click', () => {
+      if (this.surfBtn.disabled) return;
+      this.surfBtn.disabled = true;
+      this.enterBtn.disabled = true;
+      this.onSurfCallback?.();
+    });
 
     this.durElem = this.element.querySelector('#stat-dur') as HTMLElement;
     this.bpmElem = this.element.querySelector('#stat-bpm') as HTMLElement;
@@ -112,6 +124,7 @@ export class AnalysisScreen {
 
     window.addEventListener('keydown', (e) => {
       if (!this.element.classList.contains('hidden') && !this.enterBtn.disabled) {
+        if (e.target === this.surfBtn) return;
         if (e.code === 'Space' || e.code === 'Enter') {
           e.preventDefault();
           handleEnter();
@@ -122,6 +135,7 @@ export class AnalysisScreen {
 
   private triggerTransition(): void {
     this.enterBtn.disabled = true;
+    this.surfBtn.disabled = true;
     this.setStage('[SYS] ENTERING...', 1);
     // 1. Contracting animation: collapse waveform to 2px signal line
     this.element.classList.add('contracting');
@@ -134,6 +148,15 @@ export class AnalysisScreen {
 
   public setOnEnterTrack(callback: () => void): void {
     this.onEnterTrackCallback = callback;
+  }
+
+  public setOnSurf(callback: () => void): void { this.onSurfCallback = callback; }
+
+  public setCourseVariant(surf: boolean): void {
+    this.surfVariant = surf;
+    this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'NORMAL_MODE';
+    this.surfBtn.hidden = surf || this.enterBtn.disabled;
+    this.surfBtn.disabled = this.enterBtn.disabled;
   }
 
   public addStageLog(text: string): void {
@@ -178,6 +201,8 @@ export class AnalysisScreen {
     this.element.classList.remove('contracting');
     this.enterBtn.disabled = true;
     this.enterBtn.textContent = '[SYS] ENTER WORLD';
+    this.surfBtn.hidden = true;
+    this.surfBtn.disabled = true;
     if (!reset) return;
     if (this.logElem) {
       this.logElem.innerHTML = '';
@@ -224,6 +249,8 @@ export class AnalysisScreen {
     this.animateWaveformSweep(analysis);
 
     this.enterBtn.disabled = false;
+    this.surfBtn.hidden = this.surfVariant;
+    this.surfBtn.disabled = false;
     this.enterBtn.focus();
   }
 

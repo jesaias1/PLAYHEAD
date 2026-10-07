@@ -480,6 +480,7 @@ export class Game {
     this.ui.analysisScreen.setOnEnterTrack(() => {
       this.stateMachine.transitionTo(GameState.COUNTDOWN);
     });
+    this.ui.analysisScreen.setOnSurf(() => { void this.switchReadyToSurf(); });
 
     // Pause Screen
     this.ui.pauseScreen.setCallbacks({
@@ -1117,6 +1118,7 @@ export class Game {
       // Official Signal Pack courses are PLAYHEAD; a surf selection can never leak
       // its identity into an official run.
       this.currentCourseType = DEFAULT_COURSE_TYPE;
+      this.ui.analysisScreen.setCourseVariant(false);
       this.isFirstContactCourse = !!trackEntry.isFirstContact;
       this.stateMachine.transitionTo(GameState.ANALYSING);
       this.ui.analysisScreen.setTrackTitle(trackEntry.title);
@@ -1253,6 +1255,41 @@ export class Game {
     this.ui.importScreen.setCustomStatus(message, 'error');
   }
 
+  private async switchReadyToSurf(): Promise<void> {
+    if (!this.stateMachine.is(GameState.READY) || this.currentCourseType === 'SURF') return;
+    const buffer = this.audioEngine.getBuffer();
+    if (!buffer || !this.currentAnalysis) return;
+    const previous = {
+      analysis: this.currentAnalysis, track: this.currentTrack,
+      officialId: this.currentOfficialTrackId, customBuffer: this.currentCustomAudioBuffer,
+      firstContact: this.isFirstContactCourse
+    };
+    this.pendingGhostRun = null;
+    this.ghostRace.clear();
+    this.invalidateResultCompetition();
+    this.currentOfficialTrackId = null;
+    this.currentCustomAudioBuffer = buffer;
+    this.isFirstContactCourse = false;
+    this.stateMachine.transitionTo(GameState.ANALYSING);
+    try {
+      await this.processBuffer(buffer, previous.analysis.filename, {
+        custom: { source: 'FILE', encodedBytes: null }, courseType: 'SURF'
+      });
+    } catch (error) {
+      console.error('[SURF] Variant generation failed', error);
+      this.currentAnalysis = previous.analysis;
+      this.currentTrack = previous.track;
+      this.currentOfficialTrackId = previous.officialId;
+      this.currentCustomAudioBuffer = previous.customBuffer;
+      this.isFirstContactCourse = previous.firstContact;
+      this.currentCourseType = DEFAULT_COURSE_TYPE;
+      this.ui.analysisScreen.setCourseVariant(false);
+      if (previous.track) this.world.loadTrack(previous.analysis, previous.track, this.environment, previous.officialId);
+      this.stateMachine.transitionTo(GameState.READY);
+      this.ui.analysisScreen.addStageLog('[SURF] RETRY AVAILABLE // NORMAL WORLD RESTORED');
+    }
+  }
+
   private async processBuffer(
     buffer: AudioBuffer,
     filename: string,
@@ -1264,6 +1301,7 @@ export class Game {
     const isCustom = options?.custom != null;
     const courseType: CourseType = normalizeCourseType(options?.courseType);
     this.currentCourseType = courseType;
+    this.ui.analysisScreen.setCourseVariant(courseType === 'SURF');
     if (isCustom) this.ui.importScreen.setCustomStatus(null);
 
     await this.audioEngine.init();
@@ -1311,7 +1349,7 @@ export class Game {
     // Honest timing: a short clip that cannot contain a safe start/finish is
     // reported as a limitation instead of claiming a before-song finish. The
     // competitive run itself is unchanged; this only sets player-facing copy.
-    if (isCustom) {
+    if (isCustom && courseType !== 'SURF') {
       const timing = estimateRouteTiming(track, analysis);
       if (!timing.fitsSong) {
         this.ui.analysisScreen.addStageLog(
