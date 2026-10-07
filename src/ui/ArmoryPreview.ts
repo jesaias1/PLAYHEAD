@@ -17,7 +17,13 @@ import * as THREE from 'three';
 import { ViewmodelAssetLoader, ViewmodelRigInstance } from '../viewmodel/ViewmodelAssetLoader';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 
-export type ArmoryPreviewMode = 'item' | 'loadout';
+/**
+ * There is exactly ONE preview mode: an isolated ITEM view that shows either a
+ * knife OR a pair of gloves from the selected slot. The former combined
+ * knife+gloves LOADOUT view was removed because compositing both on the shared
+ * rig was unreliable and visually buggy.
+ */
+export type ArmoryPreviewMode = 'item';
 
 export interface ArmoryPreviewSelection {
   /** Which slot the user is inspecting. */
@@ -46,7 +52,6 @@ export class ArmoryPreview {
   private readonly canvasHost: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly itemBtn: HTMLButtonElement;
-  private readonly loadoutBtn: HTMLButtonElement;
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
@@ -92,9 +97,7 @@ export class ArmoryPreview {
     const toolbar = document.createElement('div');
     toolbar.className = 'armory-preview-modes';
     this.itemBtn = this.buildModeButton('ITEM PREVIEW', 'item');
-    this.loadoutBtn = this.buildModeButton('LOADOUT PREVIEW', 'loadout');
     toolbar.appendChild(this.itemBtn);
-    toolbar.appendChild(this.loadoutBtn);
 
     this.root.appendChild(this.canvasHost);
     this.root.appendChild(toolbar);
@@ -113,10 +116,8 @@ export class ArmoryPreview {
   }
 
   private syncModeButtons(): void {
-    this.itemBtn.classList.toggle('active', this.mode === 'item');
-    this.loadoutBtn.classList.toggle('active', this.mode === 'loadout');
-    this.itemBtn.setAttribute('aria-pressed', String(this.mode === 'item'));
-    this.loadoutBtn.setAttribute('aria-pressed', String(this.mode === 'loadout'));
+    this.itemBtn.classList.add('active');
+    this.itemBtn.setAttribute('aria-pressed', 'true');
   }
 
   /**
@@ -129,9 +130,14 @@ export class ArmoryPreview {
     this.observeViewport();
   }
 
+  /**
+   * Kept as a no-op entry point for callers/tests. The only supported mode is
+   * 'item'; any legacy 'loadout' request is ignored so the combined view can
+   * never be re-entered.
+   */
   public setMode(mode: ArmoryPreviewMode): void {
     if (this.disposed || this.mode === mode) return;
-    this.mode = mode;
+    this.mode = 'item';
     this.syncModeButtons();
     if (this.running) this.applySelection();
   }

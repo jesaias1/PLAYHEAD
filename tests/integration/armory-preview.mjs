@@ -17,7 +17,8 @@ try{
  await page.waitForFunction(()=>window.game.ui.importScreen.armoryPreview.rig!==null);
  await select('karambit','ASTRAL');check('static knife uses real isolated rig',(await state()).knifeVisible&&!(await state()).armsVisible,await state());await shot('knife-item');
  await select('gloves','DROP_GLOVE_CYBER');check('glove item uses real hand materials',!(await state()).knifeVisible&&(await state()).armsVisible,await state());await shot('glove-item');
- await select('gloves','DROP_GLOVE_CYBER','loadout');check('combined loadout',(await state()).knifeVisible&&(await state()).armsVisible,await state());await shot('loadout');
+ // Combined knife+gloves LOADOUT preview removed: a legacy request stays ITEM.
+ await select('gloves','DROP_GLOVE_CYBER','loadout');check('legacy loadout request stays ITEM',(await state()).mode==='item'&&!(await state()).knifeVisible&&(await state()).armsVisible,await state());await shot('loadout-removed');
  await select('karambit','SIGNALISM_ARTIFACT');const v=await state();await sleep(1300);const v2=await state();check('selected blade video advances muted',v2.videoMuted===true&&v2.videoTime>v.videoTime,v2);await shot('artifact-item');
  await page.evaluate(()=>{const p=window.game.ui.importScreen.armoryPreview;window.armoryRendererReference=p.renderer;window.armoryVideoReference=p.skinSystem.activeVideo.element;window.armoryVideoTime=window.armoryVideoReference.currentTime;window.game.ui.importScreen.renderArmorySelection();});await sleep(300);
  check('same selection reuses renderer and video',await page.evaluate(()=>{const p=window.game.ui.importScreen.armoryPreview;return p.renderer===window.armoryRendererReference&&p.skinSystem.activeVideo.element===window.armoryVideoReference&&p.skinSystem.activeVideo.element.currentTime>=window.armoryVideoTime;}));

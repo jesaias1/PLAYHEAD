@@ -94,6 +94,8 @@ export class World {
 
   private scene: THREE.Scene;
   private builtAssets: BuiltWorldAssets | null = null;
+  /** Authored surf-material emissive captured once so the breath never drifts. */
+  private surfMaterialBaseEmissive: number | null = null;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -522,6 +524,15 @@ export class World {
         material.color.copy(vState.palette.secondary).lerp(vState.palette.highlight, pulse.mix);
         material.opacity = pulse.opacity;
       }
+      // RESTRAINED SURF SURFACE + TRANSFER CUE BREATH. One shared material for
+      // every surf deck (never per-node) and the existing checkpoint beacon
+      // material already registered through the shared bus. Both are tiny
+      // additive lifts on top of the authored emissive, bounded by the effect
+      // profile, and collapse under reduced motion. No lights or geometry
+      // change; gate/finish/knife beacons are untouched.
+      const surfMatBase = this.surfMaterialBaseEmissive ?? this.builtAssets.surfMaterial.emissiveIntensity;
+      this.surfMaterialBaseEmissive = surfMatBase;
+      this.builtAssets.surfMaterial.emissiveIntensity = surfMatBase + pulse.surfaceEmissive;
     }
 
     const syncDelta = songTime - progress.targetSongTime;
@@ -583,6 +594,7 @@ export class World {
   }
 
   private disposeTrackAssets(): void {
+    this.surfMaterialBaseEmissive = null;
     if (this.builtAssets) {
       this.scene.remove(this.builtAssets.rootGroup);
       this.builtAssets.dispose();

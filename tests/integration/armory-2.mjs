@@ -22,7 +22,7 @@ try{
  await select('gloves','DROP_GLOVE_CYBER');let g=await state();check('glove ITEM uses real hand materials, knife hidden',!g.knifeVisible&&g.armsVisible&&g.rawMedia===0,g);await shot('glove-item-cyber');
  await select('gloves','DROP_GLOVE_AUREATE');await shot('glove-item-aureate');
  await select('gloves','DROP_GLOVE_CRYSTAL');await shot('glove-item-crystal');
- await select('gloves','DROP_GLOVE_CYBER','loadout');let l=await state();check('combined loadout shows knife + arms',l.knifeVisible&&l.armsVisible&&l.rawMedia===0,l);await shot('loadout-cyber');
+ await select('gloves','DROP_GLOVE_CYBER','loadout');let l=await state();check('legacy loadout request stays ITEM (knife hidden)',l.mode==='item'&&!l.knifeVisible&&l.armsVisible&&l.rawMedia===0,l);await shot('loadout-cyber-removed');
  await select('karambit','SIGNALISM_ARTIFACT');const v=await state();await sleep(1300);const v2=await state();check('selected blade video advances muted',v2.videoMuted===true&&v2.videoTime>v.videoTime,v2);check('no raw video rectangle in detail',v2.rawMedia===0,v2);await shot('knife-item-signalism');
  await select('karambit','BLACKSTAR');await shot('knife-item-blackstar');
  await select('karambit','PRISM_STATIC');await shot('knife-item-prism-static');
@@ -56,7 +56,7 @@ try{
  check('offline drop close restores Armory preview',await page.evaluate(()=>!window.game.ui.decodeModal.isVisible()&&window.game.ui.importScreen.armoryPreview.running));
  for(const width of [1280,1920]) {
  await page.setViewport({width,height:1000});await select('gloves','DROP_GLOVE_CYBER');await shot(`gloves-${width}`);
- await select('gloves','DROP_GLOVE_CYBER','loadout');await shot(`loadout-${width}`);
+ await select('gloves','DROP_GLOVE_CYBER','loadout');await shot(`gloves-loadout-ignored-${width}`);
  }
  await page.setViewport({width:1440,height:1000});
  const socket=await page.evaluate(()=>{const k=window.game.ui.importScreen.armoryPreview.rig.knifeGroup;return {p:k.position.toArray(),r:k.rotation.toArray().slice(0,3),s:k.scale.toArray()};});

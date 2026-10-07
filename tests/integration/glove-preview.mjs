@@ -77,20 +77,22 @@ try {
   await shot('knife-item-astral');
   await page.evaluate(() => { window.__glovePreviewRenderer = window.game.ui.importScreen.armoryPreview.renderer; });
 
+  // NOTE: the combined knife+gloves LOADOUT preview was removed (unreliable on
+  // the shared rig). Only the isolated ITEM view is exercised now; a legacy
+  // 'loadout' request must stay pinned to ITEM.
   const pairs = [['DROP_GLOVE_CYBER', 'cyber'], ['DROP_GLOVE_AUREATE', 'aureate'], ['DROP_GLOVE_CRYSTAL', 'crystal']];
   for (const [id, short] of pairs) {
-    for (const mode of ['item', 'loadout']) {
-      await select('gloves', id, mode);
-      const s = await state();
-      if (mode === 'item') {
-        check(`${short} ITEM: real arm materials, knife hidden, glove pose applied`, s.armsVisible && !s.knifeVisible && s.rawMedia === 0 && s.glove === id && s.previewOffsets === 4, s);
-      } else {
-        check(`${short} LOADOUT: knife + arms visible, natural arm framing`, s.armsVisible && s.knifeVisible && s.glove === id && s.previewOffsets === 2, s);
-      }
-      check(`${short} ${mode.toUpperCase()}: single renderer, no churn`, s.sameRenderer && s.canvasCount === 1, { sameRenderer: s.sameRenderer, canvases: s.canvasCount });
-      await shot(`${mode === 'item' ? 'glove-item' : 'loadout'}-${short}`);
-    }
+    await select('gloves', id, 'item');
+    const s = await state();
+    check(`${short} ITEM: real arm materials, knife hidden, glove pose applied`, s.armsVisible && !s.knifeVisible && s.rawMedia === 0 && s.glove === id && s.previewOffsets === 4, s);
+    check(`${short} ITEM: single renderer, no churn`, s.sameRenderer && s.canvasCount === 1, { sameRenderer: s.sameRenderer, canvases: s.canvasCount });
+    await shot(`glove-item-${short}`);
   }
+  // A legacy 'loadout' request is ignored and cannot re-open the combined view.
+  await page.evaluate(() => window.game.ui.importScreen.armoryPreview.setMode('loadout'));
+  await sleep(300);
+  const pinned = await state();
+  check('legacy loadout request stays in ITEM mode', pinned.mode === 'item', pinned);
 
   // Re-select to prove the pose resets and never accumulates.
   await select('gloves', 'DROP_GLOVE_CYBER');

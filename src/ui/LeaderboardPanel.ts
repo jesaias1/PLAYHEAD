@@ -20,8 +20,11 @@ export interface LeaderboardCatalogEntry {
   difficultyLabel: string;
 }
 
+export type LeaderboardBoardKind = 'NORMAL' | 'SURF';
+
 export interface LeaderboardPanelCallbacks {
   onSelectTrack: (trackId: string) => void;
+  onSelectBoard: (trackId: string, board: LeaderboardBoardKind) => void;
   onPlaySignal: (trackId: string) => void;
   onWatchRun: (runId: string) => void;
   onRaceRun: (runId: string) => void;
@@ -36,6 +39,8 @@ export class LeaderboardPanel {
   private callbacks: LeaderboardPanelCallbacks | null = null;
 
   private selectElem: HTMLSelectElement;
+  private boardElem: HTMLElement;
+  private boardKind: LeaderboardBoardKind = 'NORMAL';
   /** Entries of the currently rendered board, so WATCH can resolve a run id. */
   private currentEntries: LeaderboardView['entries'] = [];
   private statusElem: HTMLElement;
@@ -56,6 +61,10 @@ export class LeaderboardPanel {
         <select class="online-select" id="lb-track-select"></select>
         <button class="terminal-btn-subtle" id="lb-play" type="button">> PLAY SIGNAL</button>
       </div>
+      <div class="leaderboard-board-tabs" id="lb-board-tabs" role="tablist" aria-label="Board type">
+        <button class="lb-board-tab active" id="lb-board-normal" role="tab" aria-selected="true" type="button" data-board="NORMAL">NORMAL</button>
+        <button class="lb-board-tab" id="lb-board-surf" role="tab" aria-selected="false" type="button" data-board="SURF">SURF</button>
+      </div>
 
       <div class="online-lb-status" id="lb-status">SELECT A SIGNAL</div>
       <div class="online-lb-table" id="lb-table"></div>
@@ -63,13 +72,24 @@ export class LeaderboardPanel {
     `;
 
     this.selectElem = this.element.querySelector('#lb-track-select') as HTMLSelectElement;
+    this.boardElem = this.element.querySelector('#lb-board-tabs') as HTMLElement;
+    this.boardElem.querySelectorAll<HTMLButtonElement>('.lb-board-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const board = (btn.dataset.board as LeaderboardBoardKind) ?? 'NORMAL';
+        if (board === this.boardKind) return;
+        this.boardKind = board;
+        this.syncBoardTabs();
+        this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
+      });
+    });
     this.statusElem = this.element.querySelector('#lb-status') as HTMLElement;
     this.tableElem = this.element.querySelector('#lb-table') as HTMLElement;
     this.youElem = this.element.querySelector('#lb-you') as HTMLElement;
 
     // Selecting a signal loads its board straight away — no PLAY required.
     this.selectElem.addEventListener('change', () => {
-      this.callbacks?.onSelectTrack(this.selectElem.value);
+      // The NORMAL board is the default when the signal changes.
+      this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
     });
     (this.element.querySelector('#lb-play') as HTMLButtonElement).addEventListener('click', () => {
       this.callbacks?.onPlaySignal(this.selectElem.value);
@@ -92,6 +112,25 @@ export class LeaderboardPanel {
 
   public getSelectedTrack(): string {
     return this.selectElem.value;
+  }
+
+  public getBoardKind(): LeaderboardBoardKind {
+    return this.boardKind;
+  }
+
+  /** Preselect the board kind WITHOUT triggering a fetch (caller refreshes). */
+  public setBoardKind(kind: LeaderboardBoardKind): void {
+    this.boardKind = kind;
+    this.syncBoardTabs();
+  }
+
+  private syncBoardTabs(): void {
+    this.element.querySelector('#lb-play')!.textContent = this.boardKind === 'SURF' ? '> PLAY SURF' : '> PLAY SIGNAL';
+    this.boardElem.querySelectorAll<HTMLButtonElement>('.lb-board-tab').forEach((btn) => {
+      const active = btn.dataset.board === this.boardKind;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
   }
 
   /** Resolves a leaderboard entry by run id (used by WATCH RUN). */

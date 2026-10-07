@@ -2466,6 +2466,34 @@ option:hover, option:focus, option:checked {
   margin: 4px 0 6px;
 }
 
+.leaderboard-board-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+.lb-board-tab {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  padding: 4px 12px;
+  background: transparent;
+  color: #7b8794;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+.lb-board-tab.active {
+  color: #05090f;
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+}
+.results-surf-badge {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: #00f0ff;
+  margin-top: 6px;
+}
+
 .online-lb-status {
   font-family: var(--font-mono);
   font-size: 0.74rem;

@@ -498,8 +498,10 @@ export class CloudProgression {
         .eq('user_id', userId);
       if (this.auth.getUserId() !== userId) return;
       if (!error && Array.isArray(data)) {
+        // Surf PBs use their own world board and never enter Normal mastery.
+        const normalRows = (data as Record<string, unknown>[]).filter(row => !String(row.track_id ?? '').startsWith('surf:'));
         LeaderboardManager.getInstance().mergeCloudPBs(
-          (data as Record<string, unknown>[]).map((r) => ({
+          normalRows.map((r) => ({
             trackId: String(r.track_id ?? ''),
             bestTimeUs: Number(r.best_time_us ?? 0),
             bestRank: String(r.best_rank ?? 'BRONZE')
@@ -507,7 +509,7 @@ export class CloudProgression {
         );
         const records = { ...KarambitSkinSystem.getInstance().getTrackRecords() };
         const ranks: RunRank[] = ['BRONZE', 'SILVER', 'GOLD', 'DIAMOND'];
-        for (const row of data as Record<string, unknown>[]) {
+        for (const row of normalRows) {
           const rank = row.best_rank as RunRank;
           const track = String(row.track_id ?? '');
           if (track && ranks.includes(rank) && ranks.indexOf(rank) > ranks.indexOf(records[track])) records[track] = rank;

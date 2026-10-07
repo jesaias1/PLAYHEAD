@@ -24,6 +24,7 @@ import {
   REGISTRY_READY,
   REGISTRY_BLOCKED_REASON
 } from './OfficialMapRegistry';
+import { SURF_MAP_REGISTRY } from './SurfMapIdentity';
 
 export interface LeaderboardEntry {
   rankPosition: number;
@@ -218,7 +219,13 @@ export class LeaderboardService {
         detail: `outside plausible bounds (${MIN_PLAUSIBLE_TIME_US}..${MAX_PLAUSIBLE_TIME_US} us)`
       };
     }
-    const verdict = verifyAgainstRegistry(submission.identity, OFFICIAL_MAP_REGISTRY);
+    // Namespaced surf board ids verify against the SURF registry; bare official
+    // ids verify against the NORMAL registry. The two are disjoint, so a run can
+    // never be accepted onto the wrong board.
+    const registry = submission.identity.trackId.startsWith('surf:')
+      ? SURF_MAP_REGISTRY
+      : OFFICIAL_MAP_REGISTRY;
+    const verdict = verifyAgainstRegistry(submission.identity, registry);
     if (!verdict.ok) {
       return { ok: false, reason: 'IDENTITY_MISMATCH', detail: verdict.detail };
     }

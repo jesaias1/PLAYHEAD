@@ -575,8 +575,12 @@ export class SurfCourseGenerator {
     // from reading as one identical ribbon.
     const jitter = ((phraseIndex % 3) - 1) * 18;
     const rawLength = targetMeters - 24 + (simple ? 0 : jitter);
-    const length = Math.max(150, Math.min(simple ? 1200 : 350, rawLength));
-    const headingChange = simple ? 0 : bankSign * rng.nextFloat(0.5, 1.1);
+    // LONGER continuous cruises: the non-simple cap is raised so a big budget
+    // section spends its budget on one readable sweeping line instead of
+    // chopping it into many short ribbons (which read as busy and abrupt).
+    const length = Math.max(150, Math.min(simple ? 1200 : 430, rawLength));
+    // Gentler cruise heading: a long banked line should drift, not yaw hard.
+    const headingChange = simple ? 0 : bankSign * rng.nextFloat(0.35, 0.8);
     const drop = clampDescentDrop(-(6 + length * 0.022), length);
     const timeStart = window?.start ?? section.start;
     const timeEnd = window?.end ?? section.end;
@@ -588,7 +592,9 @@ export class SurfCourseGenerator {
       startBank: bankSign * 0.9,
       endBank: bankSign * 1.0,
       headingChange,
-      headingBend: simple ? 0 : bankSign * rng.nextFloat(-0.12, 0.12),
+      // TANGENT CONTINUITY: a small quadratic bend keeps heading rate from
+      // snapping at the exit while still preventing a perfectly straight read.
+      headingBend: simple ? 0 : bankSign * rng.nextFloat(-0.07, 0.07),
       verticalDelta: drop,
       timeStart,
       timeEnd,
@@ -1105,11 +1111,15 @@ export class SurfCourseGenerator {
   ): { nodes: RouteNode[] } {
     // Platforms serve surf flow: keep them short so they never dominate the
     // course's traversal distance (surf must stay 75-90% of the run).
-    length = Math.max(18, Math.min(24, length));
-    const width = 20 + rng.nextFloat(0, 4);
-    const gap = 5.0;
+    length = Math.max(18, Math.min(26, length));
+    // FORGIVING CATCH ENDS: a wide deck plus a SHORT release gap. The old 5 m
+    // gap assumed a fast entry; a slower surfer had already dropped below the
+    // 0.6 m shelf by the time the deck began and passed straight through the
+    // shallow gap. 2.5 m means even a minimum-speed arc lands ON the deck.
+    const width = 22 + rng.nextFloat(0, 4);
+    const gap = 2.5;
     const center = advance(cursor.pos, cursor.yaw, gap + length * 0.5);
-    center.y = cursor.pos.y - 0.6;
+    center.y = cursor.pos.y - 0.5;
     const node = makePlatform(
       cursor.nodeId++, center, width, length, cursor.yaw, 0,
       RouteNodeType.LANDING, section.intensity * 0.5, section.index

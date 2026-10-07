@@ -22,6 +22,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 //   WRITE_REGISTRY=1 npx vitest run tests/CanonicalOfficialMaps.test.ts
 // -----------------------------------------------------------------------------
 import { ACCEPTED_MAPS } from './accepted-maps.ts';
+import { ACCEPTED_SURF_MAPS } from './accepted-surf-maps.ts';
 
 const MIN_PLAUSIBLE_TIME_US = 8_000_000;        // 8 s
 const MAX_PLAUSIBLE_TIME_US = 30 * 60_000_000;  // 30 min
@@ -134,7 +135,14 @@ Deno.serve(async (req: Request) => {
   // Canonical map identity: the submitted fingerprint must be one this server
   // recognises for that track + version. This is what stops scores from
   // different maps being mixed onto one board.
-  const accepted = ACCEPTED_MAPS.find((m) => m.trackId === trackId);
+  //
+  // SURF boards are stored under a NAMESPACED track id ("surf:<official>:v..."),
+  // so a surf record can never be accepted as, or mixed with, a NORMAL record.
+  // The two registries are disjoint by construction: a namespaced id can only
+  // match ACCEPTED_SURF_MAPS, a bare official id can only match ACCEPTED_MAPS.
+  const isSurfBoard = trackId.startsWith('surf:');
+  const registry = isSurfBoard ? ACCEPTED_SURF_MAPS : ACCEPTED_MAPS;
+  const accepted = registry.find((m) => m.trackId === trackId);
   if (!accepted) {
     return reject(
       'REGISTRY_NOT_READY',

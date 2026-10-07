@@ -46,6 +46,7 @@ import { validateDisplayName } from '../online/AuthService';
 import { computeMapIdentity } from '../online/MapIdentity';
 import type { MapIdentity } from '../online/MapIdentity';
 import { OFFICIAL_MAP_REGISTRY } from '../online/OfficialMapRegistry';
+import { computeSurfMapIdentity } from '../online/SurfMapIdentity';
 import {
   RemoteRacerGhosts,
   GUEST_SIGNAL_COLOR,
@@ -293,6 +294,18 @@ export class Game {
   private currentAnalysis: TrackAnalysis | null = null;
   private currentTrack: GeneratedTrack | null = null;
   private currentOfficialTrackId: string | null = null;
+  /**
+   * PRESERVED original official catalog id for a SURF run. switchReadyToSurf
+   * clears currentOfficialTrackId (so a surf run never takes the NORMAL reward
+   * / progression path), but the SURF world board still needs the trusted
+   * official song id to build its namespaced board id. Only set when the run
+   * really came from an official catalog track; arbitrary uploads stay null and
+   * get no board.
+   */
+  private currentSurfOfficialTrackId: string | null = null;
+  /** Board kind + official song id of the LAST finished run (results actions). */
+  private lastResultBoardKind: 'NORMAL' | 'SURF' = 'NORMAL';
+  private lastResultBoardOfficialTrackId: string | null = null;
   /**
    * Course style of the currently loaded custom run. PLAYHEAD is the default
    * and is the legacy identity; SURF namespaces the custom cache, PB ghost and
@@ -571,11 +584,16 @@ export class Game {
       },
       onViewLeaderboard: () => {
         // Contextual competition: open the SAME canonical track's existing board
-        // without a menu hunt. The select is aimed first so the tab-open refresh
-        // targets this signal; no board state is duplicated.
-        const trackId = this.currentOfficialTrackId;
+        // (NORMAL or the separate SURF board for a surf run) without a menu hunt.
+        // The select + board kind are aimed first so the tab-open refresh targets
+        // this signal; no board state is duplicated.
+        const kind = this.lastResultBoardKind;
+        const trackId = kind === 'SURF'
+          ? this.lastResultBoardOfficialTrackId
+          : this.currentOfficialTrackId;
         if (!trackId) return;
         this.ui.importScreen.leaderboardPanel.setSelectedTrack(trackId);
+        this.ui.importScreen.leaderboardPanel.setBoardKind(kind);
         this.returnToImport();
         this.ui.importScreen.openLeaderboardTab();
       },
@@ -863,6 +881,7 @@ export class Game {
               candidate?: import('../leaderboard/LeaderboardManager').LeaderboardSubmissionCandidate;
               isNewLocalFirst?: boolean;
             } | undefined;
+            let surfInfo: { boardTrackId: string; title: string; officialTrackId: string } | undefined;
             let customRewardInfo: {
               isCustomAudio: boolean;
               eligible: boolean;
@@ -937,7 +956,20 @@ export class Game {
                 candidate,
                 isNewLocalFirst: lbResult.isNewLocalFirst
               };
-            } else if (this.currentCustomAudioBuffer) {
+            } else if (this.currentCourseType === 'SURF' && this.currentSurfOfficialTrackId) {
+              // OFFICIAL SURF RUN. The namespaced SURF board is separate from the
+              // NORMAL board; the run never touches NORMAL progression, drops or
+              // prestige (currentOfficialTrackId is null above). surfInfo drives
+              // the SURF badge on the report and the board submission below.
+              const surfIdentity = this.surfMapIdentity();
+              if (surfIdentity) {
+                surfInfo = {
+                  boardTrackId: surfIdentity.trackId,
+                  title: this.currentAnalysis.filename || 'PLAYHEAD TRACK',
+                  officialTrackId: this.currentSurfOfficialTrackId ?? ''
+                };
+              }
+            } else if (this.currentCustomAudioBuffer && this.currentCourseType !== 'SURF') {
               // Custom audio run
               const dur = this.currentCustomAudioBuffer.duration;
               const fp = CustomAudioRewardService.computeAudioFingerprint(this.currentCustomAudioBuffer);
@@ -956,6 +988,11 @@ export class Game {
                 CustomAudioRewardService.getInstance().claimReward(fp);
               }
             }
+
+            this.lastResultBoardKind = surfInfo ? 'SURF' : 'NORMAL';
+            this.lastResultBoardOfficialTrackId = surfInfo
+              ? surfInfo.officialTrackId
+              : this.currentOfficialTrackId;
 
             // A WATCH REPLAY button is only meaningful when a first-person
             // replay actually exists. Never offer an action that silently does
@@ -996,8 +1033,12 @@ export class Game {
                 diamondJustMastered,
                 pbGhostAvailable: pbGhost.available,
                 pbGhostLabel: pbGhost.label
-              }
+              },
+              surfInfo
+                ? { isSurf: true, boardTrackId: surfInfo.boardTrackId, title: surfInfo.title }
+                : undefined
             );
+            this.ui.resultsScreen.setRaceWaiting(this.friendRaceWorld);
 
             // WORLD SUBMISSION: runs independently of the results screen so the
             // player is never blocked, and reports the REAL outcome as it lands.
@@ -1016,14 +1057,29 @@ export class Game {
               void this.submitOfficialRun(results, officialInfo?.candidate).finally(() => {
                 if (boardIdentity) void this.refreshResultCompetition(boardTrackId, boardIdentity, boardToken);
               });
+            } else if (surfInfo) {
+              // SEPARATE SURF WORLD BOARD. Submits under the namespaced board id
+              // with the SURF identity; the server accepts it only against the
+              // SURF registry, and never grants NORMAL rewards. The surf board
+              // fetch is chained after the submission so the player's position is
+              // honest.
+              const surfIdentity = this.surfMapIdentity();
+              if (surfIdentity && !isOvertime && results.rank !== 'UNRANKED') {
+                void this.submitOfficialRun(results, undefined, {
+                  trackId: surfInfo.boardTrackId,
+                  identity: surfIdentity
+                }).finally(() => {
+                  void this.refreshResultCompetition(surfInfo!.boardTrackId, surfIdentity, boardToken);
+                });
+              } else {
+                this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
+              }
             } else {
               this.lastSubmissionState = { state: 'NOT_OFFICIAL' };
             }
           }
           if (this.friendRaceWorld && this.raceFinishReported) {
-            this.ui.resultsScreen.hide();
-            this.ui.raceHud.show();
-            this.audioEngine.play(Math.max(0, (this.raceNowMs() - (this.raceStartAtMs ?? this.raceNowMs())) / 1000));
+            this.ui.raceHud.hide();
           }
           break;
 
@@ -1114,6 +1170,7 @@ export class Game {
     this.invalidateResultCompetition();
     try {
       this.currentOfficialTrackId = trackEntry.id;
+      this.currentSurfOfficialTrackId = null;
       this.currentCustomAudioBuffer = null;
       // Official Signal Pack courses are PLAYHEAD; a surf selection can never leak
       // its identity into an official run.
@@ -1198,6 +1255,7 @@ export class Game {
   private async handleFileSelected(file: File, courseType: CourseType = DEFAULT_COURSE_TYPE): Promise<void> {
     try {
       this.currentOfficialTrackId = null;
+      this.currentSurfOfficialTrackId = null;
       this.currentCourseType = normalizeCourseType(courseType);
       this.isFirstContactCourse = false;
       this.stateMachine.transitionTo(GameState.ANALYSING);
@@ -1267,19 +1325,22 @@ export class Game {
     this.pendingGhostRun = null;
     this.ghostRace.clear();
     this.invalidateResultCompetition();
+    // Preserve the ORIGINAL official catalog id separately so the SURF world
+    // board can still be keyed by the trusted song id. currentOfficialTrackId is
+    // cleared so a surf run never earns NORMAL progression/drop rewards.
+    this.currentSurfOfficialTrackId = previous.officialId;
     this.currentOfficialTrackId = null;
     this.currentCustomAudioBuffer = buffer;
     this.isFirstContactCourse = false;
     this.stateMachine.transitionTo(GameState.ANALYSING);
     try {
-      await this.processBuffer(buffer, previous.analysis.filename, {
-        custom: { source: 'FILE', encodedBytes: null }, courseType: 'SURF'
-      });
+      await this.generateSurfVariant(buffer, previous.analysis);
     } catch (error) {
       console.error('[SURF] Variant generation failed', error);
       this.currentAnalysis = previous.analysis;
       this.currentTrack = previous.track;
       this.currentOfficialTrackId = previous.officialId;
+      this.currentSurfOfficialTrackId = null;
       this.currentCustomAudioBuffer = previous.customBuffer;
       this.isFirstContactCourse = previous.firstContact;
       this.currentCourseType = DEFAULT_COURSE_TYPE;
@@ -1288,6 +1349,49 @@ export class Game {
       this.stateMachine.transitionTo(GameState.READY);
       this.ui.analysisScreen.addStageLog('[SURF] RETRY AVAILABLE // NORMAL WORLD RESTORED');
     }
+  }
+
+  /**
+   * Generate the SURF variant for the currently loaded song.
+   *
+   * REUSE THE SAME DETERMINISTIC INPUTS THE CANONICAL SURF REGISTRY USES:
+   * a shipped official preset's BAKED analysis (whose duration is the actual
+   * decoded buffer duration recorded at precompute time) and the SURF generator.
+   * We never re-analyse PCM here and never trust the filename, so the client's
+   * map fingerprint and board id are reproducible and match the server registry.
+   * The decoded buffer duration is still asserted against the preset so a
+   * mismatched audio asset cannot silently produce a different map.
+   */
+  private async generateSurfVariant(buffer: AudioBuffer, fallbackAnalysis: TrackAnalysis): Promise<void> {
+    await this.audioEngine.init();
+    this.audioEngine.setBuffer(buffer);
+    this.currentCourseType = 'SURF';
+    this.ui.analysisScreen.setCourseVariant(true);
+    this.ui.analysisScreen.setStage('[MAP] SURF PHRASES', 0.5);
+
+    let analysis = fallbackAnalysis;
+    let canonical = false;
+    if (this.currentSurfOfficialTrackId) {
+      const preset = await PresetLevelCache.loadPreset(this.currentSurfOfficialTrackId);
+      if (preset && Math.abs(preset.analysis.duration - buffer.duration) <= 0.5) {
+        analysis = preset.analysis;
+        canonical = true;
+      }
+    }
+    this.currentAnalysis = analysis;
+    this.ui.applyAccent(analysis.visualAccent);
+    this.environment.setAccent(analysis.visualAccent);
+    this.ui.analysisScreen.setStage('[ROUTE] SURF TRAVERSAL VALIDATED', 0.85);
+    const track = TrackGenerator.generate(analysis, 'SURF');
+    this.currentTrack = track;
+    this.currentTrackCanonical = canonical;
+    this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
+    this.world.loadTrack(analysis, track, this.environment, null);
+    this.world.songDirector.onSectionAnnouncement = (title) => {
+      this.ui.hud.showSectionTitle(title);
+    };
+    this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.98);
+    this.stateMachine.transitionTo(GameState.READY);
   }
 
   private async processBuffer(
@@ -1759,13 +1863,20 @@ export class Game {
     this.movementFeedback.notifyFinish();
     this.movementSfx.reset();
 
-    // ~100-300 ms: music ducks into a short tail.
+    // Music ducks into a short tail UNDERNEATH the report. The fade never gates
+    // the transition: it is presentation only and may still be running when the
+    // Run Report is already visible.
     this.audioEngine.fadeOutAndStop(0.45);
 
-    // ~520 ms: Run Report transition begins. Deliberately short.
-    window.setTimeout(() => {
+    // IMMEDIATE, idempotent transition into the Run Report. The exact sub-tick
+    // finish timestamp and the terminal replay frame were recorded before this
+    // call, and the FINISHED listener builds the report synchronously (PB,
+    // drops, race feedback). No deferred timer means a fresh run can never race
+    // a stale transition, and the report is shown without waiting on the async
+    // cloud/replay submission.
+    if (!this.stateMachine.is(GameState.FINISHED)) {
       this.stateMachine.transitionTo(GameState.FINISHED);
-    }, 520);
+    }
   }
 
   private handlePlayerFall(reason: RestoreReason = RestoreReason.OTHER): void {
@@ -3093,7 +3204,14 @@ export class Game {
 
     leaderboardPanel.setCallbacks({
       onSelectTrack: (trackId) => void this.refreshLeaderboard(trackId),
-      onPlaySignal: (trackId) => void this.loadPresetTrack(trackId),
+      onSelectBoard: (trackId, board) => void this.refreshLeaderboard(trackId, board),
+      onPlaySignal: (trackId) => {
+        const board = leaderboardPanel.getBoardKind();
+        void this.loadPresetTrack(trackId).then(() => {
+          if (board === 'SURF') return this.switchReadyToSurf();
+          return undefined;
+        });
+      },
       onWatchRun: (runId) => void this.watchLeaderboardRun(runId),
       onRaceRun: (runId) => {
         // RACE GHOST is the only path that arms a recorded ghost. A failure is
@@ -3107,14 +3225,14 @@ export class Game {
       },
       onRetryConnection: () => {
         onlineBootstrap.retry();
-        void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
+        void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack(), leaderboardPanel.getBoardKind());
       },
       onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
 
     this.ui.importScreen.onLeaderboardTabOpened = () => {
       this.refreshOnlineStatus();
-      void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack());
+      void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack(), leaderboardPanel.getBoardKind());
     };
 
     // Online status → the ONE global indicator in the menu footer.
@@ -3207,20 +3325,46 @@ export class Game {
     );
   }
 
-  private async refreshLeaderboard(trackId: string): Promise<void> {
+  private async refreshLeaderboard(
+    trackId: string,
+    board: 'NORMAL' | 'SURF' = 'NORMAL'
+  ): Promise<void> {
     const panel = this.ui.importScreen.leaderboardPanel;
-    const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
+    const catalogTitle = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
+    const title = board === 'SURF' ? `${catalogTitle} // SURF` : catalogTitle;
     panel.setLoading(title);
+    const render = (view: LeaderboardView): void => {
+      if (panel.getSelectedTrack() !== trackId || panel.getBoardKind() !== board) return;
+      panel.render(view, title);
+    };
 
     // The board is scoped to the canonical identity of the local map.
     const level = await PresetLevelCache.loadPreset(trackId);
     if (!level) {
-      panel.render({ trackId, entries: [], you: null, nextAbove: null, offline: true }, title);
+      render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
       return;
     }
+
+    // SURF board: regenerate the canonical SURF course from the shipped preset
+    // analysis (deterministic, actual-duration matched) and read the NAMESPACED
+    // board. A song that is not a canonical official preset stays local-only.
+    if (board === 'SURF') {
+      let identity;
+      try {
+        const surfTrack = TrackGenerator.generate(level.analysis, 'SURF');
+        identity = computeSurfMapIdentity(trackId, surfTrack, level.analysis);
+      } catch {
+        render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
+        return;
+      }
+      const view = await leaderboardService.fetchLeaderboard(identity.trackId, identity);
+      render(view);
+      return;
+    }
+
     const identity = computeMapIdentity(trackId, level.track, level.analysis);
     const view = await leaderboardService.fetchLeaderboard(trackId, identity);
-    panel.render(view, title);
+    render(view);
   }
 
   /**
@@ -3235,7 +3379,9 @@ export class Game {
    */
   private async refreshResultCompetition(trackId: string, identity: MapIdentity, token: number): Promise<void> {
     const isCurrent = () => token === this.resultBoardToken &&
-      this.stateMachine.is(GameState.FINISHED) && this.currentOfficialTrackId === trackId &&
+      this.stateMachine.is(GameState.FINISHED) &&
+      (this.currentOfficialTrackId === trackId ||
+        (trackId.startsWith('surf:') && this.currentCourseType === 'SURF')) &&
       !this.friendRaceWorld && !this.ui.resultsScreen.element.classList.contains('hidden');
     if (!isCurrent()) return;
     try {
@@ -3820,6 +3966,7 @@ export class Game {
   }
 
   private showRaceResults(rows: readonly RaceResultRow[]): void {
+    this.ui.resultsScreen.hide();
     const panel = this.ui.importScreen.racePanel;
     panel.renderResults(rows, authService.getUserId(), this.raceIdentities);
     panel.showResults();
@@ -4328,6 +4475,19 @@ export class Game {
   }
 
   /**
+   * Canonical identity for a SURF run: namespaced by the PRESERVED official
+   * catalog id + SURF version + the actual map fingerprint. Null for arbitrary
+   * uploads (no official id) or a non-canonical surf map, so a local-only song
+   * can never create a world board.
+   */
+  private surfMapIdentity(): MapIdentity | null {
+    if (!this.currentTrack || !this.currentAnalysis) return null;
+    if (this.currentCourseType !== 'SURF') return null;
+    if (!this.currentSurfOfficialTrackId || !this.currentTrackCanonical) return null;
+    return computeSurfMapIdentity(this.currentSurfOfficialTrackId, this.currentTrack, this.currentAnalysis);
+  }
+
+  /**
    * Submits a finished official run through the existing submit-run path, records
    * the replay reference for ghost racing, and reports the REAL outcome.
    *
@@ -4337,9 +4497,10 @@ export class Game {
    */
   private async submitOfficialRun(
     results: RunResults,
-    candidate: LeaderboardSubmissionCandidate | undefined
+    candidate: LeaderboardSubmissionCandidate | undefined,
+    override?: { trackId: string; identity: MapIdentity }
   ): Promise<void> {
-    const trackId = this.currentOfficialTrackId;
+    const trackId = override?.trackId ?? this.currentOfficialTrackId;
     if (!trackId) return;
     const submissionUserId = authService.getUserId();
     let signalDropAcquired = false;
@@ -4354,7 +4515,7 @@ export class Game {
     };
 
     // 1. Canonical guard. A non-canonical map can never be submitted.
-    const identity = this.fullMapIdentity();
+    const identity = override?.identity ?? this.fullMapIdentity();
     if (!identity) {
       publish('RUN_INELIGIBLE_NON_CANONICAL');
       return;
@@ -4363,7 +4524,9 @@ export class Game {
       publish('RUN_INELIGIBLE_OVERTIME');
       return;
     }
-    if (!candidate) {
+    // A NORMAL run needs a candidate; a SURF run submits its own identity with
+    // no NORMAL candidate (surf boards carry no drops/progression).
+    if (!candidate && !override) {
       publish('RUN_INELIGIBLE_UNRANKED');
       return;
     }
@@ -4431,7 +4594,12 @@ export class Game {
     // Offline / not signed in: queue locally and say so plainly. Never claim the
     // run reached the world board.
     if (outcome.reason === 'OFFLINE' || outcome.reason === 'NOT_AUTHENTICATED') {
-      const queued = LeaderboardManager.getInstance().queueCandidate(candidate);
+      // A NORMAL run queues its candidate for offline flush; a SURF run has no
+      // NORMAL candidate (surf boards carry no rewards) so it simply reports the
+      // real offline outcome.
+      const queued = candidate
+        ? LeaderboardManager.getInstance().queueCandidate(candidate)
+        : false;
       publish(
         queued ? 'WORLD_ENTRY_QUEUED_OFFLINE' : 'WORLD_SUBMISSION_FAILED',
         outcome.detail

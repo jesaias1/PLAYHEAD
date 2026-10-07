@@ -127,8 +127,14 @@ export function buildRibbonStationAxes(
     const t = k / segments;
     const yaw = startYaw + spec.headingChange * t + (spec.headingBend ?? 0) * t * t;
     yaws.push(yaw);
-    banks.push(spec.startBank + (spec.endBank - spec.startBank) * t);
-    halfWidths.push(spec.startHalfWidth + (spec.endHalfWidth - spec.startHalfWidth) * t);
+    // SMOOTH FLOW: bank and width ease with a smoothstep so a ribbon leaves its
+    // entry with ZERO roll-rate and ZERO taper-rate, then arrives at its exit
+    // with the same. A linear ramp made heading/bank/width change abruptly at a
+    // ribbon join (the exit derivative never matched the next entry), which read
+    // as a snap or a twist rather than continuous surf flow.
+    const e = t * t * (3 - 2 * t);
+    banks.push(spec.startBank + (spec.endBank - spec.startBank) * e);
+    halfWidths.push(spec.startHalfWidth + (spec.endHalfWidth - spec.startHalfWidth) * e);
     centers.push(vVec(x, y, z));
     if (k < segments) {
       x += Math.sin(yaw) * ds;

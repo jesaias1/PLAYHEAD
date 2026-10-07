@@ -64,6 +64,12 @@ export interface BuiltWorldAssets {
   edgeLines: THREE.LineSegments[];
   routeEdgeItems: RouteEdgeItem[];
   animatedObstacles: AnimatedObstacleItem[];
+  /**
+   * The shared SURF platform material (one instance for every surf deck). SURF
+   * presentation may breathe its emissive from the shared music bus; it is never
+   * a per-node material and never a profile beacon.
+   */
+  surfMaterial: THREE.MeshStandardMaterial;
   dispose: () => void;
 }
 
@@ -891,6 +897,7 @@ export class GeometryBuilder {
       edgeLines,
       routeEdgeItems,
       animatedObstacles,
+      surfMaterial,
       dispose
     };
   }

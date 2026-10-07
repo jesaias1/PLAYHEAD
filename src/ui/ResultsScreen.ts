@@ -99,6 +99,7 @@ export class ResultsScreen {
   private registeredAccount = true;
   /** True only when this run was the FIRST Diamond on the current official track. */
   private lastDiamondMastered = false;
+  private surfBadgeElem!: HTMLElement;
   private navigationBusy = false;
 
   constructor() {
@@ -112,6 +113,7 @@ export class ResultsScreen {
             <h1 class="results-title">RUN REPORT</h1>
             <div class="results-track-title"><span>[SIGNAL]</span> <span id="res-track-title">PLAYHEAD TRACK</span></div>
             <div class="results-pb-status hidden" id="res-pb-status">[PB] NEW PERSONAL BEST</div>
+            <div class="results-surf-badge hidden" id="res-surf-badge">[SURF] SURF WORLD BOARD</div>
           </div>
           <div class="rank-group" id="res-rank-group">
             <div class="rank-badge" id="res-rank">GOLD</div>
@@ -238,6 +240,7 @@ export class ResultsScreen {
     this.rankElem = this.element.querySelector('#res-rank') as HTMLElement;
     this.rankSubElem = this.element.querySelector('#res-rank-sub') as HTMLElement;
     this.pbStatusElem = this.element.querySelector('#res-pb-status') as HTMLElement;
+    this.surfBadgeElem = this.element.querySelector('#res-surf-badge') as HTMLElement;
 
     this.timeElem = this.element.querySelector('#res-time') as HTMLElement;
     this.targetElem = this.element.querySelector('#res-target') as HTMLElement;
@@ -376,7 +379,13 @@ export class ResultsScreen {
       diamondJustMastered: boolean;
       pbGhostAvailable: boolean;
       pbGhostLabel?: string | null;
-    }
+    },
+    /**
+     * SURF board context. When present the report shows a SURF badge and the
+     * NORMAL reward panels (Signal Drop, mastery) are suppressed — a SURF run
+     * never earns NORMAL drops/progression/prestige.
+     */
+    surfInfo?: { isSurf: true; boardTrackId: string; title: string }
   ): void {
     this.clearTimeouts();
     this.navigationBusy = false;
@@ -477,7 +486,18 @@ export class ResultsScreen {
     }
     this.lastDiamondMastered = coreLoopInfo?.diamondJustMastered === true;
     if (this.lastDiamondMastered) this.rankSubElem.textContent = '// DIAMOND ACHIEVED // SIGNAL MASTERED';
-    this.prepareSignalDropPanel(progressionInfo?.dropsAwarded ?? 0, progressionInfo?.bestDropRank, customRewardInfo);
+    // SURF badge + NORMAL reward suppression. A SURF run can never earn a
+    // Signal Drop or mastery progress, so those panels are hidden entirely.
+    const isSurfRun = surfInfo?.isSurf === true;
+    this.surfBadgeElem.classList.toggle('hidden', !isSurfRun);
+    if (isSurfRun) {
+      this.surfBadgeElem.textContent = '[SURF] SURF WORLD BOARD // NO NORMAL REWARDS';
+    }
+    this.prepareSignalDropPanel(
+      isSurfRun ? 0 : (progressionInfo?.dropsAwarded ?? 0),
+      isSurfRun ? undefined : progressionInfo?.bestDropRank,
+      isSurfRun ? undefined : customRewardInfo
+    );
 
     // Leaderboard Action Setup
     this.activeCandidate = officialInfo?.candidate || null;
@@ -487,7 +507,10 @@ export class ResultsScreen {
     // run has settled; reset to the honest empty state on every new report.
     this.setCompetitionContext(null);
     (this.element.querySelector('.results-secondary-actions') as HTMLDetailsElement).open = false;
-    const viewable = officialInfo?.isOfficial === true &&
+    const viewable = (
+      officialInfo?.isOfficial === true ||
+      isSurfRun
+    ) &&
       !overtimeInfo?.isOvertime &&
       customRewardInfo?.isCustomAudio !== true;
     this.viewLeaderboardBtn.classList.toggle('hidden', !viewable);
@@ -541,8 +564,9 @@ export class ResultsScreen {
     // Real world-submission state for this run.
     this.setSubmissionState(submissionFeedback?.state ?? 'NOT_OFFICIAL', submissionFeedback?.detail);
 
-    // MASTERY: progress lines and a restrained unlock reveal.
-    this.renderMasteryInfo(masteryInfo);
+    // MASTERY: progress lines and a restrained unlock reveal. SURF runs never
+    // change mastery, so the panel stays hidden.
+    this.renderMasteryInfo(isSurfRun ? undefined : masteryInfo);
 
     // CORE LOOP: one or two authoritative next targets, the optional PB duel
     // action and the deterministic next official signal. Called last so it can
@@ -555,36 +579,26 @@ export class ResultsScreen {
       isNewPersonalBest
     );
 
-    // Staged Quick Reveal Sequence (Total ~700ms)
+    // The goal opens the report and every action immediately.
     this.element.classList.remove('hidden');
-
     const rankGroup = this.element.querySelector('#res-rank-group') as HTMLElement;
-    rankGroup.style.opacity = '0';
-    this.statsGrid.style.opacity = '0';
-    this.actionsRow.style.opacity = '0';
+    rankGroup.style.opacity = '1';
+    this.statsGrid.style.opacity = '1';
+    this.actionsRow.style.opacity = '1';
+    if ((progressionInfo?.dropsAwarded ?? 0) > 0 && KarambitSkinSystem.getInstance().getPendingDropCount() > 0) {
+      this.signalDropOpenBtn.focus();
+    } else {
+      this.againBtn.focus();
+    }
+  }
 
-    // Step 1 (180ms): Stats grid slides in
-    this.revealTimeouts.push(window.setTimeout(() => {
-      this.statsGrid.style.transition = 'opacity var(--motion-normal)';
-      this.statsGrid.style.opacity = '1';
-    }, 180));
-
-    // Step 2 (440ms): Typographic rank reveals
-    this.revealTimeouts.push(window.setTimeout(() => {
-      rankGroup.style.transition = 'opacity var(--motion-normal)';
-      rankGroup.style.opacity = '1';
-    }, 440));
-
-    // Step 3 (660ms): Actions row appears and focuses
-    this.revealTimeouts.push(window.setTimeout(() => {
-      this.actionsRow.style.transition = 'opacity var(--motion-normal)';
-      this.actionsRow.style.opacity = '1';
-      if ((progressionInfo?.dropsAwarded ?? 0) > 0 && KarambitSkinSystem.getInstance().getPendingDropCount() > 0) {
-        this.signalDropOpenBtn.focus();
-      } else {
-        this.againBtn.focus();
-      }
-    }, 660));
+  public setRaceWaiting(waiting: boolean): void {
+    this.againBtn.disabled = waiting;
+    this.againBtn.textContent = waiting ? '[ WAITING FOR RACERS ]' : '[ RETRY ]';
+    if (waiting) {
+      this.retryPbBtn.classList.add('hidden');
+      this.nextSignalBtn.classList.add('hidden');
+    }
   }
 
   private prepareSignalDropPanel(
