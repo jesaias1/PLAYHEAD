@@ -198,7 +198,9 @@ describe('Glove texture switching', () => {
     // The viewmodel is never blank: the base is applied before the load resolves.
     expect(applied).toHaveLength(1);
     expect(applied[0].texture).toBe(base);
-    expect(applied[0].hasOwn).toBe(true);
+    // The base atlas is NOT the glove's own texture: ownership is only
+    // claimed once the glove's own texture actually resolves.
+    expect(applied[0].hasOwn).toBe(false);
   });
 
   it('a SLOW load for an earlier glove cannot overwrite a later selection', async () => {

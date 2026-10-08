@@ -15,6 +15,7 @@ import {
   GLOVE_ANISOTROPY,
   GLOVE_MASK_TEXTURE_PATH,
   GloveTextureSwitcher,
+  GloveTextureCache,
   gloveMaskCache,
   gloveTextureCache,
   hasAnyOwnGloveTexture,
@@ -69,7 +70,7 @@ export class ViewmodelAssetLoader {
    */
   public static async loadRig(
     accentColor: THREE.Color = new THREE.Color(0x00f0ff),
-    options?: { skinSystem?: KarambitSkinSystem; initialSkinId?: string }
+    options?: { skinSystem?: KarambitSkinSystem; initialSkinId?: string; gloveCache?: GloveTextureCache }
   ): Promise<ViewmodelRigInstance> {
     // Gameplay defaults are unchanged: with no options this is the singleton
     // and the currently equipped skin. A preview caller may inject an isolated
@@ -125,7 +126,8 @@ export class ViewmodelAssetLoader {
      * Monotonic selection token. A slow texture load for an EARLIER glove must
      * never overwrite a later selection.
      */
-    const gloveSwitcher = new GloveTextureSwitcher(gloveTextureCache);
+    let disposed = false;
+    const gloveSwitcher = new GloveTextureSwitcher(options?.gloveCache ?? gloveTextureCache);
 
     const applyArmMaterialLift = () => {
       applyGloveTreatment(
@@ -347,6 +349,7 @@ export class ViewmodelAssetLoader {
       activeGloveHasOwnTexture = hasAnyOwnGloveTexture(gloveId);
 
       void gloveSwitcher.apply(gloveId, gloveTexture, (texture, hasOwnTexture) => {
+        if (disposed) return;
         setArmTexture(texture, hasOwnTexture);
         applyArmMaterialLift();
       });
@@ -379,7 +382,7 @@ export class ViewmodelAssetLoader {
     // The shared glove mask is fetched once per session, lazily, and is entirely
     // optional: with no mask the shader patch is a no-op.
     void gloveMaskCache.load(GLOVE_MASK_TEXTURE_PATH).then((mask) => {
-      if (!mask) return;
+      if (!mask || disposed) return;
       gloveMaskTexture = mask;
       applyArmMaterialLift();
     });
@@ -389,11 +392,16 @@ export class ViewmodelAssetLoader {
     applyArmMaterialLift();
 
     const dispose = () => {
+      disposed = true;
       if (mixer) mixer.stopAllAction();
       rootGroup.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
           const m = obj as THREE.Mesh;
           m.geometry?.dispose();
+          // PREVIEW-ONLY: a filtered clone may have parked the rig's own
+          // geometry here; release it too so nothing leaks on dispose.
+          const previewOriginal = m.userData?.previewOriginalGeometry as THREE.BufferGeometry | undefined;
+          if (previewOriginal && previewOriginal !== m.geometry) previewOriginal.dispose();
           if (Array.isArray(m.material)) {
             m.material.forEach((mat) => mat.dispose());
           } else {

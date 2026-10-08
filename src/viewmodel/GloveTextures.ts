@@ -215,6 +215,13 @@ export function configureMaskTexture(texture: THREE.Texture): THREE.Texture {
 export class GloveTextureCache {
   private textures = new Map<string, THREE.Texture>();
   private inFlight = new Map<string, Promise<THREE.Texture | null>>();
+  private failed = new Set<string>();
+  /**
+   * Bumped by clear(). A load already in flight when the cache is cleared
+   * must NOT repopulate it: its generation token no longer matches, so the
+   * resolved texture is disposed and dropped instead of being retained.
+   */
+  private generation = 0;
   /** Counts real network/disk loads, so tests can prove cache reuse. */
   public loadCount = 0;
 
@@ -245,6 +252,12 @@ export class GloveTextureCache {
 
   public size(): number {
     return this.textures.size;
+  }
+
+  public getStatus(path: string): 'ready' | 'loading' | 'error' | 'idle' {
+    if (this.textures.has(path)) return 'ready';
+    if (this.inFlight.has(path)) return 'loading';
+    return this.failed.has(path) ? 'error' : 'idle';
   }
 
   /** Moves an entry to the most-recently-used position. */
@@ -287,11 +300,20 @@ export class GloveTextureCache {
     }
 
     this.loadCount++;
+    this.failed.delete(path);
+    const generation = this.generation;
     const promise = new Promise<THREE.Texture | null>((resolve) => {
       this.loader.load(
         path,
         (texture) => {
           const configured = this.configure(texture);
+          if (generation !== this.generation) {
+            // The cache was cleared while this request was in flight.
+            // Never repopulate a cleared cache with a stale result.
+            configured.dispose();
+            resolve(null);
+            return;
+          }
           this.textures.set(path, configured);
           this.inFlight.delete(path);
           this.evictOverflow();
@@ -300,7 +322,10 @@ export class GloveTextureCache {
         undefined,
         () => {
           // Missing optional asset: fall back, never crash the viewmodel.
-          this.inFlight.delete(path);
+          if (generation === this.generation) {
+            this.inFlight.delete(path);
+            this.failed.add(path);
+          }
           resolve(null);
         }
       );
@@ -312,9 +337,11 @@ export class GloveTextureCache {
 
   /** Disposes every cached texture. */
   public clear(): void {
+    this.generation++;
     for (const texture of this.textures.values()) texture.dispose();
     this.textures.clear();
     this.inFlight.clear();
+    this.failed.clear();
   }
 }
 
@@ -359,7 +386,9 @@ export class GloveTextureSwitcher {
     }
 
     // The viewmodel is never blank: apply a safe texture straight away.
-    onApply(baseTexture, hasOwn);
+    // The base atlas is NOT the glove's own texture; only a resolved
+    // own-texture load (or a cache hit) may claim ownership.
+    onApply(baseTexture, false);
     if (!hasOwn) return;
 
     const texture = await this.cache.load(path);

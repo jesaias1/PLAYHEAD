@@ -1,5 +1,6 @@
+
 /**
- * ArmoryPreview — a single reusable 3D cosmetic preview for the Armory detail
+ * ArmoryPreview - a single reusable 3D cosmetic preview for the Armory detail
  * panel.
  *
  * ONE lazy renderer / scene / rig, reused for every selection and both modes.
@@ -10,18 +11,30 @@
  * mutates the frozen knife socket, or touches the gameplay/replay cosmetic.
  *
  * The calibrated socket transform is preserved verbatim; only preview parent
- * groups are transformed for framing and drift.
+ * groups are transformed for framing.
+ *
+ * CAMERA ORBIT: the user drives the camera by dragging on the canvas (pointer
+ * events, mouse + touch via pointer capture), with arrow keys as a keyboard
+ * equivalent and a RESET control that returns to the authored framing. There is
+ * NO idle drift: an automatic rotation must never fight or overwrite the view
+ * the user chose.
+ *
+ * SINGLE GLOVE: in glove ITEM view the preview clones the arm geometry, keeps
+ * ONLY the right-hand subtree, and renders that filtered index geometry. The
+ * clone is owned by this preview and disposed with it; the original gameplay /
+ * shared geometry is NEVER mutated.
  */
 
 import * as THREE from 'three';
 import { ViewmodelAssetLoader, ViewmodelRigInstance } from '../viewmodel/ViewmodelAssetLoader';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
+import { GloveTextureCache, hasAnyOwnGloveTexture, resolveAnyGloveTexturePath } from '../viewmodel/GloveTextures';
 
 /**
  * There is exactly ONE preview mode: an isolated ITEM view that shows either a
- * knife OR a pair of gloves from the selected slot. The former combined
- * knife+gloves LOADOUT view was removed because compositing both on the shared
- * rig was unreliable and visually buggy.
+ * knife OR gloves from the selected slot. The former combined knife+gloves
+ * LOADOUT view was removed because compositing both on the shared rig was
+ * unreliable and visually buggy.
  */
 export type ArmoryPreviewMode = 'item';
 
@@ -34,7 +47,7 @@ export interface ArmoryPreviewSelection {
   equippedGloveId: string;
 }
 
-/** Known canonical catalog id — safe to construct the rig with, never a video. */
+/** Known canonical catalog id - safe to construct the rig with, never a video. */
 const SAFE_INITIAL_SKIN_ID = 'SIGNAL_CYAN';
 
 // Calibrated socket transform (must never be altered).
@@ -46,17 +59,216 @@ const MAX_WIDTH = 600;
 const MAX_FPS = 30;
 const MAX_DPR = 1.5;
 
+/** Forearm vertices within this fraction of the hand radius are kept. */
+const FOREARM_KEEP_FRACTION = 0.5;
+/** Smallest allowed framing radius so a degenerate box cannot clip. */
+const MIN_FIT_RADIUS = 0.001;
+
+/** Camera-orbit pitch limits (radians) so the subject never flips over. */
+const ORBIT_MIN_PITCH = -0.85;
+const ORBIT_MAX_PITCH = 0.85;
+/** User-visible orbit hint, hidden once the user has interacted. */
+const DRAG_HINT_TEXT = 'DRAG TO ROTATE';
+
+/** True when the ITEM view is isolating the knife. */
+export function isolateKnifeSelection(mode: ArmoryPreviewMode, selection: ArmoryPreviewSelection | null): boolean {
+  return mode === 'item' && selection?.slot === 'karambit';
+}
+
+/** True when the ITEM view is isolating the single glove. */
+export function isolateGloveSelection(mode: ArmoryPreviewMode, selection: ArmoryPreviewSelection | null): boolean {
+  return mode === 'item' && selection?.slot === 'gloves';
+}
+
+/** Pure orbit math, extracted so interactions can be unit tested headlessly. */
+export interface OrbitAngles {
+  yaw: number;
+  pitch: number;
+}
+
+export function clampPitch(pitch: number): number {
+  return Math.min(ORBIT_MAX_PITCH, Math.max(ORBIT_MIN_PITCH, pitch));
+}
+
+/** Applies a drag delta (fraction of the canvas) to the current orbit angles. */
+export function applyOrbitDrag(current: OrbitAngles, dxFraction: number, dyFraction: number): OrbitAngles {
+  return {
+    yaw: current.yaw + dxFraction * Math.PI * 2,
+    pitch: clampPitch(current.pitch + dyFraction * Math.PI)
+  };
+}
+
+/** Applies a keyboard nudge (radians) to the orbit angles. */
+export function applyOrbitKeys(current: OrbitAngles, dYaw: number, dPitch: number): OrbitAngles {
+  return { yaw: current.yaw + dYaw, pitch: clampPitch(current.pitch + dPitch) };
+}
+
+/**
+ * The camera position for an orbit offset about the SAME pivot the camera looks
+ * at, so the subject stays framed while the user rotates around it.
+ */
+export function orbitCameraPosition(
+  center: THREE.Vector3,
+  baseDir: THREE.Vector3,
+  distance: number,
+  angles: OrbitAngles,
+  target: THREE.Vector3
+): THREE.Vector3 {
+  const base = baseDir.clone().normalize();
+  const spherical = new THREE.Spherical().setFromVector3(base);
+  spherical.theta += angles.yaw;
+  // `angles.pitch` is an OFFSET from the authored framing, so the rest pose
+  // (offset 0) is reproduced exactly; only the offset is bounded.
+  const pitchOffset = clampPitch(angles.pitch);
+  spherical.phi = Math.min(Math.PI - 0.05, Math.max(0.05, spherical.phi + pitchOffset));
+  target.setFromSpherical(spherical).multiplyScalar(distance).add(center);
+  return target;
+}
+
+/** Result of the preview-owned glove filter. */
+export interface RetainedGloveGeometry {
+  originalGeometry: THREE.BufferGeometry;
+  filteredGeometry: THREE.BufferGeometry;
+  retainedWorldBox: THREE.Box3;
+  keptTriangles: number;
+  handRadius: number;
+}
+
+/**
+ * HEADLESS-CORE: computes the preview-owned glove geometry for a skinned mesh.
+ *
+ * Returns a plain signature (no Three scene handshake), so it can be unit tested
+ * with synthetic skinned geometry. The caller assigns `filteredGeometry` to the
+ * mesh and MUST later restore `originalGeometry` and dispose `filteredGeometry`.
+ *
+ * Rule: keep a triangle only when every vertex is influenced ONLY by bones in
+ * the handR `subtree`, OR by `forearmR` within `keepFraction * handRadius` of the
+ * posed handR wrist; require at least one triangle vertex dominated by the hand
+ * subtree. Returns null when the mesh is not glove-shaped enough to filter.
+ */
+export function buildRetainedGloveGeometry(
+  mesh: THREE.SkinnedMesh,
+  handR: THREE.Object3D,
+  subtree: Set<string>,
+  keepFraction = FOREARM_KEEP_FRACTION
+): RetainedGloveGeometry | null {
+  const skeleton = mesh.skeleton;
+  const geometry = mesh.geometry as THREE.BufferGeometry;
+  const skinIndex = geometry.attributes.skinIndex as THREE.BufferAttribute | undefined;
+  const skinWeight = geometry.attributes.skinWeight as THREE.BufferAttribute | undefined;
+  const position = geometry.attributes.position as THREE.BufferAttribute | undefined;
+  const index = geometry.index;
+  if (!skeleton || !skinIndex || !skinWeight || !position || !index) return null;
+
+  // applyBoneTransform reads skeleton.boneMatrices, which only the renderer
+  // refreshes. Flatten the CURRENT posed bones now so the filter measures the
+  // exact pose that will be rendered.
+  skeleton.update();
+  const boneNames = skeleton.bones.map((b) => b.name);
+  const forearmRIndex = boneNames.indexOf('forearmR');
+  const wrist = handR.getWorldPosition(new THREE.Vector3());
+
+  const count = position.count;
+  const dominantHand = new Uint8Array(count);
+  const dist = new Float32Array(count);
+
+  // Posed distance of every vertex from the posed right wrist.
+  const v = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    mesh.getVertexPosition(i, v);
+    v.applyMatrix4(mesh.matrixWorld);
+    dist[i] = v.distanceTo(wrist);
+  }
+
+  // Hand radius from vertices whose dominant influence is the hand subtree.
+  let handRadius = 0;
+  for (let i = 0; i < count; i++) {
+    let dominantBone = -1;
+    let dominantWeight = -1;
+    for (let k = 0; k < 4; k++) {
+      const weight = skinWeight.getComponent(i, k);
+      if (weight <= 1e-4) continue;
+      if (weight > dominantWeight) {
+        dominantWeight = weight;
+        dominantBone = skinIndex.getComponent(i, k);
+      }
+    }
+    dominantHand[i] = subtree.has(boneNames[dominantBone] ?? '') ? 1 : 0;
+    if (dominantHand[i]) handRadius = Math.max(handRadius, dist[i]);
+  }
+  if (!(handRadius > 0)) return null;
+
+  const cut = keepFraction * handRadius;
+  const vertexOk = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    let onlyAllowed = true;
+    for (let k = 0; k < 4; k++) {
+      const weight = skinWeight.getComponent(i, k);
+      if (weight <= 1e-4) continue;
+      const boneIdx = skinIndex.getComponent(i, k);
+      const name = boneNames[boneIdx] ?? '';
+      if (subtree.has(name)) continue;
+      if (boneIdx === forearmRIndex && dist[i] <= cut) continue;
+      onlyAllowed = false;
+      break;
+    }
+    vertexOk[i] = onlyAllowed ? 1 : 0;
+  }
+
+  const indices = index.array as ArrayLike<number>;
+  const kept: number[] = [];
+  const used = new Set<number>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t];
+    const i1 = indices[t + 1];
+    const i2 = indices[t + 2];
+    if (!(vertexOk[i0] && vertexOk[i1] && vertexOk[i2])) continue;
+    if (!(dominantHand[i0] || dominantHand[i1] || dominantHand[i2])) continue;
+    kept.push(i0, i1, i2);
+    used.add(i0); used.add(i1); used.add(i2);
+  }
+  if (kept.length === 0) return null;
+
+  const box = new THREE.Box3();
+  const tmp = new THREE.Vector3();
+  for (const i of used) {
+    mesh.getVertexPosition(i, tmp);
+    tmp.applyMatrix4(mesh.matrixWorld);
+    box.expandByPoint(tmp);
+  }
+
+  const filtered = geometry.clone();
+  filtered.setIndex(kept);
+  filtered.setDrawRange(0, kept.length);
+  filtered.computeBoundingBox();
+  filtered.computeBoundingSphere();
+
+  return {
+    originalGeometry: geometry,
+    filteredGeometry: filtered,
+    retainedWorldBox: box,
+    keptTriangles: kept.length / 3,
+    handRadius
+  };
+}
+
 export class ArmoryPreview {
+  private readonly status: HTMLElement;
+  private rigFailed = false;
   private static activePreview: ArmoryPreview | null = null;
   private readonly root: HTMLElement;
   private readonly canvasHost: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly itemBtn: HTMLButtonElement;
+  private readonly resetBtn: HTMLButtonElement;
+  private readonly hint: HTMLElement;
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
   private readonly cameraTarget = new THREE.Vector3();
+  private readonly cameraBaseDir = new THREE.Vector3(0, 0.02, 1).normalize();
+  private cameraDistance = 1;
   private contentRoot: THREE.Group | null = null;
   private knifeParent: THREE.Group | null = null;
   private rig: ViewmodelRigInstance | null = null;
@@ -66,8 +278,21 @@ export class ArmoryPreview {
   private previewPoseRestore: { bone: THREE.Object3D; position: THREE.Vector3; quaternion: THREE.Quaternion }[] = [];
 
   private readonly skinSystem = KarambitSkinSystem.createPreviewInstance();
+  // Browsing gloves must never evict the texture worn by the gameplay rig.
+  private readonly gloveCache = new GloveTextureCache(undefined, undefined, 1);
   private selection: ArmoryPreviewSelection | null = null;
   private mode: ArmoryPreviewMode = 'item';
+
+  /** User camera orbit. Never auto-driven. */
+  private orbit: OrbitAngles = { yaw: 0, pitch: 0 };
+  private userInteracted = false;
+  private dragging = false;
+  private pointerId: number | null = null;
+  private lastPointer = { x: 0, y: 0 };
+
+  /** Preview-owned single-glove geometry override (null when not in glove view). */
+  private gloveFilter: (RetainedGloveGeometry & { mesh: THREE.SkinnedMesh }) | null = null;
+  private retainedGloveBox: THREE.Box3 | null = null;
 
   private loading = false;
   private visible = false;
@@ -76,11 +301,14 @@ export class ArmoryPreview {
   private disposed = false;
   private raf = 0;
   private lastFrame = 0;
-  private driftPhase = 0;
 
   private resizeObserver: ResizeObserver | null = null;
   private intersectionObserver: IntersectionObserver | null = null;
   private readonly onDocumentVisibility = (): void => this.evaluate();
+  private readonly onPointerDown = (e: PointerEvent): void => this.handlePointerDown(e);
+  private readonly onPointerMove = (e: PointerEvent): void => this.handlePointerMove(e);
+  private readonly onPointerUp = (e: PointerEvent): void => this.handlePointerUp(e);
+  private readonly onKeyDown = (e: KeyboardEvent): void => this.handleKeyDown(e);
 
   constructor() {
     this.root = document.createElement('div');
@@ -89,19 +317,44 @@ export class ArmoryPreview {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'armory-preview-canvas';
     this.canvas.setAttribute('aria-label', '3D cosmetic preview');
+    // The user drags to orbit; the browser must not scroll/zoom the page instead.
+    this.canvas.style.touchAction = 'none';
+    this.canvas.tabIndex = 0;
 
     this.canvasHost = document.createElement('div');
     this.canvasHost.className = 'armory-preview-stage';
     this.canvasHost.appendChild(this.canvas);
 
+    this.hint = document.createElement('div');
+    this.hint.className = 'armory-preview-hint';
+    this.hint.textContent = DRAG_HINT_TEXT;
+    this.canvasHost.appendChild(this.hint);
+    this.status = document.createElement('div');
+    this.status.className = 'armory-preview-status';
+    this.status.setAttribute('role', 'status');
+    this.canvasHost.appendChild(this.status);
+
     const toolbar = document.createElement('div');
     toolbar.className = 'armory-preview-modes';
     this.itemBtn = this.buildModeButton('ITEM PREVIEW', 'item');
+    this.resetBtn = document.createElement('button');
+    this.resetBtn.type = 'button';
+    this.resetBtn.className = 'armory-preview-mode-btn armory-preview-reset';
+    this.resetBtn.textContent = 'RESET VIEW';
+    this.resetBtn.addEventListener('click', () => this.resetView());
     toolbar.appendChild(this.itemBtn);
+    toolbar.appendChild(this.resetBtn);
 
     this.root.appendChild(this.canvasHost);
     this.root.appendChild(toolbar);
     this.syncModeButtons();
+
+    this.canvas.addEventListener('pointerdown', this.onPointerDown);
+    this.canvas.addEventListener('pointermove', this.onPointerMove);
+    this.canvas.addEventListener('pointerup', this.onPointerUp);
+    this.canvas.addEventListener('pointercancel', this.onPointerUp);
+    this.canvas.addEventListener('lostpointercapture', this.onPointerUp);
+    this.root.addEventListener('keydown', this.onKeyDown);
 
     document.addEventListener('visibilitychange', this.onDocumentVisibility);
   }
@@ -119,6 +372,83 @@ export class ArmoryPreview {
     this.itemBtn.classList.add('active');
     this.itemBtn.setAttribute('aria-pressed', 'true');
   }
+
+  // -- Pointer / keyboard orbit -------------------------------------------
+
+  private handlePointerDown(e: PointerEvent): void {
+    if (this.disposed || this.dragging) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    this.dragging = true;
+    this.pointerId = e.pointerId;
+    this.lastPointer = { x: e.clientX, y: e.clientY };
+    try {
+      this.canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is best-effort; dragging still works without it.
+    }
+    this.markInteracted();
+    e.preventDefault();
+  }
+
+  private handlePointerMove(e: PointerEvent): void {
+    if (!this.dragging || this.pointerId !== e.pointerId) return;
+    const width = Math.max(1, this.canvas.clientWidth || 1);
+    const height = Math.max(1, this.canvas.clientHeight || 1);
+    const dx = (e.clientX - this.lastPointer.x) / width;
+    const dy = (e.clientY - this.lastPointer.y) / height;
+    this.lastPointer = { x: e.clientX, y: e.clientY };
+    this.orbit = applyOrbitDrag(this.orbit, dx, dy);
+    e.preventDefault();
+  }
+
+  private handlePointerUp(e: PointerEvent): void {
+    if (this.pointerId !== null && e.pointerId !== this.pointerId) return;
+    this.dragging = false;
+    this.pointerId = null;
+    try {
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      // Capture may already be gone; nothing to release.
+    }
+  }
+
+  private handleKeyDown(e: KeyboardEvent): void {
+    if (this.disposed) return;
+    const step = e.shiftKey ? 0.24 : 0.1;
+    let dYaw = 0;
+    let dPitch = 0;
+    switch (e.key) {
+      case 'ArrowLeft': dYaw = -step; break;
+      case 'ArrowRight': dYaw = step; break;
+      case 'ArrowUp': dPitch = -step; break;
+      case 'ArrowDown': dPitch = step; break;
+      default: return;
+    }
+    this.orbit = applyOrbitKeys(this.orbit, dYaw, dPitch);
+    this.markInteracted();
+    e.preventDefault();
+  }
+
+  private markInteracted(): void {
+    if (this.userInteracted) return;
+    this.userInteracted = true;
+    this.hint.classList.add('hidden');
+  }
+
+  /** Returns the camera to the authored framing and re-shows the hint. */
+  public resetView(): void {
+    this.orbit = { yaw: 0, pitch: 0 };
+    this.userInteracted = false;
+    this.hint.classList.remove('hidden');
+    this.applyOrbitToCamera();
+  }
+
+  /** For tests/diagnostics: the current orbit. */
+  public getOrbit(): OrbitAngles {
+    return { ...this.orbit };
+  }
+
+  // -- Mount / selection ---------------------------------------------------
 
   /**
    * (Re)attach the persistent preview DOM into a freshly rendered detail panel.
@@ -148,9 +478,16 @@ export class ArmoryPreview {
 
   public update(selection: ArmoryPreviewSelection): void {
     if (this.disposed) return;
+    this.releasePointer();
     this.selection = selection;
     if (this.running) this.applySelection();
     this.evaluate();
+  }
+
+  /** Accurate preview status, e.g. for a small loading/error query. */
+  public getStatus(): 'no-rig' | 'loading' | 'ready' {
+    if (!this.rig) return this.loading ? 'loading' : 'no-rig';
+    return 'ready';
   }
 
   /** The panel is on screen and wants the preview live. */
@@ -159,6 +496,7 @@ export class ArmoryPreview {
     if (ArmoryPreview.activePreview !== this) ArmoryPreview.activePreview?.hide();
     ArmoryPreview.activePreview = this;
     this.visible = true;
+    this.rigFailed = false;
     this.evaluate();
   }
 
@@ -167,6 +505,7 @@ export class ArmoryPreview {
     if (this.disposed) return;
     if (ArmoryPreview.activePreview === this) ArmoryPreview.activePreview = null;
     this.visible = false;
+    this.releasePointer();
     this.evaluate();
   }
 
@@ -182,7 +521,7 @@ export class ArmoryPreview {
   private evaluate(): void {
     if (this.disposed) return;
     const hidden = typeof document !== 'undefined' && document.hidden;
-    if (this.visible && !hidden && this.inViewport && this.selection && !this.rig) void this.ensureRig();
+    if (this.visible && !hidden && this.inViewport && this.selection && !this.rig && !this.rigFailed) void this.ensureRig();
     const shouldRun = this.visible && !hidden && this.inViewport && !!this.rig;
     if (shouldRun) {
       // Resuming after a hide/suspend re-applies the selection so a released
@@ -197,10 +536,12 @@ export class ArmoryPreview {
   private async ensureRig(): Promise<void> {
     if (this.disposed || this.rig || this.loading) return;
     this.loading = true;
-    this.ensureRenderer();
+    this.updateLoadingStatus();
     try {
+      this.ensureRenderer();
       const rig = await ViewmodelAssetLoader.loadRig(new THREE.Color(0x00f0ff), {
         skinSystem: this.skinSystem,
+        gloveCache: this.gloveCache,
         initialSkinId: SAFE_INITIAL_SKIN_ID
       });
       if (this.disposed) {
@@ -209,9 +550,11 @@ export class ArmoryPreview {
       }
       this.installRig(rig);
     } catch (e) {
+      this.rigFailed = true;
       console.warn('[ArmoryPreview] Failed to build preview rig:', e);
     } finally {
       this.loading = false;
+      this.updateLoadingStatus();
       this.evaluate();
     }
   }
@@ -278,7 +621,7 @@ export class ArmoryPreview {
       rig.mixer.update(0);
     }
 
-    this.layout(this.mode === 'item' && this.selection?.slot === 'karambit', this.mode === 'item' && this.selection?.slot === 'gloves');
+    this.layout(isolateKnifeSelection(this.mode, this.selection), isolateGloveSelection(this.mode, this.selection));
   }
 
   private applySelection(): void {
@@ -294,20 +637,18 @@ export class ArmoryPreview {
     const knifeId = selectedIsKnife && itemId ? itemId : selection.equippedKnifeId;
     const gloveId = !selectedIsKnife && itemId ? itemId : selection.equippedGloveId;
 
-    const visibleKnifeId = this.mode === 'item' && !selectedIsKnife ? SAFE_INITIAL_SKIN_ID : knifeId;
+    const visibleKnifeId = !selectedIsKnife ? SAFE_INITIAL_SKIN_ID : knifeId;
     this.skinSystem.setPreviewSkin(visibleKnifeId);
     rig.applySkin(visibleKnifeId);
     rig.applyGlove(gloveId);
 
-    const isolateKnife = this.mode === 'item' && selectedIsKnife;
-    const isolateGloves = this.mode === 'item' && !selectedIsKnife;
-    this.layout(isolateKnife, isolateGloves);
+    this.layout(isolateKnifeSelection(this.mode, this.selection), isolateGloveSelection(this.mode, this.selection));
   }
 
   /**
    * ITEM knife: detach the socket into a dedicated preview parent and hide the
-   * arms. ITEM gloves: reattach the socket (hidden) and show the arms. LOADOUT:
-   * first-person hands + the resolved knife.
+   * arms. ITEM gloves: reattach the socket (hidden) and show ONLY the filtered
+   * right-hand geometry.
    */
   private layout(isolateKnife: boolean, isolateGloves: boolean): void {
     const rig = this.rig;
@@ -328,14 +669,15 @@ export class ArmoryPreview {
       rig.knifeGroup.visible = !isolateGloves;
     }
 
-    // GLOVE ITEM: authored relaxed pose, no knife grip. LOADOUT and the knife
-    // ITEM keep the gameplay idle pose (the knife calibration needs it).
+    // GLOVE ITEM: authored relaxed pose, no knife grip. The knife ITEM keeps the
+    // gameplay idle pose (the knife calibration needs it).
     this.resetPreviewPose();
     rig.poseTo(isolateGloves ? 'relax' : null);
 
-    // Reset drift so a mode switch never inherits a stale rotation.
-    this.driftPhase = 0;
-    if (this.knifeParent) this.knifeParent.rotation.set(0, 0, 0);
+    // Drop any previous filtered glove geometry BEFORE re-posing so the filter is
+    // always computed from the exact pose that will be rendered.
+    this.removeSingleGloveGeometry();
+
     if (this.contentRoot) {
       // Preview parent only: orient the authored arms from below the eyeline.
       this.contentRoot.rotation.set(isolateKnife ? 0 : -Math.PI / 2, 0, 0);
@@ -343,10 +685,69 @@ export class ArmoryPreview {
     }
 
     if (!isolateKnife) {
-      this.applyPreviewGlovePose(isolateGloves);
+      if (isolateGloves) this.installSingleGloveGeometry();
       this.contentRoot?.updateMatrixWorld(true);
     }
     this.fitCamera(isolateKnife);
+  }
+
+  // -- Single-glove geometry ----------------------------------------------
+
+  /**
+   * Installs a PREVIEW-OWNED filtered geometry for the right hand.
+   *
+   * The gameplay/shared arm geometry is never mutated: it is cloned, the glove
+   * triangle set is selected on the clone, and the clone is disposed with this
+   * preview. The cloned mesh additionally exposes the original geometry through
+   * `userData.previewOriginalGeometry`, so a disposal walk can release BOTH.
+   */
+  private installSingleGloveGeometry(): void {
+    const rig = this.rig;
+    if (!rig || this.gloveFilter) return;
+
+    const skinnedMeshes: THREE.SkinnedMesh[] = [];
+    rig.armsScene.traverse((obj) => {
+      if ((obj as THREE.SkinnedMesh).isSkinnedMesh) skinnedMeshes.push(obj as THREE.SkinnedMesh);
+    });
+    if (skinnedMeshes.length === 0) return;
+
+    // Posed positions need current bone matrices; force a fresh skeleton update.
+    rig.rootGroup.updateMatrixWorld(true);
+
+    const handR = rig.handRBone;
+    const subtree = new Set<string>();
+    (function walk(o: THREE.Object3D): void {
+      subtree.add(o.name);
+      for (const child of o.children) walk(child);
+    })(handR);
+
+    for (const mesh of skinnedMeshes) {
+      const filter = buildRetainedGloveGeometry(mesh, handR, subtree);
+      if (filter) {
+        this.gloveFilter = { ...filter, mesh };
+        break;
+      }
+    }
+    if (!this.gloveFilter) return;
+
+    const { mesh, originalGeometry, filteredGeometry, retainedWorldBox } = this.gloveFilter;
+    mesh.geometry = filteredGeometry;
+    mesh.userData.previewOriginalGeometry = originalGeometry;
+    mesh.userData.armoryGloveFilter = true;
+    mesh.visible = true;
+    this.retainedGloveBox = retainedWorldBox;
+  }
+
+  /** Restores the original shared geometry and disposes the preview-owned clone. */
+  private removeSingleGloveGeometry(): void {
+    const filter = this.gloveFilter;
+    if (!filter) return;
+    filter.mesh.geometry = filter.originalGeometry;
+    delete filter.mesh.userData.previewOriginalGeometry;
+    delete filter.mesh.userData.armoryGloveFilter;
+    filter.filteredGeometry.dispose();
+    this.gloveFilter = null;
+    this.retainedGloveBox = null;
   }
 
   /**
@@ -361,71 +762,55 @@ export class ArmoryPreview {
     this.previewPoseRestore = [];
   }
 
-  /** Record the authored local transform once, then add a local-space offset. */
-  private nudgeBone(name: string, rotation: [number, number, number]): THREE.Object3D | null {
-    const rig = this.rig;
-    if (!rig) return null;
-    const bone = rig.armsScene.getObjectByName(name);
-    if (!bone) return null;
-    this.previewPoseRestore.push({ bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() });
-    bone.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation[0], rotation[1], rotation[2])));
-    return bone;
-  }
-
-  /** Bring both wrists inward; glove ITEM also exposes back and palm/side detail. */
-  private applyPreviewGlovePose(isolateGloves: boolean): void {
-    // Rotate around preview world Z to bring the wrists inward without stretching.
-    for (const [name, angle] of [['upper_armR', -0.35], ['upper_armL', 0.35]] as const) {
-      const bone = this.nudgeBone(name, [0, 0, 0]);
-      if (!bone) continue;
-      const axis = new THREE.Vector3(0, 0, 1).applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
-      bone.rotateOnAxis(axis, angle);
-      bone.updateWorldMatrix(false, true);
-    }
-    if (!isolateGloves) return;
-    this.nudgeBone('forearmR', [0, -2.0, 0]);
-    // Different forearm rolls provide complementary views of the glove.
-    this.nudgeBone('forearmL', [0, 0.35, 0]);
-  }
-
+  /**
+   * KNIFE ITEM: isolate the knife at a hero three-quarter angle. GLOVES: fit the
+   * ACTUAL retained posed geometry (the filtered right-hand box) rather than a
+   * two-wrist spread, so the single glove fills the frame on both aspects.
+   */
   private fitCamera(isolateKnife: boolean): void {
     const rig = this.rig;
     const camera = this.camera;
     if (!rig || !camera) return;
 
-    // KNIFE ITEM: isolate the real knife at a hero three-quarter angle.
     if (isolateKnife) {
       const box = new THREE.Box3().setFromObject(rig.knifeGroup);
       if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(0.3, 0.3, 0.3));
       const sphere = box.getBoundingSphere(new THREE.Sphere());
       this.cameraTarget.copy(sphere.center);
-      const radius = Math.max(sphere.radius, 0.02);
-      const dir = new THREE.Vector3(1, 0.12, 0.12).normalize();
-      const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
-      camera.position.copy(sphere.center).addScaledVector(dir, distance);
-      camera.lookAt(sphere.center);
-      camera.updateProjectionMatrix();
+      this.cameraDistance = (Math.max(sphere.radius, MIN_FIT_RADIUS) / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
+      this.cameraBaseDir.set(1, 0.12, 0.12).normalize();
+      this.applyOrbitToCamera();
       return;
     }
 
-    // HANDS (glove ITEM + LOADOUT): frame from the REAL posed wrist bones.
-    // Aim above the wrists so the gloves fill the frame and arm ends stay below it.
-    const handR = rig.handRBone.getWorldPosition(new THREE.Vector3());
-    const handL = rig.handLBone.getWorldPosition(new THREE.Vector3());
-    const handCenter = handR.clone().add(handL).multiplyScalar(0.5);
-    const spread = Math.max(handR.distanceTo(handL), 0.05);
+    // HANDS: frame the retained posed geometry (falling back to the arms scene).
+    const retained = this.retainedGloveBox;
+    const box = new THREE.Box3();
+    if (retained && !retained.isEmpty()) {
+      box.copy(retained);
+    } else {
+      rig.rootGroup.updateMatrixWorld(true);
+      box.setFromObject(rig.armsScene);
+    }
+    if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(0.3, 0.3, 0.3));
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    this.cameraTarget.copy(sphere.center);
+    // Fit against the NARROWER of the two FOVs so both portrait and landscape
+    // canvases keep the subject fully inside the frame.
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(camera.aspect, 0.0001));
+    const fitFov = Math.min(vFov, hFov);
+    this.cameraDistance = (Math.max(sphere.radius, MIN_FIT_RADIUS) / Math.sin(fitFov / 2)) * 0.98;
+    this.cameraBaseDir.set(0, 0.02, 1).normalize();
+    this.applyOrbitToCamera();
+  }
 
-    // LOADOUT needs more room for the calibrated knife held by the right hand.
-    const center = handCenter.clone();
-    const isolateGloves = this.mode === 'item' && this.selection?.slot === 'gloves';
-    center.y += spread * (isolateGloves ? 0.32 : 0.40);
-    this.cameraTarget.copy(center);
-    const radius = spread * (isolateGloves ? 0.52 : 0.72) + 0.02;
-    const dir = new THREE.Vector3(0, 0.02, 1).normalize();
-    const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.95;
-
-    camera.position.copy(center).addScaledVector(dir, distance);
-    camera.lookAt(center);
+  /** Re-derives the camera position from the fitted target/distance and orbit. */
+  private applyOrbitToCamera(): void {
+    const camera = this.camera;
+    if (!camera) return;
+    orbitCameraPosition(this.cameraTarget, this.cameraBaseDir, this.cameraDistance, this.orbit, camera.position);
+    camera.lookAt(this.cameraTarget);
     camera.updateProjectionMatrix();
   }
 
@@ -440,6 +825,8 @@ export class ArmoryPreview {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    // Refit keeps the subject framed after an aspect change.
+    this.fitCamera(isolateKnifeSelection(this.mode, this.selection));
   }
 
   private startLoop(): void {
@@ -458,6 +845,7 @@ export class ArmoryPreview {
   }
 
   private stopLoop(): void {
+    this.releasePointer();
     this.running = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
@@ -472,34 +860,71 @@ export class ArmoryPreview {
     const camera = this.camera;
     if (!rig || !renderer || !scene || !camera) return;
 
-    this.driftPhase += dt;
-    const isolateKnife = this.mode === 'item' && this.selection?.slot === 'karambit';
-    if (isolateKnife && this.knifeParent) {
-      this.knifeParent.rotation.y = Math.sin(this.driftPhase * 0.6) * 0.35;
-      this.knifeParent.rotation.x = Math.sin(this.driftPhase * 0.4) * 0.08;
-    } else if (this.contentRoot) {
-      this.contentRoot.rotation.y = Math.sin(this.driftPhase * 0.35) * 0.06;
-    }
-
+    // NO IDLE DRIFT: the camera is only ever moved by the user's own input, so a
+    // chosen view is never overwritten by an automatic rotation.
+    this.applyOrbitToCamera();
+    this.updateLoadingStatus();
     rig.cosmicMaterial?.updateTime(dt);
     renderer.render(scene, camera);
+  }
+
+  private updateLoadingStatus(): void {
+    let text = this.rigFailed ? 'PREVIEW UNAVAILABLE // REOPEN TO RETRY' : this.loading ? 'LOADING PREVIEWâ€¦' : '';
+    if (this.rig && this.selection) {
+      if (this.selection.slot === 'karambit') {
+        const state = this.skinSystem.getTextureStatus(this.skinSystem.getActiveRenderSkinId());
+        if (state === 'pending') text = 'LOADING SKINâ€¦';
+        if (state === 'error') text = 'SKIN UNAVAILABLE // SELECT AGAIN TO RETRY';
+      } else {
+        const id = this.selection.itemId ?? this.selection.equippedGloveId;
+        if (hasAnyOwnGloveTexture(id)) {
+          const state = this.gloveCache.getStatus(resolveAnyGloveTexturePath(id));
+          if (state === 'loading') text = 'LOADING GLOVEâ€¦';
+          if (state === 'error') text = 'GLOVE UNAVAILABLE // SELECT AGAIN TO RETRY';
+        }
+      }
+    }
+    if (this.status.textContent !== text) this.status.textContent = text;
+    this.canvas.setAttribute('aria-busy', String(text.startsWith('LOADING')));
   }
 
   public dispose(): void {
     if (this.disposed) return;
     if (ArmoryPreview.activePreview === this) ArmoryPreview.activePreview = null;
     this.disposed = true;
+    // Clean, unconditional capture release even if a pointer is mid-drag.
+    this.releasePointer();
     this.stopLoop();
     document.removeEventListener('visibilitychange', this.onDocumentVisibility);
+    this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.canvas.removeEventListener('pointermove', this.onPointerMove);
+    this.canvas.removeEventListener('pointerup', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    this.canvas.removeEventListener('lostpointercapture', this.onPointerUp);
+    this.root.removeEventListener('keydown', this.onKeyDown);
     this.resizeObserver?.disconnect();
     this.intersectionObserver?.disconnect();
     this.resizeObserver = null;
     this.intersectionObserver = null;
+    // Return the shared geometry BEFORE the rig's dispose walks the tree.
+    this.removeSingleGloveGeometry();
     this.rig?.dispose();
     this.rig = null;
     this.skinSystem.dispose();
+    this.gloveCache.clear();
     this.renderer?.dispose();
     this.renderer = null;
     this.root.remove();
+  }
+
+  private releasePointer(): void {
+    this.dragging = false;
+    if (this.pointerId === null) return;
+    try {
+      if (this.canvas.hasPointerCapture(this.pointerId)) this.canvas.releasePointerCapture(this.pointerId);
+    } catch {
+      // Capture already released or unsupported in this environment.
+    }
+    this.pointerId = null;
   }
 }

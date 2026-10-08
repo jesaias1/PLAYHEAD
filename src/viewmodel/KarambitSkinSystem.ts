@@ -968,6 +968,8 @@ export class KarambitSkinSystem {
   private listeners: Array<(skinId: string) => void> = [];
   private committedListeners: Array<() => void> = [];
   private skinTextures: Map<string, THREE.Texture> = new Map();
+  /** Skin ids whose texture fetch most recently failed (retryable on reselect). */
+  private textureLoadFailed: Set<string> = new Set();
   private textureLoader = new THREE.TextureLoader();
   private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
   /** Which animated-cosmetic encode to decode. Presentation only. */
@@ -1074,19 +1076,39 @@ export class KarambitSkinSystem {
       return fallbackTex;
     }
 
+    // OWNERSHIP GUARD: a preview instance must only ever retain a texture it
+    // is still allowed to own. When the selection changes away from this
+    // skin, drop the stale result instead of notifying/caching it.
+    const owned = () => this.skinTextures.get(skinId) === tex;
     const tex = this.textureLoader.load(
       skin.profile.texturePath,
       (loadedTex) => {
+        if (!owned()) {
+          loadedTex.dispose();
+          return;
+        }
         loadedTex.wrapS = THREE.RepeatWrapping;
         loadedTex.wrapT = THREE.RepeatWrapping;
         loadedTex.minFilter = THREE.LinearMipmapLinearFilter;
         loadedTex.magFilter = THREE.LinearFilter;
         loadedTex.generateMipmaps = true;
         loadedTex.needsUpdate = true;
+        this.textureLoadFailed.delete(skinId);
         this.notifyListeners();
       },
       undefined,
-      (err) => console.warn(`[KarambitSkinSystem] Failed to load skin texture for ${skinId}:`, err)
+      (err) => {
+        if (!owned()) return;
+        console.warn(`[KarambitSkinSystem] Failed to load skin texture for ${skinId}:`, err);
+        this.textureLoadFailed.add(skinId);
+        // Evict the broken placeholder so a RESELECT retries instead of
+        // keeping a permanently blank texture. No listener retry loop: the
+        // retry is driven by an explicit selection, not by notifyListeners.
+        if (this.skinTextures.get(skinId) === tex) {
+          this.skinTextures.delete(skinId);
+        }
+        tex.dispose();
+      }
     );
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
@@ -1200,6 +1222,24 @@ export class KarambitSkinSystem {
   /** Number of resident static cosmetic textures (must never exceed one). */
   public getResidentTextureCount(): number {
     return this.skinTextures.size;
+  }
+
+  /**
+   * Small status query for preview/UI surfaces: whether a skin's own
+   * texture is resident, still loading, or failed. Never triggers a load.
+   */
+  public getTextureStatus(skinId: string): 'ok' | 'pending' | 'error' | 'video' | 'none' {
+    const skin = this.getSkin(skinId);
+    if (skin.profile.videoPath) {
+      if (this.activeVideo?.skinId !== skinId) return 'pending';
+      if (this.activeVideo.element.error) return 'error';
+      return this.activeVideo.element.readyState >= 2 ? 'video' : 'pending';
+    }
+    if (!skin.profile.texturePath) return 'none';
+    const texture = this.skinTextures.get(skinId);
+    if (texture) return texture.image ? 'ok' : 'pending';
+    if (this.textureLoadFailed.has(skinId)) return 'error';
+    return 'pending';
   }
 
   private releaseActiveVideoTexture(): void {
@@ -2569,6 +2609,7 @@ export class KarambitSkinSystem {
   }
 
   public dispose(): void {
+    this.textureLoadFailed.clear();
     this.releaseActiveVideoTexture();
     for (const texture of this.skinTextures.values()) texture.dispose();
     this.skinTextures.clear();

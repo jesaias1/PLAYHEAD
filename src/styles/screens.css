@@ -944,6 +944,16 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
+
+.armory-preview-status {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  color: #94b9c3;
+  font: 9px var(--font-mono, monospace);
+  pointer-events: none;
+}
 .armory-preview-canvas {
   display: block;
   width: 100%;
@@ -972,6 +982,24 @@
   border-color: var(--accent-color);
   background: var(--accent-dim);
 }
+.armory-preview-reset { flex: 0 0 auto; padding: 5px 10px; }
+.armory-preview-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #8a9bb2;
+  background: rgba(5, 9, 15, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 3px 8px;
+  pointer-events: none;
+  transition: opacity var(--motion-fast);
+}
+.armory-preview-hint.hidden { opacity: 0; }
 .armory-detail-desc {
   font-size: 0.66rem;
   line-height: 1.4;
