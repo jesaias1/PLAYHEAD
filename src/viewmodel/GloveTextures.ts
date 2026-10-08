@@ -45,20 +45,20 @@ export const BASE_GLOVE_TEXTURE_PATH = '/assets/viewmodel/textures/arms_gloves_0
 export const GLOVE_MASK_TEXTURE_PATH = `${GLOVE_TEXTURE_DIR}/glove_mask.webp`;
 
 /**
- * Optional per-glove base-color texture.
+ * Per-glove base-color texture from the shipped, UV-compatible glove collection.
  *
- * `null` means "use the canonical authored atlas". A listed path that is missing
- * on disk falls back to the atlas at runtime — the viewmodel never breaks because
- * an optional texture has not been authored yet.
+ * `null` means "use the canonical authored atlas". Mastery finishes reuse the
+ * corresponding authored material family; their own treatment and unlock rules
+ * stay distinct. Every non-null path must exist in the production assets.
  */
 export const GLOVE_TEXTURES: Record<MasteryGloveId, string | null> = {
   STANDARD_ISSUE: null,
-  FIRST_CONTACT: `${GLOVE_TEXTURE_DIR}/first_contact.webp`,
-  SIGNAL_RUNNER: `${GLOVE_TEXTURE_DIR}/signal_runner.webp`,
-  VELOCITY: `${GLOVE_TEXTURE_DIR}/velocity.webp`,
-  GOLDLINE: `${GLOVE_TEXTURE_DIR}/goldline.webp`,
-  DIAMOND_HAND: `${GLOVE_TEXTURE_DIR}/diamond_hand.webp`,
-  SIGNAL_MASTER: `${GLOVE_TEXTURE_DIR}/signal_master.webp`
+  FIRST_CONTACT: `${GLOVE_TEXTURE_DIR}/drops/cyber.webp`,
+  SIGNAL_RUNNER: `${GLOVE_TEXTURE_DIR}/drops/cyber-full.webp`,
+  VELOCITY: `${GLOVE_TEXTURE_DIR}/drops/silverskin.webp`,
+  GOLDLINE: `${GLOVE_TEXTURE_DIR}/drops/aureate.webp`,
+  DIAMOND_HAND: `${GLOVE_TEXTURE_DIR}/drops/crystal.webp`,
+  SIGNAL_MASTER: `${GLOVE_TEXTURE_DIR}/drops/synth.webp`
 };
 
 /** True when this glove ships (or will ship) its own base-color texture. */

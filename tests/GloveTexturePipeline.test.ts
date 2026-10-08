@@ -67,12 +67,12 @@ function deferredLoader() {
 
 describe('Glove texture paths', () => {
   it('resolves an expected runtime path per glove', () => {
-    expect(resolveGloveTexturePath('FIRST_CONTACT')).toBe('/assets/viewmodel/gloves/first_contact.webp');
-    expect(resolveGloveTexturePath('SIGNAL_RUNNER')).toBe('/assets/viewmodel/gloves/signal_runner.webp');
-    expect(resolveGloveTexturePath('VELOCITY')).toBe('/assets/viewmodel/gloves/velocity.webp');
-    expect(resolveGloveTexturePath('GOLDLINE')).toBe('/assets/viewmodel/gloves/goldline.webp');
-    expect(resolveGloveTexturePath('DIAMOND_HAND')).toBe('/assets/viewmodel/gloves/diamond_hand.webp');
-    expect(resolveGloveTexturePath('SIGNAL_MASTER')).toBe('/assets/viewmodel/gloves/signal_master.webp');
+    expect(resolveGloveTexturePath('FIRST_CONTACT')).toBe('/assets/viewmodel/gloves/drops/cyber.webp');
+    expect(resolveGloveTexturePath('SIGNAL_RUNNER')).toBe('/assets/viewmodel/gloves/drops/cyber-full.webp');
+    expect(resolveGloveTexturePath('VELOCITY')).toBe('/assets/viewmodel/gloves/drops/silverskin.webp');
+    expect(resolveGloveTexturePath('GOLDLINE')).toBe('/assets/viewmodel/gloves/drops/aureate.webp');
+    expect(resolveGloveTexturePath('DIAMOND_HAND')).toBe('/assets/viewmodel/gloves/drops/crystal.webp');
+    expect(resolveGloveTexturePath('SIGNAL_MASTER')).toBe('/assets/viewmodel/gloves/drops/synth.webp');
   });
 
   it('STANDARD ISSUE uses the canonical authored atlas', () => {
@@ -86,6 +86,7 @@ describe('Glove texture paths', () => {
       if (glove.id === 'STANDARD_ISSUE') continue;
       expect(hasOwnGloveTexture(glove.id), glove.id).toBe(true);
       expect(resolveGloveTexturePath(glove.id)).toMatch(/^\/assets\/viewmodel\/gloves\/.+\.webp$/);
+      expect(fs.existsSync(path.join(repoRoot, 'public', resolveGloveTexturePath(glove.id))), glove.id).toBe(true);
     }
   });
 
@@ -221,8 +222,8 @@ describe('Glove texture switching', () => {
     void switcher.apply('SIGNAL_MASTER', base, record('signal_master'));
 
     expect(pending.map((p) => p.url)).toEqual([
-      '/assets/viewmodel/gloves/goldline.webp',
-      '/assets/viewmodel/gloves/signal_master.webp'
+      '/assets/viewmodel/gloves/drops/aureate.webp',
+      '/assets/viewmodel/gloves/drops/synth.webp'
     ]);
 
     // SIGNAL MASTER resolves first, then the stale GOLDLINE load finishes.
