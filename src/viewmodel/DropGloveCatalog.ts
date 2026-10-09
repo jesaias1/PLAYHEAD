@@ -25,6 +25,9 @@
 import type { CosmeticRarity } from './KarambitSkinSystem';
 
 export type DropGloveId =
+  | 'DROP_GLOVE_PORCELAIN'
+  | 'DROP_GLOVE_ARCTIC_WEAVE'
+  | 'DROP_GLOVE_MOONSTONE'
   | 'DROP_GLOVE_CREME'
   | 'DROP_GLOVE_PEARL'
   | 'DROP_GLOVE_PEARL_ICE'
@@ -50,6 +53,8 @@ export interface DropGlove {
   dropEligible: boolean;
   /** Relative frequency inside its rarity band. */
   dropWeight: number;
+  /** These new finishes deliberately include a complete authored hand tone. */
+  authoredSkinTone?: 'FAIR' | 'TAN' | 'DEEP';
 }
 
 const DIR = '/assets/viewmodel/gloves/drops';
@@ -75,6 +80,21 @@ const HI_DIR = `${DIR}/hi`;
  * than GOLDLINE specifically so no id or label is ever ambiguous.
  */
 export const DROP_GLOVES: readonly DropGlove[] = [
+  {
+    id: 'DROP_GLOVE_PORCELAIN', name: 'PORCELAIN', codename: 'IVORY SHELL // FAIR HANDS', rarity: 'RARE',
+    texturePath: `${DIR}/porcelain.webp`, hiTexturePath: `${HI_DIR}/porcelain.webp`,
+    dropEligible: true, dropWeight: 1, authoredSkinTone: 'FAIR'
+  },
+  {
+    id: 'DROP_GLOVE_ARCTIC_WEAVE', name: 'ARCTIC WEAVE', codename: 'FROST CIRCUIT // TAN HANDS', rarity: 'RELIC',
+    texturePath: `${DIR}/arctic-weave.webp`, hiTexturePath: `${HI_DIR}/arctic-weave.webp`,
+    dropEligible: true, dropWeight: 1, authoredSkinTone: 'TAN'
+  },
+  {
+    id: 'DROP_GLOVE_MOONSTONE', name: 'MOONSTONE', codename: 'OPAL SIGNAL // DEEP HANDS', rarity: 'RELIC',
+    texturePath: `${DIR}/moonstone.webp`, hiTexturePath: `${HI_DIR}/moonstone.webp`,
+    dropEligible: true, dropWeight: 1, authoredSkinTone: 'DEEP'
+  },
   {
     id: 'DROP_GLOVE_CREME',
     name: 'CREME',

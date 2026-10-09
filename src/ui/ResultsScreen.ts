@@ -23,6 +23,8 @@ import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { cosmeticKindLabel } from '../viewmodel/CosmeticDrop';
 import { LeaderboardManager, LeaderboardSubmissionCandidate } from '../leaderboard/LeaderboardManager';
 import { SignalPackCatalog } from '../audio/SignalPackCatalog';
+import { buildShareCardModel, drawShareCard, performResultShare, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH } from './ResultShare';
+import type { ShareCardModel, ShareContext } from './ResultShare';
 import {
   describeNextRankTarget,
   nextSignalAfter,
@@ -84,6 +86,11 @@ export class ResultsScreen {
   private competitionGapElem: HTMLElement;
   private raceGhostBtn: HTMLButtonElement;
   private activeCandidate: LeaderboardSubmissionCandidate | null = null;
+  private shareModel: ShareCardModel | null = null;
+  private shareContext: ShareContext | null = null;
+  private shareGeneration = 0;
+  private shareBtn: HTMLButtonElement;
+  private shareStatus: HTMLElement;
 
   private onReplayCallback?: () => void;
   private onAgainCallback?: () => void;
@@ -232,7 +239,9 @@ export class ResultsScreen {
           <button class="btn-preview hidden" id="btn-res-view-leaderboard" title="Open this signal's world board.">[ VIEW LEADERBOARD ]</button>
           <button class="btn-preview" id="btn-res-replay" title="Watch your run back in first person.">[ WATCH REPLAY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
+          <button class="btn-preview" id="btn-res-share" type="button">[ SHARE RESULT ]</button>
         </div>
+        <div id="res-share-status" class="results-share-status" role="status" aria-live="polite"></div>
       </div>
     `;
 
@@ -256,6 +265,9 @@ export class ResultsScreen {
 
     this.statsGrid = this.element.querySelector('#res-grid') as HTMLElement;
     this.actionsRow = this.element.querySelector('#res-actions') as HTMLElement;
+    this.shareBtn = this.element.querySelector('#btn-res-share') as HTMLButtonElement;
+    this.shareStatus = this.element.querySelector('#res-share-status') as HTMLElement;
+    this.shareBtn.addEventListener('click', () => void this.shareResult());
     this.signalDropPanel = this.element.querySelector('#res-signal-drop') as HTMLElement;
     this.signalDropStatus = this.element.querySelector('#res-signal-drop-status') as HTMLElement;
     this.signalDropReward = this.element.querySelector('#res-signal-drop-reward') as HTMLElement;
@@ -388,6 +400,17 @@ export class ResultsScreen {
     surfInfo?: { isSurf: true; boardTrackId: string; title: string }
   ): void {
     this.clearTimeouts();
+    this.shareGeneration++;
+    this.shareBtn.disabled = false;
+    this.shareStatus.textContent = '';
+    this.shareContext = {
+      results: { ...results }, trackTitle, mode: surfInfo?.isSurf ? 'SURF' : 'NORMAL',
+      isOfficial: officialInfo?.isOfficial === true,
+      isCustomAudio: customRewardInfo?.isCustomAudio === true,
+      isOvertime: overtimeInfo?.isOvertime === true,
+      submittedToWorld: false
+    };
+    this.shareModel = buildShareCardModel(this.shareContext);
     this.navigationBusy = false;
     this.againBtn.disabled = false;
     this.newTrackBtn.disabled = false;
@@ -752,10 +775,54 @@ export class ResultsScreen {
   }
 
   public hide(): void {
+    this.shareGeneration++;
+    this.shareBtn.disabled = false;
     this.clearTimeouts();
     this.element.classList.add('hidden');
     // A hidden report can never show stale competition from a previous run.
     this.setCompetitionContext(null);
+  }
+
+  private async shareResult(): Promise<void> {
+    const model = this.shareModel;
+    if (!model || this.shareBtn.disabled) return;
+    const generation = this.shareGeneration;
+    this.shareBtn.disabled = true;
+    this.shareStatus.textContent = 'PREPARING RESULT CARD…';
+    const outcome = await performResultShare(model, {
+      onProgress: stage => {
+        if (generation !== this.shareGeneration) return;
+        this.shareStatus.textContent = stage === 'SHARING' ? 'OPENING SHARE SHEET // CHOOSE A DESTINATION OR CANCEL'
+          : stage === 'COPYING' ? 'COPYING RESULT TEXT…' : 'PREPARING RESULT CARD…';
+      },
+      share: navigator.share ? data => navigator.share({ ...data, files: data.files as File[] }) : undefined,
+      canShare: navigator.canShare ? data => navigator.canShare({ files: data.files as File[] }) : undefined,
+      writeText: navigator.clipboard?.writeText ? text => navigator.clipboard.writeText(text) : undefined,
+      renderPng: () => new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = SHARE_CARD_WIDTH;
+        canvas.height = SHARE_CARD_HEIGHT;
+        const context = canvas.getContext('2d');
+        if (!context) { reject(new Error('Canvas unavailable')); return; }
+        drawShareCard(context, model);
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG unavailable')), 'image/png');
+      }),
+      download: (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }
+    });
+    if (generation !== this.shareGeneration) return;
+    this.shareBtn.disabled = false;
+    this.shareStatus.textContent = outcome.state === 'SHARED' ? 'RESULT SHARED'
+      : outcome.state === 'CANCELLED' ? 'SHARE CANCELLED'
+      : [outcome.downloaded ? 'CARD DOWNLOAD STARTED' : '', outcome.copied ? 'RESULT TEXT COPIED' : '', outcome.detail ?? ''].filter(Boolean).join(' // ') || 'SHARE UNAVAILABLE';
   }
 
   /**
@@ -1047,6 +1114,10 @@ export class ResultsScreen {
    * the player never sees a claim that the server has not confirmed.
    */
   public setSubmissionState(state: SubmissionState, detail?: string): void {
+    if (this.shareContext) {
+      this.shareContext.submittedToWorld = ['WORLD_ENTRY_SUBMITTED', 'WORLD_PB_UPDATED', 'WORLD_RECORD_SET'].includes(state);
+      this.shareModel = buildShareCardModel(this.shareContext);
+    }
     this.leaderboardFeedbackElem.textContent = detail
       ? `${SUBMISSION_FEEDBACK_TEXT[state]} // ${detail.toUpperCase()}`
       : SUBMISSION_FEEDBACK_TEXT[state];

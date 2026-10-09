@@ -1,0 +1,77 @@
+{
+  "tool": "built-in image_gen",
+  "mode": "edit canonical UV atlas using glove mask reference",
+  "export": "512 and 1024 WebP, no runtime external assets",
+  "constraints": "preserve atlas UV layout; mastery preserves canonical exposed skin; white variants explicitly author exposed skin colour; no logos or words",
+  "designs": [
+    {
+      "id": "first-contact",
+      "family": "mastery",
+      "design": "Subtle cyan signal stitching and tiny sparse cyan terminal dashes on black matte woven tactical fabric. Entry-tier design, calm restrained accents, a small abstract chevron badge on the existing rectangular back-hand patch. No words/logos. Pattern does not resemble any existing drop glove.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/first-contact.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/first-contact.webp"
+    },
+    {
+      "id": "signal-runner",
+      "family": "mastery",
+      "design": "Original cyan graphite circuit-routing motif: angular thin cyan paths, small quiet amber telemetry dots, textured black carbon panels and finely stitched seams. More structured than entry tier, still mostly dark, unique terminal-inspired technical routing. No words/logos.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/signal-runner.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/signal-runner.webp"
+    },
+    {
+      "id": "velocity",
+      "family": "mastery",
+      "design": "Original silvery brushed titanium diagonal aerodynamic chevrons with cool cyan seam details over dark graphite tactical mesh. Offset flowing speed lines on both glove islands, precise geometric paneling, light silver accents only, not fully silver gloves. No words/logos.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/velocity.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/velocity.webp"
+    },
+    {
+      "id": "goldline",
+      "family": "mastery",
+      "design": "Original dark charcoal woven tactical glove with very thin gold contour tracing, tiny gold pixel-grid diamond sigils and matte bronze edge seams. Premium dark fabric and sparse gold details, no solid gold plating, no words/logos.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/goldline.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/goldline.webp"
+    },
+    {
+      "id": "diamond-hand",
+      "family": "mastery",
+      "design": "Original dark navy and charcoal tactical gloves with fractured icy pale-blue geometric facets on knuckle/back-hand areas, restrained silver-blue diamond outlines and tiny frost-like stitching. Dark underlying fabric dominates, distinctive crystalline pixel motif, no words/logos.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/diamond-hand.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/diamond-hand.webp"
+    },
+    {
+      "id": "signal-master",
+      "family": "mastery",
+      "design": "Original highest-tier dark obsidian tactical glove with a restrained spectral violet-to-cyan woven moire pattern, fine luminous-looking purple seams and a unique concentric angular signal crest on the existing back-hand patch. Rare material, intricate but calm, no neon flood or words/logos.",
+      "standardAsset": "public/assets/viewmodel/gloves/mastery/signal-master.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/mastery/hi/signal-master.webp"
+    },
+    {
+      "id": "porcelain",
+      "name": "PORCELAIN // FAIR",
+      "family": "white",
+      "skin": "Natural light fair human skin with soft pink undertones, normal realistic shading and pores, never pure white skin.",
+      "design": "Premium chalk-white ceramic-leather tactical glove with warm ivory fabric gussets, fine champagne stitches, small pearl-gray angular relief panels. Pure restrained luxury, matte white with crisp shadow detail, not beige overall.",
+      "standardAsset": "public/assets/viewmodel/gloves/drops/porcelain.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/drops/hi/porcelain.webp"
+    },
+    {
+      "id": "arctic-weave",
+      "name": "ARCTIC WEAVE // TAN",
+      "family": "white",
+      "skin": "Natural medium warm brown/tan human skin, realistic shading and pores, consistent fingers and forearms.",
+      "design": "Original frost-white technical glove with icy cyan fine routing seams, white woven lattice panels and cool silver piping; subtle blue micro-check pattern in selected fabric panels, white dominates. Distinct sporty precision design.",
+      "standardAsset": "public/assets/viewmodel/gloves/drops/arctic-weave.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/drops/hi/arctic-weave.webp"
+    },
+    {
+      "id": "moonstone",
+      "name": "MOONSTONE // DEEP",
+      "family": "white",
+      "skin": "Natural deep dark-brown human skin with warm undertones, realistic shading and pores, consistent fingertips, palm areas and forearms.",
+      "design": "Original luminous-looking pearl-white tactical glove with a very subtle opalescent silver-lavender panel sheen, quiet violet stitches, tiny angular star facets and pale silver trim. Mostly clean bright white, elegant cosmic design, not a rainbow lamp.",
+      "standardAsset": "public/assets/viewmodel/gloves/drops/moonstone.webp",
+      "highQualityAsset": "public/assets/viewmodel/gloves/drops/hi/moonstone.webp"
+    }
+  ]
+}

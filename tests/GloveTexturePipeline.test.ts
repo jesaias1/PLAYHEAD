@@ -67,12 +67,12 @@ function deferredLoader() {
 
 describe('Glove texture paths', () => {
   it('resolves an expected runtime path per glove', () => {
-    expect(resolveGloveTexturePath('FIRST_CONTACT')).toBe('/assets/viewmodel/gloves/drops/cyber.webp');
-    expect(resolveGloveTexturePath('SIGNAL_RUNNER')).toBe('/assets/viewmodel/gloves/drops/cyber-full.webp');
-    expect(resolveGloveTexturePath('VELOCITY')).toBe('/assets/viewmodel/gloves/drops/silverskin.webp');
-    expect(resolveGloveTexturePath('GOLDLINE')).toBe('/assets/viewmodel/gloves/drops/aureate.webp');
-    expect(resolveGloveTexturePath('DIAMOND_HAND')).toBe('/assets/viewmodel/gloves/drops/crystal.webp');
-    expect(resolveGloveTexturePath('SIGNAL_MASTER')).toBe('/assets/viewmodel/gloves/drops/synth.webp');
+    expect(resolveGloveTexturePath('FIRST_CONTACT')).toBe('/assets/viewmodel/gloves/mastery/first-contact.webp');
+    expect(resolveGloveTexturePath('SIGNAL_RUNNER')).toBe('/assets/viewmodel/gloves/mastery/signal-runner.webp');
+    expect(resolveGloveTexturePath('VELOCITY')).toBe('/assets/viewmodel/gloves/mastery/velocity.webp');
+    expect(resolveGloveTexturePath('GOLDLINE')).toBe('/assets/viewmodel/gloves/mastery/goldline.webp');
+    expect(resolveGloveTexturePath('DIAMOND_HAND')).toBe('/assets/viewmodel/gloves/mastery/diamond-hand.webp');
+    expect(resolveGloveTexturePath('SIGNAL_MASTER')).toBe('/assets/viewmodel/gloves/mastery/signal-master.webp');
   });
 
   it('STANDARD ISSUE uses the canonical authored atlas', () => {
@@ -222,8 +222,8 @@ describe('Glove texture switching', () => {
     void switcher.apply('SIGNAL_MASTER', base, record('signal_master'));
 
     expect(pending.map((p) => p.url)).toEqual([
-      '/assets/viewmodel/gloves/drops/aureate.webp',
-      '/assets/viewmodel/gloves/drops/synth.webp'
+      '/assets/viewmodel/gloves/mastery/goldline.webp',
+      '/assets/viewmodel/gloves/mastery/signal-master.webp'
     ]);
 
     // SIGNAL MASTER resolves first, then the stale GOLDLINE load finishes.

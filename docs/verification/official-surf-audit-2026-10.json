@@ -1,0 +1,156 @@
+[
+  {
+    "track": "track_1_signal_drift",
+    "songSeconds": 116.09977083333334,
+    "targetSeconds": 116.09977083333334,
+    "distanceMetres": 4250.4141420563565,
+    "ribbons": 13,
+    "airTransfers": 2,
+    "obstacles": 10,
+    "surfDistanceFraction": 0.9284775577532491,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_2_flow_state",
+    "songSeconds": 251.5185625,
+    "targetSeconds": 251.5185625,
+    "distanceMetres": 8900.525927759641,
+    "ribbons": 29,
+    "airTransfers": 5,
+    "obstacles": 30,
+    "surfDistanceFraction": 0.937981192967669,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_3_surf_the_void",
+    "songSeconds": 184.13425,
+    "targetSeconds": 184.13425,
+    "distanceMetres": 6537.4799104176545,
+    "ribbons": 21,
+    "airTransfers": 4,
+    "obstacles": 20,
+    "surfDistanceFraction": 0.9357550607030174,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_4_airwave_theory",
+    "songSeconds": 171.82766666666666,
+    "targetSeconds": 171.82766666666666,
+    "distanceMetres": 6312.59911516355,
+    "ribbons": 19,
+    "airTransfers": 3,
+    "obstacles": 19,
+    "surfDistanceFraction": 0.9382187918343821,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_5_gravity_line",
+    "songSeconds": 131.88935416666666,
+    "targetSeconds": 131.88935416666666,
+    "distanceMetres": 4879.479968909607,
+    "ribbons": 15,
+    "airTransfers": 3,
+    "obstacles": 20,
+    "surfDistanceFraction": 0.9327797220011337,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_6_over_the_edge",
+    "songSeconds": 163.65425,
+    "targetSeconds": 163.65425,
+    "distanceMetres": 6123.021203968563,
+    "ribbons": 19,
+    "airTransfers": 3,
+    "obstacles": 23,
+    "surfDistanceFraction": 0.935979316918591,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_7_drop_zone_surfer",
+    "songSeconds": 194.11883333333333,
+    "targetSeconds": 194.11883333333333,
+    "distanceMetres": 6947.248352672502,
+    "ribbons": 22,
+    "airTransfers": 4,
+    "obstacles": 23,
+    "surfDistanceFraction": 0.933210966925992,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_8_wave_surfing",
+    "songSeconds": 168.01960416666665,
+    "targetSeconds": 168.01960416666665,
+    "distanceMetres": 6161.018549397857,
+    "ribbons": 19,
+    "airTransfers": 3,
+    "obstacles": 19,
+    "surfDistanceFraction": 0.9363741568286088,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_9_neon_abyss",
+    "songSeconds": 109.7839375,
+    "targetSeconds": 109.7839375,
+    "distanceMetres": 4092.8561018133287,
+    "ribbons": 14,
+    "airTransfers": 2,
+    "obstacles": 19,
+    "surfDistanceFraction": 0.9310994589145073,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_10_neon_slipstream",
+    "songSeconds": 110.24835416666667,
+    "targetSeconds": 110.24835416666667,
+    "distanceMetres": 3797.2775950949504,
+    "ribbons": 11,
+    "airTransfers": 2,
+    "obstacles": 19,
+    "surfDistanceFraction": 0.9310032007303232,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_11_ex_gravity",
+    "songSeconds": 146.843,
+    "targetSeconds": 146.843,
+    "distanceMetres": 5343.3837801987975,
+    "ribbons": 17,
+    "airTransfers": 3,
+    "obstacles": 27,
+    "surfDistanceFraction": 0.9386156762283344,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_12_shadows_over_the_circuit",
+    "songSeconds": 84.24197916666667,
+    "targetSeconds": 84.24197916666667,
+    "distanceMetres": 3261.237082670543,
+    "ribbons": 11,
+    "airTransfers": 2,
+    "obstacles": 13,
+    "surfDistanceFraction": 0.9196623878122165,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_13_waveform_descent",
+    "songSeconds": 182.41597916666666,
+    "targetSeconds": 182.41597916666666,
+    "distanceMetres": 6675.5972257744725,
+    "ribbons": 21,
+    "airTransfers": 4,
+    "obstacles": 19,
+    "surfDistanceFraction": 0.9364850835573215,
+    "geometryIssues": []
+  },
+  {
+    "track": "track_14_kz_ascent",
+    "songSeconds": 150.233125,
+    "targetSeconds": 150.233125,
+    "distanceMetres": 5527.890971567169,
+    "ribbons": 17,
+    "airTransfers": 3,
+    "obstacles": 14,
+    "surfDistanceFraction": 0.9363229119730314,
+    "geometryIssues": []
+  }
+]

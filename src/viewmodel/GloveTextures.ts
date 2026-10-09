@@ -47,18 +47,17 @@ export const GLOVE_MASK_TEXTURE_PATH = `${GLOVE_TEXTURE_DIR}/glove_mask.webp`;
 /**
  * Per-glove base-color texture from the shipped, UV-compatible glove collection.
  *
- * `null` means "use the canonical authored atlas". Mastery finishes reuse the
- * corresponding authored material family; their own treatment and unlock rules
- * stay distinct. Every non-null path must exist in the production assets.
+ * `null` means "use the canonical authored atlas". Each mastery finish has
+ * original glove art. Every non-null path must exist in production assets.
  */
 export const GLOVE_TEXTURES: Record<MasteryGloveId, string | null> = {
   STANDARD_ISSUE: null,
-  FIRST_CONTACT: `${GLOVE_TEXTURE_DIR}/drops/cyber.webp`,
-  SIGNAL_RUNNER: `${GLOVE_TEXTURE_DIR}/drops/cyber-full.webp`,
-  VELOCITY: `${GLOVE_TEXTURE_DIR}/drops/silverskin.webp`,
-  GOLDLINE: `${GLOVE_TEXTURE_DIR}/drops/aureate.webp`,
-  DIAMOND_HAND: `${GLOVE_TEXTURE_DIR}/drops/crystal.webp`,
-  SIGNAL_MASTER: `${GLOVE_TEXTURE_DIR}/drops/synth.webp`
+  FIRST_CONTACT: `${GLOVE_TEXTURE_DIR}/mastery/first-contact.webp`,
+  SIGNAL_RUNNER: `${GLOVE_TEXTURE_DIR}/mastery/signal-runner.webp`,
+  VELOCITY: `${GLOVE_TEXTURE_DIR}/mastery/velocity.webp`,
+  GOLDLINE: `${GLOVE_TEXTURE_DIR}/mastery/goldline.webp`,
+  DIAMOND_HAND: `${GLOVE_TEXTURE_DIR}/mastery/diamond-hand.webp`,
+  SIGNAL_MASTER: `${GLOVE_TEXTURE_DIR}/mastery/signal-master.webp`
 };
 
 /** True when this glove ships (or will ship) its own base-color texture. */
@@ -81,7 +80,9 @@ export function resolveGloveTexturePath(gloveId: string): string {
 export function resolveAnyGloveTexturePath(gloveId: string): string {
   const drop = getDropGlove(gloveId);
   if (drop) return resolveTexturePathForQuality(drop.texturePath, drop.hiTexturePath);
-  return resolveGloveTexturePath(gloveId);
+  const standard = resolveGloveTexturePath(gloveId);
+  if (hasOwnGloveTexture(gloveId)) return resolveTexturePathForQuality(standard, standard.replace('/mastery/', '/mastery/hi/'));
+  return standard;
 }
 
 /**
@@ -90,7 +91,10 @@ export function resolveAnyGloveTexturePath(gloveId: string): string {
  */
 export function gloveTexturePathVariants(gloveId: string): string[] {
   const drop = getDropGlove(gloveId);
-  if (!drop) return [resolveGloveTexturePath(gloveId)];
+  if (!drop) {
+    const standard = resolveGloveTexturePath(gloveId);
+    return hasOwnGloveTexture(gloveId) ? [standard, standard.replace('/mastery/', '/mastery/hi/')] : [standard];
+  }
   return [drop.texturePath, drop.hiTexturePath];
 }
 
@@ -420,6 +424,7 @@ export interface GloveMaskUniforms {
   uGloveMaskOn: { value: number };
   uGloveColorMap: { value: THREE.Texture | null };
   uGloveColorOn: { value: number };
+  uGloveAuthoredSkin: { value: number };
   uGloveMetal: { value: number };
   uGloveRough: { value: number };
 }
@@ -451,6 +456,7 @@ export function installGloveMaskPatch(material: THREE.MeshStandardMaterial): Glo
     uGloveMaskOn: { value: 0 },
     uGloveColorMap: { value: null },
     uGloveColorOn: { value: 0 },
+    uGloveAuthoredSkin: { value: 0 },
     uGloveMetal: { value: material.metalness },
     uGloveRough: { value: material.roughness }
   };
@@ -460,6 +466,7 @@ export function installGloveMaskPatch(material: THREE.MeshStandardMaterial): Glo
     shader.uniforms.uGloveMaskOn = uniforms.uGloveMaskOn;
     shader.uniforms.uGloveColorMap = uniforms.uGloveColorMap;
     shader.uniforms.uGloveColorOn = uniforms.uGloveColorOn;
+    shader.uniforms.uGloveAuthoredSkin = uniforms.uGloveAuthoredSkin;
     shader.uniforms.uGloveMetal = uniforms.uGloveMetal;
     shader.uniforms.uGloveRough = uniforms.uGloveRough;
 
@@ -471,6 +478,7 @@ uniform sampler2D uGloveMask;
 uniform float uGloveMaskOn;
 uniform sampler2D uGloveColorMap;
 uniform float uGloveColorOn;
+uniform float uGloveAuthoredSkin;
 uniform float uGloveMetal;
 uniform float uGloveRough;
 // 1.0 = apply glove treatment, 0.0 = leave the authored pixel alone.
@@ -484,6 +492,8 @@ float gloveMaskFactor = 0.0;`
   if (uGloveColorOn > 0.5) {
     vec4 gloveCosmetic = texture2D(uGloveColorMap, vMapUv);
     diffuseColor.rgb = mix(diffuseColor.rgb, gloveCosmetic.rgb, gloveMaskFactor);
+    // Only explicitly authored hand-tone variants replace exposed skin colour.
+    if (uGloveAuthoredSkin > 0.5) diffuseColor.rgb = gloveCosmetic.rgb;
   }
 #endif`
       )
@@ -514,11 +524,13 @@ metalnessFactor = mix(metalnessFactor, uGloveMetal, gloveMaskFactor);`
 export function setGloveColorComposite(
   material: THREE.MeshStandardMaterial,
   colorMap: THREE.Texture | null,
-  enabled: boolean
+  enabled: boolean,
+  authoredSkin = false
 ): void {
   const uniforms = installGloveMaskPatch(material);
   uniforms.uGloveColorMap.value = colorMap;
   uniforms.uGloveColorOn.value = enabled && colorMap ? 1 : 0;
+  uniforms.uGloveAuthoredSkin.value = enabled && colorMap && authoredSkin ? 1 : 0;
 }
 
 /** Updates the shared mask on a material. `null` disables the scoping entirely. */

@@ -1,0 +1,12 @@
+{
+  "baselineCommit": "6562a91",
+  "previousEntryBytes": 1949046,
+  "previousGzipBytes": 532287,
+  "currentEntryBytes": 1898332,
+  "currentGzipBytes": 517886,
+  "deferredChunks": [
+    "ArmoryPreview",
+    "MovementLab"
+  ],
+  "note": "Download size comparison; not a frame-time or human-feel claim."
+}

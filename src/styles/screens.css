@@ -1941,10 +1941,56 @@
 
 #btn-ready-surf[hidden] { display: none; }
 
+/* READY ACADEMY ENTRY: an UNOBTRUSIVE second path into the EXISTING Movement
+   Academy. It reads as instrumentation, not a hero CTA: no fill, thin divider,
+   small mono type. It sits LEFT of the primary buttons so [SYS] ENTER WORLD
+   stays the obvious default and can never be mistaken for the main action. */
+.ready-academy-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: auto;
+  min-width: 0;
+}
+.ready-academy-entry[hidden] { display: none; }
+
+.btn-ready-academy {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid rgba(120, 132, 160, 0.35);
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-ready-academy:hover:not(:disabled),
+.btn-ready-academy:focus-visible:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.22);
+}
+.btn-ready-academy:disabled { opacity: 0.55; cursor: default; }
+.btn-ready-academy[hidden] { display: none; }
+
+.ready-academy-tip {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  color: rgba(148, 163, 184, 0.85);
+  max-width: 34ch;
+  line-height: 1.35;
+}
+.ready-academy-tip[hidden] { display: none; }
+
 @media (max-width: 560px) {
   .analysis-footer { justify-content: stretch; }
   .analysis-footer #btn-ready-surf,
   .analysis-footer #btn-enter-track { flex: 1 1 auto; }
+  .ready-academy-entry { width: 100%; }
+  .ready-academy-tip { max-width: none; }
 }
 
 /* SURF_ONBOARDING: one concise, mode-specific control hint on the Surf
@@ -3707,3 +3753,11 @@ option:hover, option:focus, option:checked {
 .results-run-data .results-grid { margin-top: 8px; }
 .race-run-feedback, .race-rival-target { font-family: var(--font-mono); font-size: .74rem; color: #00f0ff; padding: 10px 0; }
 .race-rival-target { color: #9fb0c8; padding-top: 0; }
+.results-share-status {
+  min-height: 1.5em;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .06em;
+}

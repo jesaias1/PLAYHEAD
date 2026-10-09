@@ -67,7 +67,7 @@ import { SignalPackCatalog } from '../audio/SignalPackCatalog';
 import { UIManager } from '../ui/UIManager';
 import { DevOverlay } from '../ui/DevOverlay';
 import { calculateLookYaw } from '../utils/math';
-import { MovementLab } from '../lab/MovementLab';
+import type { MovementLab } from '../lab/MovementLab';
 import { StrafeVisualizer } from '../player/StrafeVisualizer';
 import { SurfVisuals } from '../world/SurfVisuals';
 import { MusicPack, TrackCatalogEntry } from '../audio/MusicPack';
@@ -327,6 +327,8 @@ export class Game {
   private currentCustomAudioBuffer: AudioBuffer | null = null;
 
   private movementLab: MovementLab | null = null;
+  private movementLabConstructor: typeof MovementLab | null = null;
+  private movementLabLoading = false;
   private previousStateBeforePause: GameState = GameState.PLAYING;
   private lastPauseTime = 0;
   private lastResumeTime = 0;
@@ -497,6 +499,7 @@ export class Game {
       if (this.stateMachine.is(GameState.READY)) this.returnToImport();
     });
     this.ui.analysisScreen.setOnSurf(() => { void this.switchReadyToSurf(); });
+    this.ui.analysisScreen.setOnAcademy(() => this.enterAcademyFromReady());
 
     // Pause Screen
     this.ui.pauseScreen.setCallbacks({
@@ -682,8 +685,72 @@ export class Game {
   }
 
   private pendingAcademyEntry = false;
+  /**
+   * Set when the secondary READY-screen Academy entry was used. On Academy
+   * EXIT this track is re-selected so the player returns where it is safe and
+   * reasonable (the world is regenerated from the trusted catalog entry).
+   */
+  private pendingReadyAcademyReturnId: string | null = null;
+  private pendingReadyAcademyReturnSurf = false;
+  private pendingReadyAcademyEntry = false;
+
+  /** Enter the existing Academy through IMPORT, remembering the official track. */
+  private async enterAcademyFromReady(): Promise<void> {
+    if (!this.stateMachine.is(GameState.READY) || this.pendingReadyAcademyEntry) return;
+    this.pendingReadyAcademyEntry = true;
+    // Capture the trusted return target BEFORE tearing the world down.
+    const returnId = this.currentOfficialTrackId ?? this.currentSurfOfficialTrackId;
+    const wasSurf = this.currentCourseType === 'SURF';
+    try {
+      // The Lab is only reachable from IMPORT, and leaving READY must go through
+      // IMPORT, so stop/reset the pending normal/surf run cleanly first. This
+      // disposes the world, audio and transient run state; no half-built world
+      // can leak into the Academy session.
+      this.returnToImport();
+      this.pendingReadyAcademyReturnId = returnId;
+      this.pendingReadyAcademyReturnSurf = wasSurf;
+      this.currentSurfOfficialTrackId = null;
+      this.currentCourseType = DEFAULT_COURSE_TYPE;
+      await this.enterMovementLab(undefined, { academy: true });
+    } finally {
+      this.pendingReadyAcademyEntry = false;
+    }
+  }
+
+  /**
+   * Academy EXIT when it was entered from a READY world. If an official catalog
+   * track is still known, re-select it so the player lands back on the same
+   * WORLD READY screen; otherwise fall back to the import screen. This reuses
+   * the canonical load path (trusted catalog id -> baked preset) instead of
+   * caching a mutable world across sessions.
+   */
+  private async exitAcademyToReady(): Promise<void> {
+    const trackId = this.pendingReadyAcademyReturnId;
+    const wasSurf = this.pendingReadyAcademyReturnSurf;
+    this.pendingReadyAcademyReturnId = null;
+    this.pendingReadyAcademyReturnSurf = false;
+    // Always leave the Lab cleanly first: MOVEMENT_LAB -> IMPORT is the only
+    // legal way out, and returnToImport() disposes the Lab and clears state.
+    this.returnToImport();
+    if (!trackId) return;
+    const entry = MusicPack.getTrackById(trackId);
+    if (!entry) return;
+    // Re-select the same trusted catalog track: the canonical load path rebuilds
+    // the world and lands back on WORLD READY (analysing -> ready).
+    await this.handleCatalogTrackSelected(entry);
+    if (wasSurf && this.stateMachine.is(GameState.READY)) await this.switchReadyToSurf();
+  }
 
   private async enterMovementLab(trackId?: string, opts?: { academy?: boolean }): Promise<void> {
+    if (this.movementLabLoading) return;
+    const entryState = this.stateMachine.getState();
+    this.movementLabLoading = true;
+    try {
+      this.movementLabConstructor ??= (await import('../lab/MovementLab')).MovementLab;
+    } finally {
+      this.movementLabLoading = false;
+    }
+    if (this.stateMachine.getState() !== entryState) return;
     this.currentOfficialTrackId = null;
     this.pendingAcademyEntry = !!opts?.academy;
     this.stateMachine.transitionTo(GameState.MOVEMENT_LAB);
@@ -745,7 +812,7 @@ export class Game {
               this.movementLab.dispose();
               this.movementLab = null;
             }
-            this.movementLab = new MovementLab(
+            this.movementLab = new this.movementLabConstructor!(
               this.environment.scene,
               this.world.physics,
               this.playerController,
@@ -762,7 +829,8 @@ export class Game {
               this.movementLab.enterAcademy();
               const academy = this.movementLab.getAcademy();
               if (academy) {
-                academy.exitCallback = () => this.returnToImport();
+                if (this.pendingReadyAcademyReturnSurf) academy.selectLesson('SURF');
+                academy.exitCallback = () => { void this.exitAcademyToReady().catch(() => this.returnToImport()); };
               }
             }
           }
@@ -2301,6 +2369,8 @@ export class Game {
     // Leaving the world ALWAYS ends friend-race ghost mode, so a race can never
     // leak "solo ghosts disabled" into the next solo Signal.
     this.setFriendRaceWorld(false);
+    this.pendingReadyAcademyReturnId = null;
+    this.pendingReadyAcademyReturnSurf = false;
     this.ghostManager.dispose();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();

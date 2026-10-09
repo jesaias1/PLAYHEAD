@@ -10,6 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KarambitCosmicMaterial } from './KarambitCosmicShader';
 import { KarambitSkinSystem } from './KarambitSkinSystem';
 import { DEFAULT_MASTERY_GLOVE_ID } from '../mastery/MasteryLadder';
+import { getDropGlove } from './DropGloveCatalog';
 import { applyGloveTreatment, getGloveTreatment, resolveGloveTreatment } from './GloveTreatments';
 import {
   GLOVE_ANISOTROPY,
@@ -366,7 +367,7 @@ export class ViewmodelAssetLoader {
       for (const mat of armMaterials) {
         if (compose) {
           mat.map = gloveTexture;
-          setGloveColorComposite(mat, texture, true);
+          setGloveColorComposite(mat, texture, true, !!getDropGlove(activeGloveId)?.authoredSkinTone);
         } else {
           mat.map = texture ?? gloveTexture;
           setGloveColorComposite(mat, null, false);

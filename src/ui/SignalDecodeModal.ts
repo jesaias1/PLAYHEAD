@@ -7,7 +7,7 @@ import { CosmeticRarity, KarambitSkinSystem, OpenedSignalDrop } from '../viewmod
 import { cosmeticKindLabel, displayRarity } from '../viewmodel/CosmeticDrop';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { SignalDecoderAudio } from '../audio/SignalDecoderAudio';
-import { ArmoryPreview } from './ArmoryPreview';
+import { LazyArmoryPreview as ArmoryPreview } from './LazyArmoryPreview';
 
 export class SignalDecodeModal {
   public element: HTMLElement;

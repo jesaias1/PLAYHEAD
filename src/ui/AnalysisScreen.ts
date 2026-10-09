@@ -8,6 +8,8 @@ import { formatTime } from '../utils/math';
 import { PaletteSelector } from '../audio/TrackPalettes';
 import { VisualDreamDirector } from '../world/VisualDreamProfile';
 import { formatAnalysisStage } from './SignalIdentity';
+import { loadProgress } from '../lab/MovementAcademyProgress';
+import { resolveAcademyEntry } from '../lab/AcademyEntry';
 
 export class AnalysisScreen {
   public element: HTMLElement;
@@ -21,6 +23,10 @@ export class AnalysisScreen {
   private surfBtn: HTMLButtonElement;
   private surfHintElem: HTMLElement;
   private onSurfCallback?: () => void;
+  private academyBtn!: HTMLButtonElement;
+  private academyTipElem!: HTMLElement;
+  private onAcademyCallback?: () => void | Promise<void>;
+  private academyBusy = false;
   private surfVariant = false;
 
   private durElem: HTMLElement;
@@ -89,6 +95,12 @@ export class AnalysisScreen {
 
         <div class="analysis-footer">
           <div id="analysis-variant" aria-live="polite">NORMAL_MODE</div>
+          <div class="ready-academy-entry" id="analysis-academy-entry" hidden>
+            <button class="btn-ready-academy" id="btn-ready-academy" type="button" hidden disabled>
+              LEARN MOVEMENT // ACADEMY
+            </button>
+            <div class="ready-academy-tip" id="analysis-academy-tip" hidden></div>
+          </div>
           <button class="btn-hero btn-surf" id="btn-ready-surf" hidden disabled>PLAY SURF_MODE</button>
           <button class="btn-hero" id="btn-enter-track" disabled>[SYS] ENTER WORLD</button>
         </div>
@@ -110,6 +122,10 @@ export class AnalysisScreen {
       this.enterBtn.disabled = true;
       this.onSurfCallback?.();
     });
+
+    this.academyBtn = this.element.querySelector('#btn-ready-academy') as HTMLButtonElement;
+    this.academyTipElem = this.element.querySelector('#analysis-academy-tip') as HTMLElement;
+    this.academyBtn.addEventListener('click', () => this.triggerAcademyEntry());
 
     this.durElem = this.element.querySelector('#stat-dur') as HTMLElement;
     this.bpmElem = this.element.querySelector('#stat-bpm') as HTMLElement;
@@ -137,7 +153,7 @@ export class AnalysisScreen {
     window.addEventListener('keydown', (e) => {
       if (!this.element.classList.contains('hidden') && !this.enterBtn.disabled) {
         if (e.code === 'Escape') { e.preventDefault(); goBack(); return; }
-        if (e.target === this.surfBtn || e.target === backBtn) return;
+        if (e.target === this.surfBtn || e.target === this.academyBtn || e.target === backBtn) return;
         if (e.code === 'Space' || e.code === 'Enter') {
           e.preventDefault();
           handleEnter();
@@ -150,6 +166,7 @@ export class AnalysisScreen {
     (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = true;
     this.enterBtn.disabled = true;
     this.surfBtn.disabled = true;
+    this.academyBtn.disabled = true;
     this.hideSurfHint();
     this.setStage('[SYS] ENTERING...', 1);
     // 1. Contracting animation: collapse waveform to 2px signal line
@@ -169,12 +186,15 @@ export class AnalysisScreen {
 
   public setOnSurf(callback: () => void): void { this.onSurfCallback = callback; }
 
+  public setOnAcademy(callback: () => void | Promise<void>): void { this.onAcademyCallback = callback; }
+
   public setCourseVariant(surf: boolean): void {
     this.surfVariant = surf;
     this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'NORMAL_MODE';
     this.surfBtn.hidden = surf || this.enterBtn.disabled;
     this.surfBtn.disabled = this.enterBtn.disabled;
     this.syncSurfHint();
+    this.syncAcademyEntry();
   }
 
   /** The Surf onboarding hint is Surf-only and only visible once the world is ready. */
@@ -184,6 +204,51 @@ export class AnalysisScreen {
 
   private hideSurfHint(): void {
     this.surfHintElem.hidden = true;
+  }
+
+  /**
+   * READY ACADEMY ENTRY: an UNOBTRUSIVE second path into the EXISTING Movement
+   * Academy. It is never the primary CTA, never blocks first play and never
+   * auto-navigates: it only appears once the world is ready and honest Academy
+   * progress still has something to teach. Copy is mode-specific (Surf READY
+   * points at the Surf lesson).
+   */
+  private syncAcademyEntry(): void {
+    const entry = resolveAcademyEntry({
+      progress: loadProgress(typeof localStorage !== 'undefined' ? localStorage : null),
+      variant: this.surfVariant ? 'SURF' : 'NORMAL'
+    });
+    const visible = entry.visible && !this.enterBtn.disabled && !this.academyBusy;
+    (this.element.querySelector('#analysis-academy-entry') as HTMLElement).hidden = !visible;
+    this.academyBtn.hidden = !visible;
+    this.academyBtn.disabled = !visible;
+    this.academyBtn.textContent = entry.label;
+    this.academyBtn.setAttribute('aria-label', entry.ariaLabel);
+    this.academyTipElem.hidden = !visible;
+    this.academyTipElem.textContent = entry.tip;
+  }
+
+  private async triggerAcademyEntry(): Promise<void> {
+    if (this.academyBusy || this.academyBtn.disabled || this.enterBtn.disabled) return;
+    this.academyBusy = true;
+    this.enterBtn.disabled = true;
+    this.surfBtn.disabled = true;
+    this.academyBtn.disabled = true;
+    this.academyBtn.textContent = '[SYS] LOADING ACADEMY';
+    this.setStage('[SYS] OPENING MOVEMENT ACADEMY...', 1);
+    this.element.classList.add('contracting');
+    try {
+      if (!this.onAcademyCallback) throw new Error('Academy entry unavailable');
+      await this.onAcademyCallback();
+    } catch {
+      this.enterBtn.disabled = false;
+      this.surfBtn.disabled = false;
+      this.setStage('[SYS] ACADEMY UNAVAILABLE // TRY AGAIN', 1);
+    } finally {
+      this.academyBusy = false;
+      this.element.classList.remove('contracting');
+      this.syncAcademyEntry();
+    }
   }
 
   public addStageLog(text: string): void {
@@ -231,6 +296,10 @@ export class AnalysisScreen {
     this.enterBtn.textContent = '[SYS] ENTER WORLD';
     this.surfBtn.hidden = true;
     this.surfBtn.disabled = true;
+    this.academyBusy = false;
+    this.academyBtn.hidden = true;
+    this.academyBtn.disabled = true;
+    this.academyTipElem.hidden = true;
     // Re-analysis / Back / reset leaves the previous Surf copy behind: the hint
     // is only re-armed by a SURF variant on a ready world.
     this.hideSurfHint();
@@ -285,6 +354,7 @@ export class AnalysisScreen {
     this.surfBtn.hidden = this.surfVariant;
     this.surfBtn.disabled = false;
     this.syncSurfHint();
+    this.syncAcademyEntry();
     this.enterBtn.focus();
   }
 

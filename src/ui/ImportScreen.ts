@@ -50,7 +50,7 @@ import {
 } from '../mastery/SignalPackMastery';
 import { BUILD_LABEL } from '../core/BuildInfo';
 import { MenuBackdrop } from './MenuBackdrop';
-import { ArmoryPreview } from './ArmoryPreview';
+import { LazyArmoryPreview as ArmoryPreview } from './LazyArmoryPreview';
 
 export class ImportScreen {
   public element: HTMLElement;

@@ -26,7 +26,7 @@ import {
   armoryDetailRows,
   resolveSelection
 } from './ArmoryInventory';
-import { ArmoryPreview } from './ArmoryPreview';
+import { LazyArmoryPreview as ArmoryPreview } from './LazyArmoryPreview';
 
 export class ArmoryModal {
   public element: HTMLElement;

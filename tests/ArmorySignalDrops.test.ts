@@ -48,7 +48,7 @@ const UUID_A = '11111111-1111-4111-8111-111111111111';
 const UUID_B = '22222222-2222-4222-8222-222222222222';
 
 it('keeps the server reward catalog aligned with eligible cosmetic identities and rarities', () => {
-  const sql = readFileSync(new URL('../supabase/migrations/20261001000000_armory_signal_drops.sql', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../supabase/migrations/20261009000000_white_glove_finishes.sql', import.meta.url), 'utf8');
   const catalog = JSON.parse(sql.match(/select \$q\$(\[[\s\S]*?\])\$q\$::jsonb/)![1]);
   const eligible = [...KARAMBIT_SKINS.filter(s => s.dropEligible), ...dropEligibleGloves()]
     .map(s => ({ id: s.id, rarity: s.rarity })).sort((a,b)=>a.id.localeCompare(b.id));

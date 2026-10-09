@@ -175,6 +175,18 @@ export function applyGloveTreatment(
  * because the shared mask scopes it.
  */
 export const DROP_GLOVE_TREATMENTS: Record<string, GloveTreatment> = {
+  DROP_GLOVE_PORCELAIN: {
+    tint: 0xffffff, roughness: 0.48, metalness: 0.2, emissive: 0x1b2025,
+    emissiveIntensity: 0.06, audioReactive: 0.25, accent: 0.3, seam: 0.15
+  },
+  DROP_GLOVE_ARCTIC_WEAVE: {
+    tint: 0xffffff, roughness: 0.36, metalness: 0.35, emissive: 0x12333d,
+    emissiveIntensity: 0.08, audioReactive: 0.35, accent: 0.5, seam: 0.3
+  },
+  DROP_GLOVE_MOONSTONE: {
+    tint: 0xffffff, roughness: 0.3, metalness: 0.42, emissive: 0x231b33,
+    emissiveIntensity: 0.08, audioReactive: 0.4, accent: 0.55, seam: 0.35
+  },
   // Clean, premium, barely there.
   DROP_GLOVE_CREME: {
     tint: 0xffffff,

@@ -160,6 +160,9 @@ describe('CYBER II legacy fallback', () => {
 
 describe('Final drop-glove rarity table', () => {
   const TARGET: Record<string, string> = {
+    DROP_GLOVE_PORCELAIN: 'RARE',
+    DROP_GLOVE_ARCTIC_WEAVE: 'RELIC',
+    DROP_GLOVE_MOONSTONE: 'RELIC',
     DROP_GLOVE_CREME: 'STANDARD',
     DROP_GLOVE_PEARL: 'RARE',
     DROP_GLOVE_PEARL_ICE: 'RELIC',
@@ -194,8 +197,8 @@ describe('Final drop-glove rarity table', () => {
     const counts = new Map<string, number>();
     for (const g of DROP_GLOVES) counts.set(g.rarity, (counts.get(g.rarity) ?? 0) + 1);
     expect(counts.get('STANDARD')).toBe(1);
-    expect(counts.get('RARE')).toBe(3);
-    expect(counts.get('RELIC')).toBe(5);
+    expect(counts.get('RARE')).toBe(4);
+    expect(counts.get('RELIC')).toBe(7);
     expect(counts.get('ARTIFACT')).toBe(1);
     expect(counts.get('OVERCLOCKED')).toBe(1);
   });
