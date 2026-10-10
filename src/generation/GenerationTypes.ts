@@ -109,7 +109,10 @@ export type SurfObstaclePhraseKind =
   | 'SURF_RIB'      // one partial rib on the upper lane -> take the lower lane
   | 'SURF_STAGGER'  // two ribs staggered from opposite edges -> one lateral read
   | 'SURF_SLALOM'   // three ribs alternating sides -> a sustained weave
-  | 'SURF_WEAVE';   // four ribs alternating sides -> a tightening line
+  | 'SURF_WEAVE'
+  | 'SURF_DOUBLE'
+  | 'SURF_SWITCHBACK'
+  | 'SURF_KEYHOLE';
 
 /**
  * Deterministic lateral oscillation for moving obstacles (shutters, sweep

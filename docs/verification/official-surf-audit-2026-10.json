@@ -6,8 +6,13 @@
     "distanceMetres": 4250.4141420563565,
     "ribbons": 13,
     "airTransfers": 2,
-    "obstacles": 10,
+    "obstacles": 12,
     "surfDistanceFraction": 0.9284775577532491,
+    "challengeKinds": [
+      "SURF_KEYHOLE",
+      "SURF_DOUBLE",
+      "SURF_RIB"
+    ],
     "geometryIssues": []
   },
   {
@@ -17,8 +22,14 @@
     "distanceMetres": 8900.525927759641,
     "ribbons": 29,
     "airTransfers": 5,
-    "obstacles": 30,
+    "obstacles": 37,
     "surfDistanceFraction": 0.937981192967669,
+    "challengeKinds": [
+      "SURF_SLALOM",
+      "SURF_STAGGER",
+      "SURF_DOUBLE",
+      "SURF_KEYHOLE"
+    ],
     "geometryIssues": []
   },
   {
@@ -28,8 +39,15 @@
     "distanceMetres": 6537.4799104176545,
     "ribbons": 21,
     "airTransfers": 4,
-    "obstacles": 20,
+    "obstacles": 27,
     "surfDistanceFraction": 0.9357550607030174,
+    "challengeKinds": [
+      "SURF_SLALOM",
+      "SURF_DOUBLE",
+      "SURF_KEYHOLE",
+      "SURF_STAGGER",
+      "SURF_RIB"
+    ],
     "geometryIssues": []
   },
   {
@@ -39,8 +57,15 @@
     "distanceMetres": 6312.59911516355,
     "ribbons": 19,
     "airTransfers": 3,
-    "obstacles": 19,
+    "obstacles": 21,
     "surfDistanceFraction": 0.9382187918343821,
+    "challengeKinds": [
+      "SURF_DOUBLE",
+      "SURF_KEYHOLE",
+      "SURF_RIB",
+      "SURF_STAGGER",
+      "SURF_SLALOM"
+    ],
     "geometryIssues": []
   },
   {
@@ -50,8 +75,14 @@
     "distanceMetres": 4879.479968909607,
     "ribbons": 15,
     "airTransfers": 3,
-    "obstacles": 20,
+    "obstacles": 17,
     "surfDistanceFraction": 0.9327797220011337,
+    "challengeKinds": [
+      "SURF_SLALOM",
+      "SURF_SWITCHBACK",
+      "SURF_WEAVE",
+      "SURF_KEYHOLE"
+    ],
     "geometryIssues": []
   },
   {
@@ -63,6 +94,12 @@
     "airTransfers": 3,
     "obstacles": 23,
     "surfDistanceFraction": 0.935979316918591,
+    "challengeKinds": [
+      "SURF_STAGGER",
+      "SURF_KEYHOLE",
+      "SURF_DOUBLE",
+      "SURF_RIB"
+    ],
     "geometryIssues": []
   },
   {
@@ -72,8 +109,15 @@
     "distanceMetres": 6947.248352672502,
     "ribbons": 22,
     "airTransfers": 4,
-    "obstacles": 23,
+    "obstacles": 26,
     "surfDistanceFraction": 0.933210966925992,
+    "challengeKinds": [
+      "SURF_KEYHOLE",
+      "SURF_SLALOM",
+      "SURF_RIB",
+      "SURF_STAGGER",
+      "SURF_DOUBLE"
+    ],
     "geometryIssues": []
   },
   {
@@ -83,8 +127,15 @@
     "distanceMetres": 6161.018549397857,
     "ribbons": 19,
     "airTransfers": 3,
-    "obstacles": 19,
+    "obstacles": 24,
     "surfDistanceFraction": 0.9363741568286088,
+    "challengeKinds": [
+      "SURF_RIB",
+      "SURF_DOUBLE",
+      "SURF_STAGGER",
+      "SURF_KEYHOLE",
+      "SURF_SLALOM"
+    ],
     "geometryIssues": []
   },
   {
@@ -94,8 +145,14 @@
     "distanceMetres": 4092.8561018133287,
     "ribbons": 14,
     "airTransfers": 2,
-    "obstacles": 19,
+    "obstacles": 20,
     "surfDistanceFraction": 0.9310994589145073,
+    "challengeKinds": [
+      "SURF_SLALOM",
+      "SURF_KEYHOLE",
+      "SURF_STAGGER",
+      "SURF_RIB"
+    ],
     "geometryIssues": []
   },
   {
@@ -105,8 +162,14 @@
     "distanceMetres": 3797.2775950949504,
     "ribbons": 11,
     "airTransfers": 2,
-    "obstacles": 19,
+    "obstacles": 14,
     "surfDistanceFraction": 0.9310032007303232,
+    "challengeKinds": [
+      "SURF_RIB",
+      "SURF_DOUBLE",
+      "SURF_KEYHOLE",
+      "SURF_STAGGER"
+    ],
     "geometryIssues": []
   },
   {
@@ -116,8 +179,17 @@
     "distanceMetres": 5343.3837801987975,
     "ribbons": 17,
     "airTransfers": 3,
-    "obstacles": 27,
+    "obstacles": 25,
     "surfDistanceFraction": 0.9386156762283344,
+    "challengeKinds": [
+      "SURF_SLALOM",
+      "SURF_KEYHOLE",
+      "SURF_RIB",
+      "SURF_DOUBLE",
+      "SURF_STAGGER",
+      "SURF_WEAVE",
+      "SURF_SWITCHBACK"
+    ],
     "geometryIssues": []
   },
   {
@@ -127,8 +199,15 @@
     "distanceMetres": 3261.237082670543,
     "ribbons": 11,
     "airTransfers": 2,
-    "obstacles": 13,
+    "obstacles": 15,
     "surfDistanceFraction": 0.9196623878122165,
+    "challengeKinds": [
+      "SURF_KEYHOLE",
+      "SURF_RIB",
+      "SURF_STAGGER",
+      "SURF_DOUBLE",
+      "SURF_SLALOM"
+    ],
     "geometryIssues": []
   },
   {
@@ -138,8 +217,15 @@
     "distanceMetres": 6675.5972257744725,
     "ribbons": 21,
     "airTransfers": 4,
-    "obstacles": 19,
+    "obstacles": 26,
     "surfDistanceFraction": 0.9364850835573215,
+    "challengeKinds": [
+      "SURF_KEYHOLE",
+      "SURF_DOUBLE",
+      "SURF_STAGGER",
+      "SURF_RIB",
+      "SURF_SLALOM"
+    ],
     "geometryIssues": []
   },
   {
@@ -149,8 +235,15 @@
     "distanceMetres": 5527.890971567169,
     "ribbons": 17,
     "airTransfers": 3,
-    "obstacles": 14,
+    "obstacles": 21,
     "surfDistanceFraction": 0.9363229119730314,
+    "challengeKinds": [
+      "SURF_RIB",
+      "SURF_SLALOM",
+      "SURF_KEYHOLE",
+      "SURF_STAGGER",
+      "SURF_DOUBLE"
+    ],
     "geometryIssues": []
   }
 ]

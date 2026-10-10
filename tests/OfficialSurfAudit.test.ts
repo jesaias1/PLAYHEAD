@@ -22,6 +22,7 @@ describe('official Surf course geometry audit', () => {
       return { track: entry.id, songSeconds: analysis.duration, targetSeconds: track.targetDuration,
         distanceMetres: track.totalDistance, ribbons: ribbons.size, airTransfers: transfers,
         obstacles: track.obstacles?.length, surfDistanceFraction: validation.surfFraction,
+        challengeKinds: [...new Set(track.obstacles?.map(node => node.obstacleSurfPhraseKind))],
         geometryIssues: validation.issues };
     });
     if (process.env.WRITE_SURF_AUDIT === '1') {

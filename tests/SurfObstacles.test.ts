@@ -158,6 +158,17 @@ describe('SURF authored obstacles (1004)', () => {
     for (const list of byPhrase.values()) {
       const sorted = [...list].sort((a, b) => a.arcLength - b.arcLength);
       for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].obstacleSurfPhraseKind === 'SURF_KEYHOLE') {
+          // Both edge solids form ONE simultaneous aperture, not two rapid
+          // successive lane changes. Verify its combined clear width below.
+          expect(sorted[i].obstacleHostStationIndex).toBe(sorted[i - 1].obstacleHostStationIndex);
+          const left = SurfObstacleGenerator.describePlacement(sorted[i - 1], track.route)!;
+          const right = SurfObstacleGenerator.describePlacement(sorted[i], track.route)!;
+          const lo = Math.min(left.blockedMaxLateral, right.blockedMaxLateral);
+          const hi = Math.max(left.blockedMinLateral, right.blockedMinLateral);
+          expect(hi - lo).toBeGreaterThanOrEqual(SURF_OBSTACLE.SAFE_LANE_MIN - 1e-6);
+          continue;
+        }
         expect(sorted[i].arcLength - sorted[i - 1].arcLength).toBeGreaterThanOrEqual(
           SURF_OBSTACLE.MIN_ELEMENT_ARC_SPACING - 1e-6
         );

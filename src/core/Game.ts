@@ -95,6 +95,7 @@ import { playerProfileService } from '../online/PlayerProfileService';
 import { CustomAudioRewardService } from '../audio/CustomAudioRewardService';
 import { FINISH_GATE_HEIGHT, FinishGateDetector } from '../gameplay/FinishGateDetector';
 import { MovementFeedbackController } from '../feedback/MovementFeedbackController';
+import { SurfChallengeTracker, SURF_CHALLENGE_LABEL } from '../feedback/SurfChallenges';
 import { GateDiagnosticState, RaceGhostDiagnosticState } from '../ui/DevOverlay';
 import { MovementSfx } from '../audio/MovementSfx';
 
@@ -289,6 +290,7 @@ export class Game {
 
   /** Presentation-only movement feedback (never affects gameplay). */
   public movementFeedback!: MovementFeedbackController;
+  private surfChallenges = new SurfChallengeTracker();
   private movementSfx = MovementSfx.getInstance();
 
   private currentAnalysis: TrackAnalysis | null = null;
@@ -1559,6 +1561,7 @@ export class Game {
     this.currentCheckpoint = null;
     this.passedCheckpoints.clear();
     this.shownOnboardingCues.clear();
+    this.surfChallenges.configure(this.currentCourseType === 'SURF' ? this.currentTrack : null);
     this.playerController.stats.reset();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
@@ -1999,6 +2002,7 @@ export class Game {
 
   private restoreToCheckpoint(reason: RestoreReason | string = RestoreReason.OTHER, wasSurf = false): void {
     if (this.isRestoringCheckpoint) return; // Prevent respawn races
+    this.surfChallenges?.interrupt();
     this.isRestoringCheckpoint = true;
     this.playerController.isRestoring = true;
 
@@ -2369,6 +2373,7 @@ export class Game {
     // Leaving the world ALWAYS ends friend-race ghost mode, so a race can never
     // leak "solo ghosts disabled" into the next solo Signal.
     this.setFriendRaceWorld(false);
+    this.surfChallenges?.configure(null);
     this.pendingReadyAcademyReturnId = null;
     this.pendingReadyAcademyReturnSurf = false;
     this.ghostManager.dispose();
@@ -2906,6 +2911,18 @@ export class Game {
       ) {
         if (!this.isFinished) {
           this.movementFeedback.update(dt, this.playerController, this.world.physics);
+          if (this.currentCourseType === 'SURF' && this.stateMachine.is(GameState.PLAYING) && !this.friendRaceWorld && !this.isRestoringCheckpoint) {
+            const clear = this.surfChallenges.update(dt, {
+              position: this.playerController.position, velocity: this.playerController.velocity,
+              // Gentle ribbon sections may classify as grounded contact.
+              surfing: this.playerController.isSurfing || this.playerController.isGrounded
+            });
+            if (clear) {
+              this.ui.hud.showToast(`${SURF_CHALLENGE_LABEL[clear.kind]} // FLOW x${clear.streak}`, 1250);
+              this.movementSfx.playSurfLock(0.45);
+              this.world.pulseSignal(0.16);
+            }
+          } else this.surfChallenges.suspend();
           this.playerController.cameraPresentationOffsetY = this.movementFeedback.state.cameraOffsetY;
           this.playerController.syncCamera();
         }

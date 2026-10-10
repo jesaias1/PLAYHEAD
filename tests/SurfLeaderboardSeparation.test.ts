@@ -18,6 +18,7 @@ import { OFFICIAL_MAP_REGISTRY } from '../src/online/OfficialMapRegistry';
 import { Game } from '../src/core/Game';
 import { leaderboardService } from '../src/online/LeaderboardService';
 import { ACCEPTED_SURF_MAPS } from '../supabase/functions/submit-run/accepted-surf-maps';
+import { ACCEPTED_SURF_MAPS_V1004 } from '../supabase/functions/submit-run/accepted-surf-maps-v1004';
 import {
   computeSurfMapIdentity,
   surfBoardTrackId,
@@ -32,6 +33,17 @@ function loadFresh(trackId: string) {
 }
 
 describe('SURF leaderboard separation', () => {
+  it('retains exact legacy identities without mixing old and new layout boards', () => {
+    const currentIds = new Set(ACCEPTED_SURF_MAPS.map(entry => entry.trackId));
+    expect(ACCEPTED_SURF_MAPS_V1004).toHaveLength(14);
+    for (const entry of ACCEPTED_SURF_MAPS_V1004) {
+      expect(currentIds.has(entry.trackId)).toBe(false);
+      expect(entry.trackId).toContain(entry.mapFingerprint);
+      expect(entry.mapVersion).toBe(1004);
+      expect(ACCEPTED_SURF_MAPS.every(current => current.movementVersion === entry.movementVersion)).toBe(true);
+    }
+    expect(ACCEPTED_SURF_MAPS.every(entry => entry.mapVersion === 1005)).toBe(true);
+  });
   it('ships identical canonical identities to the client and submission server', () => {
     expect(ACCEPTED_SURF_MAPS).toEqual(SURF_MAP_REGISTRY.map(({ trackId, mapVersion, mapFingerprint, movementVersion }) => ({ trackId, mapVersion, mapFingerprint, movementVersion })));
   });

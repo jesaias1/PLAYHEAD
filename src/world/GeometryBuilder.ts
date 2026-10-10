@@ -22,6 +22,7 @@ import { RouteExclusionCorridor } from './RouteExclusionCorridor';
 import { tagWorldRole } from './WorldRoles';
 import { ReactiveChannel } from './PlayheadSystem';
 import { FINISH_GATE_HEIGHT } from '../gameplay/FinishGateDetector';
+import { buildSurfChallengeTargets } from '../feedback/SurfChallenges';
 
 export interface RouteEdgeItem {
   mesh: THREE.LineSegments;
@@ -730,6 +731,30 @@ export class GeometryBuilder {
         // it looked like a walkable platform and violated PLAYHEAD's visual
         // language. Collision is unaffected (the strip was never a collider).
       }
+    }
+
+    // One draw call for unobtrusive, noncolliding clean-line brackets. Their
+    // aperture is derived from the same final station basis as the colliders.
+    const challengeTargets = buildSurfChallengeTargets(track);
+    if (challengeTargets.length) {
+      const vertices: number[] = [];
+      for (const target of challengeTargets) {
+        for (const side of [-1, 1]) {
+          const point = (height: number, inset: number) => [
+            target.center.x + target.right.x * (target.lateral + side * (target.radius - inset)) + target.normal.x * height,
+            target.center.y + target.right.y * (target.lateral + side * (target.radius - inset)) + target.normal.y * height,
+            target.center.z + target.right.z * (target.lateral + side * (target.radius - inset)) + target.normal.z * height
+          ];
+          vertices.push(...point(0.1, 0), ...point(1.4, 0), ...point(1.4, 0), ...point(1.4, 0.4));
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      const brackets = new THREE.LineSegments(geometry,
+        new THREE.LineBasicMaterial({ color: primaryCol, transparent: true, opacity: 0.38, depthWrite: false }));
+      brackets.name = 'SurfCleanLineBrackets';
+      tagWorldRole(brackets, 'VISUAL_ONLY', 'GeometryBuilder.SurfCleanLineBrackets', false);
+      rootGroup.add(brackets);
     }
 
     // Build Subtle Recovery Catch-Shelves (Subdued safety shelves under tricky sequences)

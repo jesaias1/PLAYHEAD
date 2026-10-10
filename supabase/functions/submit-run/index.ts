@@ -23,6 +23,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // -----------------------------------------------------------------------------
 import { ACCEPTED_MAPS } from './accepted-maps.ts';
 import { ACCEPTED_SURF_MAPS } from './accepted-surf-maps.ts';
+import { ACCEPTED_SURF_MAPS_V1004 } from './accepted-surf-maps-v1004.ts';
 
 const MIN_PLAUSIBLE_TIME_US = 8_000_000;        // 8 s
 const MAX_PLAUSIBLE_TIME_US = 30 * 60_000_000;  // 30 min
@@ -142,7 +143,8 @@ Deno.serve(async (req: Request) => {
   // match ACCEPTED_SURF_MAPS, a bare official id can only match ACCEPTED_MAPS.
   const isSurfBoard = trackId.startsWith('surf:');
   const registry = isSurfBoard ? ACCEPTED_SURF_MAPS : ACCEPTED_MAPS;
-  const accepted = registry.find((m) => m.trackId === trackId);
+  const accepted = registry.find((m) => m.trackId === trackId) ??
+    (isSurfBoard ? ACCEPTED_SURF_MAPS_V1004.find((m) => m.trackId === trackId) : undefined);
   if (!accepted) {
     return reject(
       'REGISTRY_NOT_READY',

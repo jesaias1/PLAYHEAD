@@ -46,7 +46,10 @@ export type SurfObstaclePhraseKind =
   | 'SURF_RIB'      // one partial rib on the upper lane -> take the lower lane
   | 'SURF_STAGGER'  // two ribs staggered from opposite edges -> one lateral read
   | 'SURF_SLALOM'   // three ribs alternating sides -> a sustained weave
-  | 'SURF_WEAVE';   // four ribs alternating sides -> a tightening line
+  | 'SURF_WEAVE'    // four ribs alternating sides -> a tightening line
+  | 'SURF_DOUBLE'   // two same-side reads -> commit to one clean line
+  | 'SURF_SWITCHBACK' // two reads per side -> commit, then change lanes
+  | 'SURF_KEYHOLE'; // paired edge ribs -> a broad central precision aperture
 
 export const SURF_OBSTACLE = {
   /** Minimum traversable lane that must remain beside every solid (metres). */
@@ -166,6 +169,7 @@ export class SurfObstacleGenerator {
     let nextPhraseId = SURF_OBSTACLE_ID_BASE + 500000;
     let phrases = 0;
     let lastArc = -Infinity;
+    let previousKind: SurfObstaclePhraseKind | undefined;
 
     for (const chain of chains) {
       if (phrases >= SURF_OBSTACLE.MAX_PHRASES) break;
@@ -176,17 +180,19 @@ export class SurfObstacleGenerator {
       // reads a longer weave, quiet music keeps a single readable rib.
       const midHost = chain.hosts[Math.floor(chain.hosts.length / 2)] ?? chain.hosts[0];
       const theme = analysis.sections[midHost.sectionIndex]?.theme ?? 'FLOW';
-      const kind = SurfObstacleGenerator.chooseKind(rng, theme, chain.length);
+      const kind = SurfObstacleGenerator.chooseKind(rng, theme, chain.length, previousKind);
       const elementCount =
         kind === 'SURF_RIB' ? 1 :
-        kind === 'SURF_STAGGER' ? 2 :
+        kind === 'SURF_STAGGER' || kind === 'SURF_DOUBLE' || kind === 'SURF_KEYHOLE' ? 2 :
         kind === 'SURF_SLALOM' ? 3 : 4;
+      if (obstacles.length + elementCount > SURF_OBSTACLE.MAX_OBSTACLES) break;
 
       const lastStation = chain.stations.length - 1;
       // A phrase needs elementCount reads spaced by REAL arc metres (chains vary
       // station spacing, so counting stations could compress a read to a few
       // metres). Only elementCount=1 may use any station.
-      const anchors = SurfObstacleGenerator.pickAnchors(chain, elementCount, rng);
+      const reads = SurfObstacleGenerator.pickAnchors(chain, kind === 'SURF_KEYHOLE' ? 1 : elementCount, rng);
+      const anchors = reads && (kind === 'SURF_KEYHOLE' ? [reads[0], reads[0]] : reads);
       if (!anchors) continue;
 
       const firstHost = chain.hosts[Math.min(anchors[0], chain.hosts.length - 1)];
@@ -209,7 +215,8 @@ export class SurfObstacleGenerator {
         const station = chain.stations[stationIndex];
         const nextStation = chain.stations[Math.min(stationIndex + 1, lastStation)];
         const forward = SurfObstacleGenerator.stationForward(station, nextStation);
-        const side: 1 | -1 = e % 2 === 0 ? baseSide : (baseSide === 1 ? -1 : 1);
+        const sameSide = kind === 'SURF_DOUBLE' || (kind === 'SURF_SWITCHBACK' ? e < 2 : e % 2 === 0);
+        const side: 1 | -1 = sameSide ? baseSide : (baseSide === 1 ? -1 : 1);
         const depth = rng.nextFloat(SURF_OBSTACLE.MIN_RIB_DEPTH, SURF_OBSTACLE.MAX_RIB_DEPTH);
         // Guard the solid's FULL depth, not just its anchor point, against the
         // reserved entry / exit / checkpoint / AIR arc windows.
@@ -223,6 +230,18 @@ export class SurfObstacleGenerator {
         if (!placement) {
           skip = true;
           break;
+        }
+        // A keyhole occupies BOTH edges. Its common central opening remains
+        // at least SAFE_LANE_MIN, including edge margins on the real station.
+        if (kind === 'SURF_KEYHOLE') {
+          const usableHalf = station.halfWidth - SURF_OBSTACLE.EDGE_MARGIN;
+          const width = Math.min(SURF_OBSTACLE.MAX_RIB_WIDTH,
+            usableHalf - SURF_OBSTACLE.SAFE_LANE_MIN * 0.5);
+          placement.blockedMinLateral = side > 0 ? usableHalf - width : -usableHalf;
+          placement.blockedMaxLateral = side > 0 ? usableHalf : -usableHalf + width;
+          placement.ribLateral = (placement.blockedMinLateral + placement.blockedMaxLateral) * 0.5;
+          placement.safeLaneWidth = 2 * (usableHalf - width);
+          placement.safeLaneCenterLateral = 0;
         }
         sharedLaneLow = Math.max(sharedLaneLow, side > 0 ? -placement.halfWidth : placement.blockedMaxLateral);
         sharedLaneHigh = Math.min(sharedLaneHigh, side > 0 ? placement.blockedMinLateral : placement.halfWidth);
@@ -250,6 +269,7 @@ export class SurfObstacleGenerator {
       }
       nextPhraseId++;
       phrases++;
+      previousKind = kind;
       lastArc = phrase[phrase.length - 1].arcLength;
     }
 
@@ -416,15 +436,14 @@ export class SurfObstacleGenerator {
     };
   }
 
-  private static chooseKind(rng: SeededRandom, theme: string, ribbonLength: number): SurfObstaclePhraseKind {
-    if (ribbonLength < 110) return rng.nextBool(0.7) ? 'SURF_RIB' : 'SURF_STAGGER';
-    if (theme === 'DROP' || theme === 'SPEED' || theme === 'BUILDUP') {
-      return rng.nextBool(0.5) ? 'SURF_SLALOM' : 'SURF_WEAVE';
-    }
-    if (theme === 'BREATH' || theme === 'PRECISION') {
-      return rng.nextBool(0.65) ? 'SURF_RIB' : 'SURF_STAGGER';
-    }
-    return rng.choice<SurfObstaclePhraseKind>(['SURF_RIB', 'SURF_STAGGER', 'SURF_SLALOM']);
+  private static chooseKind(rng: SeededRandom, theme: string, ribbonLength: number, previous?: SurfObstaclePhraseKind): SurfObstaclePhraseKind {
+    const pool: SurfObstaclePhraseKind[] = ribbonLength < 110 || theme === 'BREATH'
+      ? ['SURF_RIB', 'SURF_DOUBLE', 'SURF_STAGGER']
+      : theme === 'PRECISION' ? ['SURF_KEYHOLE', 'SURF_DOUBLE', 'SURF_STAGGER']
+      : theme === 'DROP' || theme === 'SPEED' || theme === 'BUILDUP'
+        ? ['SURF_KEYHOLE', 'SURF_SWITCHBACK', 'SURF_SLALOM', 'SURF_WEAVE']
+        : ['SURF_RIB', 'SURF_DOUBLE', 'SURF_KEYHOLE', 'SURF_STAGGER', 'SURF_SLALOM'];
+    return rng.choice(pool.filter(kind => kind !== previous));
   }
 
   private static movementPhraseFor(kind: SurfObstaclePhraseKind): RouteNode['obstaclePhraseKind'] {
@@ -433,6 +452,9 @@ export class SurfObstacleGenerator {
       case 'SURF_STAGGER': return 'LEFT_RIGHT_THREAD';
       case 'SURF_SLALOM': return 'CUTOUT_SLALOM';
       case 'SURF_WEAVE': return 'THREE_WALL_THREAD';
+      case 'SURF_DOUBLE': return 'PHASE_DODGE';
+      case 'SURF_SWITCHBACK': return 'LEFT_RIGHT_THREAD';
+      case 'SURF_KEYHOLE': return 'LEFT_RIGHT_THREAD';
     }
   }
 
