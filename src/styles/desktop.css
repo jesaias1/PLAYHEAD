@@ -402,3 +402,60 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
   #ui-root .movement-lab-song-screen #lab-song-list .strip-item { flex-wrap: wrap; }
   #ui-root .movement-lab-song-screen #lab-song-list .strip-item > div:last-child { margin-left: auto; }
 }
+
+/* Real, movable title bars. Windows grow with the current page up to screen size. */
+#ui-root .desktop-real-title::before { display: none; }
+#ui-root .desktop-window-title { display: block; color: #fff; background: #000080; font: 700 12px/19px var(--font-sans); padding: 3px 7px; margin: 0 -12px 12px; cursor: grab; user-select: none; touch-action: none; }
+#ui-root .desktop-window-title.dragging { cursor: grabbing; }
+#ui-root .desktop-window-title:focus-visible { outline: 1px dotted #fff; outline-offset: -4px; }
+#ui-root .console-topbar.desktop-window-title { display: flex; margin: 0; padding: 3px 6px; }
+#ui-root .import-container.terminal-console { height: auto; max-height: calc(100dvh - 24px); grid-template-rows: 25px 27px 34px minmax(0,1fr) auto; }
+#ui-root .import-container > [role='tabpanel'] { overflow-y: auto; }
+#ui-root .signal-deck { height: auto; min-height: 480px; }
+#ui-root #panel-showcase .showcase-card { height: auto; }
+#ui-root .signal-catalog { max-height: 540px; }
+#ui-root :is(.settings-container,.profile-container,.results-container,.analysis-container) { max-height: calc(100dvh - 24px) !important; }
+#ui-root .settings-container { width: min(840px,100%); }
+#ui-root .settings-screen .settings-container { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 22px; }
+#ui-root .settings-screen .settings-container > .pause-title, #ui-root .settings-screen #btn-set-close { grid-column: 1/-1; }
+#ui-root .settings-screen #btn-set-close { justify-self: end; min-width: 100px; margin-top: 12px; }
+#ui-root .settings-screen .settings-row { min-width: 0; }
+#ui-root .screen input:disabled { background: #dfdfdf; color: #707070; }
+#ui-root #login-hint.error { color: #800000; }
+#ui-root #login-submit-row { margin-top: 12px; }
+#ui-root .armory-detail { position: sticky; top: 0; align-self: start; }
+@media(max-width:620px) {
+  #ui-root .import-container.terminal-console { height: auto; max-height: calc(100dvh - 12px); }
+  #ui-root .signal-deck { min-height: 0; }
+  #ui-root .signal-catalog { max-height: none; }
+  #ui-root .settings-screen .settings-container { display: block; }
+  #ui-root .armory-detail { position: static; }
+}
+
+#ui-root #panel-lab { max-width: none; }
+
+@media(min-width:1000px) {
+  #ui-root .import-container.terminal-console { width: min(1180px,100%); max-width: 1180px; }
+  #ui-root .armory-header { padding: 5px 8px; margin-bottom: 6px; }
+  #ui-root .armory-decoder-line { padding: 5px 8px; margin-bottom: 6px; }
+  #ui-root .armory-slots { margin-bottom: 6px; }
+  #ui-root .armory-filters { margin-bottom: 6px; padding-bottom: 5px; }
+  #ui-root .armory-body { grid-template-columns: minmax(0,1fr) 420px; }
+  #ui-root .armory-detail { padding: 10px; }
+  #ui-root .armory-detail-inner { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 6px 10px; align-items: start; }
+  #ui-root .armory-detail-inner > :is(.armory-detail-rarity,.armory-detail-name,.armory-detail-codename,.armory-detail-status) { grid-column: 1; }
+  #ui-root .armory-detail-inner > .armory-preview-host { grid-column: 2; grid-row: 1/6; min-width: 0; }
+  #ui-root .armory-detail-inner > :is(.armory-detail-desc,.armory-detail-rows,.armory-detail-actions) { grid-column: 1/-1; }
+  #ui-root .armory-detail-rows { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 4px 12px; }
+  #ui-root .armory-detail-row { flex-wrap: wrap; gap: 2px 8px; }
+}
+
+#ui-root .import-screen { padding: 12px; }
+@media(max-width:620px) { #ui-root .import-screen { padding: 6px; } }
+
+#ui-root .settings-screen .settings-container { max-width: 840px; }
+#ui-root .settings-screen .settings-footer { grid-column: 1/-1; text-align: right; margin-top: 12px; }
+#ui-root .settings-screen .settings-select { min-width: 0; max-width: 68%; }
+#ui-root .settings-screen .settings-label { flex-shrink: 1; }
+
+#ui-root .screen .desktop-real-title::before { display: none; }

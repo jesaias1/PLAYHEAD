@@ -2,6 +2,7 @@
  * Central UI Manager coordinating DOM screens with Game StateMachine
  */
 
+import { makeDesktopWindow } from './DesktopWindow';
 import { ImportScreen } from './ImportScreen';
 import { AnalysisScreen } from './AnalysisScreen';
 import { CountdownScreen } from './CountdownScreen';
@@ -77,6 +78,23 @@ export class UIManager {
     this.root.appendChild(this.loginModal.element);
     this.root.appendChild(this.raceHud.element);
     this.root.appendChild(this.replayOverlay.element);
+
+    const windows: [HTMLElement, string, string, string?][] = [
+      [this.importScreen.element, '.import-container', 'PLAYHEAD — Music Explorer', '.console-topbar'],
+      [this.analysisScreen.element, '.analysis-container', 'PLAYHEAD — Preparing track'],
+      [this.resultsScreen.element, '.results-container', 'PLAYHEAD — Run report'],
+      [this.pauseScreen.element, '.pause-container', 'PLAYHEAD — Paused', '.pause-title'],
+      [this.settingsModal.element, '.settings-container', 'PLAYHEAD — Settings', '.pause-title'],
+      [this.profileModal.element, '.profile-container', 'PLAYHEAD — Player'],
+      [this.loginModal.element, '.profile-container', 'PLAYHEAD — Account'],
+      [this.armoryModal.element, '.armory-modal-console', 'PLAYHEAD — Armory'],
+      [this.movementLabSongModal.element, '.settings-container', 'PLAYHEAD — Choose music'],
+      [this.decodeModal.element, '.decode-modal-dialog', 'PLAYHEAD — Signal decoder'],
+    ];
+    for (const [screen, selector, title, handleSelector] of windows) {
+      const panel = screen.querySelector<HTMLElement>(selector);
+      if (panel) makeDesktopWindow(panel, title, handleSelector ? panel.querySelector<HTMLElement>(handleSelector) ?? undefined : undefined);
+    }
   }
 
   public applyAccent(accent: VisualAccent): void {

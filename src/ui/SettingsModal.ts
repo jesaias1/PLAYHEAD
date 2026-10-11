@@ -3,6 +3,7 @@
  * and game hints / tips.
  */
 
+import { ModalFocus } from './ModalFocus';
 import { SettingsManager } from '../core/Settings';
 
 /** The camera controller clamps sensitivity to this range; keep the UI identical. */
@@ -32,15 +33,19 @@ export class SettingsModal {
   private vmSwayInput: HTMLInputElement;
   private closeBtn: HTMLButtonElement;
 
+  private focus: ModalFocus;
   private onCloseCallback?: () => void;
   private settingsManager = SettingsManager.getInstance();
 
   constructor() {
     this.element = document.createElement('div');
     this.element.className = 'screen settings-screen hidden';
+    this.element.setAttribute('role', 'dialog');
+    this.element.setAttribute('aria-modal', 'true');
+    this.element.setAttribute('aria-labelledby', 'settings-title');
     this.element.innerHTML = `
       <div class="settings-container" style="max-height: 88vh; overflow-y: auto;">
-        <h3 class="pause-title">SETTINGS</h3>
+        <h3 class="pause-title" id="settings-title">SETTINGS</h3>
 
         <div class="settings-row">
           <label class="settings-label">MOUSE SENSITIVITY</label>
@@ -153,7 +158,7 @@ export class SettingsModal {
           </button>
         </div>
 
-        <div style="margin-top: 24px; text-align: center;">
+        <div class="settings-footer">
           <button class="primary" id="btn-set-close">CLOSE</button>
         </div>
       </div>
@@ -178,6 +183,7 @@ export class SettingsModal {
     this.vmSwayInput = this.element.querySelector('#set-vm-sway') as HTMLInputElement;
     this.closeBtn = this.element.querySelector('#btn-set-close') as HTMLButtonElement;
 
+    this.focus = new ModalFocus(this.element, () => this.closeBtn.click());
     this.initValues();
     this.initEvents();
   }
@@ -193,12 +199,11 @@ export class SettingsModal {
 
   public show(): void {
     this.initValues();
-    this.element.classList.remove('hidden');
-    this.sensInput.focus();
+    this.focus.open(this.sensInput);
   }
 
   public hide(): void {
-    this.element.classList.add('hidden');
+    this.focus.close();
   }
 
   public isVisible(): boolean {
@@ -323,6 +328,12 @@ export class SettingsModal {
       this.settingsManager.update({ viewmodelSway: parseFloat(this.vmSwayInput.value) });
     });
 
+    for (const row of this.element.querySelectorAll('.settings-row')) {
+      const label = row.querySelector('label');
+      const control = row.querySelector<HTMLInputElement | HTMLSelectElement>('input,select');
+      if (label && control) label.htmlFor = control.id;
+    }
+    this.sensNumberInput.setAttribute('aria-label', 'Mouse sensitivity value');
     this.closeBtn.addEventListener('click', () => {
       this.hide();
       this.onCloseCallback?.();

@@ -10,6 +10,8 @@
  * terminal buttons) rather than introducing a new visual language.
  */
 
+import { ModalFocus } from './ModalFocus';
+
 export interface LoginModalCallbacks {
   onSubmit: (
     mode: 'register' | 'login',
@@ -38,6 +40,7 @@ export class LoginModal {
 
   private mode: 'register' | 'login' = 'register';
   private pending = false;
+  private focus: ModalFocus;
   private callbacks: LoginModalCallbacks = { onSubmit: async () => ({ ok: false, detail: '' }) };
 
   constructor() {
@@ -45,12 +48,13 @@ export class LoginModal {
     this.element.className = 'screen profile-screen hidden';
     this.element.setAttribute('role', 'dialog');
     this.element.setAttribute('aria-modal', 'true');
+    this.element.setAttribute('aria-labelledby', 'login-title');
     this.element.innerHTML = `
       <div class="profile-container">
         <div class="profile-header">
           <div class="profile-title-group">
             <div class="profile-kicker">[IDENTITY] SIGNAL ACCOUNT</div>
-            <h3 class="profile-title">ACCOUNT</h3>
+            <h3 class="profile-title" id="login-title">ACCOUNT</h3>
             <div class="profile-status" id="login-status"></div>
           </div>
           <button class="terminal-btn-subtle" id="btn-login-close" type="button">[ CLOSE ]</button>
@@ -79,12 +83,12 @@ export class LoginModal {
           <label class="profile-label" for="login-password">PASSWORD</label>
           <input class="online-input" id="login-password" type="password"
                  autocomplete="current-password" spellcheck="false" />
-          <div class="profile-rename-hint" id="login-hint"></div>
-          <div class="profile-rename hidden" id="login-submit-row">
+          <div class="profile-rename-hint" id="login-hint" role="status" aria-live="polite"></div>
+          <div class="profile-rename" id="login-submit-row">
             <button class="terminal-btn-subtle" id="btn-login-submit" type="button">[ CREATE ACCOUNT ]</button>
           </div>
           <div class="online-lobby-status" id="login-note">
-            NO EMAIL REQUIRED. YOUR USERNAME AND PASSWORD ARE HASHED ON THE SERVER.
+            KEEP YOUR PROGRESS ACROSS DEVICES. NO EMAIL REQUIRED.
           </div>
         </div>
       </div>
@@ -102,6 +106,8 @@ export class LoginModal {
     this.formSections = Array.from(this.element.querySelectorAll('[data-login-form]')) as HTMLElement[];
     this.signedInElem = this.element.querySelector('#login-signedin') as HTMLElement;
 
+    this.focus = new ModalFocus(this.element, () => this.closeBtn.click());
+
     this.modeRegisterBtn.addEventListener('click', () => this.setMode('register'));
     this.modeLoginBtn.addEventListener('click', () => this.setMode('login'));
     this.submitBtn.addEventListener('click', () => void this.submit());
@@ -117,7 +123,10 @@ export class LoginModal {
       }
     });
     this.element.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !this.pending) void this.submit();
+      if (e.key === 'Enter' && !this.pending && (e.target === this.usernameInput || e.target === this.passwordInput)) {
+        e.preventDefault();
+        void this.submit();
+      }
     });
   }
 
@@ -130,13 +139,14 @@ export class LoginModal {
   }
 
   public hide(): void {
-    this.element.classList.add('hidden');
+    this.focus.close();
+    this.passwordInput.value = '';
   }
 
   public show(): void {
     this.setMode(this.mode);
     this.setHint('', false);
-    this.element.classList.remove('hidden');
+    this.focus.open(this.signedInElem.classList.contains('hidden') ? this.usernameInput : this.signOutBtn);
   }
 
   /**
@@ -173,8 +183,12 @@ export class LoginModal {
   }
 
   private setMode(mode: 'register' | 'login'): void {
+    if (this.pending) return;
     this.mode = mode;
     const register = mode === 'register';
+    this.passwordInput.autocomplete = register ? 'new-password' : 'current-password';
+    this.modeRegisterBtn.setAttribute('aria-pressed', String(register));
+    this.modeLoginBtn.setAttribute('aria-pressed', String(!register));
     this.modeRegisterBtn.classList.toggle('active', register);
     this.modeLoginBtn.classList.toggle('active', !register);
     this.submitBtn.textContent = register ? '[ CREATE ACCOUNT ]' : '[ SIGN IN ]';
@@ -200,21 +214,29 @@ export class LoginModal {
       this.setHint('PASSWORD MUST BE AT LEAST 8 CHARACTERS', true);
       return;
     }
+    const mode = this.mode;
     this.pending = true;
-    this.submitBtn.disabled = true;
-    this.setHint(this.mode === 'register' ? 'CREATING ACCOUNT...' : 'SIGNING IN...', false);
-
-    const result = await this.callbacks.onSubmit(this.mode, username, password);
-    this.pending = false;
-    this.submitBtn.disabled = false;
-
-    if (result.ok) {
-      this.passwordInput.value = '';
-      this.setHint(this.mode === 'register' ? 'ACCOUNT CREATED' : 'SIGNED IN', false);
-      this.renderSession(username);
-      this.hide();
-    } else {
-      this.setHint(result.detail.toUpperCase(), true);
+    const controls = [this.submitBtn, this.modeRegisterBtn, this.modeLoginBtn, this.usernameInput, this.passwordInput];
+    controls.forEach((control) => { control.disabled = true; });
+    this.element.setAttribute('aria-busy', 'true');
+    this.setHint(mode === 'register' ? 'CREATING ACCOUNT...' : 'SIGNING IN...', false);
+    try {
+      const result = await this.callbacks.onSubmit(mode, username, password);
+      if (result.ok) {
+        this.passwordInput.value = '';
+        this.setHint(mode === 'register' ? 'ACCOUNT CREATED' : 'SIGNED IN', false);
+        this.renderSession(username);
+        this.hide();
+      } else {
+        this.setHint(result.detail.toUpperCase(), true);
+      }
+    } catch {
+      this.setHint('CONNECTION FAILED // PLEASE TRY AGAIN', true);
+    } finally {
+      this.pending = false;
+      controls.forEach((control) => { control.disabled = false; });
+      this.element.setAttribute('aria-busy', 'false');
+      if (this.isVisible()) this.passwordInput.focus();
     }
   }
 }

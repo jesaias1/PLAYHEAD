@@ -12,6 +12,7 @@
  * asset, no animated VideoTexture and no replay file is loaded to show a profile.
  */
 
+import { ModalFocus } from './ModalFocus';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { formatRaceTime } from './RaceHud';
 import type { PlayerProfileView, ProfileTrackRow } from '../online/PlayerProfileService';
@@ -41,6 +42,7 @@ export class ProfileModal {
   private renameBtn: HTMLButtonElement;
   private closeBtn: HTMLButtonElement;
 
+  private focus: ModalFocus;
   private callbacks: ProfileModalCallbacks = {};
 
   constructor() {
@@ -48,6 +50,7 @@ export class ProfileModal {
     this.element.className = 'screen profile-screen hidden';
     this.element.setAttribute('role', 'dialog');
     this.element.setAttribute('aria-modal', 'true');
+    this.element.setAttribute('aria-labelledby', 'profile-name');
     this.element.innerHTML = `
       <div class="profile-container">
         <div class="profile-header">
@@ -94,6 +97,7 @@ export class ProfileModal {
     this.renameBtn = this.element.querySelector('#btn-profile-rename') as HTMLButtonElement;
     this.closeBtn = this.element.querySelector('#btn-profile-close') as HTMLButtonElement;
 
+    this.focus = new ModalFocus(this.element, () => this.closeBtn.click());
     this.closeBtn.addEventListener('click', () => {
       this.hide();
       this.callbacks.onClose?.();
@@ -120,7 +124,7 @@ export class ProfileModal {
   }
 
   public hide(): void {
-    this.element.classList.add('hidden');
+    this.focus.close();
   }
 
   /** Renders a profile view. `allowRename` is only true for the local player. */
@@ -134,7 +138,7 @@ export class ProfileModal {
       this.masteryElem.innerHTML = '';
       this.tracksElem.innerHTML = '';
       this.renameRow.classList.add('hidden');
-      this.element.classList.remove('hidden');
+      this.focus.open(this.closeBtn);
       return;
     }
 
@@ -149,7 +153,7 @@ export class ProfileModal {
     this.renderMastery(view);
     this.renderTracks(view);
 
-    this.element.classList.remove('hidden');
+    this.focus.open(this.closeBtn);
   }
 
   // -- sections -------------------------------------------------------------
