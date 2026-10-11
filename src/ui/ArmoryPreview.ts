@@ -567,7 +567,7 @@ export class ArmoryPreview {
       alpha: false,
       powerPreference: 'low-power'
     });
-    renderer.setClearColor(0x05090f, 1);
+    renderer.setClearColor(0x252933, 1);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
     renderer.shadowMap.enabled = false;
 
@@ -819,7 +819,7 @@ export class ArmoryPreview {
     const camera = this.camera;
     if (!renderer || !camera) return;
     const width = Math.max(1, Math.min(this.canvasHost.clientWidth || MAX_WIDTH, MAX_WIDTH));
-    const height = Math.max(1, Math.round(width * 0.78));
+    const height = Math.max(1, Math.round(width * 0.7));
     this.canvasHost.style.height = `${height}px`;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
     renderer.setSize(width, height, false);

@@ -1,3 +1,4 @@
+import { raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 /**
  * 05 // ONLINE RACE — the PLAYHEAD multiplayer race hub.
  *
@@ -43,14 +44,15 @@ export interface RaceCatalogEntry {
 }
 
 export interface RacePanelCallbacks {
-  onCreateRoom: (trackId: string, capacity: number) => void;
+  onCreateRoom: (trackId: string, capacity: number, mode?: RaceMode) => void;
   onJoinRoom: (code: string) => void;
   onSetReady: (ready: boolean) => void;
   onLeaveRoom: () => void;
   onRematch: () => void;
+  onNextSong?: () => void;
   onReturnToLobby: () => void;
   /** Host changes the official track before the room locks. */
-  onHostPickTrack: (trackId: string) => void;
+  onHostPickTrack: (trackId: string, mode?: RaceMode) => void;
   /** The player NAME is the interaction target for opening a profile. */
   onOpenProfile: (userId: string, displayName: string) => void;
 }
@@ -129,6 +131,7 @@ export class RacePanel {
             </div>
             <label class="race-field-label" for="race-track-select">SIGNAL</label>
             <select class="online-select race-track-select" id="race-track-select" aria-label="Selected signal"></select>
+            <label>MODE <select id="race-mode" aria-label="Race mode"><option value="NORMAL">Normal</option><option value="SURF">Surf</option></select></label>
             <span class="race-field-label race-racers-label" id="race-racers-label">RACERS</span>
             <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
             <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
@@ -185,6 +188,7 @@ export class RacePanel {
         <div class="online-host-track hidden" id="race-host-track-row">
           <span class="online-invite-label">TRACK</span>
           <select class="online-select" id="race-host-track-select"></select>
+          <select id="race-host-mode" aria-label="Lobby race mode"><option value="NORMAL">Normal</option><option value="SURF">Surf</option></select>
         </div>
 
         <div class="online-players race-player-grid" id="race-lobby-players"></div>
@@ -206,6 +210,7 @@ export class RacePanel {
         <div class="online-results race-results-grid" id="race-results"></div>
         <div class="online-lobby-status" id="race-rematch-note"></div>
         <div class="online-lobby-actions race-results-actions">
+          <button class="terminal-btn-subtle" id="race-results-next" type="button">PLAY NEXT SONG</button>
           <button class="btn-hero btn-terminal-exec" id="race-results-rematch" type="button">> REMATCH</button>
           <button class="terminal-btn-subtle" id="race-results-lobby" type="button">RETURN TO LOBBY</button>
           <button class="terminal-btn-subtle" id="race-results-leave" type="button">LEAVE ROOM</button>
@@ -250,7 +255,7 @@ export class RacePanel {
       'click',
       () => {
         const capacity = Number(this.capacityElem.value) || DEFAULT_RACE_CAPACITY;
-        this.callbacks?.onCreateRoom(this.selectElem.value, capacity);
+        this.callbacks?.onCreateRoom(this.selectElem.value, capacity, (this.element.querySelector('#race-mode') as HTMLSelectElement).value as RaceMode);
       }
     );
     (this.element.querySelector('#race-join-btn') as HTMLButtonElement).addEventListener(
@@ -282,7 +287,7 @@ export class RacePanel {
       if (cleaned !== this.joinInput.value) this.joinInput.value = cleaned;
     });
     this.lobbyHostTrackElem.addEventListener('change', () => {
-      this.callbacks?.onHostPickTrack(this.lobbyHostTrackElem.value);
+      this.callbacks?.onHostPickTrack(this.lobbyHostTrackElem.value, (this.element.querySelector('#race-host-mode') as HTMLSelectElement).value as RaceMode);
     });
 
     this.lobbyReadyBtn.addEventListener('click', () => {
@@ -307,6 +312,10 @@ export class RacePanel {
       this.callbacks?.onLeaveRoom()
     );
 
+    this.element.querySelector('#race-results-next')!.addEventListener('click', () => this.callbacks?.onNextSong?.());
+    this.element.querySelector('#race-host-mode')!.addEventListener('change', () => {
+      if (this.isHost && this.lastRoom?.state === 'LOBBY') this.callbacks?.onHostPickTrack(this.lobbyHostTrackElem.value, (this.element.querySelector('#race-host-mode') as HTMLSelectElement).value as RaceMode);
+    });
     (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).addEventListener(
       'click',
       () => this.callbacks?.onRematch()
@@ -443,7 +452,7 @@ export class RacePanel {
     this.selectView.classList.add('hidden');
     this.lobbyView.classList.add('hidden');
     this.resultsView.classList.remove('hidden');
-    this.rematchNoteElem.textContent = '';
+    this.rematchNoteElem.textContent = this.isHost ? '' : 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
   }
 
   public showError(message: string): void {
@@ -460,8 +469,9 @@ export class RacePanel {
     this.isHost = isHost;
     this.lobbyStartBtn.classList.add('hidden');
     (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).disabled = !isHost;
+    (this.element.querySelector('#race-results-next') as HTMLButtonElement).disabled = !isHost;
     (this.element.querySelector('#race-results-lobby') as HTMLButtonElement).disabled = !isHost;
-    if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'WAITING FOR HOST // REMATCH OR LOBBY';
+    if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
     // Only the host sees the track picker, and only while the room is unlocked.
     const canPick = isHost && (this.lastRoom?.state ?? 'LOBBY') === 'LOBBY';
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
@@ -487,7 +497,7 @@ export class RacePanel {
 
     // Track identity: real title + BPM // difficulty from the official catalog,
     // painted with the real track accent. No track content change.
-    const track = this.catalog.find((t) => t.id === room.trackId);
+    const track = this.catalog.find((t) => t.id === raceBaseTrackId(room.trackId));
     const accent = track?.accentColor || 'var(--accent-color)';
     this.lobbyView.style.setProperty('--race-accent', accent);
     this.lobbyTitleElem.style.color = accent;
@@ -504,9 +514,11 @@ export class RacePanel {
       'hidden',
       !(this.isHost && room.state === 'LOBBY')
     );
-    if (room.state === 'LOBBY' && this.lobbyHostTrackElem.value !== room.trackId) {
-      this.lobbyHostTrackElem.value = room.trackId;
+    if (room.state === 'LOBBY' && this.lobbyHostTrackElem.value !== raceBaseTrackId(room.trackId)) {
+      this.lobbyHostTrackElem.value = raceBaseTrackId(room.trackId);
     }
+    const modeSelect = this.element.querySelector('#race-host-mode') as HTMLSelectElement;
+    modeSelect.value = raceMode(room.trackId); modeSelect.disabled = !this.isHost || room.state !== 'LOBBY';
     this.lobbyHostTrackElem.disabled = !this.isHost || room.state !== 'LOBBY';
 
     this.renderPlayerRows(room, players, myUserId, identities);
@@ -517,6 +529,7 @@ export class RacePanel {
 
     const connected = players.filter((p) => p.connected);
     (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).disabled = !this.isHost || connected.length < 2;
+    (this.element.querySelector('#race-results-next') as HTMLButtonElement).disabled = !this.isHost || connected.length < 2;
     const allReady = computeAllReady(players);
 
     let status: string;

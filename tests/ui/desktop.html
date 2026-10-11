@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.png"><title>PLAYHEAD UI regression fixture</title></head><body><div id="ui-root"></div><nav id="fixture-controls" style="position:fixed;bottom:0;z-index:10000;background:#191c22;color:white;padding:2px;font:12px monospace">OFFLINE UI FIXTURE </nav><script type="module">
+import '/src/styles/main.css'; import '/src/styles/desktop.css';
+import { UIManager } from '/src/ui/UIManager.ts';
+import { initializeDesktopTheme } from '/src/ui/DesktopTheme.ts';
+initializeDesktopTheme(); const ui = new UIManager(document.querySelector('#ui-root'));
+const board = ui.importScreen.leaderboardPanel;
+function renderBoard(offline = false) {
+ const start = board.getPage() * 25;
+ const entries = Array.from({length:Math.max(0,Math.min(25,53-start))}, (_,i)=>({rankPosition:start+i+1,trackId:'fixture',displayName:start+i===36?'YOU':'RUNNER '+(start+i+1),timeUs:30000000+(start+i)*1000000,rank:'GOLD',userId:start+i===36?'me':'runner',runId:'run-'+(start+i),verificationState:'accepted',createdAt:'',replayVersion:null,replayPath:null,replayHash:null}));
+ board.render({trackId:'fixture',entries:offline?[]:entries,you:offline?null:{timeUs:66000000,position:37,displayName:'YOU',runId:'run-36',userId:'me'},nextAbove:null,offline,page:board.getPage(),pageSize:25,total:53},'LOCAL FIXTURE');
+}
+board.setCallbacks({onSelectTrack:()=>renderBoard(),onSelectBoard:()=>renderBoard(),onRetryConnection:()=>renderBoard(),onPlaySignal:()=>{},onWatchRun:()=>{},onRaceRun:()=>{},onOpenProfile:()=>{}});
+let replayState={player:'LOCAL FIXTURE',finishTimeUs:12000000,currentMs:0,durationMs:12000,paused:true,playbackRate:1};
+ui.replayOverlay.setCallbacks({onSeek:time=>{replayState.currentMs=time;ui.replayOverlay.update(replayState);},onSpeed:rate=>{replayState.playbackRate=rate;ui.replayOverlay.update(replayState);},onTogglePause:()=>{replayState.paused=!replayState.paused;ui.replayOverlay.update(replayState);},onRestart:()=>{replayState.currentMs=0;ui.replayOverlay.update(replayState);},onExit:()=>show('Menu')});
+function show(name) {
+ ui.armoryModal.hide(); ui.importScreen.hide(); ui.replayOverlay.hide(); ui.resultsScreen.hide(); ui.settingsModal.hide();
+ if(name==='Menu') {ui.importScreen.show();document.querySelector('#tab-btn-showcase').click();}
+ if(name==='Armory') ui.armoryModal.show();
+ if(name==='Leaderboard'||name==='Offline') {ui.importScreen.show();document.querySelector('#tab-btn-online').click();document.querySelector('#online-subnav-leaderboard').click();renderBoard(name==='Offline');}
+ if(name==='Replay') {ui.replayOverlay.show();ui.replayOverlay.update(replayState);}
+ if(name==='Settings') ui.settingsModal.show();
+ if(name==='Results') {ui.resultsScreen.showResults({completionTime:60,targetTime:70,syncDelta:-10,maxSpeed:1200,averageSpeed:900,strafeEfficiency:87,fallsCount:0,restartsCount:0,rank:'GOLD',score:10000},123,undefined,'LOCAL FIXTURE');ui.resultsScreen.show();}
+}
+for(const name of ['Menu','Armory','Leaderboard','Offline','Replay','Results','Settings']) {const b=document.createElement('button');b.textContent=name;b.onclick=()=>show(name);document.querySelector('#fixture-controls').append(b);}
+show('Menu');document.body.dataset.fixtureReady='true';
+</script></body></html>

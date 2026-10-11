@@ -11,7 +11,8 @@
     "test": "vitest run",
     "precompute-presets": "node scripts/precompute_presets.mjs",
     "minify-presets": "node scripts/minify_presets.mjs",
-    "encode-karambit-videos": "node scripts/encode_karambit_videos.mjs"
+    "encode-karambit-videos": "node scripts/encode_karambit_videos.mjs",
+    "test:ui": "node scripts/check-ui.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",

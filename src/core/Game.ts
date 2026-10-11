@@ -1,3 +1,4 @@
+import { loadRaceCourse, nextRaceTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 /**
  * Master Game Controller for TRACK//RUN
  * Integrates StateMachine, AudioEngine, World, PlayerController, Replay, and UI
@@ -40,6 +41,7 @@ import {
   isRaceComplete
 } from '../online/RaceRoomService';
 import { leaderboardService } from '../online/LeaderboardService';
+import { readMenuPreferences, saveMenuPreferences } from '../ui/MenuPreferences';
 import type { LeaderboardView, RunSubmission } from '../online/LeaderboardService';
 import { authService } from '../online/AuthService';
 import { validateDisplayName } from '../online/AuthService';
@@ -254,6 +256,9 @@ export class Game {
   private spectateIndex = 0;
   /** Ensures the final room results are shown exactly once per race instance. */
   private raceResultsShownForRaceId: string | null = null;
+  private raceContinuationPending = false;
+  private raceVerifiedCourseKey = '';
+  private raceTrackSelectionPending = false;
   private currentRaceInstanceId: string | null = null;
   private raceHudAccumulator = 0;
   private raceTeleportId = 0;
@@ -481,7 +486,11 @@ export class Game {
       (err) => alert(err),
       (trackId) => this.enterMovementLab(trackId),
       () => this.enterMovementLab(undefined, { academy: true }),
-      (track) => this.handleCatalogTrackSelected(track),
+      async (track) => {
+        const mode = readMenuPreferences().mode;
+        await this.handleCatalogTrackSelected(track);
+        if (mode === 'SURF' && this.stateMachine.is(GameState.READY)) await this.switchReadyToSurf();
+      },
       (trackId) => {
         // RACE PB GHOST: retrieve + validate + enter the level. Failures surface
         // in the restrained showcase state instead of a fake action.
@@ -501,7 +510,12 @@ export class Game {
     this.ui.analysisScreen.setOnBack(() => {
       if (this.stateMachine.is(GameState.READY)) this.returnToImport();
     });
-    this.ui.analysisScreen.setOnSurf(() => { void this.switchReadyToSurf(); });
+    this.ui.analysisScreen.setOnSurf(() => {
+      if (this.currentCourseType === 'SURF' && this.currentSurfOfficialTrackId) {
+        saveMenuPreferences({ mode: 'NORMAL' });
+        void this.loadPresetTrack(this.currentSurfOfficialTrackId);
+      } else void this.switchReadyToSurf();
+    });
     this.ui.analysisScreen.setOnAcademy(() => this.enterAcademyFromReady());
 
     // Pause Screen
@@ -1176,6 +1190,11 @@ export class Game {
                 else this.povPlayer.pause();
               },
               onRestart: () => this.povPlayer.restart(),
+              onSeek: timeMs => {
+                this.povPlayer.seek(timeMs);
+                this.audioEngine.seek((this.povPlayer.getStartSongTimeMs() + this.povPlayer.getCurrentMs()) / 1000);
+              },
+              onSpeed: rate => this.povPlayer.setPlaybackRate(rate),
               onExit: () => this.exitPovReplay()
             });
             this.ui.replayOverlay.setTitle('WORLD // WATCH RUN');
@@ -1443,7 +1462,8 @@ export class Game {
     await this.audioEngine.init();
     this.audioEngine.setBuffer(buffer);
     this.currentCourseType = 'SURF';
-    this.ui.analysisScreen.setCourseVariant(true);
+    saveMenuPreferences({ mode: 'SURF' });
+    this.ui.analysisScreen.setCourseVariant(true, !!this.currentSurfOfficialTrackId);
     this.ui.analysisScreen.setStage('[MAP] SURF PHRASES', 0.5);
 
     let analysis = fallbackAnalysis;
@@ -3276,7 +3296,7 @@ export class Game {
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
 
     racePanel.setCallbacks({
-      onCreateRoom: (trackId, capacity) => void this.createRaceRoom(trackId, capacity),
+      onCreateRoom: (trackId, capacity, mode) => void this.createRaceRoom(trackId, capacity, mode),
       onJoinRoom: (code) => void this.joinRaceRoom(code),
       onSetReady: (ready) => {
         void raceRoomService.setReady(ready).then((result) => {
@@ -3287,13 +3307,15 @@ export class Game {
       },
       onLeaveRoom: () => void this.leaveRaceRoom(),
       onRematch: () => this.handleRaceRematch(),
+      onNextSong: () => void this.handleRaceNextSong(),
       onReturnToLobby: () => {
+        if (this.raceContinuationPending) return;
         void raceRoomService.returnToLobby().then(result => {
           if (result.ok) this.returnToRaceLobby();
           else this.ui.importScreen.racePanel.showError(result.detail);
         });
       },
-      onHostPickTrack: (trackId) => void this.hostPickRaceTrack(trackId),
+      onHostPickTrack: (trackId, mode) => void this.hostPickRaceTrack(trackId, mode),
       onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
 
@@ -3319,8 +3341,8 @@ export class Game {
         });
       },
       onRetryConnection: () => {
-        onlineBootstrap.retry();
-        void this.refreshLeaderboard(leaderboardPanel.getSelectedTrack(), leaderboardPanel.getBoardKind());
+        void onlineBootstrap.retry().then(() =>
+          this.refreshLeaderboard(leaderboardPanel.getSelectedTrack(), leaderboardPanel.getBoardKind()));
       },
       onOpenProfile: (userId, displayName) => void this.openPlayerProfile(userId, displayName)
     });
@@ -3360,6 +3382,19 @@ export class Game {
         const panelRef = this.ui.importScreen.racePanel;
         panelRef.setHost(raceRoomService.isHost());
         panelRef.renderLobby(room, players, raceRoomService.getInviteUrl() ?? '', authService.getUserId(), this.raceIdentities);
+        const verificationKey = `${room.id}:${room.raceId}:${room.trackId}`;
+        if (room.state === 'LOBBY' && this.raceVerifiedCourseKey !== verificationKey) {
+          this.raceVerifiedCourseKey = verificationKey;
+          panelRef.setMapState('VERIFYING');
+          void loadRaceCourse(room.trackId).then(course => {
+            const current = raceRoomService.getRoom();
+            if (!current || `${current.id}:${current.raceId}:${current.trackId}` !== verificationKey) return;
+            const verdict = course ? raceRoomService.verifyLocalMap(course.track) : { ok: false, detail: 'Canonical course unavailable' };
+            panelRef.setMapState(verdict.ok ? 'OK' : 'MISMATCH', verdict.detail);
+          }).catch(() => {
+            if (this.raceVerifiedCourseKey === verificationKey) panelRef.setMapState('MISMATCH', 'Course verification failed. Choose the track again.');
+          });
+        }
     // Identity is fetched lazily and only while a lobby is actually open.
     void this.refreshRaceIdentities();
         // AUTHORITATIVE PHASE: both clients react to the SAME room state. No
@@ -3426,42 +3461,47 @@ export class Game {
   ): Promise<void> {
     const panel = this.ui.importScreen.leaderboardPanel;
     const requestToken = ++this.leaderboardRequestToken;
+    const page = panel.getPage?.() ?? 0;
     const catalogTitle = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
     const title = board === 'SURF' ? `${catalogTitle} // SURF` : catalogTitle;
     panel.setLoading(title);
     const render = (view: LeaderboardView): void => {
       if (requestToken !== this.leaderboardRequestToken ||
-          panel.getSelectedTrack() !== trackId || panel.getBoardKind() !== board) return;
+          panel.getSelectedTrack() !== trackId || panel.getBoardKind() !== board || (panel.getPage?.() ?? 0) !== page) return;
       panel.render(view, title);
     };
 
-    // The board is scoped to the canonical identity of the local map.
-    const level = await PresetLevelCache.loadPreset(trackId);
-    if (!level) {
-      render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
-      return;
-    }
-
-    // SURF board: regenerate the canonical SURF course from the shipped preset
-    // analysis (deterministic, actual-duration matched) and read the NAMESPACED
-    // board. A song that is not a canonical official preset stays local-only.
-    if (board === 'SURF') {
-      let identity;
-      try {
-        const surfTrack = TrackGenerator.generate(level.analysis, 'SURF');
-        identity = computeSurfMapIdentity(trackId, surfTrack, level.analysis);
-      } catch {
+    try {
+      // The board is scoped to the canonical identity of the local map.
+      const level = await PresetLevelCache.loadPreset(trackId);
+      if (!level) {
         render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
         return;
       }
-      const view = await leaderboardService.fetchLeaderboard(identity.trackId, identity);
-      render(view);
-      return;
-    }
 
-    const identity = computeMapIdentity(trackId, level.track, level.analysis);
-    const view = await leaderboardService.fetchLeaderboard(trackId, identity);
-    render(view);
+      // SURF board: regenerate the canonical SURF course from the shipped preset
+      // analysis (deterministic, actual-duration matched) and read the NAMESPACED
+      // board. A song that is not a canonical official preset stays local-only.
+      if (board === 'SURF') {
+        let identity;
+        try {
+          const surfTrack = TrackGenerator.generate(level.analysis, 'SURF');
+          identity = computeSurfMapIdentity(trackId, surfTrack, level.analysis);
+        } catch {
+          render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
+          return;
+        }
+        const view = await leaderboardService.fetchLeaderboard(identity.trackId, identity, 25, page * 25);
+        render(view);
+        return;
+      }
+
+      const identity = computeMapIdentity(trackId, level.track, level.analysis);
+      const view = await leaderboardService.fetchLeaderboard(trackId, identity, 25, page * 25);
+      render(view);
+    } catch {
+      render({ trackId, entries: [], you: null, nextAbove: null, offline: true });
+    }
   }
 
   /**
@@ -3529,20 +3569,20 @@ export class Game {
 
   // -- race lifecycle -------------------------------------------------------
 
-  private async createRaceRoom(trackId: string, capacity?: number): Promise<void> {
+  private async createRaceRoom(trackId: string, capacity?: number, mode: RaceMode = 'NORMAL'): Promise<void> {
     const panel = this.ui.importScreen.racePanel;
     panel.clearError();
 
-    const level = await PresetLevelCache.loadPreset(trackId);
+    const level = await loadRaceCourse(trackId, mode);
     if (!level) {
       panel.showError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
       return;
     }
-    const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
-    const identity = computeMapIdentity(trackId, level.track, level.analysis);
+    const title = level.title;
+    const identity = level.identity;
 
     const result = await raceRoomService.createRoom({
-      trackId,
+      trackId: identity.trackId,
       trackTitle: title,
       identity,
       capacity
@@ -3578,7 +3618,7 @@ export class Game {
 
     // Both clients MUST agree on the map before READY/START is meaningful.
     panel.setMapState('VERIFYING');
-    const level = await PresetLevelCache.loadPreset(result.room.trackId);
+    const level = await loadRaceCourse(result.room.trackId);
     if (!level) {
       panel.setMapState('MISMATCH', 'canonical map unavailable');
       panel.showError('CANONICAL MAP UNAVAILABLE FOR THIS ROOM');
@@ -3612,13 +3652,43 @@ export class Game {
    * race instance; RETURN TO LOBBY also resets the authoritative room.
    */
   private async handleRaceRematch(): Promise<void> {
-    const result = await raceRoomService.requestRematch();
-    if (!result.ok) {
-      this.ui.importScreen.racePanel.showError(`REMATCH FAILED // ${result.detail.toUpperCase()}`);
-      return;
-    }
-    this.ui.importScreen.racePanel.setRematchNote('REMATCH READY // ALL RACERS RESET');
-    this.returnToRaceLobby();
+    if (this.raceContinuationPending) return;
+    this.raceContinuationPending = true;
+    try {
+      const result = await raceRoomService.requestRematch();
+      if (!result.ok) {
+        this.ui.importScreen.racePanel.showError(`REMATCH FAILED // ${result.detail.toUpperCase()}`);
+        return;
+      }
+      this.ui.importScreen.racePanel.setRematchNote('REMATCH READY // ALL RACERS RESET');
+      this.returnToRaceLobby();
+    } finally { this.raceContinuationPending = false; }
+  }
+
+  private async handleRaceNextSong(): Promise<void> {
+    const room = raceRoomService.getRoom();
+    const panel = this.ui.importScreen.racePanel;
+    if (this.raceContinuationPending || !room || !raceRoomService.isHost() || room.state !== 'FINISHED') return;
+    const next = nextRaceTrackId(room.trackId);
+    if (!next) { panel.setRematchNote('NEXT SONG UNAVAILABLE'); return; }
+    this.raceContinuationPending = true;
+    panel.setRematchNote('PREPARING NEXT SONG…');
+    try {
+      const course = await loadRaceCourse(next, raceMode(room.trackId));
+      if (!course || raceRoomService.getRoom()?.raceId !== room.raceId) throw new Error('Room changed or course unavailable');
+      const reset = await raceRoomService.requestRematch();
+      if (!reset.ok) throw new Error(reset.detail);
+      const current = raceRoomService.getRoom();
+      if (!current || current.id !== room.id || current.state !== 'LOBBY' || !raceRoomService.isHost()) throw new Error('Room changed');
+      const selected = await raceRoomService.selectTrack(course.identity.trackId, course.title, course.identity);
+      if (!selected.ok) throw new Error(selected.detail);
+      this.returnToRaceLobby();
+      panel.setRematchNote('NEXT SONG READY // READY UP TO CONTINUE');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      panel.setRematchNote('NEXT SONG FAILED // ' + detail);
+      panel.showError('NEXT SONG FAILED // ' + detail);
+    } finally { this.raceContinuationPending = false; }
   }
 
   private returnToRaceLobby(): void {
@@ -3657,20 +3727,26 @@ export class Game {
   }
 
   /** Host: picks the OFFICIAL track while the room is still in LOBBY. */
-  private async hostPickRaceTrack(trackId: string): Promise<void> {
-    const level = await PresetLevelCache.loadPreset(trackId);
-    if (!level) {
-      this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
-      return;
-    }
-    const title = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
-    const identity = computeMapIdentity(trackId, level.track, level.analysis);
-    const result = await raceRoomService.selectTrack(trackId, title, identity);
-    if (!result.ok) {
-      this.ui.importScreen.racePanel.showError(`TRACK SELECT FAILED // ${result.detail.toUpperCase()}`);
-      return;
-    }
-    this.returnToRaceLobby();
+  private async hostPickRaceTrack(trackId: string, mode?: RaceMode): Promise<void> {
+    if (this.raceTrackSelectionPending || !raceRoomService.isHost() || raceRoomService.getRoom()?.state !== 'LOBBY') return;
+    this.raceTrackSelectionPending = true;
+    try {
+      const level = await loadRaceCourse(trackId, mode ?? raceMode(raceRoomService.getRoom()?.trackId ?? ''));
+      if (!level) {
+        this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE FOR THIS SIGNAL');
+        return;
+      }
+      const title = level.title;
+      const identity = level.identity;
+      const result = await raceRoomService.selectTrack(identity.trackId, title, identity);
+      if (!result.ok) {
+        this.ui.importScreen.racePanel.showError(`TRACK SELECT FAILED // ${result.detail.toUpperCase()}`);
+        return;
+      }
+      this.returnToRaceLobby();
+    } catch (error) {
+      this.ui.importScreen.racePanel.showError('TRACK SELECT FAILED // ' + (error instanceof Error ? error.message : String(error)));
+    } finally { this.raceTrackSelectionPending = false; }
   }
 
   /**
@@ -3968,7 +4044,7 @@ export class Game {
     if (!room) { this.raceLoading = false; return; }
     const loadGeneration = this.raceLoadGeneration;
 
-    const level = await PresetLevelCache.loadPreset(room.trackId);
+    const level = await loadRaceCourse(room.trackId);
     if (loadGeneration !== this.raceLoadGeneration) return;
     if (!level) {
       this.ui.importScreen.racePanel.showError('CANONICAL MAP UNAVAILABLE');
@@ -4002,7 +4078,13 @@ export class Game {
     this.ui.raceHud.showNotice('SESSION STARTING');
 
     // Enter the normal track flow; the shared clock starts at startAtMs.
-    await this.loadPresetTrack(room.trackId);
+    await this.loadPresetTrack(level.baseId);
+    if (level.mode === 'SURF' && loadGeneration === this.raceLoadGeneration) await this.switchReadyToSurf();
+    if (!this.currentTrack || !raceRoomService.verifyLocalMap(this.currentTrack).ok) {
+      this.raceLoading = false; this.returnToRaceLobby();
+      this.ui.importScreen.racePanel.setMapState('MISMATCH', 'LOADED COURSE DOES NOT MATCH ROOM');
+      return;
+    }
     if (loadGeneration !== this.raceLoadGeneration || raceRoomService.getRoom()?.state === 'LOBBY' || raceRoomService.getRoom()?.state === 'EXPIRED') {
       if (!this.raceActive) this.stateMachine.transitionTo(GameState.IMPORT);
       return;
@@ -5314,7 +5396,10 @@ export class Game {
 
     // Audio + music-reactive world follow the recorded song time.
     const songTime = frame.songTimeMs / 1000;
-    this.audioEngine.seek(songTime);
+    this.audioEngine.setReplayPlaybackRate(this.povPlayer.getPlaybackRate());
+    if (this.povPlayer.isPaused || !this.povPlayer.isPlaying) this.audioEngine.pause();
+    else if (!this.audioEngine.getIsPlaying()) this.audioEngine.play(songTime);
+    if (Math.abs(this.audioEngine.getCurrentTime() - songTime) > 0.08) this.audioEngine.seek(songTime);
     this.world.update(songTime, frame.position, frame.yaw, frameDelta, this.environment);
 
     // Viewmodel: the runner's cosmetic (safe fallback if it no longer exists).
@@ -5353,7 +5438,8 @@ export class Game {
       finishTimeUs: this.povPlayer.getFinishTimeUs(),
       currentMs: this.povPlayer.getCurrentMs(),
       durationMs: this.povPlayer.getDurationMs(),
-      paused: this.povPlayer.isPaused
+      paused: this.povPlayer.isPaused,
+      playbackRate: this.povPlayer.getPlaybackRate()
     });
   }
 

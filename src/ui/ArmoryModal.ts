@@ -9,6 +9,8 @@
  * preview architecture is unchanged, so a cosmetic is previewed by being worn.
  */
 
+import { mountLoadouts } from './LoadoutPresets';
+import { readMenuPreferences, saveMenuPreferences } from './MenuPreferences';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { masteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { DROP_GLOVES } from '../viewmodel/DropGloveCatalog';
@@ -61,6 +63,8 @@ export class ArmoryModal {
   private items: ArmoryItem[] = [];
 
   constructor() {
+    const prefs = readMenuPreferences();
+    this.slot = prefs.slot; this.gloveFamily = prefs.family; this.ownership = prefs.ownership; this.sort = prefs.sort;
     this.element = document.createElement('div');
     this.element.className = 'screen armory-modal-screen hidden';
     this.element.innerHTML = `
@@ -150,6 +154,16 @@ export class ArmoryModal {
       });
     }
 
+    const presetHost = document.createElement('div'); this.element.querySelector('.armory-filters')!.after(presetHost);
+    mountLoadouts(presetHost, {
+      items: () => this.buildItems(), current: () => ({ knifeId: this.skinSystem.getEquippedSkinId(), gloveId: masteryGloveSystem.getEquippedGloveId() }),
+      equip: (knife, glove) => {
+        const old = this.skinSystem.getEquippedSkinId();
+        if (!this.skinSystem.equipSkin(knife)) return false;
+        if (masteryGloveSystem.equipAnyGlove(glove)) return true;
+        this.skinSystem.equipSkin(old); return false;
+      }, refresh: () => this.render()
+    });
     this.initEvents();
   }
 
@@ -162,6 +176,8 @@ export class ArmoryModal {
   }
 
   public show(): void {
+    const prefs = readMenuPreferences();
+    this.slot = prefs.slot; this.gloveFamily = prefs.family; this.ownership = prefs.ownership; this.sort = prefs.sort;
     this.render();
     this.element.classList.remove('hidden');
     this.preview.show();
@@ -210,6 +226,7 @@ export class ArmoryModal {
       : `SIGNAL DROPS // ${pendingDrops.toString().padStart(2, '0')}`;
     this.dropOpenBtn.disabled = pendingDrops <= 0 || poolsComplete;
 
+    saveMenuPreferences({ slot: this.slot, family: this.gloveFamily, ownership: this.ownership, sort: this.sort });
     this.items = this.buildItems();
 
     for (const btn of this.slotBtns) {

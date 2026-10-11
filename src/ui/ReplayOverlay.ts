@@ -14,12 +14,15 @@ export interface ReplayOverlayState {
   currentMs: number;
   durationMs: number;
   paused: boolean;
+  playbackRate?: number;
 }
 
 export interface ReplayOverlayCallbacks {
   onTogglePause: () => void;
   onRestart: () => void;
   onExit: () => void;
+  onSeek?: (timeMs: number) => void;
+  onSpeed?: (rate: number) => void;
 }
 
 export class ReplayOverlay {
@@ -29,7 +32,7 @@ export class ReplayOverlay {
   private titleElem: HTMLElement;
   private playerElem: HTMLElement;
   private timeElem: HTMLElement;
-  private timelineElem: HTMLElement;
+  private timelineElem: HTMLInputElement;
   private pauseBtn: HTMLButtonElement;
 
   constructor() {
@@ -44,7 +47,7 @@ export class ReplayOverlay {
       </div>
 
       <div class="replay-timeline">
-        <div class="replay-timeline-track"><div class="replay-timeline-fill" id="replay-fill"></div></div>
+        <input id="replay-seek" type="range" min="0" max="1" step="10" value="0" aria-label="Replay position">
         <div class="replay-timeline-text" id="replay-time">00:00.000 / 00:00.000</div>
       </div>
 
@@ -52,6 +55,7 @@ export class ReplayOverlay {
         <button class="terminal-btn-subtle" id="replay-pause" type="button">PAUSE</button>
         <button class="terminal-btn-subtle" id="replay-restart" type="button">RESTART</button>
         <button class="terminal-btn-subtle" id="replay-exit" type="button">EXIT</button>
+        <select id="replay-speed" aria-label="Replay speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
         <span class="replay-hint">ESC EXITS</span>
       </div>
     `;
@@ -59,9 +63,12 @@ export class ReplayOverlay {
     this.titleElem = this.element.querySelector('#replay-title') as HTMLElement;
     this.playerElem = this.element.querySelector('#replay-player') as HTMLElement;
     this.timeElem = this.element.querySelector('#replay-time') as HTMLElement;
-    this.timelineElem = this.element.querySelector('#replay-fill') as HTMLElement;
+    this.timelineElem = this.element.querySelector('#replay-seek') as HTMLInputElement;
     this.pauseBtn = this.element.querySelector('#replay-pause') as HTMLButtonElement;
 
+    this.timelineElem.addEventListener('input', () => this.callbacks?.onSeek?.(Number(this.timelineElem.value)));
+    this.element.querySelector('#replay-speed')!.addEventListener('change', event => this.callbacks?.onSpeed?.(Number((event.target as HTMLSelectElement).value)));
+    this.element.addEventListener('keydown', event => { if (event.key !== 'Escape') event.stopPropagation(); });
     this.pauseBtn.addEventListener('click', () => this.callbacks?.onTogglePause());
     (this.element.querySelector('#replay-restart') as HTMLButtonElement).addEventListener('click', () =>
       this.callbacks?.onRestart()
@@ -98,8 +105,10 @@ export class ReplayOverlay {
     this.timeElem.textContent = `${formatRaceTime(state.currentMs * 1000)} / ${formatRaceTime(
       state.durationMs * 1000
     )}`;
-    const progress = state.durationMs > 0 ? Math.min(1, state.currentMs / state.durationMs) : 0;
-    this.timelineElem.style.width = `${(progress * 100).toFixed(2)}%`;
+    this.timelineElem.max = String(Math.max(1, state.durationMs));
+    this.timelineElem.value = String(state.currentMs);
+    this.timelineElem.setAttribute('aria-valuetext', formatRaceTime(state.currentMs * 1000));
+    (this.element.querySelector('#replay-speed') as HTMLSelectElement).value = String(state.playbackRate ?? 1);
     this.pauseBtn.textContent = state.paused ? 'RESUME' : 'PAUSE';
   }
 }

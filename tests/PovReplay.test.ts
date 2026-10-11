@@ -431,3 +431,37 @@ describe('POV replay — storage path authorization', () => {
     expect(buildReplayPath('u', 't', 1, 'h')).toBe(buildReplayPath('u', 't', 1, 'h'));
   });
 });
+
+
+describe('replay seek and speed', () => {
+  function loaded() {
+    const replay = buildFixture();
+    const player = new PovReplayPlayer();
+    expect(player.load(encodePovReplay(replay), { identity: IDENTITY }).ok).toBe(true);
+    return player;
+  }
+  it('seeks without emitting skipped events, then emits future crossings once', () => {
+    const player = loaded(); player.play(); player.seek(7500);
+    expect(player.getCurrentMs()).toBe(7500);
+    expect(player.getEmittedEvents()).toEqual([]);
+    player.update(0.6);
+    expect(player.getEmittedEvents().map(e => e.type)).toEqual(['SURF_EXIT']);
+    player.pause(); player.seek(2000);
+    expect(player.isPaused).toBe(true);
+    player.resume(); player.update(1.1);
+    expect(player.getEmittedEvents().map(e => e.type)).toEqual(['JUMP']);
+  });
+  it('scales the recorded clock and safely clamps time and speed', () => {
+    const player = loaded(); player.play(); player.setPlaybackRate(2); player.update(1);
+    expect(player.getCurrentMs()).toBe(2000);
+    player.setPlaybackRate(NaN); player.update(-1); player.update(Infinity);
+    expect(player.getCurrentMs()).toBe(2000);
+    expect(player.getPlaybackRate()).toBe(2);
+    player.seek(Infinity); expect(player.getCurrentMs()).toBe(2000);
+    player.seek(-10); expect(player.getCurrentMs()).toBe(0);
+    player.seek(1e9); expect(player.getCurrentMs()).toBe(12000);
+    expect(player.isPaused).toBe(true);
+    player.resume(); expect(player.getCurrentMs()).toBe(0);
+    player.unload(); expect(player.getPlaybackRate()).toBe(1);
+  });
+});

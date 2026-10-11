@@ -6,7 +6,8 @@
  * and Karambit Armory & Cosmic Skins Profile.
  */
 
-import { mountDesktopThemeToggle } from './DesktopTheme';
+import { readMenuPreferences, saveMenuPreferences, matchesTrackFilter, type TrackFilter } from './MenuPreferences';
+import { mountLoadouts } from './LoadoutPresets';
 import { AudioLoader } from '../audio/AudioLoader';
 import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
@@ -137,6 +138,7 @@ export class ImportScreen {
    */
   public switchArmorySlot(slot: ArmorySlot): void {
     this.armorySlot = slot;
+    saveMenuPreferences({ slot });
     this.armorySelectedId = null;
     this.renderArmory();
   }
@@ -148,6 +150,7 @@ export class ImportScreen {
   /** Secondary glove filter: SIGNAL DROP and MASTERY share the glove slot. */
   public setArmoryGloveFamily(family: GloveFamilyFilter): void {
     this.armoryGloveFamily = family;
+    saveMenuPreferences({ family });
     this.armorySelectedId = null;
     this.renderArmory();
   }
@@ -158,6 +161,7 @@ export class ImportScreen {
 
   public setArmoryOwnershipFilter(ownership: OwnershipFilter): void {
     this.armoryOwnership = ownership;
+    saveMenuPreferences({ ownership });
     this.armorySelectedId = null;
     this.renderArmory();
   }
@@ -168,6 +172,7 @@ export class ImportScreen {
 
   public setArmorySort(sort: ArmorySort): void {
     this.armorySort = sort;
+    saveMenuPreferences({ sort });
     this.renderArmory();
   }
 
@@ -278,6 +283,7 @@ export class ImportScreen {
   private armoryItems: ArmoryItem[] = [];
 
   // State
+  private trackFilter: TrackFilter = { search: '', difficulty: '', duration: '' };
   private catalog: TrackCatalogEntry[];
   private selectedTrack: TrackCatalogEntry;
   private isPreviewPlaying = false;
@@ -303,7 +309,12 @@ export class ImportScreen {
 
   constructor() {
     this.catalog = MusicPack.getCatalog();
-    this.selectedTrack = this.catalog[0]; // Default track
+    const prefs = readMenuPreferences();
+    this.selectedTrack = this.catalog.find(t => t.id === prefs.trackId) ?? this.catalog[0];
+    this.armorySlot = prefs.slot; this.armoryOwnership = prefs.ownership;
+    this.armoryGloveFamily = prefs.family; this.armorySort = prefs.sort;
+    this.selectedCourseType = prefs.mode === 'SURF' ? 'SURF' : DEFAULT_COURSE_TYPE;
+    this.leaderboardPanel.setBoardKind(prefs.mode);
 
     this.element = document.createElement('div');
     this.element.className = 'screen import-screen';
@@ -389,6 +400,12 @@ export class ImportScreen {
             <aside class="signal-catalog" aria-label="Signal Pack catalog">
               <div class="terminal-panel-header catalog-header">
                 <span>SIGNAL PACK // OFFICIAL TRACKS</span><span class="catalog-count" id="showcase-catalog-count"></span>
+              </div>
+              <div class="catalog-filters" role="search" aria-label="Find a signal">
+                <input type="search" id="catalog-search" aria-label="Search signals" placeholder="Search signals…" />
+                <select id="catalog-difficulty" aria-label="Filter difficulty"><option value="">All tiers</option><option value="1">Tier I</option><option value="2">Tier II</option><option value="3">Tier III</option><option value="4">Tier IV</option><option value="5">Tier V</option></select>
+                <select id="catalog-duration" aria-label="Filter duration"><option value="">All lengths</option><option value="short">Up to 2 min</option><option value="medium">2–3 min</option><option value="long">Over 3 min</option></select>
+                <button type="button" id="catalog-clear" title="Clear search and filters">CLEAR</button>
               </div>
               <div class="showcase-selector-strip terminal-selector-strip" id="showcase-strip">
                 <!-- Populated dynamically via buildStrip() -->
@@ -676,15 +693,35 @@ export class ImportScreen {
     if (heroWave) this.backdrop.attachHeroWave(heroWave);
     this.backdrop.start();
 
+    for (const [id, key] of [['catalog-search', 'search'], ['catalog-difficulty', 'difficulty'], ['catalog-duration', 'duration']] as const) {
+      const control = this.element.querySelector(`#${id}`) as HTMLInputElement | HTMLSelectElement;
+      control.addEventListener(key === 'search' ? 'input' : 'change', () => { this.trackFilter[key] = control.value; this.buildStrip(); });
+    }
+    this.element.querySelector('#catalog-clear')!.addEventListener('click', () => {
+      this.trackFilter = { search: '', difficulty: '', duration: '' };
+      for (const id of ['catalog-search', 'catalog-difficulty', 'catalog-duration']) (this.element.querySelector(`#${id}`) as HTMLInputElement).value = '';
+      this.buildStrip(); (this.element.querySelector('#catalog-search') as HTMLInputElement).focus();
+    });
+    this.leaderboardPanel.setSelectedTrack(this.selectedTrack.id);
+    this.setCourseType(this.selectedCourseType);
     this.buildStrip();
     this.buildLabSelect();
     this.updateShowcaseCard(this.selectedTrack);
     this.initEvents();
+    const presetHost = document.createElement('div'); this.armoryPanel.querySelector('.armory-filters')!.after(presetHost);
+    mountLoadouts(presetHost, {
+      items: () => this.buildArmoryItems(), current: () => ({ knifeId: this.skinSystem.getEquippedSkinId(), gloveId: masteryGloveSystem.getEquippedGloveId() }),
+      equip: (knife, glove) => {
+        const old = this.skinSystem.getEquippedSkinId();
+        if (!this.skinSystem.equipSkin(knife)) return false;
+        if (masteryGloveSystem.equipAnyGlove(glove)) return true;
+        this.skinSystem.equipSkin(old); return false;
+      }, refresh: () => this.renderArmory()
+    });
 
     // The ONE global connection indicator lives in the footer, not inside any
     // feature panel, so it never duplicates online controls on unrelated pages.
     const footer = this.element.querySelector('.terminal-footer-status') as HTMLElement;
-    mountDesktopThemeToggle(footer);
     if (footer) {
       footer.appendChild(document.createTextNode(' · '));
       footer.appendChild(this.onlineStatusBar.element);
@@ -734,7 +771,12 @@ export class ImportScreen {
       });
     }
 
-    itemsToRender.forEach(({ entry: t, displayIndex, isTutorial }) => {
+    const filtered = itemsToRender.filter(({entry}) => matchesTrackFilter(entry, this.trackFilter));
+    if (!filtered.length) {
+      const empty = document.createElement('div'); empty.className = 'catalog-empty'; empty.setAttribute('role', 'status');
+      empty.textContent = 'No signals match. Clear filters to show all tracks.'; this.selectorStripElem.appendChild(empty);
+    }
+    filtered.forEach(({ entry: t, displayIndex, isTutorial }) => {
       const summary = LeaderboardManager.getInstance().getRecordSummary(t.id);
       const bestRank = summary.bestRank;
       const rankClass = bestRank ? `rank-${bestRank.toLowerCase()}` : '';
@@ -809,6 +851,7 @@ export class ImportScreen {
   public selectTrack(track: TrackCatalogEntry): void {
     this.stopPreview();
     this.selectedTrack = track;
+    saveMenuPreferences({ trackId: track.id });
     this.updateShowcaseCard(track);
 
     // Update active class on strip items
@@ -1450,6 +1493,7 @@ export class ImportScreen {
 
   public setCourseType(courseType: CourseType): void {
     this.selectedCourseType = normalizeCourseType(courseType);
+    saveMenuPreferences({ mode: this.selectedCourseType === 'SURF' ? 'SURF' : 'NORMAL' });
     for (const btn of this.courseTypeBtns) {
       const active = btn.dataset.courseType === this.selectedCourseType;
       btn.classList.toggle('active', active);
@@ -1487,6 +1531,10 @@ export class ImportScreen {
   }
 
   public show(): void {
+    const prefs = readMenuPreferences();
+    this.armorySlot = prefs.slot; this.armoryGloveFamily = prefs.family;
+    this.armoryOwnership = prefs.ownership; this.armorySort = prefs.sort;
+    this.setCourseType(prefs.mode === 'SURF' ? 'SURF' : DEFAULT_COURSE_TYPE);
     this.renderArmory();
     this.element.classList.remove('hidden');
     if (!this.armoryPanel.classList.contains('hidden')) this.armoryPreview.show();

@@ -11,6 +11,7 @@
  */
 
 import type { LeaderboardView } from '../online/LeaderboardService';
+import { saveMenuPreferences } from './MenuPreferences';
 import { formatRaceTime } from './RaceHud';
 
 export interface LeaderboardCatalogEntry {
@@ -46,6 +47,35 @@ export class LeaderboardPanel {
   private statusElem: HTMLElement;
   private tableElem: HTMLElement;
   private youElem: HTMLElement;
+  private page = 0;
+  private view: LeaderboardView | null = null;
+  private findPending = false;
+  private loading = false;
+  public getPage(): number { return this.page; }
+  private refreshControls(): void {
+    const control = (id: string) => this.element?.querySelector<HTMLButtonElement>(id);
+    const total = this.view?.total ?? this.currentEntries.length;
+    const size = this.view?.pageSize ?? 25;
+    const prev = control('#lb-prev'), next = control('#lb-next'), find = control('#lb-find'), retry = control('#lb-refresh');
+    if (prev) prev.disabled = this.loading || this.page === 0;
+    if (next) next.disabled = this.loading || !!this.view?.offline || (this.page + 1) * size >= total;
+    if (find) find.disabled = this.loading || !this.view?.you?.position;
+    if (retry) retry.disabled = this.loading;
+    const info = this.element?.querySelector('#lb-page-info');
+    if (info) info.textContent = this.loading ? 'Loading…' : this.view?.offline ? 'Unavailable' : `Page ${this.page + 1} / ${Math.max(1, Math.ceil(total / size))} · ${total} runs`;
+  }
+  private findMe(): void {
+    const position = this.view?.you?.position;
+    if (!position) return;
+    const target = Math.floor((position - 1) / (this.view?.pageSize ?? 25));
+    if (target !== this.page) {
+      this.findPending = true; this.page = target;
+      this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
+    } else {
+      const row = this.tableElem.querySelector<HTMLElement>('.online-lb-row.is-you');
+      row?.scrollIntoView({ block: 'nearest' }); row?.focus({ preventScroll: true });
+    }
+  }
 
   constructor() {
     this.element = document.createElement('div');
@@ -68,6 +98,7 @@ export class LeaderboardPanel {
 
       <div class="online-lb-status" id="lb-status" role="status">SELECT A SIGNAL</div>
       <div class="online-lb-table" id="lb-table" role="region" aria-label="World rankings" tabindex="0"></div>
+      <div class="leaderboard-tools"><button type="button" id="lb-prev" disabled>PREV</button><span id="lb-page-info" role="status"></span><button type="button" id="lb-next" disabled>NEXT</button><button type="button" id="lb-find" disabled>FIND ME</button><button type="button" id="lb-refresh">REFRESH</button></div>
       <div class="online-lb-you" id="lb-you"></div>
     `;
 
@@ -77,7 +108,9 @@ export class LeaderboardPanel {
       btn.addEventListener('click', () => {
         const board = (btn.dataset.board as LeaderboardBoardKind) ?? 'NORMAL';
         if (board === this.boardKind) return;
+        this.page = 0; this.findPending = false;
         this.boardKind = board;
+        saveMenuPreferences({ mode: board });
         this.syncBoardTabs();
         this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
       });
@@ -98,8 +131,18 @@ export class LeaderboardPanel {
     this.tableElem = this.element.querySelector('#lb-table') as HTMLElement;
     this.youElem = this.element.querySelector('#lb-you') as HTMLElement;
 
+    for (const [id, delta] of [['#lb-prev', -1], ['#lb-next', 1]] as const) {
+      this.element.querySelector(id)!.addEventListener('click', () => {
+        this.page = Math.max(0, this.page + delta); this.findPending = false;
+        this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
+      });
+    }
+    this.element.querySelector('#lb-find')!.addEventListener('click', () => this.findMe());
+    this.element.querySelector('#lb-refresh')!.addEventListener('click', () => this.callbacks?.onRetryConnection());
     // Selecting a signal loads its board straight away — no PLAY required.
     this.selectElem.addEventListener('change', () => {
+      this.page = 0; this.findPending = false;
+      saveMenuPreferences({ trackId: this.selectElem.value });
       // Keep the selected mode when browsing other signals.
       this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
     });
@@ -132,6 +175,7 @@ export class LeaderboardPanel {
 
   /** Preselect the board kind WITHOUT triggering a fetch (caller refreshes). */
   public setBoardKind(kind: LeaderboardBoardKind): void {
+    if (this.boardKind !== kind) this.page = 0;
     this.boardKind = kind;
     this.syncBoardTabs();
   }
@@ -170,6 +214,7 @@ export class LeaderboardPanel {
   public setSelectedTrack(trackId: string): void {
     const options = Array.from(this.selectElem.options);
     if (options.some((option) => option.value === trackId)) {
+      if (this.selectElem.value !== trackId) this.page = 0;
       this.selectElem.value = trackId;
     }
   }
@@ -180,6 +225,7 @@ export class LeaderboardPanel {
   }
 
   public setLoading(trackTitle: string): void {
+    this.loading = true; this.refreshControls();
     this.currentEntries = [];
     this.tableElem.scrollTop = 0;
     this.statusElem.textContent = `LOADING // ${trackTitle}`;
@@ -188,14 +234,17 @@ export class LeaderboardPanel {
   }
 
   public render(view: LeaderboardView, trackTitle: string): void {
+    this.view = view; this.loading = false; this.refreshControls();
     if (view.offline) {
       this.currentEntries = [];
-      this.statusElem.textContent = 'WORLD // OFFLINE — LOCAL RESULTS ONLY';
+      this.statusElem.textContent = 'WORLD // UNAVAILABLE — RETRY TO RECONNECT';
+      const retry = this.element?.querySelector('#lb-refresh'); if (retry) retry.textContent = 'RETRY';
       this.tableElem.innerHTML = '';
       this.youElem.innerHTML = `<div class="online-lb-empty">[LOCAL // SYNC PENDING]</div>`;
       return;
     }
 
+    const retry = this.element?.querySelector('#lb-refresh'); if (retry) retry.textContent = 'REFRESH';
     this.statusElem.textContent = `WORLD // ${trackTitle.toUpperCase()}`;
     this.currentEntries = view.entries;
 
@@ -219,7 +268,7 @@ export class LeaderboardPanel {
               `<button class="online-lb-race-btn" type="button" data-run-id="${this.escape(e.runId)}" title="Race this recorded run as a ghost.">RACE GHOST</button>`
             : '';
           return (
-            `<div class="online-lb-row">` +
+            `<div class="online-lb-row${e.runId === view.you?.runId ? ' is-you' : ''}" tabindex="-1">` +
             `<span class="online-lb-rank">${e.rankPosition}</span>` +
             `<span class="online-lb-name">` +
             `<button class="online-lb-name-btn" type="button"` +
@@ -259,6 +308,7 @@ export class LeaderboardPanel {
       });
     }
 
+    if (this.findPending) { this.findPending = false; this.findMe(); }
     if (view.you) {
       // NEXT ABOVE YOU: a cheap, honest competitive target derived from the same
       // fetched page. RACE GHOST reuses the existing event-driven replay path.

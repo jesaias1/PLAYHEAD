@@ -128,12 +128,12 @@ class OnlineBootstrap {
   }
 
   /** Retry entry point for the UI (e.g. after reconnecting). */
-  public retry(): void {
+  public async retry(): Promise<void> {
     if (!online.isConfigured()) return;
     this.setStatus('SYNCING', 'retrying');
-    void this.run().catch((err) => {
+    try { await this.run(); } catch (err) {
       this.setStatus('ERROR', err instanceof Error ? err.message : String(err));
-    });
+    }
   }
 
   public getClient(): OnlineClient {

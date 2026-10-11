@@ -55,6 +55,7 @@ export class PovReplayPlayer {
 
   private replay: PovReplay | null = null;
   private currentMs = 0;
+  private playbackRate = 1;
   private eventCursor = 0;
   private emitted: PovReplayEvent[] = [];
   private frame: PovReplayFrame;
@@ -101,6 +102,7 @@ export class PovReplayPlayer {
     if (!validation.ok) return { ok: false, reason: `${validation.reason}: ${validation.detail}` };
 
     this.replay = decoded.replay;
+    this.playbackRate = 1;
     this.currentMs = 0;
     this.eventCursor = 0;
     this.emitted = [];
@@ -122,6 +124,7 @@ export class PovReplayPlayer {
 
   public resume(): void {
     if (!this.replay) return;
+    if (this.currentMs >= this.replay.durationMs) { this.restart(); return; }
     this.isPaused = false;
     this.isPlaying = true;
   }
@@ -144,6 +147,7 @@ export class PovReplayPlayer {
   public unload(): void {
     this.stop();
     this.replay = null;
+    this.playbackRate = 1;
     this.currentMs = 0;
     this.eventCursor = 0;
     this.emitted = [];
@@ -195,14 +199,32 @@ export class PovReplayPlayer {
     return this.emitted;
   }
 
+  public getPlaybackRate(): number { return this.playbackRate; }
+
+  public setPlaybackRate(rate: number): void {
+    if (Number.isFinite(rate)) this.playbackRate = Math.max(0.5, Math.min(2, rate));
+  }
+
+  /** Seeking changes presentation only; skipped events must not trigger effects. */
+  public seek(timeMs: number): void {
+    if (!this.replay || !Number.isFinite(timeMs)) return;
+    this.currentMs = Math.max(0, Math.min(this.replay.durationMs, timeMs));
+    const next = this.replay.events.findIndex(event => event.t > this.currentMs);
+    this.eventCursor = next < 0 ? this.replay.events.length : next;
+    this.emitted = [];
+    this.updateFrame(this.currentMs);
+    if (this.currentMs >= this.replay.durationMs) { this.isPaused = true; this.isPlaying = false; }
+  }
+
   /** Advances playback and returns the reconstructed frame. */
   public update(dt: number): PovReplayFrame {
     if (!this.replay) return this.frame;
     if (this.isPlaying && !this.isPaused) {
-      this.currentMs += dt * 1000;
+      this.currentMs += (Number.isFinite(dt) ? Math.max(0, dt) : 0) * 1000 * this.playbackRate;
       if (this.currentMs >= this.replay.durationMs) {
         this.currentMs = this.replay.durationMs;
         this.isPlaying = false;
+        this.isPaused = true;
         this.onComplete?.();
       }
     }

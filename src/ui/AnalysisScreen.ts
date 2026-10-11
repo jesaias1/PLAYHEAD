@@ -28,6 +28,7 @@ export class AnalysisScreen {
   private onAcademyCallback?: () => void | Promise<void>;
   private academyBusy = false;
   private surfVariant = false;
+  private canReturnNormal = false;
 
   private durElem: HTMLElement;
   private bpmElem: HTMLElement;
@@ -188,10 +189,11 @@ export class AnalysisScreen {
 
   public setOnAcademy(callback: () => void | Promise<void>): void { this.onAcademyCallback = callback; }
 
-  public setCourseVariant(surf: boolean): void {
-    this.surfVariant = surf;
+  public setCourseVariant(surf: boolean, canReturnNormal = false): void {
+    this.surfVariant = surf; this.canReturnNormal = canReturnNormal;
+    this.surfBtn.textContent = surf && canReturnNormal ? 'PLAY NORMAL_MODE' : 'PLAY SURF_MODE';
     this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'NORMAL_MODE';
-    this.surfBtn.hidden = surf || this.enterBtn.disabled;
+    this.surfBtn.hidden = (surf && !canReturnNormal) || this.enterBtn.disabled;
     this.surfBtn.disabled = this.enterBtn.disabled;
     this.syncSurfHint();
     this.syncAcademyEntry();
@@ -351,7 +353,7 @@ export class AnalysisScreen {
 
     this.enterBtn.disabled = false;
     (this.element.querySelector('#btn-ready-back') as HTMLButtonElement).hidden = false;
-    this.surfBtn.hidden = this.surfVariant;
+    this.surfBtn.hidden = this.surfVariant && !this.canReturnNormal;
     this.surfBtn.disabled = false;
     this.syncSurfHint();
     this.syncAcademyEntry();

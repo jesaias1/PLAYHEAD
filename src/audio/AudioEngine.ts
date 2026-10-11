@@ -13,6 +13,7 @@ export class AudioEngine {
   private currentOffset = 0;
   private contextStartTime = 0;
   private volume = 0.8;
+  private replayPlaybackRate = 1;
 
   /**
    * Monotonic ownership token for the CURRENT playback attempt. Every async
@@ -76,6 +77,7 @@ export class AudioEngine {
 
     const source = this.ctx.createBufferSource();
     source.buffer = this.currentBuffer;
+    if (source.playbackRate) source.playbackRate.value = this.replayPlaybackRate;
 
     // Small anti-click fade in
     const fadeGain = this.ctx.createGain();
@@ -167,6 +169,18 @@ export class AudioEngine {
     this.isPlaying = false;
     this.isPaused = false;
     this.currentOffset = 0;
+    this.replayPlaybackRate = 1;
+  }
+
+  /** Used only by recorded playback. stop() restores the live clock to 1x. */
+  public setReplayPlaybackRate(rate: number): void {
+    if (!Number.isFinite(rate)) return;
+    const bounded = Math.max(0.5, Math.min(2, rate));
+    if (bounded === this.replayPlaybackRate) return;
+    this.currentOffset = this.getCurrentTime();
+    this.contextStartTime = this.ctx?.currentTime ?? 0;
+    this.replayPlaybackRate = bounded;
+    if (this.currentSource?.playbackRate) this.currentSource.playbackRate.value = bounded;
   }
 
   public getCurrentTime(): number {
@@ -175,7 +189,7 @@ export class AudioEngine {
     if (!this.isPlaying) return Math.min(this.currentOffset, this.currentBuffer.duration);
 
     const elapsed = this.ctx.currentTime - this.contextStartTime;
-    return Math.min(this.currentOffset + elapsed, this.currentBuffer.duration);
+    return Math.min(this.currentOffset + elapsed * this.replayPlaybackRate, this.currentBuffer.duration);
   }
 
   public getDuration(): number {

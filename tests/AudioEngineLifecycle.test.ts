@@ -27,6 +27,7 @@ class FakeGainNode {
 }
 
 class FakeSourceNode {
+  playbackRate = new FakeParam();
   buffer: AudioBuffer | null = null;
   onended: (() => void) | null = null;
   started = false;
@@ -205,4 +206,17 @@ describe('AudioEngine pause / resume / seek clock', () => {
     engine.resume();
     expect(engine.getCurrentTime()).toBe(10);
   });
+});
+
+it('keeps replay audio continuous at changed speeds and restores normal time after stop', async () => {
+  const engine = await makeEngine(); engine.setBuffer(makeBuffer(100)); engine.play(10);
+  const { ctx, source } = internals(engine); ctx.currentTime = 2;
+  expect(engine.getCurrentTime()).toBe(12);
+  engine.setReplayPlaybackRate(2); expect(engine.getCurrentTime()).toBe(12);
+  expect(source!.playbackRate.value).toBe(2);
+  ctx.currentTime = 3; expect(engine.getCurrentTime()).toBe(14);
+  engine.pause(); ctx.currentTime = 8; expect(engine.getCurrentTime()).toBe(14);
+  engine.resume(); ctx.currentTime = 9; expect(engine.getCurrentTime()).toBe(16);
+  engine.stop(); engine.play(); ctx.currentTime = 10;
+  expect(engine.getCurrentTime()).toBe(1); expect(internals(engine).source!.playbackRate.value).toBe(1);
 });

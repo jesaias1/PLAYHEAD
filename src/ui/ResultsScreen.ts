@@ -90,6 +90,7 @@ export class ResultsScreen {
   private shareContext: ShareContext | null = null;
   private shareGeneration = 0;
   private shareBtn: HTMLButtonElement;
+  private downloadBtn: HTMLButtonElement;
   private shareStatus: HTMLElement;
 
   private onReplayCallback?: () => void;
@@ -239,6 +240,7 @@ export class ResultsScreen {
           <button class="btn-preview hidden" id="btn-res-view-leaderboard" title="Open this signal's world board.">[ VIEW LEADERBOARD ]</button>
           <button class="btn-preview" id="btn-res-replay" title="Watch your run back in first person.">[ WATCH REPLAY ]</button>
           <button class="btn-preview" id="btn-res-new">[ MAIN MENU ]</button>
+          <button class="btn-preview" id="btn-res-download" type="button">[ DOWNLOAD CARD ]</button>
           <button class="btn-preview" id="btn-res-share" type="button">[ SHARE RESULT ]</button>
         </div>
         <div id="res-share-status" class="results-share-status" role="status" aria-live="polite"></div>
@@ -267,6 +269,8 @@ export class ResultsScreen {
     this.actionsRow = this.element.querySelector('#res-actions') as HTMLElement;
     this.shareBtn = this.element.querySelector('#btn-res-share') as HTMLButtonElement;
     this.shareStatus = this.element.querySelector('#res-share-status') as HTMLElement;
+    this.downloadBtn = this.element.querySelector('#btn-res-download') as HTMLButtonElement;
+    this.downloadBtn.addEventListener('click', () => void this.shareResult(true));
     this.shareBtn.addEventListener('click', () => void this.shareResult());
     this.signalDropPanel = this.element.querySelector('#res-signal-drop') as HTMLElement;
     this.signalDropStatus = this.element.querySelector('#res-signal-drop-status') as HTMLElement;
@@ -402,6 +406,7 @@ export class ResultsScreen {
     this.clearTimeouts();
     this.shareGeneration++;
     this.shareBtn.disabled = false;
+    this.downloadBtn.disabled = false;
     this.shareStatus.textContent = '';
     this.shareContext = {
       results: { ...results }, trackTitle, mode: surfInfo?.isSurf ? 'SURF' : 'NORMAL',
@@ -777,17 +782,19 @@ export class ResultsScreen {
   public hide(): void {
     this.shareGeneration++;
     this.shareBtn.disabled = false;
+    this.downloadBtn.disabled = false;
     this.clearTimeouts();
     this.element.classList.add('hidden');
     // A hidden report can never show stale competition from a previous run.
     this.setCompetitionContext(null);
   }
 
-  private async shareResult(): Promise<void> {
+  private async shareResult(downloadOnly = false): Promise<void> {
     const model = this.shareModel;
     if (!model || this.shareBtn.disabled) return;
     const generation = this.shareGeneration;
     this.shareBtn.disabled = true;
+    this.downloadBtn.disabled = true;
     this.shareStatus.textContent = 'PREPARING RESULT CARD…';
     const outcome = await performResultShare(model, {
       onProgress: stage => {
@@ -795,9 +802,9 @@ export class ResultsScreen {
         this.shareStatus.textContent = stage === 'SHARING' ? 'OPENING SHARE SHEET // CHOOSE A DESTINATION OR CANCEL'
           : stage === 'COPYING' ? 'COPYING RESULT TEXT…' : 'PREPARING RESULT CARD…';
       },
-      share: navigator.share ? data => navigator.share({ ...data, files: data.files as File[] }) : undefined,
-      canShare: navigator.canShare ? data => navigator.canShare({ files: data.files as File[] }) : undefined,
-      writeText: navigator.clipboard?.writeText ? text => navigator.clipboard.writeText(text) : undefined,
+      share: !downloadOnly && navigator.share ? data => navigator.share({ ...data, files: data.files as File[] }) : undefined,
+      canShare: !downloadOnly && navigator.canShare ? data => navigator.canShare({ files: data.files as File[] }) : undefined,
+      writeText: !downloadOnly && navigator.clipboard?.writeText ? text => navigator.clipboard.writeText(text) : undefined,
       renderPng: () => new Promise((resolve, reject) => {
         const canvas = document.createElement('canvas');
         canvas.width = SHARE_CARD_WIDTH;
@@ -813,13 +820,15 @@ export class ResultsScreen {
         link.href = url;
         link.download = filename;
         document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+        try { link.click(); } finally {
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+        }
       }
     });
     if (generation !== this.shareGeneration) return;
     this.shareBtn.disabled = false;
+    this.downloadBtn.disabled = false;
     this.shareStatus.textContent = outcome.state === 'SHARED' ? 'RESULT SHARED'
       : outcome.state === 'CANCELLED' ? 'SHARE CANCELLED'
       : [outcome.downloaded ? 'CARD DOWNLOAD STARTED' : '', outcome.copied ? 'RESULT TEXT COPIED' : '', outcome.detail ?? ''].filter(Boolean).join(' // ') || 'SHARE UNAVAILABLE';

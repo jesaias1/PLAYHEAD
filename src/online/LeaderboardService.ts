@@ -47,7 +47,8 @@ export interface LeaderboardView {
   trackId: string;
   entries: LeaderboardEntry[];
   /** The requesting player's own best, if any. */
-  you: { timeUs: number; position: number | null; displayName: string } | null;
+  you: { timeUs: number; position: number | null; displayName: string; runId?: string; userId?: string } | null;
+  page?: number; pageSize?: number; total?: number;
   /**
    * The run ranked directly above the player, when the player's position is
    * known and is not already #1. A cheap, honest competitive target taken from
@@ -117,78 +118,47 @@ export class LeaderboardService {
    * it never fabricates a WORLD ranking.
    */
   public async fetchLeaderboard(
-    trackId: string,
-    identity: MapIdentity,
-    limit = 25
+    trackId: string, identity: MapIdentity, limit = 25, offset = 0
   ): Promise<LeaderboardView> {
     const client = this.onlineClient.getClient();
+    const size = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 25;
+    const start = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
     const empty: LeaderboardView = { trackId, entries: [], you: null, nextAbove: null, offline: true };
     if (!client) return empty;
-
+    const scope = (query: any) => query.eq('track_id', trackId).eq('map_version', identity.mapVersion)
+      .eq('map_fingerprint', identity.mapFingerprint).eq('verification_state', 'accepted');
     try {
-      const { data, error } = await client
-        .from('leaderboard_runs')
-        .select('id, user_id, display_name, time_us, rank, verification_state, created_at, replay_version, replay_path, replay_hash')
-        .eq('track_id', trackId)
-        .eq('map_version', identity.mapVersion)
-        .eq('map_fingerprint', identity.mapFingerprint)
-        .eq('verification_state', 'accepted')
-        .order('time_us', { ascending: true })
-        .limit(limit);
-
+      const { data, count, error } = await scope(client.from('leaderboard_runs').select(
+        'id, user_id, display_name, time_us, rank, verification_state, created_at, replay_version, replay_path, replay_hash', { count: 'exact' }))
+        .order('time_us', { ascending: true }).order('id', { ascending: true }).range(start, start + size - 1);
       if (error) throw error;
-
-      const entries: LeaderboardEntry[] = (data ?? []).map((row, index) => ({
-        rankPosition: index + 1,
-        trackId,
-        displayName: (row.display_name as string) ?? 'PLAYER',
-        timeUs: Number(row.time_us),
-        rank: (row.rank as string) ?? 'UNRANKED',
-        userId: row.user_id as string,
-        runId: row.id as string,
-        verificationState: (row.verification_state as string) ?? 'accepted',
-        createdAt: (row.created_at as string) ?? '',
-        replayVersion: (row.replay_version as number | null) ?? null,
-        replayPath: (row.replay_path as string | null) ?? null,
-        replayHash: (row.replay_hash as string | null) ?? null
+      const entries: LeaderboardEntry[] = (data ?? []).map((row: any, index: number) => ({
+        rankPosition: start + index + 1, trackId, displayName: row.display_name ?? 'PLAYER', timeUs: Number(row.time_us),
+        rank: row.rank ?? 'UNRANKED', userId: row.user_id, runId: row.id, verificationState: row.verification_state ?? 'accepted',
+        createdAt: row.created_at ?? '', replayVersion: row.replay_version ?? null, replayPath: row.replay_path ?? null, replayHash: row.replay_hash ?? null
       }));
-
       const userId = this.auth.getUserId();
       let you: LeaderboardView['you'] = null;
       if (userId) {
-        const own = entries.find((e) => e.userId === userId);
-        if (own) {
-          you = { timeUs: own.timeUs, position: own.rankPosition, displayName: own.displayName };
-        } else {
-          const { data: best } = await client
-            .from('leaderboard_runs')
-            .select('time_us, display_name')
-            .eq('track_id', trackId)
-            .eq('map_version', identity.mapVersion)
-            .eq('map_fingerprint', identity.mapFingerprint)
-            .eq('user_id', userId)
-            .eq('verification_state', 'accepted')
-            .order('time_us', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          if (best) {
-            you = {
-              timeUs: Number(best.time_us),
-              position: null,
-              displayName: (best.display_name as string) ?? 'PLAYER'
-            };
+        const { data: best, error: bestError } = await scope(client.from('leaderboard_runs').select('id, display_name, time_us'))
+          .eq('user_id', userId).order('time_us', { ascending: true }).order('id', { ascending: true }).limit(1).maybeSingle();
+        if (bestError) throw bestError;
+        if (best) {
+          const inPage = entries.find(entry => entry.runId === best.id);
+          let position = inPage?.rankPosition ?? null;
+          if (position === null) {
+            const [faster, tiedBefore] = await Promise.all([
+              scope(client.from('leaderboard_runs').select('id', { count: 'exact', head: true })).lt('time_us', best.time_us),
+              scope(client.from('leaderboard_runs').select('id', { count: 'exact', head: true })).eq('time_us', best.time_us).lt('id', best.id)
+            ]);
+            if (!faster.error && !tiedBefore.error && typeof faster.count === 'number' && typeof tiedBefore.count === 'number') position = faster.count + tiedBefore.count + 1;
           }
+          you = { timeUs: Number(best.time_us), position, displayName: best.display_name ?? 'PLAYER', runId: best.id, userId };
         }
       }
-
-      // NEXT ABOVE YOU: derived from the SAME page, only when the player's own
-      // position is known and they are not already #1. Never a second query.
-      const nextAbove =
-        you && you.position !== null && you.position > 1
-          ? entries.find((e) => e.rankPosition === you.position! - 1) ?? null
-          : null;
-
-      return { trackId, entries, you, nextAbove, offline: false };
+      const nextAbove = you?.position ? entries.find(entry => entry.rankPosition === you!.position! - 1) ?? null : null;
+      return { trackId, entries, you, nextAbove, offline: false, page: Math.floor(start / size), pageSize: size,
+        total: count ?? start + entries.length };
     } catch {
       this.onlineClient.setStatus('ERROR');
       return empty;
