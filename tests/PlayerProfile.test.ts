@@ -473,7 +473,7 @@ describe('Race identity', () => {
   });
 
   it('the in-race HUD gains no cosmetic cards', () => {
-    const hud = read('src/ui/HUD.ts');
+    const hud = read('src/ui/Hud.ts');
     expect(hud).not.toMatch(/identity|glove|profile/i);
   });
 });

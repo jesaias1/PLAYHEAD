@@ -387,7 +387,7 @@ describe('Ghost race — splits', () => {
   });
 
   it('the HUD honours the ghost label instead of guessing', () => {
-    const hud = read('src/ui/HUD.ts');
+    const hud = read('src/ui/Hud.ts');
     expect(hud).toMatch(/split\.label \?\?/);
     expect(read('src/replay/GhostManager.ts')).toMatch(/'PB' \| 'ECHO' \| 'GHOST'/);
   });
