@@ -459,3 +459,25 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .settings-screen .settings-label { flex-shrink: 1; }
 
 #ui-root .screen .desktop-real-title::before { display: none; }
+
+/* Catalogue chrome gets its own intrinsic row, clear of the scrollable list. */
+#ui-root .signal-catalog { grid-template-rows: auto minmax(0,1fr) auto; }
+#ui-root .signal-catalog > .catalog-header { position: relative; margin: 0; padding: 6px 7px; min-height: 30px; line-height: 18px; align-items: center; flex-wrap: wrap; gap: 0 8px; color: #000; background: #c0c0c0; }
+#ui-root .signal-catalog > .catalog-header * { color: inherit; }
+#ui-root .screen .desktop-window-title { background: var(--desktop-signal-color,#000080); color: var(--desktop-signal-ink,#fff); }
+#ui-root .desktop-window-title:focus-visible { outline-color: currentColor; }
+#ui-root #panel-showcase .strip-item.active { background: var(--desktop-signal-color,#000080); color: var(--desktop-signal-ink,#fff); }
+#ui-root > .menu-bg { display: none; }
+#ui-root:has(.import-screen:not(.hidden),.analysis-screen:not(.hidden)) > .menu-bg { display: block; }
+#ui-root :is(.import-screen,.analysis-screen) { background: transparent; }
+@media(max-width:620px) {
+  #ui-root .signal-catalog { grid-template-rows: auto 300px auto; }
+}
+
+/* In-game loadout uses the same full inventory width as the desktop Armory. */
+#ui-root .armory-modal-screen { padding: 12px; }
+#ui-root .armory-modal-screen .armory-modal-console { width: min(1180px,100%); max-width: 1180px; max-height: calc(100dvh - 24px); }
+@media(min-width:1000px) {
+  #ui-root .armory-modal-console .armory-header { padding: 5px 8px; }
+  #ui-root .armory-modal-console .armory-title { font-size: 12px !important; }
+}

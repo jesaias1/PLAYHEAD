@@ -79,6 +79,8 @@ export class UIManager {
     this.root.appendChild(this.raceHud.element);
     this.root.appendChild(this.replayOverlay.element);
 
+    this.importScreen.mountDesktopBackdrop(this.root, this.analysisScreen.element);
+
     const windows: [HTMLElement, string, string, string?][] = [
       [this.importScreen.element, '.import-container', 'PLAYHEAD — Music Explorer', '.console-topbar'],
       [this.analysisScreen.element, '.analysis-container', 'PLAYHEAD — Preparing track'],

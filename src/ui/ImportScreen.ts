@@ -296,6 +296,7 @@ export class ImportScreen {
   private onMovementLabCallback?: (trackId?: string) => void;
   private decodeModal?: import('./SignalDecodeModal').SignalDecodeModal;
   private backdrop = new MenuBackdrop();
+  private desktopRoot: HTMLElement | null = null;
   private previewAnalyser: AnalyserNode | null = null;
   private previewLevelBuf: Uint8Array<ArrayBuffer> | null = null;
 
@@ -782,6 +783,24 @@ export class ImportScreen {
     });
   }
 
+  /** Keep one living desktop behind both the menu and track preparation. */
+  public mountDesktopBackdrop(root: HTMLElement, preparation: HTMLElement): void {
+    this.desktopRoot = root;
+    root.prepend(this.backdrop.canvas);
+    this.backdrop.isVisible = () => !this.element.classList.contains('hidden') || !preparation.classList.contains('hidden');
+    this.updateDesktopAccent(this.selectedTrack.accentColor);
+  }
+
+  private updateDesktopAccent(color: string): void {
+    const rgb = color.replace('#', '').match(/.{2}/g)!.map((value) => parseInt(value, 16) / 255);
+    const linear = rgb.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+    for (const host of [this.element, this.desktopRoot]) {
+      host?.style.setProperty('--desktop-signal-color', color);
+      host?.style.setProperty('--desktop-signal-ink', luminance > 0.179 ? '#000' : '#fff');
+    }
+  }
+
   public selectTrack(track: TrackCatalogEntry): void {
     this.stopPreview();
     this.selectedTrack = track;
@@ -858,6 +877,7 @@ export class ImportScreen {
 
     // The whole Signal Pack deck takes the selected track's palette.
     this.showcasePanel.style.setProperty('--track-accent', t.accentColor);
+    this.updateDesktopAccent(t.accentColor);
     const slotElem = this.element.querySelector('#showcase-slot') as HTMLElement | null;
     if (slotElem) {
       const official = this.catalog.filter((c) => c.id !== 'tutorial_00');
