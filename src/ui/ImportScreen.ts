@@ -6,6 +6,7 @@
  * and Karambit Armory & Cosmic Skins Profile.
  */
 
+import { mountDesktopThemeToggle } from './DesktopTheme';
 import { AudioLoader } from '../audio/AudioLoader';
 import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { SyntheticGenre } from '../audio/SyntheticTrack';
@@ -683,6 +684,7 @@ export class ImportScreen {
     // The ONE global connection indicator lives in the footer, not inside any
     // feature panel, so it never duplicates online controls on unrelated pages.
     const footer = this.element.querySelector('.terminal-footer-status') as HTMLElement;
+    mountDesktopThemeToggle(footer);
     if (footer) {
       footer.appendChild(document.createTextNode(' · '));
       footer.appendChild(this.onlineStatusBar.element);

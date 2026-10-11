@@ -4,12 +4,15 @@
 
 import './styles/main.css';
 import './styles/desktop.css';
+import { initializeDesktopTheme } from './ui/DesktopTheme';
 import { Game } from './core/Game';
 import { raceRoomService } from './online/RaceRoomService';
 import { authService } from './online/AuthService';
 import { cloudProgression } from './online/CloudProgression';
 
 import { PresetGenerator } from './audio/PresetGenerator';
+
+initializeDesktopTheme();
 
 function init() {
   const canvasContainer = document.getElementById('canvas-container');
