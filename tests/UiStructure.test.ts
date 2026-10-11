@@ -47,12 +47,13 @@ describe('Top navigation', () => {
     ]);
   });
 
-  it('uses the required labels', () => {
-    expect(importScreen).toMatch(/\[ 01 \/\/ SIGNAL PACK \]/);
-    expect(importScreen).toMatch(/\[ 02 \/\/ CUSTOM AUDIO \]/);
-    expect(importScreen).toMatch(/\[ 03 \/\/ MOVEMENT LAB \]/);
-    expect(importScreen).toMatch(/\[ 04 \/\/ ARMORY \]/);
-    expect(importScreen).toMatch(/\[ 05 \/\/ ONLINE \]/);
+  it('uses concise desktop tab labels', () => {
+    for (const [id, label] of [
+      ['showcase', 'Signal Pack'], ['custom', 'Custom Audio'], ['lab', 'Movement Lab'],
+      ['armory', 'Armory'], ['online', 'Online']
+    ]) {
+      expect(importScreen).toMatch(new RegExp(`id="tab-btn-${id}"[^>]*>${label}</button>`));
+    }
   });
 
   it('no longer has RACE or LEADERBOARD as top-level tabs', () => {

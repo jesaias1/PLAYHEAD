@@ -2429,26 +2429,19 @@ button.secondary:hover {
 /* ==========================================================================
    DROPDOWN / SELECT NATIVE READABILITY FIX
    ========================================================================== */
+/* Native controls follow the active desktop palette. */
 select, option, optgroup {
-  background-color: #0b0f19 !important;
-  color: #e2e8f0 !important;
-  border-color: #1f293d !important;
-  font-family: var(--font-mono) !important;
+  background-color: #fff;
+  color: #000;
+  font-family: var(--font-sans);
 }
+select { cursor: pointer; }
+select:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
 
-select {
-  cursor: pointer;
-  outline: none;
-}
-
-select:focus {
-  outline: 1px solid #00f0ff !important;
-  border-color: #00f0ff !important;
-}
 
 option:hover, option:focus, option:checked {
-  background-color: #162035 !important;
-  color: #00f0ff !important;
+  background-color: #000080;
+  color: #fff;
 }
 
 @media (max-width: 900px) {

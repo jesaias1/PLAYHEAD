@@ -3,6 +3,7 @@
  */
 
 import './styles/main.css';
+import './styles/desktop.css';
 import { Game } from './core/Game';
 import { raceRoomService } from './online/RaceRoomService';
 import { authService } from './online/AuthService';

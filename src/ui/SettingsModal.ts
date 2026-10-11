@@ -194,7 +194,7 @@ export class SettingsModal {
   public show(): void {
     this.initValues();
     this.element.classList.remove('hidden');
-    this.closeBtn.focus();
+    this.sensInput.focus();
   }
 
   public hide(): void {

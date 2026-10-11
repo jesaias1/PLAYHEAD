@@ -308,22 +308,17 @@ export class ImportScreen {
     this.element.innerHTML = `
       <div class="import-container terminal-console">
         <header class="brand-header console-topbar">
-          <div class="brand-title-wrap">
-            <img src="/assets/brand/playhead_mascot.png" class="brand-logo-mascot" alt="" />
-            <img src="/assets/brand/playhead_logo_text.png" class="brand-logo-text" alt="PLAYHEAD" />
-          </div>
-          <div class="brand-lines">
-            <p class="brand-tagline">ENTER THE SIGNAL.<span class="terminal-cursor" aria-hidden="true"></span></p>
-            <p class="brand-secondary">BECOME THE PLAYHEAD.</p>
-          </div>
+          <div class="desktop-title"><span class="desktop-app-icon" aria-hidden="true">▥</span> PLAYHEAD — Music Explorer</div>
+          <span class="desktop-title-detail">Your music, as a place.</span>
         </header>
+        <div class="desktop-menubar" aria-hidden="true"><span>PLAYHEAD</span><span>Music &amp; movement</span><span>14 built-in tracks · Bring your own audio</span></div>
 
         <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
-          <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">[ 01 // SIGNAL PACK ]</button>
-          <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">[ 02 // CUSTOM AUDIO ]</button>
-          <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">[ 03 // MOVEMENT LAB ]</button>
-          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">[ 04 // ARMORY ]</button>
-          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">[ 05 // ONLINE ]</button>
+          <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">Signal Pack</button>
+          <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">Custom Audio</button>
+          <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">Movement Lab</button>
+          <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">Armory</button>
+          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">Online</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL: hero deck (selected signal) + catalog list. -->
