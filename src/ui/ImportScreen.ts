@@ -566,6 +566,9 @@ export class ImportScreen {
     // own section visibility, so the panels themselves stay mounted and visible.
     this.racePanel.element.classList.remove('hidden');
     this.leaderboardPanel.element.classList.remove('hidden');
+    this.racePanel.element.removeAttribute('aria-hidden');
+    this.leaderboardPanel.element.removeAttribute('aria-hidden');
+    this.racePanel.element.setAttribute('aria-labelledby', 'online-subnav-race');
 
     // ONLINE internal sub-nav.
     this.onlineSubnavRace = this.element.querySelector('#online-subnav-race') as HTMLButtonElement;

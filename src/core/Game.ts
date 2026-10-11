@@ -175,6 +175,7 @@ export class Game {
    * audio, race start, menu return).
    */
   private resultBoardToken = 0;
+  private leaderboardRequestToken = 0;
   /**
    * Upload promise from the run that just finished, so the submission can carry
    * the replay metadata. Reset at the start of every recording.
@@ -3424,11 +3425,13 @@ export class Game {
     board: 'NORMAL' | 'SURF' = 'NORMAL'
   ): Promise<void> {
     const panel = this.ui.importScreen.leaderboardPanel;
+    const requestToken = ++this.leaderboardRequestToken;
     const catalogTitle = SignalPackCatalog.getTrackById(trackId)?.title ?? trackId;
     const title = board === 'SURF' ? `${catalogTitle} // SURF` : catalogTitle;
     panel.setLoading(title);
     const render = (view: LeaderboardView): void => {
-      if (panel.getSelectedTrack() !== trackId || panel.getBoardKind() !== board) return;
+      if (requestToken !== this.leaderboardRequestToken ||
+          panel.getSelectedTrack() !== trackId || panel.getBoardKind() !== board) return;
       panel.render(view, title);
     };
 

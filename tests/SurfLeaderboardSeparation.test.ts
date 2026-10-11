@@ -57,6 +57,7 @@ describe('SURF leaderboard separation', () => {
     const panel = { getSelectedTrack: () => trackId, getBoardKind: () => kind, setLoading: vi.fn(), render: vi.fn() };
     const host = Object.assign(Object.create(Game.prototype), {
       ui: { importScreen: { leaderboardPanel: panel } },
+      leaderboardRequestToken: 0,
       audioEngine: { getBuffer: () => ({ duration: 1 }) }
     });
     try {
@@ -73,6 +74,19 @@ describe('SURF leaderboard separation', () => {
       release(view);
       await pending;
       expect(panel.render).not.toHaveBeenCalled();
+
+      // Two requests for the same selection must also resolve newest-first.
+      kind = 'NORMAL';
+      fetch.mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+      const older = host.refreshLeaderboard(trackId, 'NORMAL');
+      await Promise.resolve();
+      const newestView = { ...view, trackId: 'newest-response' };
+      fetch.mockResolvedValueOnce(newestView);
+      await host.refreshLeaderboard(trackId, 'NORMAL');
+      release(view);
+      await older;
+      expect(panel.render).toHaveBeenCalledTimes(1);
+      expect(panel.render).toHaveBeenCalledWith(newestView, expect.any(String));
     } finally { preset.mockRestore(); fetch.mockRestore(); }
   });
   it('uses namespaced surf ids disjoint from the normal registry', () => {

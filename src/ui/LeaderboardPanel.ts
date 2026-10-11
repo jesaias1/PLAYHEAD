@@ -52,7 +52,7 @@ export class LeaderboardPanel {
     this.element.className = 'showcase-container showcase-panel leaderboard-panel hidden';
     this.element.id = 'panel-leaderboard';
     this.element.setAttribute('role', 'tabpanel');
-    this.element.setAttribute('aria-labelledby', 'tab-btn-leaderboard');
+    this.element.setAttribute('aria-labelledby', 'online-subnav-leaderboard');
     this.element.setAttribute('aria-hidden', 'true');
 
     this.element.innerHTML = `
@@ -63,11 +63,11 @@ export class LeaderboardPanel {
       </div>
       <div class="leaderboard-board-tabs" id="lb-board-tabs" role="tablist" aria-label="Board type">
         <button class="lb-board-tab active" id="lb-board-normal" role="tab" aria-selected="true" type="button" data-board="NORMAL">NORMAL</button>
-        <button class="lb-board-tab" id="lb-board-surf" role="tab" aria-selected="false" type="button" data-board="SURF">SURF</button>
+        <button class="lb-board-tab" id="lb-board-surf" role="tab" aria-selected="false" tabindex="-1" type="button" data-board="SURF">SURF</button>
       </div>
 
-      <div class="online-lb-status" id="lb-status">SELECT A SIGNAL</div>
-      <div class="online-lb-table" id="lb-table"></div>
+      <div class="online-lb-status" id="lb-status" role="status">SELECT A SIGNAL</div>
+      <div class="online-lb-table" id="lb-table" role="region" aria-label="World rankings" tabindex="0"></div>
       <div class="online-lb-you" id="lb-you"></div>
     `;
 
@@ -82,13 +82,25 @@ export class LeaderboardPanel {
         this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
       });
     });
+    this.boardElem.addEventListener('keydown', (event) => {
+      const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (!keys.includes(event.key)) return;
+      const tabs = Array.from(this.boardElem.querySelectorAll<HTMLButtonElement>('.lb-board-tab'));
+      const index = tabs.indexOf(event.target as HTMLButtonElement);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].focus();
+      tabs[next].click();
+    });
     this.statusElem = this.element.querySelector('#lb-status') as HTMLElement;
     this.tableElem = this.element.querySelector('#lb-table') as HTMLElement;
     this.youElem = this.element.querySelector('#lb-you') as HTMLElement;
 
     // Selecting a signal loads its board straight away — no PLAY required.
     this.selectElem.addEventListener('change', () => {
-      // The NORMAL board is the default when the signal changes.
+      // Keep the selected mode when browsing other signals.
       this.callbacks?.onSelectBoard(this.selectElem.value, this.boardKind);
     });
     (this.element.querySelector('#lb-play') as HTMLButtonElement).addEventListener('click', () => {
@@ -130,6 +142,7 @@ export class LeaderboardPanel {
       const active = btn.dataset.board === this.boardKind;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', String(active));
+      btn.tabIndex = active ? 0 : -1;
     });
   }
 
@@ -167,6 +180,8 @@ export class LeaderboardPanel {
   }
 
   public setLoading(trackTitle: string): void {
+    this.currentEntries = [];
+    this.tableElem.scrollTop = 0;
     this.statusElem.textContent = `LOADING // ${trackTitle}`;
     this.tableElem.innerHTML = '';
     this.youElem.innerHTML = '';
@@ -174,6 +189,7 @@ export class LeaderboardPanel {
 
   public render(view: LeaderboardView, trackTitle: string): void {
     if (view.offline) {
+      this.currentEntries = [];
       this.statusElem.textContent = 'WORLD // OFFLINE — LOCAL RESULTS ONLY';
       this.tableElem.innerHTML = '';
       this.youElem.innerHTML = `<div class="online-lb-empty">[LOCAL // SYNC PENDING]</div>`;
