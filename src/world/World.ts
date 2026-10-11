@@ -34,6 +34,8 @@ import {
   WorldSafetyReport
 } from './WorldGeometrySafetyPass';
 import { obstacleLateralOffset } from '../generation/ObstacleMotion';
+import { EnvironmentThemeInstance } from './themes/EnvironmentTheme';
+import { resolveEnvironmentTheme } from './themes/EnvironmentThemeRegistry';
 
 export class World {
   public physics: PhysicsWorld;
@@ -86,6 +88,15 @@ export class World {
    */
   public signalImpulse = 0;
 
+  /**
+   * Non-city environment for the loaded track, or null for the default city.
+   * Presentation only: it replaces the city decoration stack and the sky, and
+   * is never an input to route, physics, map identity or scoring.
+   */
+  public environmentTheme: EnvironmentThemeInstance | null = null;
+  /** Environment whose lighting the active theme changed, to restore it. */
+  private themedEnvironment: Environment | null = null;
+
   /** Authoritative gameplay protection region for the loaded track. */
   public corridor: RouteExclusionCorridor | null = null;
 
@@ -111,9 +122,17 @@ export class World {
     analysis: TrackAnalysis,
     track: GeneratedTrack,
     environment?: Environment,
-    officialTrackId: string | null = null
+    officialTrackId: string | null = null,
+    /**
+     * Trusted catalog id used ONLY to pick the visual environment. Defaults to
+     * the official id; a SURF course passes its preserved song id here so both
+     * variants of a song share one environment while the surf world keeps its
+     * null official id for everything else.
+     */
+    environmentTrackId: string | null = officialTrackId
   ): void {
     this.disposeTrackAssets();
+    const themeDefinition = resolveEnvironmentTheme(environmentTrackId);
 
     this.analysis = analysis;
     this.track = track;
@@ -153,6 +172,7 @@ export class World {
     this.visualController.clearWorldProfile();
     this.sky.clearWorldProfile();
     if (environment) environment.clearWorldProfile();
+    if (themeDefinition) this.visualController.setPalette(themeDefinition.createPalette());
 
     // 1c. Order matters for the sky: its palette/base colours are set FIRST,
     //     then the profile tint is layered on, so tint is never overwritten.
@@ -201,24 +221,52 @@ export class World {
       this.playheadSystem.registerReactive(beacon.mesh, beacon.channel);
     }
 
-    // 4. Build Distant Audio Skyline (architecture family / density / spacing
-    //    / signage density follow the resolved official world profile).
-    this.skyline = new SkylineArchitecture(this.scene, analysis, track, this.worldProfile);
+    // The protected gameplay region is needed by a theme at build time and by
+    // the final safety pass below; both use this one instance.
+    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
+    this.corridor = new RouteExclusionCorridor(allCorridorNodes);
+    const preset = environment?.activePreset;
 
-    // 5. Build Celestial Landmarks (Giant low-res Moon / Eclipse / Halos in negative space)
-    this.celestialLandmarks = new CelestialLandmarks(
-      this.scene,
-      analysis,
-      track,
-      this.visualController.state.palette,
-      this.worldProfile
-    );
+    if (themeDefinition) {
+      // A themed track replaces the CITY decoration stack (skyline, spectral
+      // canyons, drop setpiece, landmarks, megastructure, hero motifs, the
+      // route-side monoliths) and the procedural sky. Route, colliders, gates,
+      // finish, edge trim and route packets are untouched.
+      this.builtAssets.decorativeGroup.visible = false;
+      this.sky.mesh.visible = false;
+      this.environmentTheme = themeDefinition.build({
+        analysis,
+        track,
+        corridor: this.corridor,
+        palette: this.visualController.state.palette,
+        quality: preset ?? null
+      });
+      this.scene.add(this.environmentTheme.group);
+      this.scene.add(this.environmentTheme.skyGroup);
+      if (environment) {
+        environment.setThemeLighting(this.environmentTheme.lighting);
+        this.themedEnvironment = environment;
+      }
+    } else {
+      // 4. Build Distant Audio Skyline (architecture family / density / spacing
+      //    / signage density follow the resolved official world profile).
+      this.skyline = new SkylineArchitecture(this.scene, analysis, track, this.worldProfile);
 
-    // 6. Build Spatial Spectral Architecture (Waveform Canyons, Canopy, Onset Gates)
-    this.spectralArchitecture = new SpectralArchitecture(this.scene, analysis, track);
+      // 5. Build Celestial Landmarks (Giant low-res Moon / Eclipse / Halos in negative space)
+      this.celestialLandmarks = new CelestialLandmarks(
+        this.scene,
+        analysis,
+        track,
+        this.visualController.state.palette,
+        this.worldProfile
+      );
 
-    // 6. Build Major Drop Setpiece
-    this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
+      // 6. Build Spatial Spectral Architecture (Waveform Canyons, Canopy, Onset Gates)
+      this.spectralArchitecture = new SpectralArchitecture(this.scene, analysis, track);
+
+      // 6. Build Major Drop Setpiece
+      this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
+    }
 
     // 7. Build world-scale AUDIO LANDMARKS + the travelling route signal.
     //
@@ -227,15 +275,16 @@ export class World {
     // route, and a signal packet stream running along the route edges. Both are
     // presentation only — no collision, no gameplay reads — and both are
     // batched into a handful of draw calls.
-    const preset = environment?.activePreset;
-    this.signalLandmarks = new SignalLandmarks(
-      analysis,
-      track,
-      this.visualController.state.palette,
-      preset?.reactiveLandmarkScale ?? 1.0,
-      this.worldProfile
-    );
-    this.scene.add(this.signalLandmarks.group);
+    if (!themeDefinition) {
+      this.signalLandmarks = new SignalLandmarks(
+        analysis,
+        track,
+        this.visualController.state.palette,
+        preset?.reactiveLandmarkScale ?? 1.0,
+        this.worldProfile
+      );
+      this.scene.add(this.signalLandmarks.group);
+    }
 
     this.routePackets = new RouteSignalPackets(
       track,
@@ -244,23 +293,25 @@ export class World {
     );
     this.scene.add(this.routePackets.group);
 
-    // 8. Megastructure: abyss strata, composed hero structures, light shafts.
-    this.megastructure = new Megastructure(
-      this.scene,
-      track,
-      this.visualController.state.palette,
-      this.worldProfile
-    );
+    if (!themeDefinition) {
+      // 8. Megastructure: abyss strata, composed hero structures, light shafts.
+      this.megastructure = new Megastructure(
+        this.scene,
+        track,
+        this.visualController.state.palette,
+        this.worldProfile
+      );
 
-    // 9. Per-track HERO composition. One authored motif family placed in
-    //    validated negative space; decoration only, never inside the corridor.
-    this.heroMotifs = new SignalHeroMotifs(
-      analysis,
-      track,
-      this.visualController.state.palette,
-      this.worldProfile
-    );
-    this.scene.add(this.heroMotifs.group);
+      // 9. Per-track HERO composition. One authored motif family placed in
+      //    validated negative space; decoration only, never inside the corridor.
+      this.heroMotifs = new SignalHeroMotifs(
+        analysis,
+        track,
+        this.visualController.state.palette,
+        this.worldProfile
+      );
+      this.scene.add(this.heroMotifs.group);
+    }
 
     // ==========================================================
     // FINAL AUTHORITATIVE WORLD GEOMETRY SAFETY PASS
@@ -279,13 +330,16 @@ export class World {
     // Anything unregistered is audited too, so a future builder cannot
     // `scene.add(hugeBuilding)` and escape this pass.
     // ==========================================================
-    const allCorridorNodes = RouteExclusionCorridor.collectGameplayNodes(track);
-    this.corridor = new RouteExclusionCorridor(allCorridorNodes);
-
     const safetyPass = new WorldGeometrySafetyPass(track, this.corridor);
-    safetyPass.register(this.dropSetpiece.group, 'DropSetpiece', 'DECORATION');
-    safetyPass.register(this.spectralArchitecture.group, 'SpectralArchitecture', 'DECORATION');
-    safetyPass.register(this.skyline.group, 'SkylineArchitecture', 'DECORATION');
+    if (this.dropSetpiece) safetyPass.register(this.dropSetpiece.group, 'DropSetpiece', 'DECORATION');
+    if (this.spectralArchitecture) {
+      safetyPass.register(this.spectralArchitecture.group, 'SpectralArchitecture', 'DECORATION');
+    }
+    if (this.skyline) safetyPass.register(this.skyline.group, 'SkylineArchitecture', 'DECORATION');
+    if (this.environmentTheme) {
+      safetyPass.register(this.environmentTheme.group, 'EnvironmentTheme', 'DECORATION');
+      safetyPass.register(this.environmentTheme.skyGroup, 'EnvironmentThemeSky', 'IGNORE_WORLD_SAFETY');
+    }
     if (this.celestialLandmarks?.group) {
       safetyPass.register(this.celestialLandmarks.group, 'CelestialLandmarks', 'VISUAL_ONLY');
     }
@@ -319,14 +373,6 @@ export class World {
 
     // FREEZE: after the safety pass the world geometry is final. Nothing capable
     // of intersecting gameplay may be added without passing the same contract.
-    const decorationRoots: THREE.Object3D[] = [
-      this.dropSetpiece.group,
-      this.spectralArchitecture.group,
-      this.skyline.group
-    ];
-    if (this.celestialLandmarks?.group) decorationRoots.push(this.celestialLandmarks.group);
-    if (this.builtAssets?.decorativeGroup) decorationRoots.push(this.builtAssets.decorativeGroup);
-
     const buildingReport = RouteExclusionCorridor.getLastBuildingReport();
     if (buildingReport.candidatesGenerated > 0) {
       console.log(
@@ -340,7 +386,7 @@ export class World {
     }
 
     // Refresh authored transforms so distance culling never resurrects rejected buildings
-    this.skyline.refreshAuthoredTransformsAfterValidation();
+    this.skyline?.refreshAuthoredTransformsAfterValidation();
 
     // ==========================================================
     // STATIC TRANSFORM FREEZE
@@ -354,7 +400,8 @@ export class World {
     // Animated groups (drop setpiece, spectral canyon/onset, celestial
     // landmarks, playhead edges) are deliberately left alone.
     // ==========================================================
-    const staticRoots: THREE.Object3D[] = [this.skyline.group];
+    const staticRoots: THREE.Object3D[] = [];
+    if (this.skyline) staticRoots.push(this.skyline.group);
     if (this.builtAssets?.decorativeGroup) staticRoots.push(this.builtAssets.decorativeGroup);
     const frozen = this.freezeStaticTransforms(staticRoots);
     if (frozen > 0) {
@@ -459,7 +506,27 @@ export class World {
     }
 
     // Update spectacle runtime renderer (6 distinct event families)
-    this.spectacleRenderer.update(directorState.activeSpectacle, vState, playerPos, reduceMotion);
+    // (A themed environment has its own restrained reactivity; the city's
+    // spectacle families stay hidden there.)
+    this.spectacleRenderer.update(
+      this.environmentTheme ? null : directorState.activeSpectacle,
+      vState,
+      playerPos,
+      reduceMotion
+    );
+
+    if (this.environmentTheme) {
+      this.environmentTheme.update({
+        dt,
+        songTime,
+        visualState: vState,
+        bands: this.visualController.getLiveBands(),
+        playerPos,
+        routeProgress: progressRatio,
+        effectScale: effectEmissiveScale,
+        reduceMotion
+      });
+    }
 
     // Update skyline architecture
     if (this.skyline) {
@@ -642,6 +709,17 @@ export class World {
       this.scene.remove(this.routePackets.group);
       this.routePackets.dispose();
       this.routePackets = null;
+    }
+
+    if (this.environmentTheme) {
+      this.environmentTheme.dispose();
+      this.environmentTheme = null;
+    }
+    // Hand the sky and the scene lighting back to the default city.
+    this.sky.mesh.visible = true;
+    if (this.themedEnvironment) {
+      this.themedEnvironment.setThemeLighting(null);
+      this.themedEnvironment = null;
     }
 
     if (this.debugChainMesh) {

@@ -174,6 +174,20 @@ export const CURATED_PALETTES: Record<string, PaletteConfig> = {
     highTintHex: '#e0aaff',
     accentRgb: [181, 23, 158]
   },
+  // Environment-theme palette: cold moonlit route trim that stays distinct
+  // from the warm lamps and the green aurora of the mountains.
+  MIDNIGHT_MOUNTAINS: {
+    voidHex: '#040714',
+    surfaceHex: '#0d1526',
+    surfaceDarkHex: '#0d1526',
+    surfaceLightHex: '#22304d',
+    primaryHex: '#9fe4ff',
+    secondaryHex: '#6f9dff',
+    highlightHex: '#f2f7ff',
+    bassTintHex: '#0a1838',
+    highTintHex: '#d6e6ff',
+    accentRgb: [159, 228, 255]
+  },
   GLACIER: {
     voidHex: '#040608',
     surfaceHex: '#101418',

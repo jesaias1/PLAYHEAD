@@ -1483,7 +1483,9 @@ export class Game {
     this.currentTrack = track;
     this.currentTrackCanonical = canonical;
     this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
-    this.world.loadTrack(analysis, track, this.environment, null);
+    // The surf world keeps a null official id; the preserved song id only
+    // selects the visual environment, so both variants of a song share it.
+    this.world.loadTrack(analysis, track, this.environment, null, this.currentSurfOfficialTrackId);
     this.world.songDirector.onSectionAnnouncement = (title) => {
       this.ui.hud.showSectionTitle(title);
     };

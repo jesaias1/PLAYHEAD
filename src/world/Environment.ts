@@ -24,6 +24,14 @@ import { EffectIntensityProfile, resolveEffectProfile } from '../rendering/Effec
  */
 const BASE_EXPOSURE = 1.10;
 
+/** Default (city) scene lighting, restored whenever a theme is unloaded. */
+const DEFAULT_KEY_COLOR = 0xffffff;
+const DEFAULT_KEY_INTENSITY = 2.3;
+const DEFAULT_KEY_OFFSET = new THREE.Vector3(50, 120, 60);
+const DEFAULT_HEMI_SKY = 0x45556b;
+const DEFAULT_HEMI_GROUND = 0x111620;
+const DEFAULT_HEMI_INTENSITY = 1.05;
+
 export class Environment {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -52,6 +60,9 @@ export class Environment {
   public effectProfile: EffectIntensityProfile = resolveEffectProfile('STANDARD');
 
   private adaptive: AdaptiveQuality = new AdaptiveQuality('HIGH');
+
+  /** Camera-relative key light offset (a theme may move it, e.g. to its moon). */
+  private keyLightOffset = DEFAULT_KEY_OFFSET.clone();
 
   private defaultFov = 75;
   private currentFov = 75;
@@ -104,11 +115,11 @@ export class Environment {
     this.applyQualityTier(savedTier, false);
 
     // 6. Lighting: stark, high-contrast brutalist key light + cold ambient
-    this.hemiLight = new THREE.HemisphereLight(0x45556b, 0x111620, 1.05);
+    this.hemiLight = new THREE.HemisphereLight(DEFAULT_HEMI_SKY, DEFAULT_HEMI_GROUND, DEFAULT_HEMI_INTENSITY);
     this.scene.add(this.hemiLight);
 
-    this.dirLight = new THREE.DirectionalLight(0xffffff, 2.3);
-    this.dirLight.position.set(50, 120, 60);
+    this.dirLight = new THREE.DirectionalLight(DEFAULT_KEY_COLOR, DEFAULT_KEY_INTENSITY);
+    this.dirLight.position.copy(DEFAULT_KEY_OFFSET);
     this.scene.add(this.dirLight);
     this.scene.add(this.dirLight.target);
 
@@ -272,11 +283,7 @@ export class Environment {
 
   public update(dt: number): void {
     // Keep directional light following the player along the route
-    this.dirLight.position.set(
-      this.camera.position.x + 50,
-      this.camera.position.y + 120,
-      this.camera.position.z + 60
-    );
+    this.dirLight.position.copy(this.camera.position).add(this.keyLightOffset);
     this.dirLight.target.position.set(
       this.camera.position.x,
       this.camera.position.y,
@@ -330,6 +337,29 @@ export class Environment {
    */
   public clearWorldProfile(): void {
     this.worldProfile = null;
+  }
+
+  /**
+   * Applies an environment theme's scene lighting, or restores the default
+   * city lighting when passed null. Presentation only. (The city re-derives
+   * the hemisphere colours from the palette on every load, via setPalette.)
+   */
+  public setThemeLighting(lighting: import('./themes/EnvironmentTheme').EnvironmentThemeLighting | null): void {
+    if (!lighting) {
+      this.dirLight.color.setHex(DEFAULT_KEY_COLOR);
+      this.dirLight.intensity = DEFAULT_KEY_INTENSITY;
+      this.keyLightOffset.copy(DEFAULT_KEY_OFFSET);
+      this.hemiLight.color.setHex(DEFAULT_HEMI_SKY);
+      this.hemiLight.groundColor.setHex(DEFAULT_HEMI_GROUND);
+      this.hemiLight.intensity = DEFAULT_HEMI_INTENSITY;
+      return;
+    }
+    this.dirLight.color.setHex(lighting.keyColor);
+    this.dirLight.intensity = lighting.keyIntensity;
+    this.keyLightOffset.copy(lighting.keyOffset);
+    this.hemiLight.color.setHex(lighting.hemiSkyColor);
+    this.hemiLight.groundColor.setHex(lighting.hemiGroundColor);
+    this.hemiLight.intensity = lighting.hemiIntensity;
   }
 
   public setAccent(accent: VisualAccent): void {

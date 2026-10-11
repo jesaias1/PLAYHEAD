@@ -18,6 +18,12 @@
  *   - ?baseline=1   load each track with a NULL official id (fallback profile)
  *                   using the identical camera + music + scrub, for comparison.
  *   - ?t=<fraction 0..1>  scrub position within the track (default 0.35 = mid).
+ *   - ?course=SURF  build the SURF course of the track (same generator and
+ *                   environment selection the game uses for a surf run).
+ *   - ?live=1       keep rendering, advancing song time from the scrub point,
+ *                   so audio-reactive presentation can be watched in motion.
+ *                   window.__PREVIEW__ exposes { environment, world, setScrub,
+ *                   view } (view = inspection camera lift / yaw / pitch).
  *
  * IMPORTANT: ONE World instance is reused across every load. World.loadTrack()
  * disposes the previous track's assets first, so the scene never accumulates
@@ -29,6 +35,7 @@ import { Environment } from '../../src/world/Environment';
 import { World } from '../../src/world/World';
 import { PresetLevelCache } from '../../src/audio/PresetLevelCache';
 import { SignalPackCatalog } from '../../src/audio/SignalPackCatalog';
+import { TrackGenerator } from '../../src/generation/TrackGenerator';
 
 interface SweepEntry {
   trackId: string;
@@ -52,6 +59,8 @@ hud.style.cssText =
 const params = new URLSearchParams(location.search);
 const trackParam = params.get('track') || 'track_1_signal_drift';
 const baselineMode = params.get('baseline') === '1';
+const surfMode = (params.get('course') || '').toUpperCase() === 'SURF';
+const liveMode = params.get('live') === '1';
 let scrub = Math.max(0, Math.min(1, parseFloat(params.get('t') || '0.35')));
 
 function countRenderables(scene: THREE.Scene): { objects: number; geometricObjects: number } {
@@ -74,6 +83,9 @@ function countHeroInstances(world: World): number {
   return n;
 }
 
+/** Inspection-only camera offsets, settable through window.__PREVIEW__.view. */
+const view = { lift: 0, yaw: 0, pitch: 0 };
+
 function placeCamera(environment: Environment, world: World, t: number): void {
   const route = world.track?.route;
   if (!route || route.length === 0) return;
@@ -90,13 +102,15 @@ function placeCamera(environment: Environment, world: World, t: number): void {
   dir.normalize();
   environment.camera.position.set(
     node.position.x - dir.x * 12,
-    node.position.y + 6,
+    node.position.y + 6 + view.lift,
     node.position.z - dir.z * 12
   );
+  // Optional inspection offsets (identity by default).
+  const look = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), view.yaw);
   environment.camera.lookAt(
-    node.position.x + dir.x * 60,
-    node.position.y + 2,
-    node.position.z + dir.z * 60
+    node.position.x + look.x * 60,
+    node.position.y + 2 + view.lift + view.pitch * 60,
+    node.position.z + look.z * 60
   );
 }
 
@@ -126,7 +140,14 @@ async function loadAndMeasure(
     // Baseline mode deliberately passes null, exercising the fallback profile
     // with the IDENTICAL camera/music/scrub for a like-for-like comparison.
     const trustedId = baselineMode ? null : SignalPackCatalog.getTrackById(trackId)?.id ?? null;
-    world.loadTrack(precomputed.analysis, precomputed.track, environment, trustedId);
+    if (surfMode) {
+      // Mirrors Game.generateSurfVariant: null official id, the trusted song
+      // id only selects the visual environment.
+      const surfTrack = TrackGenerator.generate(precomputed.analysis, 'SURF');
+      world.loadTrack(precomputed.analysis, surfTrack, environment, null, trustedId);
+    } else {
+      world.loadTrack(precomputed.analysis, precomputed.track, environment, trustedId);
+    }
     entry.worldProfileUsesOverride = world.worldProfile.usesOverride;
     entry.finalUnsafe = world.worldSafetyReport?.finalUnsafe ?? null;
 
@@ -252,6 +273,44 @@ async function main(): Promise<void> {
     await renderAll(environment, world);
   } else {
     await renderSingle(environment, world, trackParam);
+    const setScrub = (t: number): void => {
+      scrub = Math.max(0, Math.min(1, t));
+      advanced = 0;
+    };
+    // Deterministic stepping for capture: simulate `seconds` at 60 Hz from
+    // the current scrub point, then draw. Works while the tab is hidden.
+    let advanced = 0;
+    const advance = (seconds: number): number => {
+      const duration = world.analysis?.duration ?? 100;
+      const frames = Math.max(1, Math.round(seconds * 60));
+      for (let f = 0; f < frames; f++) {
+        advanced += 1 / 60;
+        placeCamera(environment, world, scrub);
+        world.update(Math.min(duration, duration * scrub + advanced), environment.camera.position, 0, 1 / 60, environment);
+        environment.update(1 / 60);
+      }
+      environment.resetFrameStats();
+      environment.render();
+      return environment.renderer.info.render.calls;
+    };
+    (window as unknown as Record<string, unknown>).__PREVIEW__ = { environment, world, setScrub, view, advance };
+    if (liveMode) {
+      let last = performance.now();
+      let elapsed = 0;
+      const tick = (now: number): void => {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        elapsed += dt;
+        const duration = world.analysis?.duration ?? 100;
+        placeCamera(environment, world, scrub);
+        world.update(Math.min(duration, duration * scrub + elapsed), environment.camera.position, 0, dt, environment);
+        environment.update(dt);
+        environment.resetFrameStats();
+        environment.render();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
   }
 }
 
