@@ -483,7 +483,7 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 }
 
 /* Compact Explorer rankings: keep names, times and replay actions together. */
-#ui-root .import-container.terminal-console:has(#leaderboard-panel-host:not(.hidden)) { width: min(760px,100%); max-width: 760px; }
+#ui-root .import-container.terminal-console:has(#panel-online:not(.hidden) #leaderboard-panel-host:not(.hidden)) { width: min(760px,100%); max-width: 760px; }
 #ui-root #panel-leaderboard { gap: 0; margin-bottom: 0; min-width: 0; width: 100%; padding: 0; }
 #ui-root .leaderboard-head { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 8px; margin: 0 0 8px; }
 #ui-root .leaderboard-head .online-select { min-width: 0; width: 100%; }
