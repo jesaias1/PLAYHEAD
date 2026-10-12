@@ -61,6 +61,10 @@ const trackParam = params.get('track') || 'track_1_signal_drift';
 const baselineMode = params.get('baseline') === '1';
 const surfMode = (params.get('course') || '').toUpperCase() === 'SURF';
 const liveMode = params.get('live') === '1';
+// ?layer=0 renders the city WITHOUT the Signal City layer, for before/after.
+World.signalCityEnabled = params.get('layer') !== '0';
+// ?map=<key> forces a map (CITY, MIDNIGHT_MOUNTAINS, ORBITAL_STATION).
+const mapParam = params.get('map');
 let scrub = Math.max(0, Math.min(1, parseFloat(params.get('t') || '0.35')));
 
 function countRenderables(scene: THREE.Scene): { objects: number; geometricObjects: number } {
@@ -144,9 +148,9 @@ async function loadAndMeasure(
       // Mirrors Game.generateSurfVariant: null official id, the trusted song
       // id only selects the visual environment.
       const surfTrack = TrackGenerator.generate(precomputed.analysis, 'SURF');
-      world.loadTrack(precomputed.analysis, surfTrack, environment, null, trustedId);
+      world.loadTrack(precomputed.analysis, surfTrack, environment, null, mapParam ?? trustedId);
     } else {
-      world.loadTrack(precomputed.analysis, precomputed.track, environment, trustedId);
+      world.loadTrack(precomputed.analysis, precomputed.track, environment, trustedId, mapParam ?? trustedId);
     }
     entry.worldProfileUsesOverride = world.worldProfile.usesOverride;
     entry.finalUnsafe = world.worldSafetyReport?.finalUnsafe ?? null;

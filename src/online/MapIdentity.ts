@@ -127,6 +127,15 @@ export const MOVEMENT_VERSION: string = (() => {
 /** Obstacle / spine / fork generator identity. */
 export const GENERATOR_VERSION: string = `gen_${ROUTE_GENERATION_VERSION}`;
 
+/**
+ * SURF courses come from their own generator and are versioned by
+ * SURF_GENERATION_VERSION. Their fingerprint string also carries a route
+ * version for historical reasons; it is frozen at the value the surf boards
+ * were registered under, so a change to the NORMAL route generator can never
+ * move a surf map onto a new board.
+ */
+const SURF_FINGERPRINT_ROUTE_VERSION = 5;
+
 export interface MapIdentity {
   trackId: string;
   mapVersion: number;
@@ -182,9 +191,9 @@ function pushNode(parts: string[], node: RouteNode, tag: string): void {
 export function buildMapIdentityString(track: GeneratedTrack, analysis?: TrackAnalysis): string {
   const parts: string[] = [
     `alg:${MAP_FINGERPRINT_ALGORITHM}`,
-    `mapVersion:${ROUTE_GENERATION_VERSION}`,
+    `mapVersion:${track.courseType === 'SURF' ? SURF_FINGERPRINT_ROUTE_VERSION : ROUTE_GENERATION_VERSION}`,
     `movement:${MOVEMENT_VERSION}`,
-    `generator:${GENERATOR_VERSION}`,
+    `generator:${track.courseType === 'SURF' ? `gen_${SURF_FINGERPRINT_ROUTE_VERSION}` : GENERATOR_VERSION}`,
     `analysis:${analysis ? computeAnalysisFingerprint(analysis) : 'unbound'}`,
     `seed:${track.seed >>> 0}`,
     `total:${q(track.totalDistance)}`,

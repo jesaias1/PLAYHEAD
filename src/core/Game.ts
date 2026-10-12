@@ -21,6 +21,7 @@ import { GeneratedTrack, CheckpointDefinition } from '../generation/GenerationTy
 import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { Environment } from '../world/Environment';
 import { World } from '../world/World';
+import { CITY_MAP_KEY, ENVIRONMENT_MAPS } from '../world/themes/EnvironmentThemeRegistry';
 import { CameraController } from '../player/CameraController';
 import { PlayerController } from '../player/PlayerController';
 import type { RunRank, RunResults } from '../player/PlayerStats';
@@ -311,6 +312,8 @@ export class Game {
    * get no board.
    */
   private currentSurfOfficialTrackId: string | null = null;
+  /** Map chosen in the map picker for the current song (null = its own map). */
+  private selectedMapKey: string | null = null;
   /** Board kind + official song id of the LAST finished run (results actions). */
   private lastResultBoardKind: 'NORMAL' | 'SURF' = 'NORMAL';
   private lastResultBoardOfficialTrackId: string | null = null;
@@ -517,6 +520,7 @@ export class Game {
       } else void this.switchReadyToSurf();
     });
     this.ui.analysisScreen.setOnAcademy(() => this.enterAcademyFromReady());
+    this.ui.analysisScreen.setOnMapSelect((key) => this.selectMap(key));
 
     // Pause Screen
     this.ui.pauseScreen.setCallbacks({
@@ -1303,8 +1307,10 @@ export class Game {
           precomputed.analysis,
           precomputed.track,
           this.environment,
-          trackEntry.id
+          trackEntry.id,
+          this.selectedMapKey ?? trackEntry.id
         );
+        this.syncMapPicker();
         if (precomputed.spectacleEvents) {
           this.world.songDirector.spectaclePlanner.events = precomputed.spectacleEvents;
         }
@@ -1409,6 +1415,28 @@ export class Game {
     this.ui.importScreen.setCustomStatus(message, 'error');
   }
 
+  /**
+   * Map picker: rebuild the READY world in the chosen map. A map is visual
+   * only, so the course, its identity and its boards are exactly the same;
+   * the choice holds for this song until the player returns to the menu.
+   */
+  private selectMap(key: string): void {
+    if (!this.stateMachine.is(GameState.READY) || !this.currentAnalysis || !this.currentTrack) return;
+    this.selectedMapKey = key;
+    const events = this.world.songDirector.spectaclePlanner.events;
+    this.world.loadTrack(this.currentAnalysis, this.currentTrack, this.environment, this.currentOfficialTrackId, key);
+    this.world.songDirector.spectaclePlanner.events = events;
+    this.world.songDirector.onSectionAnnouncement = (title) => {
+      this.ui.hud.showSectionTitle(title);
+    };
+    this.syncMapPicker();
+  }
+
+  /** Reflects the map the world actually built in the picker. */
+  private syncMapPicker(): void {
+    this.ui.analysisScreen.setMaps(ENVIRONMENT_MAPS, this.world.environmentTheme?.id ?? CITY_MAP_KEY);
+  }
+
   private async switchReadyToSurf(): Promise<void> {
     if (!this.stateMachine.is(GameState.READY) || this.currentCourseType === 'SURF') return;
     const buffer = this.audioEngine.getBuffer();
@@ -1441,7 +1469,13 @@ export class Game {
       this.isFirstContactCourse = previous.firstContact;
       this.currentCourseType = DEFAULT_COURSE_TYPE;
       this.ui.analysisScreen.setCourseVariant(false);
-      if (previous.track) this.world.loadTrack(previous.analysis, previous.track, this.environment, previous.officialId);
+      if (previous.track) {
+        this.world.loadTrack(
+          previous.analysis, previous.track, this.environment, previous.officialId,
+          this.selectedMapKey ?? previous.officialId
+        );
+        this.syncMapPicker();
+      }
       this.stateMachine.transitionTo(GameState.READY);
       this.ui.analysisScreen.addStageLog('[SURF] RETRY AVAILABLE // NORMAL WORLD RESTORED');
     }
@@ -1485,7 +1519,8 @@ export class Game {
     this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
     // The surf world keeps a null official id; the preserved song id only
     // selects the visual environment, so both variants of a song share it.
-    this.world.loadTrack(analysis, track, this.environment, null, this.currentSurfOfficialTrackId);
+    this.world.loadTrack(analysis, track, this.environment, null, this.selectedMapKey ?? this.currentSurfOfficialTrackId);
+    this.syncMapPicker();
     this.world.songDirector.onSectionAnnouncement = (title) => {
       this.ui.hud.showSectionTitle(title);
     };
@@ -1564,7 +1599,11 @@ export class Game {
     this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.94);
     // Custom audio / tutorial / lab: no official catalog id, so the world uses
     // the fallback profile. A filename is never trusted to select an official one.
-    this.world.loadTrack(analysis, this.currentTrack, this.environment, this.currentOfficialTrackId);
+    this.world.loadTrack(
+      analysis, this.currentTrack, this.environment, this.currentOfficialTrackId,
+      this.selectedMapKey ?? this.currentOfficialTrackId
+    );
+    this.syncMapPicker();
     this.world.songDirector.onSectionAnnouncement = (title) => {
       this.ui.hud.showSectionTitle(title);
     };
@@ -2409,6 +2448,7 @@ export class Game {
     this.currentAnalysis = null;
     this.currentTrack = null;
     this.currentOfficialTrackId = null;
+    this.selectedMapKey = null;
     // Leaving the world clears any Armory preview override so a stale ephemeral
     // skin can never outlive the screen that set it, and releases any equipped
     // ARTIFACT video so an offscreen menu never keeps decoding it.
@@ -2617,7 +2657,8 @@ export class Game {
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0 && this.cameraController.getIsLocked()) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          this.viewmodelController.triggerMicroJab();
+          const cut = this.viewmodelController.triggerSlash();
+          MovementSfx.getInstance().playKnifeSlash(cut === 'BACKHAND');
         }
       }
     });
@@ -2669,7 +2710,7 @@ export class Game {
         }
       } else if (e.code === 'KeyF' && !e.repeat) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          this.viewmodelController.triggerSignalPulse();
+          this.viewmodelController.triggerInspect();
         }
       } else if (e.code === 'KeyM' && !e.repeat && this.stateMachine.is(GameState.MOVEMENT_LAB)) {
         if (this.ui.movementLabSongModal.isVisible()) {

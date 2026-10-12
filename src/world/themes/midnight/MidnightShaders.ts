@@ -12,6 +12,7 @@
  */
 
 import * as THREE from 'three';
+import { GLSL_NOISE, GLSL_SIGNAL_DITHER } from '../ThemeShaderChunks';
 
 export const AURORA_BAND_COUNT = 6;
 
@@ -43,6 +44,10 @@ export interface MidnightUniforms {
   uAccent: THREE.IUniform<number>;
   uAccentSlot: THREE.IUniform<number>;
   uBeacon: THREE.IUniform<number>;
+  uHat: THREE.IUniform<number>;
+  uHatSlot: THREE.IUniform<number>;
+  uSub: THREE.IUniform<number>;
+  uSubPhase: THREE.IUniform<number>;
   uHazeDistance: THREE.IUniform<number>;
 }
 
@@ -74,6 +79,10 @@ export function createMidnightUniforms(): MidnightUniforms {
     uAccent: { value: 0 },
     uAccentSlot: { value: 0 },
     uBeacon: { value: 0.5 },
+    uHat: { value: 0 },
+    uHatSlot: { value: 0 },
+    uSub: { value: 0 },
+    uSubPhase: { value: 0 },
     uHazeDistance: { value: 1150 }
   };
 }
@@ -86,59 +95,10 @@ uniform vec3 uMistColor;
 uniform vec3 uAbyss;
 uniform vec3 uMoonDir;
 uniform float uMist;
+uniform float uSub;
 
-float hash31(vec3 p) {
-  p = fract(p * vec3(443.897, 441.423, 437.195));
-  p += dot(p, p.yzx + 19.19);
-  return fract((p.x + p.y) * p.z);
-}
-
-float hash11(float p) {
-  p = fract(p * 0.1031);
-  p *= p + 33.33;
-  p *= p + p;
-  return fract(p);
-}
-
-float vnoise1(float x) {
-  float i = floor(x);
-  float f = fract(x);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(hash11(i), hash11(i + 1.0), f);
-}
-
-float vnoise3(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x),
-        mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
-    mix(mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x),
-        mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
-    f.z);
-}
-
-float bayer4(vec2 p) {
-  vec2 c = floor(mod(p, 4.0));
-  float i = c.y * 4.0 + c.x;
-  // 4x4 ordered matrix, evaluated arithmetically.
-  float r = 0.0;
-  if (i < 0.5) r = 0.0; else if (i < 1.5) r = 8.0; else if (i < 2.5) r = 2.0; else if (i < 3.5) r = 10.0;
-  else if (i < 4.5) r = 12.0; else if (i < 5.5) r = 4.0; else if (i < 6.5) r = 14.0; else if (i < 7.5) r = 6.0;
-  else if (i < 8.5) r = 3.0; else if (i < 9.5) r = 11.0; else if (i < 10.5) r = 1.0; else if (i < 11.5) r = 9.0;
-  else if (i < 12.5) r = 15.0; else if (i < 13.5) r = 7.0; else if (i < 14.5) r = 13.0; else r = 5.0;
-  return r / 16.0;
-}
-
-// The game's signal pass quantises linear colour to a few dozen steps per
-// channel, which would crush a night gradient into flat, hue-shifted bands.
-// Offsetting by half a step with the same ordered matrix turns those bands
-// into a proper pixel dither and keeps the average colour true.
-vec3 signalDither(vec3 col) {
-  return max(col + (bayer4(gl_FragCoord.xy * 0.5) - 0.5) / 32.0, 0.0);
-}
-
+${GLSL_NOISE}
+${GLSL_SIGNAL_DITHER}
 // The night backdrop WITHOUT stars, moon or aurora. Terrain fades into this.
 vec3 midnightBackdrop(vec3 dir) {
   float e = dir.y;
@@ -147,7 +107,10 @@ vec3 midnightBackdrop(vec3 dir) {
   float moonSide = max(dot(normalize(flat2), normalize(uMoonDir.xz + vec2(1e-5))), 0.0);
   float nearHorizon = 1.0 - smoothstep(0.0, 0.32, abs(e));
   sky += uHorizon * 0.45 * moonSide * moonSide * nearHorizon;
-  vec3 sea = mix(uMistColor * (0.7 + 0.6 * uMist), uAbyss, pow(smoothstep(0.0, -0.55, e), 0.55));
+  // Sub-bass is felt at world scale: the air along the horizon and the whole
+  // mist sea swell with it, slowly.
+  sky += uHorizon * 0.42 * uSub * nearHorizon;
+  vec3 sea = mix(uMistColor * (0.7 + 0.6 * uMist) * (1.0 + 0.7 * uSub), uAbyss, pow(smoothstep(0.0, -0.55, e), 0.55));
   sea += uMistColor * 0.5 * pow(moonSide, 6.0) * nearHorizon * uMist;
   return mix(sea, sky, smoothstep(-0.025, 0.025, e));
 }
@@ -175,24 +138,36 @@ uniform float uAuroraBass;
 uniform vec3 uAuroraLow;
 uniform vec3 uAuroraHigh;
 uniform float uBands[${AURORA_BAND_COUNT}];
+uniform float uHat;
+uniform float uHatSlot;
+uniform float uSubPhase;
 varying vec3 vDir;
 
-// Crisp, STABLE stars: three size classes, a barely perceptible slow twinkle
-// and no audio input at all.
+// Crisp stars in three size classes with a barely perceptible slow twinkle.
+// The field itself never moves or pulses; a hi-hat only lets a small subset
+// glint, and the golden-ratio step picks a different subset for every hit.
 vec3 stars(vec3 dir) {
   if (dir.y < 0.01) return vec3(0.0);
   vec3 col = vec3(0.0);
   vec3 g1 = floor(dir * 300.0);
   float h1 = hash31(g1);
   if (h1 > 0.990) {
-    col += vec3(0.72, 0.80, 1.0) * (1.0 - smoothstep(0.0, 0.0026, length(dir - (g1 + 0.5) / 300.0))) * 0.34;
+    float glint = step(0.90, fract(h1 * 517.3 + uHatSlot * 0.6180339)) * uHat;
+    col += vec3(0.72, 0.80, 1.0) * (1.0 - smoothstep(0.0, 0.0026, length(dir - (g1 + 0.5) / 300.0))) * (0.34 + 1.1 * glint);
   }
   vec3 g2 = floor(dir * 170.0);
   float h2 = hash31(g2);
   if (h2 > 0.9945) {
     float tw = 0.94 + 0.06 * sin(uTime * 0.7 + h2 * 40.0);
     vec3 tint = mix(vec3(0.80, 0.88, 1.0), vec3(1.0, 0.90, 0.78), step(0.997, h2));
-    col += tint * (1.0 - smoothstep(0.0, 0.0030, length(dir - (g2 + 0.5) / 170.0))) * 0.85 * tw;
+    float glint = step(0.78, fract(h2 * 331.7 + uHatSlot * 0.6180339)) * uHat;
+    vec3 d2 = dir - (g2 + 0.5) / 170.0;
+    float point = 1.0 - smoothstep(0.0, 0.0030 * (1.0 + 0.5 * glint), length(d2));
+    // A glinting star grows a short cross, like the big ones always have.
+    float cross = max(
+      max(1.0 - abs(d2.x) / 0.0009, 0.0) * max(1.0 - abs(d2.y) / 0.0075, 0.0),
+      max(1.0 - abs(d2.y) / 0.0009, 0.0) * max(1.0 - abs(d2.x) / 0.0075, 0.0));
+    col += tint * (point * (0.85 * tw + 1.5 * glint) + cross * 0.55 * glint);
   }
   vec3 g3 = floor(dir * 70.0);
   float h3 = hash31(g3);
@@ -269,7 +244,11 @@ void main() {
     float n = vnoise3(vec3(p * 0.55 + vec2(uTime * 0.006, 0.0), 1.7)) * 0.65 + vnoise3(vec3(p * 1.7, 4.2)) * 0.35;
     float band = smoothstep(0.42, 0.78, n + (bayer4(gl_FragCoord.xy * 0.5) - 0.5) * 0.10);
     float reach = smoothstep(0.0, -0.05, dir.y) * (1.0 - smoothstep(-0.10, -0.62, dir.y));
-    col += uMistColor * band * reach * (0.22 + 0.30 * uMist);
+    col += uMistColor * band * reach * (0.22 + 0.30 * uMist) * (1.0 + 1.3 * uSub);
+    // Slow rings rolling out across the cloud sea from under the route: the
+    // sub-bass made visible as a swell, never as a flash.
+    float rings = 0.5 + 0.5 * sin(length(p) * 2.6 - uSubPhase);
+    col += uMistColor * rings * rings * reach * uSub * 0.55;
   }
 
   vec3 au = aurora(dir);
@@ -282,7 +261,7 @@ void main() {
   float md = length(dir - uMoonDir);
   float radius = 0.030;
   float halo = exp(-md * 16.0) * 0.05 + exp(-md * 70.0) * 0.16;
-  col += uMoonColor * halo;
+  col += uMoonColor * halo * (1.0 + 0.7 * uSub);
   if (md < radius) {
     float lit = step(length(dir - uMoonDir - vec3(0.007, 0.004, 0.0)), radius * 0.98);
     float maria = floor(vnoise3(dir * 62.0) * 4.0) / 4.0;
@@ -397,7 +376,7 @@ void main() {
   float low = 1.0 - smoothstep(vParams.z - vParams.w, vParams.z, vWorld.y + wisps);
   low = clamp(low + (bayer4(gl_FragCoord.xy * 0.5) - 0.5) * 0.06 * step(0.001, low), 0.0, 1.0);
   // A faint moonlit lip where rock meets mist is what reveals the depth.
-  col += uMistColor * low * (1.0 - low) * 0.9 * (0.35 + 0.65 * uMist);
+  col += uMistColor * low * (1.0 - low) * 0.9 * (0.35 + 0.65 * uMist) * (1.0 + 2.2 * uSub);
   float fade = max(haze, low * low);
   // Air between here and the rock is DARKER than the sky behind it until the
   // far distance, so every range stands as a silhouette one step paler than

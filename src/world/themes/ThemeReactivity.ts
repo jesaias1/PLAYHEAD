@@ -5,6 +5,11 @@
  *   accent   percussion        -> an occasional small accent on one structure
  *   sustain  sustained energy  -> slow aurora / atmosphere change
  *
+ * Two finer layers a theme may also use:
+ *
+ *   hat      hi-hat onsets     -> a small, different subset of sparkles per hit
+ *   sub      sub-bass level    -> slow low-end swell of the atmosphere
+ *
  * Every layer reads the EXISTING shared visual bus (MusicVisualState), is
  * rate-limited by an attack/release envelope and hard-clamped to 0..1, so no
  * input can produce a strobe or a full-scene flash. Pure and dt-driven, which
@@ -16,6 +21,8 @@ import { MusicChannels } from '../MusicVisualController';
 export interface ThemeReactivityInput {
   channels: Pick<MusicChannels, 'bassMass' | 'transient' | 'sectionEnergy' | 'midFlow' | 'highGlint' | 'slot'>;
   energy: number;
+  /** Smoothed sub-bass level from the shared bus (optional). */
+  subBass?: number;
 }
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
@@ -36,6 +43,11 @@ const ACCENT_RELEASE = 0.55;
 const ACCENT_GATE = 0.5;
 /** Minimum time between two accents, so they stay occasional. */
 const ACCENT_MIN_INTERVAL = 0.9;
+/** A hat sparkle is short, and two can never start closer than this. */
+const HAT_RELEASE = 0.17;
+const HAT_MIN_INTERVAL = 0.08;
+const SUB_ATTACK = 0.14;
+const SUB_RELEASE = 0.6;
 const SUSTAIN_ATTACK = 1.6;
 const SUSTAIN_RELEASE = 3.4;
 
@@ -51,6 +63,13 @@ export class ThemeReactivity {
   /** 0..1 slow mid / high colour and shimmer followers for the aurora. */
   public mid = 0;
   public high = 0;
+  /** 0..1 envelope of the current hi-hat sparkle. */
+  public hat = 0;
+  /** Increments per hat, so each one lights a different subset. */
+  public hatSlot = 0;
+  /** 0..1 smoothed sub-bass swell. */
+  public sub = 0;
+  private sinceHat = HAT_MIN_INTERVAL;
   /** Slow bass reference the kick is measured against. */
   private bassFloor = 0;
   private accentTarget = 0;
@@ -66,6 +85,22 @@ export class ThemeReactivity {
     this.bassFloor = 0;
     this.accentTarget = 0;
     this.sinceAccent = ACCENT_MIN_INTERVAL;
+    this.hat = 0;
+    this.hatSlot = 0;
+    this.sub = 0;
+    this.sinceHat = HAT_MIN_INTERVAL;
+  }
+
+  /**
+   * Registers one hi-hat onset (strength 0..1). The envelope can only step up
+   * to the hit's own strength, then decays in update(); hits arriving faster
+   * than the minimum interval are dropped rather than stacked.
+   */
+  public strikeHat(strength: number): void {
+    if (this.sinceHat < HAT_MIN_INTERVAL) return;
+    this.sinceHat = 0;
+    this.hat = Math.max(this.hat, clamp01(0.45 + 0.55 * clamp01(strength)));
+    this.hatSlot = (this.hatSlot + 1) % 4096;
   }
 
   public update(input: ThemeReactivityInput, dt: number, reduceMotion = false): void {
@@ -91,6 +126,10 @@ export class ThemeReactivity {
     // The target is a one-shot: once the envelope has risen, let it fall.
     if (this.accent >= this.accentTarget * 0.9) this.accentTarget = 0;
     if (reduceMotion) this.accentTarget = 0;
+
+    this.sinceHat += step;
+    this.hat = reduceMotion ? 0 : clamp01(this.hat * Math.exp(-step / HAT_RELEASE));
+    this.sub = clamp01(follow(this.sub, clamp01(input.subBass ?? 0), step, SUB_ATTACK, SUB_RELEASE));
 
     const sustained = clamp01(input.channels.sectionEnergy * 0.6 + input.energy * 0.55);
     this.sustain = clamp01(follow(this.sustain, sustained, step, SUSTAIN_ATTACK, SUSTAIN_RELEASE));

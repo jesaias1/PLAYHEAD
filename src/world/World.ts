@@ -36,6 +36,7 @@ import {
 import { obstacleLateralOffset } from '../generation/ObstacleMotion';
 import { EnvironmentThemeInstance } from './themes/EnvironmentTheme';
 import { resolveEnvironmentTheme } from './themes/EnvironmentThemeRegistry';
+import { SignalCityLayer, buildSignalCityLayer } from './themes/signalcity/SignalCityLayer';
 
 export class World {
   public physics: PhysicsWorld;
@@ -94,6 +95,14 @@ export class World {
    * is never an input to route, physics, map identity or scoring.
    */
   public environmentTheme: EnvironmentThemeInstance | null = null;
+  /**
+   * SIGNAL CITY: landmarks, housing and transit built on top of the city for
+   * city maps of catalog songs. Null for themed maps and for custom audio,
+   * the tutorial and the lab, which keep the plain city.
+   */
+  public signalCity: SignalCityLayer | null = null;
+  /** DEV: lets the preview render the city without the layer for comparison. */
+  public static signalCityEnabled = true;
   /** Environment whose lighting the active theme changed, to restore it. */
   private themedEnvironment: Environment | null = null;
 
@@ -124,8 +133,9 @@ export class World {
     environment?: Environment,
     officialTrackId: string | null = null,
     /**
-     * Trusted catalog id used ONLY to pick the visual environment. Defaults to
-     * the official id; a SURF course passes its preserved song id here so both
+     * Key used ONLY to pick the visual environment: a trusted catalog id (the
+     * song's own map) or a map key chosen in the map picker. Defaults to the
+     * official id; a SURF course passes its preserved song id here so both
      * variants of a song share one environment while the surf world keeps its
      * null official id for everything else.
      */
@@ -266,6 +276,18 @@ export class World {
 
       // 6. Build Major Drop Setpiece
       this.dropSetpiece = new DropSetpiece(this.scene, analysis, track);
+
+      // 6b. SIGNAL CITY layer, for city maps of catalog songs only.
+      if (environmentTrackId != null && World.signalCityEnabled) {
+        this.signalCity = buildSignalCityLayer({
+          analysis,
+          track,
+          corridor: this.corridor,
+          palette: this.visualController.state.palette,
+          quality: preset ?? null
+        });
+        this.scene.add(this.signalCity.group);
+      }
     }
 
     // 7. Build world-scale AUDIO LANDMARKS + the travelling route signal.
@@ -336,6 +358,7 @@ export class World {
       safetyPass.register(this.spectralArchitecture.group, 'SpectralArchitecture', 'DECORATION');
     }
     if (this.skyline) safetyPass.register(this.skyline.group, 'SkylineArchitecture', 'DECORATION');
+    if (this.signalCity) safetyPass.register(this.signalCity.group, 'SignalCityLayer', 'DECORATION');
     if (this.environmentTheme) {
       safetyPass.register(this.environmentTheme.group, 'EnvironmentTheme', 'DECORATION');
       safetyPass.register(this.environmentTheme.skyGroup, 'EnvironmentThemeSky', 'IGNORE_WORLD_SAFETY');
@@ -515,8 +538,9 @@ export class World {
       reduceMotion
     );
 
-    if (this.environmentTheme) {
-      this.environmentTheme.update({
+    const layer = this.environmentTheme ?? this.signalCity;
+    if (layer) {
+      layer.update({
         dt,
         songTime,
         visualState: vState,
@@ -714,6 +738,10 @@ export class World {
     if (this.environmentTheme) {
       this.environmentTheme.dispose();
       this.environmentTheme = null;
+    }
+    if (this.signalCity) {
+      this.signalCity.dispose();
+      this.signalCity = null;
     }
     // Hand the sky and the scene lighting back to the default city.
     this.sky.mesh.visible = true;

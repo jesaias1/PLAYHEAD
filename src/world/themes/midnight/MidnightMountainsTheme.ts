@@ -41,6 +41,7 @@ import {
   roleSpan,
   sampleProgression
 } from '../ThemeProgression';
+import { GlowBatch, InstanceBatch, NO_LAMP, composeYaw, mulberry32 } from '../ThemeInstancing';
 import { ThemeReactivity } from '../ThemeReactivity';
 import {
   AURORA_BAND_COUNT,
@@ -74,7 +75,6 @@ const ACCENT_SLOTS = 5;
 const LAMP_HEIGHT = 6.4;
 
 const NO_MIST = { top: -1e6, depth: 1 };
-const NO_LAMP = new THREE.Vector4(0, 0, 0, 0);
 const WARM = new THREE.Color(1.0, 0.6, 0.26);
 const COOL = new THREE.Color(0.62, 0.8, 1.0);
 
@@ -89,17 +89,6 @@ export interface MidnightMountainsStats {
   /** Candidates dropped because no corridor-safe position was found. */
   rejected: number;
   drawBatches: number;
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 /**
@@ -184,53 +173,6 @@ function buildRoofGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
-/** Collects instances for one geometry, then bakes a single InstancedMesh. */
-class TerrainBatch {
-  private matrices: THREE.Matrix4[] = [];
-  private params: number[] = [];
-  private lamps: number[] = [];
-  private seeds: number[] = [];
-  public readonly box: THREE.Box3;
-
-  constructor(public readonly name: string, public readonly geometry: THREE.BufferGeometry) {
-    if (!geometry.boundingBox) geometry.computeBoundingBox();
-    this.box = geometry.boundingBox!;
-  }
-
-  public get count(): number {
-    return this.matrices.length;
-  }
-
-  public add(
-    matrix: THREE.Matrix4,
-    kind: number,
-    texel: number,
-    mist: { top: number; depth: number },
-    seed: number,
-    lamp: THREE.Vector4 = NO_LAMP
-  ): void {
-    this.matrices.push(matrix);
-    this.params.push(kind, texel, mist.top, mist.depth);
-    this.lamps.push(lamp.x, lamp.y, lamp.z, lamp.w);
-    this.seeds.push(seed);
-  }
-
-  public build(material: THREE.Material): THREE.InstancedMesh | null {
-    if (this.matrices.length === 0) return null;
-    this.geometry.setAttribute('aParams', new THREE.InstancedBufferAttribute(new Float32Array(this.params), 4));
-    this.geometry.setAttribute('aLamp', new THREE.InstancedBufferAttribute(new Float32Array(this.lamps), 4));
-    this.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(new Float32Array(this.seeds), 1));
-    const mesh = new THREE.InstancedMesh(this.geometry, material, this.matrices.length);
-    mesh.name = this.name;
-    for (let i = 0; i < this.matrices.length; i++) mesh.setMatrixAt(i, this.matrices[i]);
-    mesh.instanceMatrix.needsUpdate = true;
-    // Instances span the whole course; per-batch culling would only pop.
-    mesh.frustumCulled = false;
-    mesh.matrixAutoUpdate = false;
-    return mesh;
-  }
-}
-
 interface PlacedRock {
   /** World position of the summit (the top centre of a mesa). */
   summit: THREE.Vector3;
@@ -268,6 +210,11 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
   private routeU = -1;
   private auroraPhase = 0;
   private auroraAxisReady = false;
+  /** Hi-hat onsets of the song (time, strength), and the playback cursor. */
+  private readonly hats: Array<{ time: number; strength: number }> = [];
+  private hatCursor = 0;
+  private lastSongTime = -1;
+  private subPhase = 0;
   private disposed = false;
 
   constructor(private readonly context: EnvironmentThemeBuildContext) {
@@ -305,6 +252,14 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
       hemiIntensity: 1.25
     };
 
+    // Hi-hats come straight from the analysed onsets: bright, and not just the
+    // top of a kick. Using the events keeps the glints exactly on the hits.
+    for (const onset of analysis.onsets ?? []) {
+      if (onset.highs > 0.3 && onset.highs >= onset.bass * 0.8) {
+        this.hats.push({ time: onset.time, strength: onset.highs * onset.strength });
+      }
+    }
+
     this.buildSky();
     if (!this.frame.isEmpty) this.buildScenery();
   }
@@ -333,36 +288,28 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
     const spans = this.spans;
     const detail = quality?.reactiveLandmarkScale ?? 1;
 
-    const peaks = new TerrainBatch('MidnightPeaks', this.track(buildRockGeometry(rng, false)));
-    const crags = new TerrainBatch('MidnightCrags', this.track(buildRockGeometry(rng, true)));
+    const peaks = new InstanceBatch('MidnightPeaks', this.track(buildRockGeometry(rng, false)));
+    const crags = new InstanceBatch('MidnightCrags', this.track(buildRockGeometry(rng, true)));
     const boxGeometry = this.track(new THREE.BoxGeometry(1, 1, 1));
     boxGeometry.translate(0, 0.5, 0);
     boxGeometry.computeBoundingBox();
-    const boxes = new TerrainBatch('MidnightStructures', boxGeometry);
-    const roofs = new TerrainBatch('MidnightRoofs', this.track(buildRoofGeometry()));
+    const boxes = new InstanceBatch('MidnightStructures', boxGeometry);
+    const roofs = new InstanceBatch('MidnightRoofs', this.track(buildRoofGeometry()));
     const drumGeometry = this.track(new THREE.CylinderGeometry(1, 1, 1, 18));
     drumGeometry.translate(0, 0.5, 0);
     drumGeometry.computeBoundingBox();
-    const drums = new TerrainBatch('MidnightDrums', drumGeometry);
+    const drums = new InstanceBatch('MidnightDrums', drumGeometry);
     const domeGeometry = this.track(new THREE.SphereGeometry(1, 18, 9, 0, Math.PI * 2, 0, Math.PI / 2));
     domeGeometry.computeBoundingBox();
-    const domes = new TerrainBatch('MidnightDomes', domeGeometry);
+    const domes = new InstanceBatch('MidnightDomes', domeGeometry);
 
-    const glowMatrices: THREE.Matrix4[] = [];
-    const glowColors: number[] = [];
-    const glowParams: number[] = [];
-    const glowBox = new THREE.Box3(new THREE.Vector3(-0.5, -0.5, 0), new THREE.Vector3(0.5, 0.5, 0));
+    const glows = new GlowBatch();
 
     const scratchBox = new THREE.Box3();
     const fits = (geomBox: THREE.Box3, matrix: THREE.Matrix4): boolean =>
       corridor.evaluateVolume(scratchBox.copy(geomBox).applyMatrix4(matrix)) === null;
 
-    const compose = (pos: THREE.Vector3, yaw: number, scale: THREE.Vector3): THREE.Matrix4 =>
-      new THREE.Matrix4().compose(
-        pos,
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
-        scale
-      );
+    const compose = composeYaw;
 
     // Views that must stay open: from the build and the peak towards the
     // observatory's light. Rock that would stand in one of them is not placed.
@@ -385,10 +332,8 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
       core = 0
     ): boolean => {
       const matrix = compose(pos, 0, new THREE.Vector3(size, size, size));
-      if (!fits(glowBox, matrix)) return false;
-      glowMatrices.push(matrix);
-      glowColors.push(color.r, color.g, color.b);
-      glowParams.push(intensity, kind, slot, core);
+      if (!fits(glows.box, matrix)) return false;
+      glows.add(matrix, color, [intensity, kind, slot, core]);
       return true;
     };
 
@@ -397,7 +342,7 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
      * from `lateral` until its real world-space bounds clear the corridor.
      */
     const placeRock = (
-      batch: TerrainBatch,
+      batch: InstanceBatch,
       opts: {
         u: number;
         side: number;
@@ -433,9 +378,7 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
         const top = (batch.geometry.userData.apex as THREE.Vector3).clone().applyMatrix4(matrix);
         batch.add(
           matrix,
-          KIND_ROCK,
-          opts.texel,
-          { top: at.position.y - opts.mistTopBelow, depth: opts.mistDepth },
+          [KIND_ROCK, opts.texel, at.position.y - opts.mistTopBelow, opts.mistDepth],
           seed,
           opts.lamp ? opts.lamp(top) : NO_LAMP
         );
@@ -461,8 +404,8 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
         return false;
       }
       const seed = rng();
-      boxes.add(body, KIND_STRUCTURE, 1.0 * scale, NO_MIST, seed);
-      roofs.add(roof, KIND_ROOF, 0.8 * scale, NO_MIST, seed);
+      boxes.add(body, [KIND_STRUCTURE, 1.0 * scale, NO_MIST.top, NO_MIST.depth], seed);
+      roofs.add(roof, [KIND_ROOF, 0.8 * scale, NO_MIST.top, NO_MIST.depth], seed);
       const window = base.clone().addScaledVector(toRoute, 3.4 * scale);
       window.y += 2.4 * scale;
       addGlow(window, 3.2 * scale, WARM, 0.85, GLOW_WINDOW, slot % ACCENT_SLOTS);
@@ -505,15 +448,15 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
         this.stats.rejected++;
         continue;
       }
-      drums.add(drum, KIND_STRUCTURE, 2.0, NO_MIST, rng());
-      domes.add(dome, KIND_DOME, 2.0, NO_MIST, rng());
+      drums.add(drum, [KIND_STRUCTURE, 2.0, NO_MIST.top, NO_MIST.depth], rng());
+      domes.add(dome, [KIND_DOME, 2.0, NO_MIST.top, NO_MIST.depth], rng());
       // A low annex and a mast give the silhouette a readable asymmetry.
       const side = new THREE.Vector3(toFinish.z, 0, -toFinish.x);
       const annexPos = crown.clone().addScaledVector(side, 70);
       annexPos.y -= 6;
       const annex = compose(annexPos, yaw, new THREE.Vector3(46, 22, 32));
       if (fits(boxes.box, annex)) {
-        boxes.add(annex, KIND_STRUCTURE, 2.0, NO_MIST, rng());
+        boxes.add(annex, [KIND_STRUCTURE, 2.0, NO_MIST.top, NO_MIST.depth], rng());
         for (let w = 0; w < 3; w++) {
           const win = annexPos.clone().addScaledVector(toFinish, 16.5).addScaledVector(side, (w - 1) * 12);
           win.y += 12;
@@ -522,7 +465,7 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
       }
       const mastPos = crown.clone().addScaledVector(side, -62);
       const mast = compose(mastPos, yaw, new THREE.Vector3(2.2, 92, 2.2));
-      if (fits(boxes.box, mast)) boxes.add(mast, KIND_STRUCTURE, 1.0, NO_MIST, rng());
+      if (fits(boxes.box, mast)) boxes.add(mast, [KIND_STRUCTURE, 1.0, NO_MIST.top, NO_MIST.depth], rng());
       const light = mastPos.clone();
       light.y += 95;
       addGlow(light, 34, COOL, 1.3, GLOW_BEACON, 0, 0.12);
@@ -730,7 +673,7 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
           0,
           new THREE.Vector3(0.55, 6.6, 0.55)
         );
-        if (fits(boxes.box, post)) boxes.add(post, KIND_STRUCTURE, 0.5, NO_MIST, rng());
+        if (fits(boxes.box, post)) boxes.add(post, [KIND_STRUCTURE, 0.5, NO_MIST.top, NO_MIST.depth], rng());
         if (addGlow(head, 11, WARM, 1.2, GLOW_LAMP)) this.stats.lamps++;
         this.stats.crags++;
       }
@@ -779,7 +722,7 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
       pos.y = ledgeTop - 40;
       const ledgeMatrix = compose(pos, rng() * 6.28, new THREE.Vector3(16, 40, 16));
       if (!fits(crags.box, ledgeMatrix)) continue;
-      crags.add(ledgeMatrix, KIND_ROCK, 3, NO_MIST, rng());
+      crags.add(ledgeMatrix, [KIND_ROCK, 3, NO_MIST.top, NO_MIST.depth], rng());
       addCabin(
         { summit: new THREE.Vector3(pos.x, ledgeTop, pos.z), centre: pos, baseY: pos.y, topY: ledgeTop, radius: 16, height: 40 },
         nearest,
@@ -802,21 +745,13 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
       }
     }
 
-    if (glowMatrices.length > 0) {
-      const glowGeometry = this.track(new THREE.PlaneGeometry(1, 1));
-      glowGeometry.setAttribute('aColor', new THREE.InstancedBufferAttribute(new Float32Array(glowColors), 3));
-      glowGeometry.setAttribute('aGlow', new THREE.InstancedBufferAttribute(new Float32Array(glowParams), 4));
-      const glowMaterial = createGlowMaterial(this.uniforms);
-      this.materials.push(glowMaterial);
-      const glows = new THREE.InstancedMesh(glowGeometry, glowMaterial, glowMatrices.length);
-      glows.name = 'MidnightGlows';
-      for (let i = 0; i < glowMatrices.length; i++) glows.setMatrixAt(i, glowMatrices[i]);
-      glows.instanceMatrix.needsUpdate = true;
-      glows.frustumCulled = false;
-      glows.matrixAutoUpdate = false;
-      glows.renderOrder = 5;
-      this.group.add(glows);
-      this.stats.glows = glowMatrices.length;
+    const glowMaterial = createGlowMaterial(this.uniforms);
+    this.materials.push(glowMaterial);
+    const glowMesh = glows.build('MidnightGlows', glowMaterial);
+    if (glowMesh) {
+      this.track(glowMesh.geometry);
+      this.group.add(glowMesh);
+      this.stats.glows = glows.count;
       this.stats.drawBatches++;
     }
   }
@@ -848,6 +783,20 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
     if (this.routeU < 0) this.routeU = target;
     else this.routeU += (target - this.routeU) * (1 - Math.exp(-dt / 1.4));
 
+    // Fire the hi-hats the song passed since the last frame. A seek or restart
+    // re-finds the cursor instead of replaying everything in between.
+    const now = frame.songTime;
+    if (this.lastSongTime < 0 || now < this.lastSongTime || now - this.lastSongTime > 0.5) {
+      this.hatCursor = this.hats.findIndex((h) => h.time > now);
+      if (this.hatCursor < 0) this.hatCursor = this.hats.length;
+    } else {
+      while (this.hatCursor < this.hats.length && this.hats[this.hatCursor].time <= now) {
+        if (!frame.reduceMotion) this.reactivity.strikeHat(this.hats[this.hatCursor].strength);
+        this.hatCursor++;
+      }
+    }
+    this.lastSongTime = now;
+
     this.reactivity.update(frame.visualState, dt, frame.reduceMotion);
     const effect = Math.max(0, Math.min(1.25, frame.effectScale));
     const sustain = Math.min(1, this.reactivity.sustain * effect);
@@ -870,7 +819,16 @@ export class MidnightMountainsInstance implements EnvironmentThemeInstance {
     u.uAuroraHeight.value = 0.25 + 0.75 * sustain;
     u.uAuroraHue.value = this.reactivity.mid;
     u.uAuroraShimmer.value = frame.reduceMotion ? 0 : this.reactivity.high * effect;
-    u.uAuroraBass.value = this.reactivity.kick * 0.55 * effect;
+    // The level alone would sit flat under a wall of bass, so the hits ride on
+    // top of it: a held sub glows, a struck one swells.
+    const held = Math.max(0, (this.reactivity.sub - 0.3) / 0.7);
+    const sub = Math.min(1, (held * 0.6 + this.reactivity.kick * 0.6) * effect);
+    u.uAuroraBass.value = Math.min(1, this.reactivity.kick * 0.55 * effect + sub * 0.4);
+    u.uHat.value = Math.min(1, this.reactivity.hat * effect);
+    u.uHatSlot.value = this.reactivity.hatSlot;
+    u.uSub.value = sub;
+    if (!frame.reduceMotion) this.subPhase += dt * (0.5 + 2.4 * sub);
+    u.uSubPhase.value = this.subPhase;
     // Sway speed is integrated, so a change in energy bends the motion without
     // ever jumping the curtains.
     this.auroraPhase += dt * (frame.reduceMotion ? 0.05 : 0.07 + 0.3 * sustain);

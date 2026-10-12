@@ -38,7 +38,7 @@ import { MidnightMountainsInstance } from '../src/world/themes/midnight/Midnight
 
 const PRESET_DIR = path.resolve(__dirname, '../public/music/presets');
 const THEMED = 'track_5_gravity_line';
-const CITY = 'track_3_surf_the_void';
+const CITY = 'track_8_wave_surfing';
 
 function loadFresh(trackId: string) {
   const raw = fs.readFileSync(path.join(PRESET_DIR, `${trackId}.json`), 'utf8');
@@ -82,15 +82,19 @@ function channels(overrides: Partial<Record<string, number>> = {}) {
 }
 
 describe('Midnight Mountains — assignment', () => {
-  it('is assigned to exactly the chosen official song', () => {
-    expect(themedTrackIds()).toEqual([THEMED]);
+  it('is assigned to the chosen official song', () => {
+    expect(themedTrackIds()).toContain(THEMED);
     expect(resolveEnvironmentTheme(THEMED)?.id).toBe('MIDNIGHT_MOUNTAINS');
     expect(SignalPackCatalog.getTrackById(THEMED)?.id).toBe(THEMED);
   });
 
-  it('leaves every other official song, and all untrusted sources, on the city', () => {
+  it('leaves unassigned official songs, and all untrusted sources, on the city', () => {
     for (const track of SignalPackCatalog.getTracks()) {
-      if (track.id === THEMED) continue;
+      if (themedTrackIds().includes(track.id)) {
+        // Only the chosen song is Midnight Mountains.
+        expect(resolveEnvironmentTheme(track.id)?.id === 'MIDNIGHT_MOUNTAINS', track.id).toBe(track.id === THEMED);
+        continue;
+      }
       expect(resolveEnvironmentTheme(track.id), track.id).toBeNull();
     }
     expect(resolveEnvironmentTheme(null)).toBeNull();
@@ -218,6 +222,46 @@ describe('Midnight Mountains — restrained reactivity', () => {
     expect(accents).toBeLessThanOrEqual(12);
   });
 
+  it('lets hi-hats glint a different star subset per hit without stacking', () => {
+    const r = new ThemeReactivity();
+    const idle = { channels: channels(), energy: 0 };
+    r.strikeHat(1);
+    expect(r.hat).toBeLessThanOrEqual(1);
+    expect(r.hat).toBeGreaterThan(0.9);
+    const firstSlot = r.hatSlot;
+    // A second hit inside the minimum interval is dropped, not stacked.
+    r.update(idle, 1 / 60);
+    r.strikeHat(1);
+    expect(r.hatSlot).toBe(firstSlot);
+    // The glint is short: gone within half a second.
+    for (let i = 0; i < 30; i++) r.update(idle, 1 / 60);
+    expect(r.hat).toBeLessThan(0.08);
+    r.strikeHat(0.2);
+    expect(r.hatSlot).toBe(firstSlot + 1);
+    expect(r.hat).toBeLessThan(0.6);
+    // Sixteenth-note hats at 60 Hz never exceed full scale.
+    for (let frame = 0; frame < 600; frame++) {
+      if (frame % 6 === 0) r.strikeHat(1);
+      r.update(idle, 1 / 60);
+      expect(r.hat).toBeGreaterThanOrEqual(0);
+      expect(r.hat).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('follows sub-bass as a slow swell', () => {
+    const r = new ThemeReactivity();
+    let previous = 0;
+    let largestStep = 0;
+    for (let frame = 0; frame < 600; frame++) {
+      r.update({ channels: channels(), energy: 0, subBass: frame % 2 === 0 ? 4 : -4 }, 1 / 60);
+      expect(r.sub).toBeGreaterThanOrEqual(0);
+      expect(r.sub).toBeLessThanOrEqual(1);
+      largestStep = Math.max(largestStep, Math.abs(r.sub - previous));
+      previous = r.sub;
+    }
+    expect(largestStep).toBeLessThan(0.13);
+  });
+
   it('holds the reactive layers still under reduce-motion', () => {
     const r = new ThemeReactivity();
     for (let frame = 0; frame < 300; frame++) {
@@ -264,7 +308,7 @@ describe('Midnight Mountains — world integration', () => {
       const node = level.track.route[Math.floor((level.track.route.length - 1) * t)];
       const pos = new THREE.Vector3(node.position.x, node.position.y + 2, node.position.z);
       for (let f = 0; f < 30; f++) world.update(duration * t + f / 60, pos, 0, 1 / 60, undefined);
-      for (const key of ['uAuroraGain', 'uAuroraLevel', 'uKick', 'uAccent', 'uLampLevel', 'uMist'] as const) {
+      for (const key of ['uAuroraGain', 'uAuroraLevel', 'uKick', 'uAccent', 'uLampLevel', 'uMist', 'uHat', 'uSub'] as const) {
         const value = theme.uniforms[key].value as number;
         expect(Number.isFinite(value), key).toBe(true);
         expect(value, key).toBeGreaterThanOrEqual(0);

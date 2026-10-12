@@ -139,9 +139,9 @@ export class RouteFrame {
  * Assigns a dramatic role to every analysed section.
  *
  * The first section opens, the last one closes, and the most intense section
- * in between is the peak. Sections before the peak build towards it; sections
- * after it are a breakdown unless they hold nearly the peak's intensity, in
- * which case the peak simply continues. Short songs degrade gracefully.
+ * in between is the peak, together with any section that holds nearly its
+ * intensity. Weaker sections build before the peak first arrives and are a
+ * breakdown after it. Short songs degrade gracefully.
  */
 export function deriveProgression(analysis: TrackAnalysis, track: GeneratedTrack): ProgressionSpan[] {
   const frame = new RouteFrame(track.route, track.totalDistance);
@@ -159,12 +159,18 @@ export function deriveProgression(analysis: TrackAnalysis, track: GeneratedTrack
     }
   }
   const peakIntensity = peak >= 0 ? sections[peak].intensity : 0;
+  // A song may hold its peak across several sections (a plateau) and dip in
+  // the middle of it: anything within a few percent of the strongest section
+  // is peak too, and a weaker section AFTER the peak has arrived is a
+  // breakdown, even if the peak then returns.
+  let peakReached = false;
   for (let i = 0; i < n; i++) {
     if (i === 0) roles[i] = 'OPENING';
     else if (i === n - 1) roles[i] = 'FINALE';
-    else if (i === peak) roles[i] = 'PEAK';
-    else if (i < peak) roles[i] = 'BUILD';
-    else roles[i] = sections[i].intensity >= peakIntensity * 0.85 ? 'PEAK' : 'BREAKDOWN';
+    else if (i === peak || sections[i].intensity >= peakIntensity * 0.92) {
+      roles[i] = 'PEAK';
+      peakReached = true;
+    } else roles[i] = peakReached ? 'BREAKDOWN' : 'BUILD';
   }
 
   const spans: ProgressionSpan[] = [];

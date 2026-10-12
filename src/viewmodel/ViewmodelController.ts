@@ -27,6 +27,51 @@ import { MasteryGloveSystem } from '../mastery/MasteryGloveSystem';
 import { disposeGloveTextureCaches, setGloveTextureQuality } from './GloveTextures';
 import { clamp } from '../utils/math';
 
+/** One pose of a keyed viewmodel action: time, offset (m), rotation (rad). */
+interface ActionKey {
+  t: number;
+  pos: [number, number, number];
+  rot: [number, number, number];
+  ease?: 'in' | 'out' | 'smooth';
+}
+
+/**
+ * Forehand cut: a short draw back to the right, then the blade whips across
+ * the view to the left and the wrist rolls over, then a settling recovery.
+ * View space: +x right, +y up, -z away from the camera.
+ */
+const SLASH_FOREHAND: ActionKey[] = [
+  { t: 0.07, pos: [0.045, 0.018, 0.02], rot: [0.06, -0.34, -0.3], ease: 'out' },
+  { t: 0.17, pos: [-0.215, 0.05, -0.12], rot: [-0.2, 0.85, 0.72], ease: 'out' },
+  { t: 0.24, pos: [-0.235, 0.035, -0.105], rot: [-0.22, 0.95, 0.8], ease: 'smooth' },
+  { t: 0.46, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
+];
+
+/** Backhand return cut: chained from the forehand, travelling left to right. */
+const SLASH_BACKHAND: ActionKey[] = [
+  { t: 0.06, pos: [-0.2, 0.06, -0.09], rot: [-0.12, 0.8, 0.55], ease: 'out' },
+  { t: 0.16, pos: [0.085, 0.01, -0.1], rot: [-0.1, -0.6, -0.62], ease: 'out' },
+  { t: 0.23, pos: [0.1, 0.0, -0.085], rot: [-0.08, -0.68, -0.7], ease: 'smooth' },
+  { t: 0.44, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
+];
+
+/**
+ * Inspect: lift the knife to the middle of the view, show one flat of the
+ * blade, roll the wrist to show the other, then lower it again.
+ */
+const INSPECT_KEYS: ActionKey[] = [
+  { t: 0.32, pos: [-0.12, 0.085, -0.02], rot: [0.12, 0.5, 0.95], ease: 'smooth' },
+  { t: 0.95, pos: [-0.125, 0.09, -0.015], rot: [0.16, 0.42, 1.08], ease: 'smooth' },
+  { t: 1.3, pos: [-0.115, 0.1, -0.03], rot: [-0.12, -0.12, 0.18], ease: 'smooth' },
+  { t: 1.95, pos: [-0.11, 0.105, -0.025], rot: [-0.16, -0.18, 0.1], ease: 'smooth' },
+  { t: 2.2, pos: [-0.11, 0.07, -0.02], rot: [0.05, 0.2, 0.5], ease: 'smooth' },
+  { t: 2.6, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
+];
+
+const SCRATCH_A = new THREE.Vector3();
+const SCRATCH_B = new THREE.Vector3();
+const SCRATCH_C = new THREE.Vector3();
+
 export class ViewmodelController {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -87,12 +132,24 @@ export class ViewmodelController {
   public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.034, 0.3737, 0.2205);
   public static readonly DEFAULT_KNIFE_SCALE = new THREE.Vector3(1.011, 1.011, 1.011);
 
-  // Viewmodel Actions (F signal pulse & Mouse1 presentation-only micro-jab)
-  private activeAction: 'NONE' | 'PULSE' | 'JAB' = 'NONE';
+  // Viewmodel Actions (presentation only): Mouse1 slash, F inspect, and the
+  // legacy signal pulse. All of them move the ACTION GROUP (hand + knife
+  // together); the calibrated knife socket is never touched.
+  private activeAction: 'NONE' | 'PULSE' | 'SLASH' | 'INSPECT' = 'NONE';
   private actionTimer = 0;
   private actionDuration = 0;
-  private jabBlend = 0;
-  private jabStartBlend = 0;
+  private actionKeys: ActionKey[] = [];
+  /** Alternates forehand / backhand so repeated clicks chain like a combo. */
+  private slashBackhand = false;
+  private lastSlashAt = -10;
+  private actionClock = 0;
+  /** Right-hand position in action-group space: rotations pivot about it. */
+  private readonly actionPivot = new THREE.Vector3();
+  /** Pose the action is blending out of, so a new input never snaps. */
+  private readonly actionFromPos = new THREE.Vector3();
+  private readonly actionFromRot = new THREE.Vector3();
+  private readonly actionPos = new THREE.Vector3();
+  private readonly actionRot = new THREE.Vector3();
   private readonly leftHandActionOffset = new THREE.Vector3();
   private targetAccentColor = new THREE.Color(0x00f0ff);
 
@@ -372,12 +429,82 @@ export class ViewmodelController {
     this.audioImpact = Math.max(this.audioImpact, 1.8);
   }
 
-  public triggerMicroJab(): void {
-    this.jabStartBlend = this.activeAction === 'JAB' ? this.jabBlend : 0;
-    this.activeAction = 'JAB';
-    this.actionTimer = 0;
-    this.actionDuration = 0.24;
+  /**
+   * Mouse1: a karambit slash. Forehand first; a second click soon after
+   * chains into the backhand return cut. Returns which cut started so the
+   * caller can voice it. Presentation only.
+   */
+  public triggerSlash(): 'FOREHAND' | 'BACKHAND' {
+    const chained = this.actionClock - this.lastSlashAt < 0.75;
+    this.slashBackhand = chained ? !this.slashBackhand : false;
+    this.lastSlashAt = this.actionClock;
+    this.beginAction('SLASH', this.slashBackhand ? SLASH_BACKHAND : SLASH_FOREHAND);
     this.audioImpact = Math.max(this.audioImpact, 1.4);
+    return this.slashBackhand ? 'BACKHAND' : 'FOREHAND';
+  }
+
+  /** Kept for callers of the old micro-jab; it is the slash now. */
+  public triggerMicroJab(): void {
+    this.triggerSlash();
+  }
+
+  /** F: raise the knife and turn it over to look at both sides. */
+  public triggerInspect(): void {
+    if (this.activeAction === 'INSPECT' || this.activeAction === 'SLASH') return;
+    this.beginAction('INSPECT', INSPECT_KEYS);
+  }
+
+  private beginAction(kind: 'SLASH' | 'INSPECT', keys: ActionKey[]): void {
+    // Start from wherever the hand currently is, so interrupting an inspect
+    // with a slash (or chaining slashes) blends instead of popping.
+    this.actionFromPos.copy(this.actionPos);
+    this.actionFromRot.copy(this.actionRot);
+    this.activeAction = kind;
+    this.actionKeys = keys;
+    this.actionTimer = 0;
+    this.actionDuration = keys[keys.length - 1].t;
+  }
+
+  /**
+   * Evaluates the current keyed action (slash / inspect) and poses the action
+   * group. The pose is a translation plus a rotation ABOUT THE RIGHT HAND, so
+   * turning the knife over reads as a wrist and forearm move rather than the
+   * whole rig swinging round the camera. The off hand simply follows the
+   * body: moving its bone independently would stretch the skinned arm.
+   */
+  private applyKeyedAction(): void {
+    const rig = this.rigInstance;
+    const group = this.actionGroup;
+    const handR = rig.handRBone;
+
+    // Find the knife hand with the action group at rest.
+    group.position.set(0, 0, 0);
+    group.rotation.set(0, 0, 0);
+    group.updateWorldMatrix(true, true);
+    if (handR) group.worldToLocal(handR.getWorldPosition(this.actionPivot));
+    else this.actionPivot.set(0.12, -0.12, -0.3);
+
+    // Sample the keys, blending out of the pose the action started from.
+    const keys = this.actionKeys;
+    const t = Math.min(this.actionTimer, this.actionDuration);
+    let i = 0;
+    while (i < keys.length - 1 && keys[i].t <= t) i++;
+    const b = keys[i];
+    const aT = i === 0 ? 0 : keys[i - 1].t;
+    const aPos = i === 0 ? this.actionFromPos : SCRATCH_A.fromArray(keys[i - 1].pos);
+    const aRot = i === 0 ? this.actionFromRot : SCRATCH_B.fromArray(keys[i - 1].rot);
+    const span = Math.max(1e-4, b.t - aT);
+    let k = Math.min(1, Math.max(0, (t - aT) / span));
+    if (b.ease === 'out') k = 1 - Math.pow(1 - k, 3);
+    else if (b.ease === 'in') k = k * k;
+    else k = k * k * (3 - 2 * k);
+    this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos), k);
+    this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot), k);
+
+    // Rotate about the hand: p' = pivot - R * pivot + offset.
+    group.rotation.set(this.actionRot.x, this.actionRot.y, this.actionRot.z);
+    SCRATCH_C.copy(this.actionPivot).applyEuler(group.rotation);
+    group.position.copy(this.actionPivot).sub(SCRATCH_C).add(this.actionPos);
   }
 
   /**
@@ -616,6 +743,7 @@ export class ViewmodelController {
 
     // 10. Action Motion on actionGroup (F Signal Pulse & Mouse1 Micro-Jab)
     // Moves hand + knife together through additive actionGroup, preserving calibrated knifeGroup transform
+    this.actionClock += dt;
     if (this.activeAction !== 'NONE') {
       this.actionTimer += dt;
       const progress = Math.min(1.0, this.actionTimer / this.actionDuration);
@@ -623,36 +751,15 @@ export class ViewmodelController {
         const p = Math.sin(progress * Math.PI);
         this.actionGroup.position.set(0.002 * p, 0.014 * p, -0.012 * p);
         this.actionGroup.rotation.set(-0.14 * p, 0.04 * p, -0.09 * p);
-      } else if (this.activeAction === 'JAB') {
-        const extensionDuration = 0.095;
-        if (this.actionTimer <= extensionDuration) {
-          const t = Math.min(1, this.actionTimer / extensionDuration);
-          const easeOut = 1 - Math.pow(1 - t, 3);
-          this.jabBlend = this.jabStartBlend + (1 - this.jabStartBlend) * easeOut;
-        } else {
-          const t = Math.min(1, (this.actionTimer - extensionDuration) / (this.actionDuration - extensionDuration));
-          const smoothReturn = t * t * (3 - 2 * t);
-          this.jabBlend = 1 - smoothReturn;
-        }
-
-        // The common action group carries the right hand and knife forward and
-        // slightly inward. A much smaller inverse offset on the left hand sells
-        // the upper-body counter-motion without touching the knife socket.
-        const p = this.jabBlend;
-        this.actionGroup.position.set(-0.006 * p, 0.002 * p, -0.030 * p);
-        this.actionGroup.rotation.set(-0.035 * p, 0.025 * p, -0.018 * p);
-        if (this.rigInstance.handLBone) {
-          // Arms are authored facing +Z then rotated 180 degrees by the rig,
-          // so negative local Z counters the action group's forward motion.
-          // The net left-hand recoil is ~9 mm versus the right's 30 mm jab.
-          this.leftHandActionOffset.set(0.002 * p, -0.001 * p, -0.039 * p);
-          this.rigInstance.handLBone.position.add(this.leftHandActionOffset);
-        }
+        this.actionPos.set(0, 0, 0);
+        this.actionRot.set(0, 0, 0);
+      } else {
+        this.applyKeyedAction();
       }
       if (progress >= 1.0) {
         this.activeAction = 'NONE';
-        this.jabBlend = 0;
-        this.jabStartBlend = 0;
+        this.actionPos.set(0, 0, 0);
+        this.actionRot.set(0, 0, 0);
         this.actionGroup.position.set(0, 0, 0);
         this.actionGroup.rotation.set(0, 0, 0);
       }

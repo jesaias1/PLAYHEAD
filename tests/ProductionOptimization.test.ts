@@ -91,25 +91,26 @@ describe('Canonical presets — shipped minified', () => {
   it('keeps the registry fingerprints untouched (no value was reformatted away)', () => {
     // Snapshot of the shipped canonical identity. Minification is formatting
     // only, so these strings must be byte-identical to the pre-optimization set.
+    // (Regenerated for ROUTE_GENERATION_VERSION 6: the variety guard.)
     expect(OFFICIAL_MAP_REGISTRY.map((e) => `${e.trackId}|${e.mapFingerprint}|${e.analysisFingerprint}`)).toEqual([
-      'track_1_signal_drift|mfp_v1_2AC7467E29419C32_40eb|anfp_v1_0FECC3F530E85242',
-      'track_2_flow_state|mfp_v1_B1EEF8A8434DD30E_b8eb|anfp_v1_2111C10AC5F43134',
-      'track_3_surf_the_void|mfp_v1_5E0500352418B06D_7a0e|anfp_v1_00060E570B0513A3',
-      'track_4_airwave_theory|mfp_v1_A62A03D1A5DE1F81_766c|anfp_v1_99AA2FE5F6B0A7E2',
-      'track_5_gravity_line|mfp_v1_1CB4B484B698E2E2_6515|anfp_v1_FB088A54EDA2FA29',
-      'track_6_over_the_edge|mfp_v1_B6AC926A38515910_6f75|anfp_v1_F2BD7F721D1A7BBA',
-      'track_7_drop_zone_surfer|mfp_v1_02C4103B70DC8E14_8fa6|anfp_v1_E990D0B35C179694',
-      'track_8_wave_surfing|mfp_v1_48CC984100DD6740_739a|anfp_v1_49ECF2186778D318',
-      'track_9_neon_abyss|mfp_v1_0D8A10180466F0B4_4540|anfp_v1_20747FA912E066A6',
-      'track_10_neon_slipstream|mfp_v1_F84D156F59CB8DB4_42c8|anfp_v1_5AC224E5DB296EA7',
-      'track_11_ex_gravity|mfp_v1_4CB7847FD5BDF154_6569|anfp_v1_E1987AC6947525FC',
-      'track_12_shadows_over_the_circuit|mfp_v1_16C61C7F26179A9C_3ce5|anfp_v1_67DD4774BF859EDA',
-      'track_13_waveform_descent|mfp_v1_F9C6BB2864A7C47E_8834|anfp_v1_E0CA9EF8EAB73ACB',
-      'track_14_kz_ascent|mfp_v1_C95B69E61B60700F_7859|anfp_v1_0C066A2929007804'
+      'track_1_signal_drift|mfp_v1_353746C55C006F8F_40eb|anfp_v1_0FECC3F530E85242',
+      'track_2_flow_state|mfp_v1_91E6F2193CAC2575_9fb5|anfp_v1_2111C10AC5F43134',
+      'track_3_surf_the_void|mfp_v1_5BD5BC95441CADE0_76bd|anfp_v1_00060E570B0513A3',
+      'track_4_airwave_theory|mfp_v1_E36816C6E32910F9_6c74|anfp_v1_99AA2FE5F6B0A7E2',
+      'track_5_gravity_line|mfp_v1_6F6D8F838F7A0B2B_5f58|anfp_v1_FB088A54EDA2FA29',
+      'track_6_over_the_edge|mfp_v1_90C1235B38E216DA_6d54|anfp_v1_F2BD7F721D1A7BBA',
+      'track_7_drop_zone_surfer|mfp_v1_279625215A8CEC6E_7ef3|anfp_v1_E990D0B35C179694',
+      'track_8_wave_surfing|mfp_v1_293E4C7E5F4974B6_6c44|anfp_v1_49ECF2186778D318',
+      'track_9_neon_abyss|mfp_v1_42ED0370C2115403_4065|anfp_v1_20747FA912E066A6',
+      'track_10_neon_slipstream|mfp_v1_C24426E7E32ED2F1_4231|anfp_v1_5AC224E5DB296EA7',
+      'track_11_ex_gravity|mfp_v1_5BDCB2F04EE51DE8_519b|anfp_v1_E1987AC6947525FC',
+      'track_12_shadows_over_the_circuit|mfp_v1_1F65CF72467D0E3A_3c89|anfp_v1_67DD4774BF859EDA',
+      'track_13_waveform_descent|mfp_v1_1CE0F554D66FC35D_7b6e|anfp_v1_E0CA9EF8EAB73ACB',
+      'track_14_kz_ascent|mfp_v1_81D43071B9661612_7340|anfp_v1_0C066A2929007804'
     ]);
     for (const entry of OFFICIAL_MAP_REGISTRY) {
       expect(entry.movementVersion).toBe('phmv1_2865D271');
-      expect(entry.mapVersion).toBe(5);
+      expect(entry.mapVersion).toBe(ROUTE_GENERATION_VERSION);
       expect(entry.analysisVersion).toBe(1);
     }
   });

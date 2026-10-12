@@ -24,7 +24,17 @@ import {
 } from './TempoPressure';
 import { computeCustomPhraseProfile, customTrackHasSurfSupport, supportsCustomSurf } from './CustomPhraseProfile';
 
-export const ROUTE_GENERATION_VERSION = 5;
+export const ROUTE_GENERATION_VERSION = 6;
+
+/**
+ * VARIETY GUARD. No route may run on as plain platform after plain platform:
+ * once this many metres of unbroken standard runways / step-ups have been
+ * laid, the next phrase is forced to be something else (a surf phrase or a
+ * boost run), whatever the section's theme asks for. Applies to every song.
+ */
+const VARIETY_LIMIT_METRES = 200;
+/** A forced phrase needs room: never start one this close to a section end. */
+const VARIETY_MIN_REMAINING_METRES = 90;
 
 /** Deterministic tempo/route telemetry for the most recent generation. */
 export interface RouteTempoReport {
@@ -110,6 +120,8 @@ export class RouteGenerator {
     cumulativeDistance += startLength * 0.5;
 
     // 2. Iterate through detected sections
+    let plainRunMetres = 0;
+    let varietyTurn = 0;
     for (let sIdx = 0; sIdx < analysis.sections.length; sIdx++) {
       const section = analysis.sections[sIdx];
       const isLastSection = sIdx === analysis.sections.length - 1;
@@ -174,7 +186,9 @@ export class RouteGenerator {
         currentYaw += yawDelta;
 
         const phraseRoll = rng.next();
-        const theme = section.theme;
+        let theme = section.theme;
+        const phraseNodeStart = nodes.length;
+        const phraseDistanceStart = cumulativeDistance;
         const currentNodeTime = section.start + (sectionTargetDistance > 0 ? (sectionCurrentDistance / sectionTargetDistance) * section.duration : 0);
         const isOnboarding = currentNodeTime < onboardingWindow;
         const pendingSurf = surfEvents.find(e => e.sectionIndex === sIdx && !executedSurfEventIds.has(e.id)) ?? null;
@@ -183,6 +197,23 @@ export class RouteGenerator {
         const surfEligible = pendingSurf != null && (
           !isCustomRoute || (currentNodeTime >= pendingSurf.startTime && sectionCurrentDistance >= sectionTargetDistance * 0.2)
         );
+
+        // VARIETY GUARD: break up a long plain stretch (see VARIETY_LIMIT_METRES).
+        let forcedVariety = false;
+        if (
+          !isOnboarding &&
+          plainRunMetres > VARIETY_LIMIT_METRES &&
+          sectionTargetDistance - sectionCurrentDistance > VARIETY_MIN_REMAINING_METRES
+        ) {
+          const surfAllowed = !isCustomRoute ||
+            supportsCustomSurf(section, sIdx > 0 ? analysis.sections[sIdx - 1] : null);
+          forcedVariety = true;
+          // A stagger chain left over from an earlier section must not hold
+          // the guard off (or swallow the forced phrase).
+          staggerStepsRemaining = 0;
+          theme = varietyTurn % 2 === 0 && surfAllowed ? 'SURF' : 'SPEED';
+          varietyTurn++;
+        }
 
         if (isOnboarding) {
           // Onboarding period (first 25 seconds): Wide, forgiving runways (14m width) with gentle gaps (3.0m - 4.2m)
@@ -373,7 +404,7 @@ export class RouteGenerator {
 
         } else if (
           theme === 'SURF' &&
-          phraseRoll < 0.6 &&
+          (phraseRoll < 0.6 || forcedVariety) &&
           (!isCustomRoute || supportsCustomSurf(section, sIdx > 0 ? analysis.sections[sIdx - 1] : null))
         ) {
           // Generate a validated surf phrase
@@ -674,6 +705,18 @@ export class RouteGenerator {
           estimatedSpeed = estimatedSpeed * 0.7 + refSpeed * 0.3;
           consecutiveNarrow = (platWidth < 10.0) ? consecutiveNarrow + 1 : 0;
         }
+
+        // VARIETY GUARD bookkeeping: a phrase is plain when everything it laid
+        // is an ordinary runway or step-up.
+        let plainPhrase = true;
+        for (let n = phraseNodeStart; n < nodes.length; n++) {
+          const laid = nodes[n];
+          if (laid.isSurf || laid.isBoost || (laid.type !== RouteNodeType.RUNWAY && laid.type !== RouteNodeType.STEP_UP)) {
+            plainPhrase = false;
+            break;
+          }
+        }
+        plainRunMetres = plainPhrase && !isOnboarding ? plainRunMetres + (cumulativeDistance - phraseDistanceStart) : 0;
       }
     }
 

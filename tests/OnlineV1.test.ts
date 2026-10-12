@@ -1,3 +1,4 @@
+import { ROUTE_GENERATION_VERSION } from '../src/generation/RouteGenerator';
 /**
  * ONLINE V1 — logic tests.
  *
@@ -140,7 +141,7 @@ describe('Map identity — canonical competitive identity', () => {
 
   it('includes the versions and the algorithm revision', () => {
     const identity = computeMapIdentity('track_5_gravity_line', track());
-    expect(identity.mapVersion).toBe(5);
+    expect(identity.mapVersion).toBe(ROUTE_GENERATION_VERSION);
     expect(identity.movementVersion).toBe(MOVEMENT_VERSION);
     expect(identity.generatorVersion).toMatch(/^gen_\d+$/);
     expect(identity.mapFingerprint).toContain(`mfp_v${MAP_FINGERPRINT_ALGORITHM}_`);

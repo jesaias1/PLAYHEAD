@@ -100,6 +100,46 @@ export class MovementSfx {
     src.stop(now + 0.22);
   }
 
+  /** Knife cut: a short, bright air swish. The backhand is pitched lower. */
+  public playKnifeSlash(backhand = false): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const vol = this.master();
+    if (vol <= 0.001) return;
+
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.makeNoiseBuffer(ctx, 0.2);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(2.2, now);
+    const top = backhand ? 3400 : 4600;
+    filter.frequency.setValueAtTime(top * 0.35, now);
+    filter.frequency.exponentialRampToValueAtTime(top, now + 0.06);
+    filter.frequency.exponentialRampToValueAtTime(top * 0.22, now + 0.16);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.11 * vol, now + 0.045);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
+
+    let tail: AudioNode = gain;
+    if (typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(backhand ? -0.35 : 0.35, now);
+      panner.pan.linearRampToValueAtTime(backhand ? 0.35 : -0.35, now + 0.14);
+      gain.connect(panner);
+      tail = panner;
+    }
+    src.connect(filter);
+    filter.connect(gain);
+    tail.connect(ctx.destination);
+
+    src.start(now);
+    src.stop(now + 0.19);
+  }
+
   /** Landing impact. `major` adds a deeper, longer mechanical body. */
   public playLanding(intensity: number, major: boolean): void {
     const ctx = this.getContext();

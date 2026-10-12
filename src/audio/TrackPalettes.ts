@@ -188,6 +188,33 @@ export const CURATED_PALETTES: Record<string, PaletteConfig> = {
     highTintHex: '#d6e6ff',
     accentRgb: [159, 228, 255]
   },
+  // Environment-theme palette: cold white route trim against black space.
+  ORBITAL_STATION: {
+    voidHex: '#000003',
+    surfaceHex: '#0e1218',
+    surfaceDarkHex: '#0e1218',
+    surfaceLightHex: '#262e3b',
+    primaryHex: '#dcecff',
+    secondaryHex: '#7fa6d8',
+    highlightHex: '#ffffff',
+    bassTintHex: '#050a16',
+    highTintHex: '#cfe0ff',
+    accentRgb: [220, 236, 255]
+  },
+  // Environment-theme palette: pale navigation-green route trim, distinct
+  // from the harbour's amber floodlights and red beacons.
+  MIDNIGHT_HARBOUR: {
+    voidHex: '#020409',
+    surfaceHex: '#0c1114',
+    surfaceDarkHex: '#0c1114',
+    surfaceLightHex: '#222c30',
+    primaryHex: '#b8ffe0',
+    secondaryHex: '#57c9a8',
+    highlightHex: '#f2fff9',
+    bassTintHex: '#06100f',
+    highTintHex: '#d2ffee',
+    accentRgb: [184, 255, 224]
+  },
   GLACIER: {
     voidHex: '#040608',
     surfaceHex: '#101418',

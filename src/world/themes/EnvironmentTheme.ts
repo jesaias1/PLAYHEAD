@@ -21,7 +21,7 @@ import { QualityPreset } from '../../rendering/QualityPresets';
 import { MusicVisualState } from '../MusicVisualController';
 import { RouteExclusionCorridor } from '../RouteExclusionCorridor';
 
-export type EnvironmentThemeId = 'MIDNIGHT_MOUNTAINS';
+export type EnvironmentThemeId = 'MIDNIGHT_MOUNTAINS' | 'ORBITAL_STATION' | 'MIDNIGHT_HARBOUR' | 'SIGNAL_CITY';
 
 /** Scene lighting a theme asks the Environment for while it is loaded. */
 export interface EnvironmentThemeLighting {

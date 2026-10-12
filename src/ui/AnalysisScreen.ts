@@ -20,6 +20,7 @@ export class AnalysisScreen {
   private logElem: HTMLElement;
   private waveformCanvas: HTMLCanvasElement;
   private enterBtn: HTMLButtonElement;
+  private onMapSelectCallback: ((key: string) => void) | null = null;
   private surfBtn: HTMLButtonElement;
   private surfHintElem: HTMLElement;
   private onSurfCallback?: () => void;
@@ -89,6 +90,8 @@ export class AnalysisScreen {
             <div class="stat-value" id="stat-palette">------</div>
           </div>
         </div>
+
+        <div class="map-picker" id="analysis-maps" role="radiogroup" aria-label="Map" hidden></div>
 
         <div class="surf-onboarding-hint" id="analysis-surf-hint" hidden>
           JUMP ONTO THE RAMP // HOLD A / D INTO THE SLOPE // STEER WITH THE MOUSE
@@ -188,6 +191,44 @@ export class AnalysisScreen {
   public setOnSurf(callback: () => void): void { this.onSurfCallback = callback; }
 
   public setOnAcademy(callback: () => void | Promise<void>): void { this.onAcademyCallback = callback; }
+
+  public setOnMapSelect(callback: (key: string) => void): void { this.onMapSelectCallback = callback; }
+
+  /**
+   * Shows the map picker: one small thumbnail per map, the active one marked.
+   * Purely a visual choice, so it is offered for every course.
+   */
+  public setMaps(maps: Array<{ key: string; name: string; thumbnail: string }>, activeKey: string): void {
+    const host = this.element.querySelector('#analysis-maps') as HTMLElement;
+    host.hidden = maps.length < 2;
+    host.replaceChildren();
+    const label = document.createElement('div');
+    label.className = 'map-picker-label';
+    label.textContent = 'MAP';
+    host.appendChild(label);
+    for (const map of maps) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'map-option';
+      button.setAttribute('role', 'radio');
+      button.setAttribute('aria-checked', String(map.key === activeKey));
+      button.dataset.mapKey = map.key;
+      const image = document.createElement('img');
+      image.src = map.thumbnail;
+      image.alt = '';
+      image.width = 112;
+      image.height = 63;
+      image.decoding = 'async';
+      const name = document.createElement('span');
+      name.textContent = map.name;
+      button.append(image, name);
+      button.addEventListener('click', () => {
+        if (button.getAttribute('aria-checked') === 'true') return;
+        this.onMapSelectCallback?.(map.key);
+      });
+      host.appendChild(button);
+    }
+  }
 
   public setCourseVariant(surf: boolean, canReturnNormal = false): void {
     this.surfVariant = surf; this.canReturnNormal = canReturnNormal;
