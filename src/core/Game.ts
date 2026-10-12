@@ -2336,12 +2336,6 @@ export class Game {
    * If the lock fails, the game stays paused with the cursor free rather than
    * pretending to resume and leaving the player without mouse control.
    */
-  /**
-   * The browser refused pointer lock for a resume (typically a second Escape
-   * press, which is not a gesture it accepts). Stay paused, but leave the
-   * pause menu in a usable state: cursor visible, mouse-look off, and a hint
-   * that any click resumes.
-   */
   /** Resolves after the browser has had a chance to paint (or ~60 ms if hidden). */
   private nextPaint(): Promise<void> {
     return new Promise((resolve) => {
@@ -2354,12 +2348,6 @@ export class Game {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => window.setTimeout(finish, 0));
       window.setTimeout(finish, 60);
     });
-  }
-
-  private resumeLockRefused(): void {
-    if (!this.stateMachine.is(GameState.PAUSED)) return;
-    this.cameraController.unlock?.();
-    this.ui?.pauseScreen?.setResumeHint?.(true);
   }
 
   private resumeGame(): void {
@@ -2379,7 +2367,6 @@ export class Game {
         if (!this.awaitingResumeLock) return;
         this.awaitingResumeLock = false;
         if (this.cameraController.getIsLocked()) this.finalizeResume();
-        else this.resumeLockRefused();
       }, 600);
       return;
     }
@@ -2662,37 +2649,14 @@ export class Game {
 
     // Pointer lock became available only after the user gesture; complete the
     // deferred resume. A failure keeps the game paused (cursor stays free).
-    // FULLSCREEN + ESCAPE. In fullscreen the browser may spend the first
-    // Escape on leaving fullscreen without releasing the mouse, so the game
-    // never heard it and pausing took two presses. Two fixes:
-    //  - leaving fullscreen during play pauses at once;
-    //  - where supported (Chromium, fullscreen only) the Keyboard Lock API
-    //    hands Escape to the page, so one press pauses and the next resumes.
-    //    Holding Escape still exits fullscreen; that is the browser's rule.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('fullscreenchange', () => {
-        const keyboard = (navigator as unknown as {
-          keyboard?: { lock?: (keys: string[]) => Promise<void>; unlock?: () => void };
-        }).keyboard;
-        if (document.fullscreenElement) {
-          void keyboard?.lock?.(['Escape'])?.catch(() => undefined);
-          return;
-        }
-        keyboard?.unlock?.();
-        if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          this.pauseGame();
-        }
-      });
-    }
-
     this.cameraController.onLockChange = (locked) => {
       if (!this.awaitingResumeLock) return;
       this.awaitingResumeLock = false;
       if (locked) {
         this.finalizeResume();
-      } else {
-        this.resumeLockRefused();
       }
+      // On failure: intentionally do nothing. The pause screen stays up, so it
+      // is obvious that gameplay has not resumed and a further click retries.
     };
 
     window.addEventListener('click', (e) => {
@@ -2740,6 +2704,11 @@ export class Game {
       if (e.code === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+
+        // One press, one toggle. A key held a moment too long auto-repeats,
+        // and without this each repeat toggled the menu again (it reopened
+        // right after closing).
+        if (e.repeat) return;
 
         const now = performance.now();
 
