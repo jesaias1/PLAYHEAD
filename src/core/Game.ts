@@ -1100,6 +1100,11 @@ export class Game {
                 diamondJustMastered
               });
             }
+            {
+              // The report sits over a picture of the map that was just run.
+              const mapKey = this.world.environmentTheme?.id ?? CITY_MAP_KEY;
+              this.ui.resultsScreen.setMapBackdrop(ENVIRONMENT_MAPS.find((m) => m.key === mapKey)?.backdrop ?? null);
+            }
             this.ui.resultsScreen.showResults(
               results,
               this.currentTrack.seed,
@@ -1301,6 +1306,11 @@ export class Game {
         this.currentTrack = precomputed.track;
         this.currentAnalysis = precomputed.analysis;
         this.ui.analysisScreen.setStage('[WORLD] SYNTHESIZING SPACE', 0.88);
+        // Let the stage text and progress bar actually paint before the world
+        // build blocks the thread, so loading advances visibly instead of
+        // jumping from one frozen frame to the next.
+        await this.nextPaint();
+        if (this.currentOfficialTrackId !== trackEntry.id || !this.stateMachine.is(GameState.ANALYSING)) return;
         // The catalog id here is TRUSTED (arrived from a real official track
         // selection), so the world can resolve the correct official profile.
         this.world.loadTrack(
@@ -1319,6 +1329,11 @@ export class Game {
         };
 
         this.ui.analysisScreen.setStage('[ROUTE] COURSE ONLINE', 0.97);
+        // Compile the new world's shaders off the critical frame, so neither
+        // the READY screen nor the first second of the run hitches on them.
+        await this.nextPaint();
+        await this.environment.prewarmShadersAsync();
+        if (this.currentOfficialTrackId !== trackEntry.id || !this.stateMachine.is(GameState.ANALYSING)) return;
         this.ui.analysisScreen.displayAnalysis(precomputed.analysis);
         this.currentTrackCanonical = true;
         // The selected track is now current: refresh the restrained PB-ghost
@@ -2321,6 +2336,32 @@ export class Game {
    * If the lock fails, the game stays paused with the cursor free rather than
    * pretending to resume and leaving the player without mouse control.
    */
+  /**
+   * The browser refused pointer lock for a resume (typically a second Escape
+   * press, which is not a gesture it accepts). Stay paused, but leave the
+   * pause menu in a usable state: cursor visible, mouse-look off, and a hint
+   * that any click resumes.
+   */
+  /** Resolves after the browser has had a chance to paint (or ~60 ms if hidden). */
+  private nextPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => window.setTimeout(finish, 0));
+      window.setTimeout(finish, 60);
+    });
+  }
+
+  private resumeLockRefused(): void {
+    if (!this.stateMachine.is(GameState.PAUSED)) return;
+    this.cameraController.unlock?.();
+    this.ui?.pauseScreen?.setResumeHint?.(true);
+  }
+
   private resumeGame(): void {
     if (!this.stateMachine.is(GameState.PAUSED)) return;
 
@@ -2338,6 +2379,7 @@ export class Game {
         if (!this.awaitingResumeLock) return;
         this.awaitingResumeLock = false;
         if (this.cameraController.getIsLocked()) this.finalizeResume();
+        else this.resumeLockRefused();
       }, 600);
       return;
     }
@@ -2625,9 +2667,9 @@ export class Game {
       this.awaitingResumeLock = false;
       if (locked) {
         this.finalizeResume();
+      } else {
+        this.resumeLockRefused();
       }
-      // On failure: intentionally do nothing. The pause screen stays up, so it
-      // is obvious that gameplay has not resumed and a further click retries.
     };
 
     window.addEventListener('click', (e) => {

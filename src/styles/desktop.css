@@ -250,7 +250,9 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .results-header { padding: 6px 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--edge); }
 #ui-root .results-title { font-size: 18px; }
 #ui-root .results-kicker { color: var(--muted); font-size: 11px; }
-#ui-root .rank-badge { width: 70px; height: 70px; font: 40px/1 var(--font-mono); border: 2px solid #000080; background: var(--field); color: var(--link); }
+#ui-root .rank-badge { display: flex; flex-direction: column; align-items: center; gap: 8px; width: auto; height: auto; padding: 8px 12px; font: 16px/1 var(--font-mono); letter-spacing: 0.14em; border: 2px solid #000080; background: var(--field); color: var(--link); }
+#ui-root .rank-badge svg { display: block; image-rendering: pixelated; }
+#ui-root .results-screen.has-map-backdrop { background: linear-gradient(rgba(4, 8, 14, 0.45), rgba(4, 8, 14, 0.72)), var(--results-map) center / cover no-repeat #05080d; backdrop-filter: none; }
 #ui-root .rank-label { color: var(--ink); }
 #ui-root .results-pb-status { color: var(--success); }
 #ui-root .results-grid { gap: 10px; }

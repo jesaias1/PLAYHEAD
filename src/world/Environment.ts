@@ -232,6 +232,29 @@ export class Environment {
   }
 
   /**
+   * Non-blocking variant: lets the driver compile programs in parallel and
+   * resolves when they are ready (or after a short timeout). Used right after
+   * a world is built, so entering it does not stall on shader compilation.
+   */
+  public async prewarmShadersAsync(timeoutMs = 1500): Promise<void> {
+    try {
+      const renderer = this.renderer as unknown as {
+        compileAsync?: (scene: THREE.Scene, camera: THREE.Camera) => Promise<unknown>;
+      };
+      if (typeof renderer.compileAsync !== 'function') {
+        this.prewarmShaders();
+        return;
+      }
+      await Promise.race([
+        renderer.compileAsync(this.scene, this.camera),
+        new Promise((resolve) => setTimeout(resolve, timeoutMs))
+      ]);
+    } catch {
+      // An optimisation only: a refused precompile keeps first-use behaviour.
+    }
+  }
+
+  /**
    * Clears accumulated render statistics. Called once per frame by the game
    * loop because `renderer.info.autoReset` is disabled so the stats cover every
    * composer pass, not just the last one.

@@ -35,14 +35,16 @@ export interface EnvironmentMapEntry {
   name: string;
   /** Thumbnail shown by the map picker (served from public/assets). */
   thumbnail: string;
+  /** Wide image shown behind the run report. */
+  backdrop: string;
 }
 
 /** Every map a player can choose for a run, in picker order. */
 export const ENVIRONMENT_MAPS: EnvironmentMapEntry[] = [
-  { key: CITY_MAP_KEY, name: 'SIGNAL CITY', thumbnail: '/assets/maps/signal-city.jpg' },
-  { key: MIDNIGHT_MOUNTAINS_THEME.id, name: MIDNIGHT_MOUNTAINS_THEME.displayName, thumbnail: '/assets/maps/midnight-mountains.jpg' },
-  { key: ORBITAL_STATION_THEME.id, name: ORBITAL_STATION_THEME.displayName, thumbnail: '/assets/maps/orbital-station.jpg' },
-  { key: MIDNIGHT_HARBOUR_THEME.id, name: MIDNIGHT_HARBOUR_THEME.displayName, thumbnail: '/assets/maps/midnight-harbour.jpg' }
+  { key: CITY_MAP_KEY, name: 'SIGNAL CITY', thumbnail: '/assets/maps/signal-city.jpg', backdrop: '/assets/maps/signal-city-wide.jpg' },
+  { key: MIDNIGHT_MOUNTAINS_THEME.id, name: MIDNIGHT_MOUNTAINS_THEME.displayName, thumbnail: '/assets/maps/midnight-mountains.jpg', backdrop: '/assets/maps/midnight-mountains-wide.jpg' },
+  { key: ORBITAL_STATION_THEME.id, name: ORBITAL_STATION_THEME.displayName, thumbnail: '/assets/maps/orbital-station.jpg', backdrop: '/assets/maps/orbital-station-wide.jpg' },
+  { key: MIDNIGHT_HARBOUR_THEME.id, name: MIDNIGHT_HARBOUR_THEME.displayName, thumbnail: '/assets/maps/midnight-harbour.jpg', backdrop: '/assets/maps/midnight-harbour-wide.jpg' }
 ];
 
 const THEME_BY_MAP_KEY: Record<string, EnvironmentThemeDefinition> = {

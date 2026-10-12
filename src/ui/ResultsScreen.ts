@@ -3,6 +3,7 @@
  * "Editorial Graphic Design": Staged quick reveal over the completed world.
  */
 
+import { isGemRank, rankGemSvg } from './RankGem';
 import { RunRank, RunResults } from '../player/PlayerStats';
 import { formatSpeed, formatTime } from '../utils/math';
 import { seedToHex } from '../utils/hash';
@@ -36,6 +37,14 @@ export class ResultsScreen {
   public element: HTMLElement;
   private trackTitleElem: HTMLElement;
   private rankElem: HTMLElement;
+
+  /** Shows the finished run's map behind the report (null = plain backdrop). */
+  public setMapBackdrop(url: string | null): void {
+    this.element.classList.toggle('has-map-backdrop', !!url);
+    if (url) this.element.style.setProperty('--results-map', `url("${url}")`);
+    else this.element.style.removeProperty('--results-map');
+  }
+
   private rankSubElem: HTMLElement;
   private pbStatusElem: HTMLElement;
 
@@ -474,7 +483,10 @@ export class ResultsScreen {
       this.syncElem.style.color = '#f59e0b';
     } else {
       const rank = results.rank.toUpperCase();
-      this.rankElem.textContent = rank;
+      // An 8-bit gem for the rank, with the word beneath it.
+      this.rankElem.innerHTML = isGemRank(rank)
+        ? `${rankGemSvg(rank, 5)}<span class="rank-word">${rank}</span>`
+        : rank;
       this.rankElem.className = `rank-badge rank-${rank.toLowerCase()}`;
 
       switch (rank) {

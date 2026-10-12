@@ -22,6 +22,7 @@ export class PauseScreen {
     this.element.innerHTML = `
       <div class="pause-container">
         <h2 class="pause-title">PAUSED</h2>
+        <div class="pause-resume-hint" id="pause-resume-hint" hidden>CLICK ANYWHERE TO RESUME</div>
         <button class="primary" id="btn-pause-resume">RESUME</button>
         <button class="secondary" id="btn-pause-restart-cp">RESTART CHECKPOINT</button>
         <button class="secondary" id="btn-pause-restart-track">RESTART TRACK</button>
@@ -61,6 +62,7 @@ export class PauseScreen {
   }
 
   public show(): void {
+    this.setResumeHint(false);
     this.element.classList.remove('hidden');
     this.resumeBtn.focus();
   }
@@ -72,11 +74,26 @@ export class PauseScreen {
     }
   }
 
+  /**
+   * Shown when a keyboard resume could not re-acquire the mouse (browsers
+   * refuse pointer lock from the Escape key), so the next step is obvious.
+   */
+  public setResumeHint(visible: boolean): void {
+    const hint = this.element.querySelector('#pause-resume-hint') as HTMLElement | null;
+    if (hint) hint.hidden = !visible;
+  }
+
   public isVisible(): boolean {
     return !this.element.classList.contains('hidden');
   }
 
   private initEvents(): void {
+    // Clicking anywhere outside the buttons resumes too. A click is always a
+    // valid gesture for pointer lock, which a second Escape press is not.
+    this.element.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement | null)?.closest('button')) return;
+      this.onResumeCallback?.();
+    });
     this.resumeBtn.addEventListener('click', () => {
       // NOTE: deliberately does NOT hide the screen here. Resuming requires
       // re-acquiring pointer lock, which the browser only grants from a user

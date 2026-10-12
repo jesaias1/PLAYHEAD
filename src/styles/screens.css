@@ -1885,6 +1885,16 @@
   text-overflow: ellipsis;
 }
 
+.pause-resume-hint {
+  margin: -6px 0 10px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.pause-resume-hint[hidden] { display: none; }
+
 .map-picker {
   display: flex;
   align-items: stretch;

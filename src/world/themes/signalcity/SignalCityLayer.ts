@@ -66,10 +66,16 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Clearance above the deck that the train occupies along its whole run. */
 const TRAIN_HEIGHT = 5.2;
 const TRAIN_CARS = 5;
+/**
+ * How far below the route every building is carried. Deep enough that, with
+ * the shader's depth fade, no foundation ever ends in view: nothing floats.
+ */
+const FOUNDATION_DEPTH = 460;
 const TRAIN_CAR_LENGTH = 19;
 
 export interface SignalCityStats {
   housing: number;
+  skybridges: number;
   rooftopUnits: number;
   viaductSpans: number;
   hasTrain: boolean;
@@ -101,6 +107,7 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
   public readonly reactivity = new ThemeReactivity();
   public readonly stats: SignalCityStats = {
     housing: 0,
+    skybridges: 0,
     rooftopUnits: 0,
     viaductSpans: 0,
     hasTrain: false,
@@ -265,6 +272,7 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
     for (let u = 0.004; u < 0.992; u += stepHousing) {
       const intimacy = sampleProgression(spans, INTIMACY, u);
       if (intimacy < 0.2) continue;
+      const placedHere: Array<{ centre: THREE.Vector3; topY: number }> = [];
       for (const side of [-1, 1]) {
         if (rng() > 0.35 + intimacy * 0.6) continue;
         const family = rng() < slabby ? 'SLAB' : rng() < 0.55 ? 'TOWER' : 'STEPPED';
@@ -273,12 +281,13 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
         const top = (family === 'TOWER' ? 95 + rng() * 80 : 42 + rng() * 60) * (0.8 + intimacy * 0.3);
         const uJit = u + (rng() - 0.5) * stepHousing * 0.5;
         const base = block({
-          u: uJit, lateral: side * (104 + rng() * 26), size: [width, depth], top, baseBelow: 150,
+          u: uJit, lateral: side * (104 + rng() * 26), size: [width, depth], top, baseBelow: FOUNDATION_DEPTH,
           kind: KIND_CONCRETE, texel: 1.0, lived: lived * (0.6 + rng() * 0.8), crown: rng() > 0.7,
           push: { step: 10, steps: 5 }
         });
         if (!base) continue;
         this.stats.housing++;
+        placedHere.push(base);
         dressRoof(base, width, depth);
         if (family === 'STEPPED') {
           // A set-back upper volume: the same building, a second roofline.
@@ -287,6 +296,27 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
             baseBelow: -top, kind: KIND_CONCRETE, texel: 1.0, lived: lived, crown: true
           });
           if (upper) dressRoof(upper, width * 0.62, depth * 0.7);
+        }
+      }
+      // Where blocks face each other across a tight street, a lit skybridge
+      // sometimes joins them high over the route: you travel THROUGH the
+      // district, not past it. High enough to clear the corridor, or omitted.
+      if (placedHere.length === 2 && intimacy > 0.55 && rng() > 0.45) {
+        const at = frame.sample(u);
+        for (let lift = 84; lift <= 140; lift += 14) {
+          const a = placedHere[0].centre.clone();
+          const b = placedHere[1].centre.clone();
+          a.y = b.y = at.position.y + lift;
+          if (a.y > Math.min(placedHere[0].topY, placedHere[1].topY) - 6) break;
+          const span = b.clone().sub(a);
+          const x = span.clone().normalize();
+          const z = new THREE.Vector3().crossVectors(x, UP).normalize();
+          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, UP, z));
+          const matrix = new THREE.Matrix4().compose(a.add(b).multiplyScalar(0.5), q, new THREE.Vector3(span.length(), 8, 11));
+          if (!fits(boxes.box, matrix)) continue;
+          boxes.add(matrix, [KIND_GLASS, 1.0, 0.75, 1], rng());
+          this.stats.skybridges++;
+          break;
         }
       }
     }
@@ -298,7 +328,7 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
     const anchor = peak ?? buildSpan ?? { start: 0.4, end: 0.6 };
     const towerU = anchor.start + (anchor.end - anchor.start) * 0.55;
     const shaft = block({
-      u: towerU, lateral: towerSide * 470, size: [58, 58], top: 250, baseBelow: 260,
+      u: towerU, lateral: towerSide * 470, size: [58, 58], top: 250, baseBelow: FOUNDATION_DEPTH,
       kind: KIND_CONCRETE, texel: 2.0, lived: 0.05, crown: true, push: { step: 40, steps: 8 }
     });
     if (shaft) {
@@ -322,12 +352,12 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
     // ---------------------------------------------------------------------
     const pairU = buildSpan ? buildSpan.start + (buildSpan.end - buildSpan.start) * 0.5 : (opening?.end ?? 0.1) + 0.05;
     const half = block({
-      u: pairU, lateral: transitSide * 360, along: -31, size: [46, 44], top: 300, baseBelow: 240,
+      u: pairU, lateral: transitSide * 360, along: -31, size: [46, 44], top: 300, baseBelow: FOUNDATION_DEPTH,
       kind: KIND_GLASS, texel: 1.4, lived: 0.16, crown: true, push: { step: 30, steps: 6 }
     });
     if (half) {
       const other = block({
-        u: pairU, lateral: half.lateral, along: 31, size: [46, 44], top: 262, baseBelow: 240,
+        u: pairU, lateral: half.lateral, along: 31, size: [46, 44], top: 262, baseBelow: FOUNDATION_DEPTH,
         kind: KIND_GLASS, texel: 1.4, lived: 0.2, crown: true
       });
       if (other) {
@@ -390,9 +420,9 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
       boxes.add(deck, [KIND_CONCRETE, 1.2, 0, 1], rng());
       this.stats.viaductSpans++;
       const pier = new THREE.Matrix4().compose(
-        a.clone().add(new THREE.Vector3(0, -112, 0)),
+        a.clone().add(new THREE.Vector3(0, -FOUNDATION_DEPTH / 2 - 1.6, 0)),
         q,
-        new THREE.Vector3(7, 220, 7)
+        new THREE.Vector3(7, FOUNDATION_DEPTH, 7)
       );
       if (fits(boxes.box, pier)) boxes.add(pier, [KIND_CONCRETE, 1.6, 0, 0], rng());
       if (run.length === 0) run.push(a.clone().add(new THREE.Vector3(0, 1.6, 0)));
@@ -430,7 +460,7 @@ export class SignalCityLayer implements EnvironmentThemeInstance {
     for (let forward = 400; forward <= 700 && !this.stats.hasTerminal; forward += 60) {
       const u = 1 + metres(forward);
       const hall = block({
-        u, lateral: towerSide * 120, size: [210, 110], top: 34, baseBelow: 180,
+        u, lateral: towerSide * 120, size: [210, 110], top: 34, baseBelow: FOUNDATION_DEPTH,
         kind: KIND_CONCRETE, texel: 1.6, lived: 0.1, crown: true
       });
       if (!hall) continue;

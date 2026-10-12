@@ -180,6 +180,10 @@ void main() {
   // Haze separates the ranks of buildings; it never fully hides one.
   float haze = (1.0 - exp(-dist / 620.0)) * 0.82;
   col = mix(col, uHaze + emissive * 0.55, haze);
+  // Depth fade: far below the eye a building sinks into the city's darkness,
+  // so its foundations never end at a visible edge.
+  float sink = smoothstep(cameraPosition.y - 70.0, cameraPosition.y - 300.0, vWorld.y);
+  col = mix(col, uHaze * 0.35, sink);
 
   gl_FragColor = vec4(signalDither(col), 1.0);
 }

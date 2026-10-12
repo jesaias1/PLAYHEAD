@@ -970,6 +970,10 @@ export class KarambitSkinSystem {
   private skinTextures: Map<string, THREE.Texture> = new Map();
   /** Skin ids whose texture fetch most recently failed (retryable on reselect). */
   private textureLoadFailed: Set<string> = new Set();
+  /** Skins whose animated video failed; they render with the still finish. */
+  private videoLoadFailed: Set<string> = new Set();
+  /** Skins whose texture failure is currently being reported to listeners. */
+  private textureFailureNotifying: Set<string> = new Set();
   private textureLoader = new THREE.TextureLoader();
   private activeVideo: { skinId: string; quality: 'STANDARD' | 'LOW'; element: HTMLVideoElement; texture: THREE.VideoTexture } | null = null;
   /** Which animated-cosmetic encode to decode. Presentation only. */
@@ -1061,9 +1065,18 @@ export class KarambitSkinSystem {
 
   public getSkinTexture(skinId: string): THREE.Texture | null {
     const skin = this.getSkin(skinId);
-    if (skin.profile.videoPath) {
-      return this.getEquippedVideoTexture(skin);
+    if (skin.profile.videoPath && !this.videoLoadFailed.has(skinId)) {
+      const video = this.getEquippedVideoTexture(skin);
+      if (!video) return null;
+      // Until the first frame has decoded, a video texture samples as black.
+      // Use the skin's still texture (or the plain finish) meanwhile; the
+      // 'loadeddata' handler re-applies as soon as there is a frame.
+      const ready = this.activeVideo?.element.readyState;
+      if (typeof ready !== 'number' || ready >= 2) return video;
     }
+    // While a failure is being reported to listeners, their re-apply must see
+    // "no texture" rather than start the same request again.
+    if (this.textureFailureNotifying.has(skinId)) return null;
 
     if (this.skinTextures.has(skinId)) {
       return this.skinTextures.get(skinId)!;
@@ -1108,6 +1121,16 @@ export class KarambitSkinSystem {
           this.skinTextures.delete(skinId);
         }
         tex.dispose();
+        // Re-apply so the knife falls back to its clean base finish instead of
+        // keeping a material that points at the disposed texture. The guard
+        // covers only this notification, so it cannot become a request loop
+        // and an explicit reselect still retries at once.
+        this.textureFailureNotifying.add(skinId);
+        try {
+          this.notifyListeners();
+        } finally {
+          this.textureFailureNotifying.delete(skinId);
+        }
       }
     );
     tex.wrapS = THREE.RepeatWrapping;
@@ -1150,10 +1173,32 @@ export class KarambitSkinSystem {
     texture.wrapT = THREE.ClampToEdgeWrapping;
     this.activeVideo = { skinId: skin.id, quality: this.videoQuality, element: video, texture };
 
+    // First decoded frame: swap the still for the live texture.
+    const listen = typeof video.addEventListener === 'function';
+    if (listen) video.addEventListener('loadeddata', () => {
+      if (this.activeVideo?.element === video) this.notifyListeners();
+    }, { once: true });
+    // A video that cannot load must not leave the knife sampling nothing.
+    if (listen) video.addEventListener('error', () => {
+      if (this.activeVideo?.element !== video) return;
+      console.warn(`[KarambitSkinSystem] Skin video failed for ${skin.id}; using the still finish.`);
+      this.videoLoadFailed.add(skin.id);
+      this.releaseActiveVideoTexture();
+      this.notifyListeners();
+    }, { once: true });
+
     try {
       const playResult = video.play();
       playResult?.catch(() => {
-        // Muted autoplay can still be denied until the next user gesture.
+        // Muted autoplay can still be denied until the next user gesture:
+        // try again on the first one.
+        const retry = (): void => {
+          window.removeEventListener('pointerdown', retry);
+          window.removeEventListener('keydown', retry);
+          if (this.activeVideo?.element === video) void video.play().catch(() => undefined);
+        };
+        window.addEventListener('pointerdown', retry, { once: true });
+        window.addEventListener('keydown', retry, { once: true });
       });
     } catch {
       // The material remains valid and the first frame can still be sampled.

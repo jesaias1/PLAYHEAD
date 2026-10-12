@@ -50,8 +50,8 @@ const SLASH_FOREHAND: ActionKey[] = [
 /** Backhand return cut: chained from the forehand, travelling left to right. */
 const SLASH_BACKHAND: ActionKey[] = [
   { t: 0.06, pos: [-0.2, 0.06, -0.09], rot: [-0.12, 0.8, 0.55], ease: 'out' },
-  { t: 0.16, pos: [0.085, 0.01, -0.1], rot: [-0.1, -0.6, -0.62], ease: 'out' },
-  { t: 0.23, pos: [0.1, 0.0, -0.085], rot: [-0.08, -0.68, -0.7], ease: 'smooth' },
+  { t: 0.16, pos: [0.02, 0.015, -0.11], rot: [-0.1, -0.26, -0.46], ease: 'out' },
+  { t: 0.23, pos: [0.03, 0.005, -0.095], rot: [-0.08, -0.32, -0.52], ease: 'smooth' },
   { t: 0.44, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
 ];
 
@@ -71,6 +71,11 @@ const INSPECT_KEYS: ActionKey[] = [
 const SCRATCH_A = new THREE.Vector3();
 const SCRATCH_B = new THREE.Vector3();
 const SCRATCH_C = new THREE.Vector3();
+const MAT_T = new THREE.Matrix4();
+const MAT_W = new THREE.Matrix4();
+const MAT_I = new THREE.Matrix4();
+const MAT_L = new THREE.Matrix4();
+const EULER = new THREE.Euler();
 
 export class ViewmodelController {
   public scene: THREE.Scene;
@@ -151,6 +156,12 @@ export class ViewmodelController {
   private readonly actionPos = new THREE.Vector3();
   private readonly actionRot = new THREE.Vector3();
   private readonly leftHandActionOffset = new THREE.Vector3();
+  /** Root bone of the knife arm (see resolveKnifeArmRoot) and its rest pose. */
+  private armRoot: THREE.Object3D | null = null;
+  private armRootFor: THREE.Object3D | null | undefined = undefined;
+  private armPosed = false;
+  private readonly armBasePos = new THREE.Vector3();
+  private readonly armBaseQuat = new THREE.Quaternion();
   private targetAccentColor = new THREE.Color(0x00f0ff);
 
   // Spring Physics State (Damped Harmonic Oscillator)
@@ -245,8 +256,10 @@ export class ViewmodelController {
     this.loadRealAssets();
 
     // 6. Subscribe to KarambitSkinSystem equip updates
-    this.unsubscribeSkin = KarambitSkinSystem.getInstance().addListener((skinId) => {
-      this.applySkin(skinId);
+    this.unsubscribeSkin = KarambitSkinSystem.getInstance().addListener(() => {
+      // Always the skin that should be RENDERED (equipped, or a replay's own):
+      // a late texture load must not swap a replay knife for the equipped one.
+      this.applySkin(KarambitSkinSystem.getInstance().getRenderSkinId());
     });
 
     // 7. Subscribe to mastery glove equip updates. Eligibility is derived by the
@@ -501,10 +514,54 @@ export class ViewmodelController {
     this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos), k);
     this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot), k);
 
-    // Rotate about the hand: p' = pivot - R * pivot + offset.
+    // Preferred: pose the KNIFE ARM ALONE. The motion is applied to the root
+    // bone of the right arm, so the off hand stays exactly in its idle pose at
+    // every FOV instead of being dragged across the view.
+    const arm = this.resolveKnifeArmRoot();
+    if (arm && arm.parent) {
+      this.armBasePos.copy(arm.position);
+      this.armBaseQuat.copy(arm.quaternion);
+      // T (action-group space): rotate about the hand, then offset.
+      MAT_T.makeRotationFromEuler(EULER.set(this.actionRot.x, this.actionRot.y, this.actionRot.z));
+      SCRATCH_C.copy(this.actionPivot).applyMatrix4(MAT_T);
+      MAT_T.setPosition(
+        this.actionPivot.x - SCRATCH_C.x + this.actionPos.x,
+        this.actionPivot.y - SCRATCH_C.y + this.actionPos.y,
+        this.actionPivot.z - SCRATCH_C.z + this.actionPos.z
+      );
+      // The same transform in world space, then in the arm's parent space.
+      MAT_W.copy(group.matrixWorld).multiply(MAT_T).multiply(MAT_I.copy(group.matrixWorld).invert());
+      arm.updateMatrix();
+      MAT_L.copy(arm.parent.matrixWorld).invert().multiply(MAT_W).multiply(arm.parent.matrixWorld).multiply(arm.matrix);
+      MAT_L.decompose(arm.position, arm.quaternion, SCRATCH_C);
+      this.armPosed = true;
+      return;
+    }
+
+    // Fallback (no separable arm): move the whole action group about the hand.
     group.rotation.set(this.actionRot.x, this.actionRot.y, this.actionRot.z);
     SCRATCH_C.copy(this.actionPivot).applyEuler(group.rotation);
     group.position.copy(this.actionPivot).sub(SCRATCH_C).add(this.actionPos);
+  }
+
+  /**
+   * The highest node of the right arm that the left hand does not also hang
+   * from. Null when the rig has no separable knife arm.
+   */
+  private resolveKnifeArmRoot(): THREE.Object3D | null {
+    const handR = this.rigInstance.handRBone;
+    const handL = this.rigInstance.handLBone;
+    if (this.armRootFor === handR) return this.armRoot;
+    this.armRootFor = handR ?? null;
+    this.armRoot = null;
+    if (!handR || !handL) return null;
+    const shared = new Set<THREE.Object3D>();
+    for (let n: THREE.Object3D | null = handL; n; n = n.parent) shared.add(n);
+    let node: THREE.Object3D = handR;
+    while (node.parent && !shared.has(node.parent)) node = node.parent;
+    // Only a real chain counts: the hand bone alone would bend the wrist only.
+    this.armRoot = node !== handR && node.parent ? node : null;
+    return this.armRoot;
   }
 
   /**
@@ -558,6 +615,12 @@ export class ViewmodelController {
     // Remove last frame's additive left-hand recoil before the animation mixer
     // evaluates its authored pose. This keeps the jab non-accumulating and safe
     // for both animated and fallback rigs.
+    // Likewise put the knife arm back before the mixer evaluates.
+    if (this.armPosed && this.armRoot) {
+      this.armRoot.position.copy(this.armBasePos);
+      this.armRoot.quaternion.copy(this.armBaseQuat);
+      this.armPosed = false;
+    }
     if (this.leftHandActionOffset.lengthSq() > 0 && this.rigInstance.handLBone) {
       this.rigInstance.handLBone.position.sub(this.leftHandActionOffset);
       this.leftHandActionOffset.set(0, 0, 0);
