@@ -97,6 +97,7 @@ interface WaterLight {
   position: THREE.Vector3;
   color: THREE.Color;
   kind: number;
+  distance: number;
 }
 
 export class MidnightHarbourInstance implements EnvironmentThemeInstance {
@@ -129,6 +130,8 @@ export class MidnightHarbourInstance implements EnvironmentThemeInstance {
   private readonly materials: THREE.Material[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly waterLights: WaterLight[] = [];
+  private readonly nearest: WaterLight[] = [];
+  private nearestAge = 0;
   private readonly hits: Array<{ time: number; strength: number }> = [];
   private hitCursor = 0;
   private lastSongTime = -1;
@@ -300,7 +303,7 @@ export class MidnightHarbourInstance implements EnvironmentThemeInstance {
       const matrix = new THREE.Matrix4().compose(pos, new THREE.Quaternion(), new THREE.Vector3(size, size, size));
       if (!fits(unit, matrix)) return false;
       glows.add(matrix, color, [intensity, kind, rng(), core]);
-      this.waterLights.push({ position: pos.clone(), color: color.clone().multiplyScalar(intensity), kind });
+      this.waterLights.push({ position: pos.clone(), color: color.clone().multiplyScalar(intensity), kind, distance: 0 });
       this.stats.lights++;
       return true;
     };
@@ -637,22 +640,28 @@ export class MidnightHarbourInstance implements EnvironmentThemeInstance {
 
     // The water carries the same changes: its glitter paths use the live
     // level of the nearest lights.
-    const nearest = this.waterLights
-      .map((l) => ({ l, d: l.position.distanceToSquared(frame.playerPos) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, WATER_LIGHT_COUNT);
+    // Which lights are nearest only changes as you travel, so re-pick them a
+    // few times a second (no per-frame sort or allocation); their LEVELS are
+    // still updated every frame.
+    if (this.nearestAge-- <= 0 || this.nearest.length === 0) {
+      this.nearestAge = 15;
+      for (const l of this.waterLights) l.distance = l.position.distanceToSquared(frame.playerPos);
+      this.waterLights.sort((a, b) => a.distance - b.distance);
+      this.nearest.length = 0;
+      for (let i = 0; i < Math.min(WATER_LIGHT_COUNT, this.waterLights.length); i++) this.nearest.push(this.waterLights[i]);
+    }
     for (let i = 0; i < WATER_LIGHT_COUNT; i++) {
-      const entry = nearest[i];
+      const entry = this.nearest[i];
       if (!entry) {
         u.uLightPos.value[i].set(0, -1e5, 0);
         u.uLightColor.value[i].setRGB(0, 0, 0);
         continue;
       }
-      const level = entry.l.kind === GLOW_STEADY ? 0.3 + 0.8 * station
-        : entry.l.kind === GLOW_NAV ? 0.55 + 0.7 * hat
+      const level = entry.kind === GLOW_STEADY ? 0.3 + 0.8 * station
+        : entry.kind === GLOW_NAV ? 0.55 + 0.7 * hat
         : 0.5 + 0.5 * beacon;
-      u.uLightPos.value[i].copy(entry.l.position);
-      u.uLightColor.value[i].copy(entry.l.color).multiplyScalar(level);
+      u.uLightPos.value[i].copy(entry.position);
+      u.uLightColor.value[i].copy(entry.color).multiplyScalar(level);
     }
   }
 

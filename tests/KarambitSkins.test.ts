@@ -45,7 +45,7 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
 
   it('defines the static collection and video Artifact skins with complete rarity metadata', () => {
     const skins = skinSystem.getSkins();
-    expect(skins).toHaveLength(24);
+    expect(skins).toHaveLength(28);
 
     const expectedIds = [
       'SIGNAL_CYAN', 'ASTRAL', 'VOID_SIGNAL', 'REDSHIFT', 'PRISM_STATIC', 'BLACKSTAR',
@@ -55,7 +55,9 @@ describe('Karambit Skin System & Cosmic Shaders', () => {
       'DNA_ARTIFACT', 'MIRRORS_ARTIFACT', 'PINK_SMOKE_ARTIFACT', 'BLUE_SMOKE_ARTIFACT',
       'WHITE_SMOKE_ARTIFACT', 'BLUE_MARBLE_ARTIFACT', 'ACID_ARTIFACT', 'RAINBOW_VORTEX_ARTIFACT',
       // Static RARE addition: a mineral azure crystal interior with gold veining.
-      'BLUE_GEM'
+      'BLUE_GEM',
+      // Map editions: one finish per environment, unlocked for everyone.
+      'AURORA_VEIL', 'EARTHRISE', 'SODIUM_TIDE', 'BROADCAST'
     ];
     expect(skins.map(s => s.id)).toEqual(expectedIds);
 

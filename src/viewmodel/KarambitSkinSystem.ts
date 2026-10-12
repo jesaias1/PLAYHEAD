@@ -936,8 +936,140 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
       emission: 1.15,
       uvScale: 1.0
     }
+  },
+  // MAP EDITIONS: one finish per environment, owned by everyone.
+  {
+    id: 'AURORA_VEIL',
+    name: 'M1 // AURORA VEIL',
+    codename: 'MIDNIGHT MOUNTAINS',
+    description: 'Green and violet curtains of northern light over a field of cold stars, drawn from the Midnight Mountains sky.',
+    unlockRequirement: 'MAP EDITION — UNLOCKED BY DEFAULT',
+    shortRequirement: 'DEFAULT',
+    tier: 14,
+    rarity: 'RARE',
+    dropEligible: false,
+    dropWeight: 0,
+    paletteTag: 'AURORA // #19F28C',
+    profile: {
+      baseColor: new THREE.Color(0x0a1020),
+      nebulaPrimary: new THREE.Color(0x19f28c),
+      nebulaSecondary: new THREE.Color(0x6f3cff),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0x4dffb0),
+      parallaxDepth: 0.2,
+      layer2Scale: 2.0,
+      flowSpeed: 0.05,
+      sparkleRate: 1.6,
+      fresnelPower: 3.0,
+      audioReactivity: 0.25,
+      isCanonical: false,
+      texturePath: '/assets/viewmodel/karambit/textures/aurora_veil_cosmic.webp',
+      exposure: 1.35,
+      contrast: 1.1,
+      emission: 1.3,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'EARTHRISE',
+    name: 'M2 // EARTHRISE',
+    codename: 'ORBITAL STATION',
+    description: 'The thin blue line of a planet at night, city lights scattered beneath it, as seen from the Orbital Station.',
+    unlockRequirement: 'MAP EDITION — UNLOCKED BY DEFAULT',
+    shortRequirement: 'DEFAULT',
+    tier: 14,
+    rarity: 'RARE',
+    dropEligible: false,
+    dropWeight: 0,
+    paletteTag: 'EARTHRISE // #3F8CFF',
+    profile: {
+      baseColor: new THREE.Color(0x05070d),
+      nebulaPrimary: new THREE.Color(0x3f8cff),
+      nebulaSecondary: new THREE.Color(0xffb866),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0x7fb6ff),
+      parallaxDepth: 0.2,
+      layer2Scale: 2.0,
+      flowSpeed: 0.02,
+      sparkleRate: 1.6,
+      fresnelPower: 3.0,
+      audioReactivity: 0.25,
+      isCanonical: false,
+      texturePath: '/assets/viewmodel/karambit/textures/earthrise_cosmic.webp',
+      exposure: 1.5,
+      contrast: 1.1,
+      emission: 1.4,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'SODIUM_TIDE',
+    name: 'M3 // SODIUM TIDE',
+    codename: 'MIDNIGHT HARBOUR',
+    description: 'Amber floodlights and red beacons broken into glitter on black harbour water.',
+    unlockRequirement: 'MAP EDITION — UNLOCKED BY DEFAULT',
+    shortRequirement: 'DEFAULT',
+    tier: 14,
+    rarity: 'RARE',
+    dropEligible: false,
+    dropWeight: 0,
+    paletteTag: 'SODIUM // #FF8F29',
+    profile: {
+      baseColor: new THREE.Color(0x06080c),
+      nebulaPrimary: new THREE.Color(0xff8f29),
+      nebulaSecondary: new THREE.Color(0xff2414),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0xffa040),
+      parallaxDepth: 0.2,
+      layer2Scale: 2.0,
+      flowSpeed: 0.04,
+      sparkleRate: 1.6,
+      fresnelPower: 3.0,
+      audioReactivity: 0.25,
+      isCanonical: false,
+      texturePath: '/assets/viewmodel/karambit/textures/sodium_tide_cosmic.webp',
+      exposure: 1.4,
+      contrast: 1.1,
+      emission: 1.35,
+      uvScale: 1.0
+    }
+  },
+  {
+    id: 'BROADCAST',
+    name: 'M4 // BROADCAST',
+    codename: 'SIGNAL CITY',
+    description: 'A night facade of warm windows crossed by one live signal trace, from the streets of Signal City.',
+    unlockRequirement: 'MAP EDITION — UNLOCKED BY DEFAULT',
+    shortRequirement: 'DEFAULT',
+    tier: 14,
+    rarity: 'RARE',
+    dropEligible: false,
+    dropWeight: 0,
+    paletteTag: 'BROADCAST // #33E6FF',
+    profile: {
+      baseColor: new THREE.Color(0x06080d),
+      nebulaPrimary: new THREE.Color(0x33e6ff),
+      nebulaSecondary: new THREE.Color(0xffb060),
+      starColor: new THREE.Color(0xffffff),
+      rimColor: new THREE.Color(0x33e6ff),
+      parallaxDepth: 0.2,
+      layer2Scale: 2.0,
+      flowSpeed: 0.0,
+      sparkleRate: 1.6,
+      fresnelPower: 3.0,
+      audioReactivity: 0.25,
+      isCanonical: false,
+      texturePath: '/assets/viewmodel/karambit/textures/broadcast_cosmic.webp',
+      exposure: 1.4,
+      contrast: 1.1,
+      emission: 1.3,
+      uvScale: 1.0
+    }
   }
 ];
+
+/** Finishes every player owns from the start, one per map. */
+const MAP_EDITION_SKIN_IDS: ReadonlySet<string> = new Set(['AURORA_VEIL', 'EARTHRISE', 'SODIUM_TIDE', 'BROADCAST']);
 
 export const TOTAL_SIGNAL_PACK_TRACKS = 14;
 
@@ -2542,6 +2674,10 @@ export class KarambitSkinSystem {
       return { current: 1, total: 1, label: 'SIGNAL DROP', isUnlocked: true };
     }
 
+    if (MAP_EDITION_SKIN_IDS.has(norm)) {
+      return { current: 1, total: 1, label: 'MAP EDITION', isUnlocked: true };
+    }
+
     switch (norm) {
       case 'SIGNAL_CYAN':
         return { current: 1, total: 1, label: 'STANDARD ISSUE', isUnlocked: true };
@@ -2608,7 +2744,7 @@ export class KarambitSkinSystem {
 
   private isSkinUnlockedWithoutDev(id: string): boolean {
     const target = this.getSkin(id);
-    if (target.id === 'SIGNAL_CYAN') return true;
+    if (target.id === 'SIGNAL_CYAN' || MAP_EDITION_SKIN_IDS.has(target.id)) return true;
     if (this.progression.rewardOwnedSkinIds.includes(target.id)) return true;
     return this.getSkinProgress(target.id, false).isUnlocked;
   }

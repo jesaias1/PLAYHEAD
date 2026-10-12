@@ -71,6 +71,7 @@ const INSPECT_KEYS: ActionKey[] = [
 const SCRATCH_A = new THREE.Vector3();
 const SCRATCH_B = new THREE.Vector3();
 const SCRATCH_C = new THREE.Vector3();
+const SCRATCH_D = new THREE.Vector3();
 const MAT_T = new THREE.Matrix4();
 const MAT_W = new THREE.Matrix4();
 const MAT_I = new THREE.Matrix4();
@@ -160,6 +161,10 @@ export class ViewmodelController {
   private armRoot: THREE.Object3D | null = null;
   private armRootFor: THREE.Object3D | null | undefined = undefined;
   private armPosed = false;
+  private offArmRoot: THREE.Object3D | null = null;
+  private offArmPosed = false;
+  private readonly offArmBasePos = new THREE.Vector3();
+  private readonly offArmBaseQuat = new THREE.Quaternion();
   private readonly armBasePos = new THREE.Vector3();
   private readonly armBaseQuat = new THREE.Quaternion();
   private targetAccentColor = new THREE.Color(0x00f0ff);
@@ -521,20 +526,29 @@ export class ViewmodelController {
     if (arm && arm.parent) {
       this.armBasePos.copy(arm.position);
       this.armBaseQuat.copy(arm.quaternion);
-      // T (action-group space): rotate about the hand, then offset.
-      MAT_T.makeRotationFromEuler(EULER.set(this.actionRot.x, this.actionRot.y, this.actionRot.z));
-      SCRATCH_C.copy(this.actionPivot).applyMatrix4(MAT_T);
-      MAT_T.setPosition(
-        this.actionPivot.x - SCRATCH_C.x + this.actionPos.x,
-        this.actionPivot.y - SCRATCH_C.y + this.actionPos.y,
-        this.actionPivot.z - SCRATCH_C.z + this.actionPos.z
-      );
-      // The same transform in world space, then in the arm's parent space.
-      MAT_W.copy(group.matrixWorld).multiply(MAT_T).multiply(MAT_I.copy(group.matrixWorld).invert());
-      arm.updateMatrix();
-      MAT_L.copy(arm.parent.matrixWorld).invert().multiply(MAT_W).multiply(arm.parent.matrixWorld).multiply(arm.matrix);
-      MAT_L.decompose(arm.position, arm.quaternion, SCRATCH_C);
+      this.poseArmRoot(arm, this.actionPivot, this.actionPos, this.actionRot);
       this.armPosed = true;
+
+      // The off arm answers with a small counter-motion, as a body does when
+      // the other shoulder drives forward: it draws back and dips a little and
+      // turns slightly with the torso. Moved as a whole from its own shoulder,
+      // so it can never stretch; an inspect barely stirs it.
+      const off = this.offArmRoot;
+      const handL = this.rigInstance.handLBone;
+      if (off && off.parent && handL) {
+        const amount = this.activeAction === 'SLASH' ? 1 : 0.3;
+        this.offArmBasePos.copy(off.position);
+        this.offArmBaseQuat.copy(off.quaternion);
+        group.worldToLocal(handL.getWorldPosition(SCRATCH_A));
+        SCRATCH_B.set(
+          this.actionPos.x * 0.1 * amount,
+          (this.actionPos.y * -0.25 - Math.abs(this.actionPos.x) * 0.07) * amount,
+          this.actionPos.z * -0.34 * amount
+        );
+        SCRATCH_D.set(this.actionRot.x * 0.1 * amount, this.actionRot.y * 0.13 * amount, this.actionRot.z * 0.08 * amount);
+        this.poseArmRoot(off, SCRATCH_A, SCRATCH_B, SCRATCH_D);
+        this.offArmPosed = true;
+      }
       return;
     }
 
@@ -542,6 +556,22 @@ export class ViewmodelController {
     group.rotation.set(this.actionRot.x, this.actionRot.y, this.actionRot.z);
     SCRATCH_C.copy(this.actionPivot).applyEuler(group.rotation);
     group.position.copy(this.actionPivot).sub(SCRATCH_C).add(this.actionPos);
+  }
+
+  /**
+   * Applies "rotate about `pivot`, then offset" (given in action-group space)
+   * to one arm's root bone, leaving the rest of the rig alone.
+   */
+  private poseArmRoot(arm: THREE.Object3D, pivot: THREE.Vector3, pos: THREE.Vector3, rot: THREE.Vector3): void {
+    const group = this.actionGroup;
+    MAT_T.makeRotationFromEuler(EULER.set(rot.x, rot.y, rot.z));
+    SCRATCH_C.copy(pivot).applyMatrix4(MAT_T);
+    MAT_T.setPosition(pivot.x - SCRATCH_C.x + pos.x, pivot.y - SCRATCH_C.y + pos.y, pivot.z - SCRATCH_C.z + pos.z);
+    // The same transform in world space, then in the arm's parent space.
+    MAT_W.copy(group.matrixWorld).multiply(MAT_T).multiply(MAT_I.copy(group.matrixWorld).invert());
+    arm.updateMatrix();
+    MAT_L.copy(arm.parent!.matrixWorld).invert().multiply(MAT_W).multiply(arm.parent!.matrixWorld).multiply(arm.matrix);
+    MAT_L.decompose(arm.position, arm.quaternion, SCRATCH_C);
   }
 
   /**
@@ -554,6 +584,7 @@ export class ViewmodelController {
     if (this.armRootFor === handR) return this.armRoot;
     this.armRootFor = handR ?? null;
     this.armRoot = null;
+    this.offArmRoot = null;
     if (!handR || !handL) return null;
     const shared = new Set<THREE.Object3D>();
     for (let n: THREE.Object3D | null = handL; n; n = n.parent) shared.add(n);
@@ -561,6 +592,12 @@ export class ViewmodelController {
     while (node.parent && !shared.has(node.parent)) node = node.parent;
     // Only a real chain counts: the hand bone alone would bend the wrist only.
     this.armRoot = node !== handR && node.parent ? node : null;
+    // And the mirror image: the off arm's own root.
+    const sharedR = new Set<THREE.Object3D>();
+    for (let n: THREE.Object3D | null = handR; n; n = n.parent) sharedR.add(n);
+    let offNode: THREE.Object3D = handL;
+    while (offNode.parent && !sharedR.has(offNode.parent)) offNode = offNode.parent;
+    this.offArmRoot = this.armRoot && offNode !== handL && offNode.parent ? offNode : null;
     return this.armRoot;
   }
 
@@ -620,6 +657,11 @@ export class ViewmodelController {
       this.armRoot.position.copy(this.armBasePos);
       this.armRoot.quaternion.copy(this.armBaseQuat);
       this.armPosed = false;
+    }
+    if (this.offArmPosed && this.offArmRoot) {
+      this.offArmRoot.position.copy(this.offArmBasePos);
+      this.offArmRoot.quaternion.copy(this.offArmBaseQuat);
+      this.offArmPosed = false;
     }
     if (this.leftHandActionOffset.lengthSq() > 0 && this.rigInstance.handLBone) {
       this.rigInstance.handLBone.position.sub(this.leftHandActionOffset);

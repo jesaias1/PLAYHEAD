@@ -2662,6 +2662,29 @@ export class Game {
 
     // Pointer lock became available only after the user gesture; complete the
     // deferred resume. A failure keeps the game paused (cursor stays free).
+    // FULLSCREEN + ESCAPE. In fullscreen the browser may spend the first
+    // Escape on leaving fullscreen without releasing the mouse, so the game
+    // never heard it and pausing took two presses. Two fixes:
+    //  - leaving fullscreen during play pauses at once;
+    //  - where supported (Chromium, fullscreen only) the Keyboard Lock API
+    //    hands Escape to the page, so one press pauses and the next resumes.
+    //    Holding Escape still exits fullscreen; that is the browser's rule.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('fullscreenchange', () => {
+        const keyboard = (navigator as unknown as {
+          keyboard?: { lock?: (keys: string[]) => Promise<void>; unlock?: () => void };
+        }).keyboard;
+        if (document.fullscreenElement) {
+          void keyboard?.lock?.(['Escape'])?.catch(() => undefined);
+          return;
+        }
+        keyboard?.unlock?.();
+        if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
+          this.pauseGame();
+        }
+      });
+    }
+
     this.cameraController.onLockChange = (locked) => {
       if (!this.awaitingResumeLock) return;
       this.awaitingResumeLock = false;
