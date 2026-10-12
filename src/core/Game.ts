@@ -312,6 +312,9 @@ export class Game {
    * get no board.
    */
   private currentSurfOfficialTrackId: string | null = null;
+  /** Set by an Escape resume until the mouse has been captured again. */
+  private relockOnNextInput = false;
+  private relockPointerListener: (() => void) | null = null;
   /** Map chosen in the map picker for the current song (null = its own map). */
   private selectedMapKey: string | null = null;
   /** Board kind + official song id of the LAST finished run (results actions). */
@@ -2376,6 +2379,39 @@ export class Game {
   }
 
   /** Performs the actual paused -> playing transition. */
+  /**
+   * Escape closes the pause menu at once.
+   *
+   * Browsers will not capture the mouse from an Escape press, only from a
+   * click or an ordinary key. So this path does not wait for the capture the
+   * way the RESUME button does: it resumes immediately, asks for the mouse
+   * anyway, and if that is refused takes it on the player's very next key
+   * press or click.
+   */
+  private resumeFromEscape(): void {
+    if (!this.stateMachine.is(GameState.PAUSED)) return;
+    this.lastResumeTime = performance.now();
+    this.awaitingResumeLock = false;
+    this.finalizeResume();
+    this.relockOnNextInput = true;
+    this.tryRelockAfterEscape();
+    if (!this.relockPointerListener && typeof window !== 'undefined') {
+      this.relockPointerListener = () => {
+        if (this.relockOnNextInput) this.tryRelockAfterEscape();
+      };
+      window.addEventListener('pointerdown', this.relockPointerListener);
+    }
+  }
+
+  private tryRelockAfterEscape(): void {
+    const playing = this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB);
+    if (!playing || this.cameraController.getIsLocked()) {
+      this.relockOnNextInput = false;
+      return;
+    }
+    this.cameraController.lock();
+  }
+
   private finalizeResume(): void {
     if (!this.stateMachine.is(GameState.PAUSED)) return;
 
@@ -2693,6 +2729,9 @@ export class Game {
     });
 
     window.addEventListener('keydown', (e) => {
+      // After an Escape resume the mouse may not be captured yet (see
+      // resumeFromEscape): the first ordinary key press captures it.
+      if (this.relockOnNextInput && e.code !== 'Escape') this.tryRelockAfterEscape();
       // In-game race READY consumes SPACE only while the race is staged.
       if (this.handleRaceReadyKey(e)) return;
       // FINISH spectator NEXT / PREV consumes the arrow keys only after we
@@ -2735,7 +2774,7 @@ export class Game {
           this.pauseGame();
         } else if (this.stateMachine.is(GameState.PAUSED)) {
           if (now - this.lastPauseTime < 250) return;
-          this.resumeGame();
+          this.resumeFromEscape();
         } else if (this.stateMachine.is(GameState.REPLAY)) {
           // ESC is the same exit as the overlay button: release the replay
           // (audio, glove/knife preview, ghost) instead of a partial transition

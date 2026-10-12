@@ -52,6 +52,7 @@ export class AnalysisScreen {
         <div class="analysis-header">
           <div class="analysis-kicker">[SIGNAL] AUDIO-TO-SPACE COMPILER <button id="btn-ready-back" type="button" hidden>[ESC] BACK</button></div>
           <h2 class="analysis-track-title" id="analysis-title">SIGNAL LOADING...</h2>
+          <div class="signal-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div class="analysis-stage-row">
             <div class="analysis-stage" id="analysis-stage" aria-live="polite">[SIGNAL] STANDING BY</div>
             <div class="analysis-progress-readout" id="analysis-progress-readout">00%</div>
