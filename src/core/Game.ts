@@ -1,4 +1,5 @@
-import { loadRaceCourse, nextRaceTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
+import { loadRaceCourse, nextRaceTrackId, raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
+import { drawRaceMap } from '../online/MapVote';
 /**
  * Master Game Controller for TRACK//RUN
  * Integrates StateMachine, AudioEngine, World, PlayerController, Replay, and UI
@@ -21,7 +22,7 @@ import { GeneratedTrack, CheckpointDefinition } from '../generation/GenerationTy
 import { CourseType, DEFAULT_COURSE_TYPE, normalizeCourseType } from '../generation/CourseType';
 import { Environment } from '../world/Environment';
 import { World } from '../world/World';
-import { CITY_MAP_KEY, ENVIRONMENT_MAPS } from '../world/themes/EnvironmentThemeRegistry';
+import { CITY_MAP_KEY, ENVIRONMENT_MAPS, resolveEnvironmentTheme } from '../world/themes/EnvironmentThemeRegistry';
 import { CameraController } from '../player/CameraController';
 import { PlayerController } from '../player/PlayerController';
 import type { RunRank, RunResults } from '../player/PlayerStats';
@@ -3494,7 +3495,22 @@ export class Game {
     const racePanel = this.ui.importScreen.racePanel;
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
 
+    racePanel.setMapVoteSource(() => {
+      const room = raceRoomService.getRoom();
+      const defaultKey = this.defaultRaceMapKey();
+      const me = authService.getUserId();
+      if (room && me && !raceRoomService.getMapVotes().has(me)) raceRoomService.setMyMapVote(defaultKey);
+      return {
+        votes: raceRoomService.getMapVotes(),
+        myUserId: me,
+        players: raceRoomService.getPlayers(),
+        defaultKey,
+        open: !room || room.state === 'LOBBY'
+      };
+    });
+
     racePanel.setCallbacks({
+      onMapVote: (key) => raceRoomService.setMyMapVote(key),
       onCreateRoom: (trackId, capacity, mode) => {
         racePanel.setTrackPickLocked(false);
         void this.createRaceRoom(trackId, capacity, mode);
@@ -3609,6 +3625,7 @@ export class Game {
         this.onRacePhase(room, players);
       },
       onGhost: (sample) => this.onRemoteGhostSample(sample),
+      onMapVotes: () => this.ui.importScreen.racePanel.refreshMapVotes(),
       onPlayerJoined: (player) => {
         this.ui.raceHud.showNotice(`${player.displayName} // JOINED`);
       },
@@ -3978,7 +3995,15 @@ export class Game {
     } finally { this.raceContinuationPending = false; }
   }
 
+  /** The map a racer who has not voted gets: the song's own map, or the city. */
+  private defaultRaceMapKey(): string {
+    const trackId = raceRoomService.getRoom()?.trackId;
+    const base = trackId ? raceBaseTrackId(trackId) : '';
+    return resolveEnvironmentTheme(base)?.id ?? CITY_MAP_KEY;
+  }
+
   private returnToRaceLobby(): void {
+    this.selectedMapKey = null;
     this.raceLoadGeneration++;
     const room = raceRoomService.getRoom();
     if (!room) {
@@ -4396,6 +4421,22 @@ export class Game {
     this.ui.raceHud.show();
     this.ui.raceHud.showNotice('SESSION STARTING');
 
+    // MAP VOTE: wait briefly for every racer's vote, then draw. Same inputs on every
+    // client give the same map; the map is visual only, never part of the course.
+    const racers = raceRoomService.getPlayers().filter((p) => p.connected).map((p) => p.userId);
+    for (let waited = 0; waited < 2500 && racers.some((id) => !raceRoomService.getMapVotes().has(id)); waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const draw = drawRaceMap(
+      raceRoomService.getRaceId() ?? room.raceId,
+      raceRoomService.getMapVotes(),
+      racers,
+      this.defaultRaceMapKey()
+    );
+    this.selectedMapKey = draw.key;
+    const mapName = ENVIRONMENT_MAPS.find((m) => m.key === draw.key)?.name ?? draw.key;
+    this.ui.raceHud.showNotice(`MAP // ${mapName}${draw.drawn ? ' (DRAWN FROM THE VOTES)' : ''}`);
+
     // Enter the normal track flow; the shared clock starts at startAtMs.
     await this.loadPresetTrack(level.baseId);
     if (level.mode === 'SURF' && loadGeneration === this.raceLoadGeneration) await this.switchReadyToSurf();
@@ -4475,6 +4516,7 @@ export class Game {
   }
 
   private async leaveRaceRoom(): Promise<void> {
+    this.selectedMapKey = null;
     this.ui.importScreen.racePanel.setTrackPickLocked(false);
     this.raceLoadGeneration++;
     this.raceActive = false;

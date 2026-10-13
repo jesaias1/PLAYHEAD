@@ -1,3 +1,4 @@
+import { ENVIRONMENT_MAPS } from '../world/themes/EnvironmentThemeRegistry';
 import { raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 /**
  * 05 // ONLINE RACE — the PLAYHEAD multiplayer race hub.
@@ -46,6 +47,8 @@ export interface RaceCatalogEntry {
 export interface RacePanelCallbacks {
   onCreateRoom: (trackId: string, capacity: number, mode?: RaceMode) => void;
   onJoinRoom: (code: string) => void;
+  /** This racer voted for a map. */
+  onMapVote?: (key: string) => void;
   /** Quick match: search the queue for another player. */
   onFindOpponent?: (trackId: string, mode: RaceMode) => void;
   onCancelFind?: () => void;
@@ -211,6 +214,11 @@ export class RacePanel {
           </div>
         </div>
 
+        <div class="race-map-vote" id="race-map-vote">
+          <div class="race-map-vote-head">VOTE FOR THE MAP <span>if you pick different maps, one of them is drawn at random</span></div>
+          <div class="race-map-grid" id="race-map-grid"></div>
+          <div class="race-map-votes" id="race-map-votes" aria-live="polite"></div>
+        </div>
         <div class="online-host-track hidden" id="race-host-track-row">
           <span class="online-invite-label">TRACK</span>
           <select class="online-select" id="race-host-track-select"></select>
@@ -492,6 +500,43 @@ export class RacePanel {
   }
 
   private searching = false;
+  private mapVoteSource:
+    | (() => { votes: ReadonlyMap<string, string>; myUserId: string | null; players: readonly RacePlayer[]; defaultKey: string; open: boolean })
+    | null = null;
+
+  /** Where the lobby reads the current map votes from (Game owns the room). */
+  public setMapVoteSource(source: NonNullable<RacePanel['mapVoteSource']>): void {
+    this.mapVoteSource = source;
+  }
+
+  /** Redraws the map vote card: the picked map is highlighted and every racer's vote is listed. */
+  public refreshMapVotes(): void {
+    const grid = this.element.querySelector('#race-map-grid') as HTMLElement | null;
+    const line = this.element.querySelector('#race-map-votes') as HTMLElement | null;
+    const source = this.mapVoteSource?.();
+    if (!grid || !line || !source) return;
+    if (grid.childElementCount === 0) {
+      for (const map of ENVIRONMENT_MAPS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'race-map-btn';
+        btn.dataset.mapKey = map.key;
+        btn.innerHTML = `<img src="${map.thumbnail}" alt="" loading="lazy"><span>${this.escape(map.name)}</span>`;
+        btn.addEventListener('click', () => this.callbacks?.onMapVote?.(map.key));
+        grid.appendChild(btn);
+      }
+    }
+    const mine = source.myUserId ? source.votes.get(source.myUserId) ?? source.defaultKey : source.defaultKey;
+    grid.querySelectorAll<HTMLButtonElement>('.race-map-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.mapKey === mine);
+      btn.disabled = !source.open;
+    });
+    const nameOf = (key: string): string => ENVIRONMENT_MAPS.find((m) => m.key === key)?.name ?? key;
+    line.textContent = source.players
+      .filter((p) => p.connected)
+      .map((p) => `${p.displayName.toUpperCase()}: ${nameOf(source.votes.get(p.userId) ?? source.defaultKey)}`)
+      .join('   //   ');
+  }
   private trackPickLocked = false;
 
   /**
@@ -547,6 +592,7 @@ export class RacePanel {
     identities?: Map<string, { gloveName: string; knifeName: string }>
   ): void {
     this.lastRoom = room;
+    this.refreshMapVotes();
 
     this.lobbyCodeElem.textContent = room.inviteCode;
     this.lobbyTitleElem.textContent = room.trackTitle || room.trackId;

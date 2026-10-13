@@ -246,6 +246,8 @@ export function activeRacerCount(players: readonly RacePlayer[]): number {
 export interface RaceRoomCallbacks {
   onRoomUpdate?: (room: RaceRoom, players: RacePlayer[]) => void;
   onGhost?: (sample: GhostSample) => void;
+  /** A racer's map vote arrived or changed (see MapVote.ts). */
+  onMapVotes?: () => void;
   onPlayerJoined?: (player: RacePlayer) => void;
   onPlayerLeft?: (userId: string) => void;
   onFinished?: (results: RaceResultRow[]) => void;
@@ -1063,6 +1065,14 @@ export class RaceRoomService {
       config: { broadcast: { self: false } }
     });
 
+    channel.on('broadcast', { event: 'map_vote' }, (payload) => {
+      const vote = payload?.payload as { userId?: unknown; key?: unknown } | undefined;
+      if (typeof vote?.userId !== 'string' || typeof vote.key !== 'string') return;
+      if (!/^[A-Z0-9_]{2,40}$/.test(vote.key)) return;
+      this.mapVotes.set(vote.userId, vote.key);
+      this.callbacks.onMapVotes?.();
+    });
+
     channel.on('broadcast', { event: 'ghost' }, (payload) => {
       const sample = payload?.payload as GhostSample | undefined;
       // Never render our own transform; drop stale / previous-race packets.
@@ -1360,7 +1370,40 @@ export class RaceRoomService {
     this.remoteSeenAt.clear();
   }
 
+  // ---- MAP VOTE ------------------------------------------------------------
+  private mapVotes = new Map<string, string>();
+  private mapVoteTimer: number | null = null;
+
+  public getMapVotes(): ReadonlyMap<string, string> {
+    return this.mapVotes;
+  }
+
+  /**
+   * Records this racer's map vote and shares it. It is re-sent every second while
+   * the room exists, so a racer who joins late (or a dropped packet) still gets it.
+   */
+  public setMyMapVote(key: string): void {
+    const me = this.auth.getUserId();
+    if (!me) return;
+    this.mapVotes.set(me, key);
+    this.callbacks.onMapVotes?.();
+    const send = (): void => {
+      const mine = this.mapVotes.get(me);
+      if (!this.channel || !mine) return;
+      void this.channel.send({ type: 'broadcast', event: 'map_vote', payload: { userId: me, key: mine } });
+    };
+    send();
+    if (this.mapVoteTimer === null) this.mapVoteTimer = window.setInterval(send, 1000);
+  }
+
+  private stopMapVotes(): void {
+    if (this.mapVoteTimer !== null) window.clearInterval(this.mapVoteTimer);
+    this.mapVoteTimer = null;
+    this.mapVotes.clear();
+  }
+
   public async unsubscribe(): Promise<void> {
+    this.stopMapVotes();
     this.stopGhostBroadcast();
     this.stopLobbySync();
     if (this.channel) {
