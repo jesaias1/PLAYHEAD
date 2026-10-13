@@ -2,6 +2,7 @@
  * Central UI Manager coordinating DOM screens with Game StateMachine
  */
 
+import { installDialogFit } from './DialogFit';
 import { makeDesktopWindow } from './DesktopWindow';
 import { ImportScreen } from './ImportScreen';
 import { AnalysisScreen } from './AnalysisScreen';
@@ -74,6 +75,7 @@ export class UIManager {
     this.root.appendChild(this.armoryModal.element);
     this.root.appendChild(this.movementLabSongModal.element);
     this.root.appendChild(this.decodeModal.element);
+    installDialogFit(this.root);
     this.root.appendChild(this.profileModal.element);
     this.root.appendChild(this.loginModal.element);
     this.root.appendChild(this.raceHud.element);
