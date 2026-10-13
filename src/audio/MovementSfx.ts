@@ -100,6 +100,64 @@ export class MovementSfx {
     src.stop(now + 0.22);
   }
 
+  private spinFilter: BiquadFilterNode | null = null;
+  private spinGain: GainNode | null = null;
+
+  /**
+   * Soft airy whirl that follows the knife spin (0..1). Deliberately very
+   * quiet: this is a music game and the track must stay in front.
+   */
+  public setKnifeSpinLevel(level: number): void {
+    const ctx = this.ctx && this.ctx.state !== 'closed' ? this.ctx : null;
+    if (!this.spinGain && level < 0.02) return;
+    const live = ctx ?? this.getContext();
+    if (!live) return;
+    if (!this.spinGain || !this.spinFilter) {
+      const src = live.createBufferSource();
+      src.buffer = this.makeNoiseBuffer(live, 1.5);
+      src.loop = true;
+      const filter = live.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.value = 1.4;
+      const gain = live.createGain();
+      gain.gain.value = 0;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(live.destination);
+      src.start();
+      this.spinFilter = filter;
+      this.spinGain = gain;
+    }
+    const l = Math.max(0, Math.min(1, level));
+    const now = live.currentTime;
+    this.spinFilter.frequency.setTargetAtTime(500 + l * 1700, now, 0.05);
+    this.spinGain.gain.setTargetAtTime(l * l * 0.016 * this.master(), now, 0.06);
+  }
+
+  /** The tiniest tick as the knife drops back into the palm. */
+  public playKnifeCatch(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const vol = this.master();
+    if (vol <= 0.001) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.makeNoiseBuffer(ctx, 0.06);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 2200;
+    filter.Q.value = 2;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.022 * vol, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(now);
+    src.stop(now + 0.06);
+  }
+
   /** Knife cut: a short, bright air swish. The backhand is pitched lower. */
   public playKnifeSlash(backhand = false): void {
     const ctx = this.getContext();

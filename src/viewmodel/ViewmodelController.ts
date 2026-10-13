@@ -43,7 +43,7 @@ const SPIN_HOLD_POS: [number, number, number] = [-0.033, 0.032, 0];
 const SPIN_HOLD_ROT: [number, number, number] = [0.09, 0.32, 0.11];
 
 /** Knife spin is a fidget toy: it runs while clicks keep coming, then catches. */
-const SPIN_SPEED = 20; // rad/s at full whirl (about 3 turns a second)
+const SPIN_SPEED = 20; // rad/s at full whirl (about 3 turns a second); scaled by the spinSpeed setting
 const SPIN_SUSTAIN = 0.4; // s after the last click before the knife is caught
 const SPIN_CATCH_DECEL = 40; // rad/s^2: how gently the knife slows once the clicks stop
 const SPIN_CATCH_EASE = 6; // 1/s: the last stretch eases out instead of braking hard
@@ -222,6 +222,10 @@ export class ViewmodelController {
   private trailColors = new Float32Array(SPIN_TRAIL_MAX_POINTS * 2 * 3);
   private readonly trailPoints: { p: THREE.Vector3; t: number }[] = [];
   private trailStrength = 0;
+  /** Spin speed from settings (1 = default), and the audio hooks. */
+  private spinSpeedScale = 1;
+  private spinLanded = false;
+  private inspectShineStage = 0;
   /** Finger rotations as the mixer left them, restored before it runs again. */
   private readonly fingerBaseQuats: THREE.Quaternion[] = [];
   private fingersPosed = false;
@@ -458,6 +462,7 @@ export class ViewmodelController {
       this.applyMasteryGlove(true);
       this.actionGroup.add(this.rigInstance.rootGroup);
       this.isRigLoaded = true;
+      this.rigInstance.playDraw();
     } catch (err) {
       console.warn('[ViewmodelController] Asset load error, keeping fallback:', err);
     }
@@ -563,6 +568,7 @@ export class ViewmodelController {
     this.actionFromPos.copy(this.actionPos);
     this.actionFromRot.copy(this.actionRot);
     this.activeAction = kind;
+    this.inspectShineStage = 0;
     this.actionKeys = keys;
     this.actionTimer = 0;
     this.actionDuration = keys.length > 0 ? keys[keys.length - 1].t : Infinity;
@@ -596,12 +602,13 @@ export class ViewmodelController {
           this.spinOmega = 0;
           this.spinAtRest = true;
           this.kickVel = -0.16; // the handle lands in the palm
+          this.spinLanded = true;
           this.audioImpact = Math.max(this.audioImpact, 0.9);
         } else {
           this.spinAngle += this.spinOmega * dt;
         }
       } else {
-        this.spinOmega += (SPIN_SPEED - this.spinOmega) * Math.min(1, dt * 10);
+        this.spinOmega += (SPIN_SPEED * this.spinSpeedScale - this.spinOmega) * Math.min(1, dt * 10);
         this.spinAngle += this.spinOmega * dt;
       }
     }
@@ -618,7 +625,7 @@ export class ViewmodelController {
     const h = Math.min(dt, 0.033);
     this.kickVel += (-KICK_STIFFNESS * this.kickY - KICK_DAMPING * this.kickVel) * h;
     this.kickY += this.kickVel * h;
-    const swirl = Math.min(1, this.spinOmega / SPIN_SPEED) * this.fingerOpen;
+    const swirl = Math.min(1, this.spinOmega / (SPIN_SPEED * this.spinSpeedScale)) * this.fingerOpen;
     this.spinWobblePos.set(0, this.kickY + 0.004 * Math.sin(this.spinAngle * 2) * swirl, 0);
     this.spinWobbleRot.set(
       -this.kickY * 3 + 0.035 * Math.sin(this.spinAngle) * swirl,
@@ -637,9 +644,33 @@ export class ViewmodelController {
     }
   }
 
+  /** 0..1: how fast the knife is spinning, for the quiet whirl sound. */
+  public getSpinLevel(): number {
+    if (this.activeAction !== 'SPIN' || this.spinAtRest) return 0;
+    return clamp(this.spinOmega / 20, 0, 1);
+  }
+
+  /** True once per landing of the knife into the palm. */
+  public consumeSpinLanded(): boolean {
+    const landed = this.spinLanded;
+    this.spinLanded = false;
+    return landed;
+  }
+
+  /** Plays the authored draw clip: on spawn and after a restart or restore. */
+  public playDraw(): void {
+    if (this.activeAction === 'NONE' && this.isRigLoaded) this.rigInstance.playDraw();
+  }
+
   /** Inspect: the knife's roll and how loosely the hand holds it, from the action clock. */
   private updateInspect(): number {
     const t = this.actionTimer;
+    // A shine sweeps the blade as each flat comes round.
+    const shineAt = [0.58, 1.43];
+    if (this.inspectShineStage < shineAt.length && t >= shineAt[this.inspectShineStage]) {
+      this.inspectShineStage++;
+      this.audioImpact = Math.max(this.audioImpact, 1.3);
+    }
     const roll = (a: readonly [number, number]): number => easeInOutBack((t - a[0]) / (a[1] - a[0]));
     let angle: number;
     if (t <= INSPECT_ROLL_FIRST[0]) angle = 0;
@@ -657,9 +688,9 @@ export class ViewmodelController {
    * last moment, drawn additively in the accent colour. It only shows once the
    * knife has turned a few times in one go and fades as the spin slows.
    */
-  private updateSpinTrail(dt: number): void {
+  private updateSpinTrail(dt: number, enabled: boolean): void {
     const whirling = this.activeAction === 'SPIN' && !this.spinAtRest;
-    const fast = whirling && this.spinAngle > SPIN_TRAIL_TURNS * Math.PI * 2 && this.spinOmega > 10;
+    const fast = enabled && whirling && this.spinAngle > SPIN_TRAIL_TURNS * Math.PI * 2 && this.spinOmega > 10;
     this.trailStrength += ((fast ? 1 : 0) - this.trailStrength) * Math.min(1, dt * (fast ? 12 : 9));
 
     const now = this.actionClock;
@@ -681,8 +712,16 @@ export class ViewmodelController {
     const mesh = this.trailMesh;
     const pos = this.trailPositions;
     const col = this.trailColors;
-    // Accent colour, lifted toward white so it reads as light, not paint.
-    SCRATCH_C.set(this.accentColor.r, this.accentColor.g, this.accentColor.b).lerp(SCRATCH_D.set(1, 1, 1), 0.45);
+    // The equipped skin's edge colour, pulled toward the map accent and lifted
+    // toward white so it reads as light, not paint. The canonical skin is pure accent.
+    SCRATCH_C.set(this.accentColor.r, this.accentColor.g, this.accentColor.b);
+    const skinSystem = KarambitSkinSystem.getInstance();
+    const profile = skinSystem.getSkin(skinSystem.getActiveRenderSkinId()).profile;
+    if (!profile.isCanonical) SCRATCH_C.set(profile.rimColor.r, profile.rimColor.g, profile.rimColor.b).lerp(
+      SCRATCH_D.set(this.accentColor.r, this.accentColor.g, this.accentColor.b),
+      0.3
+    );
+    SCRATCH_C.lerp(SCRATCH_D.set(1, 1, 1), 0.45);
     for (let i = 0; i < pts.length; i++) {
       const age = (now - pts[i].t) / SPIN_TRAIL_LIFE;
       const life = Math.max(0, 1 - age);
@@ -1213,7 +1252,12 @@ export class ViewmodelController {
       this.actionGroup.rotation.set(0, 0, 0);
     }
 
-    this.updateSpinTrail(dt);
+    this.spinSpeedScale = clamp(settings.spinSpeed ?? 1, 0.5, 1.5);
+    // The blade's own shader lights up with the spin, matching the speed line.
+    if (this.activeAction === 'SPIN' && !this.spinAtRest) {
+      this.audioImpact = Math.max(this.audioImpact, clamp(this.spinOmega / 20, 0, 1) * 0.85);
+    }
+    this.updateSpinTrail(dt, settings.spinTrail !== false);
 
     // Decay audio impact
     if (this.audioImpact > 0) {

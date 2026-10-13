@@ -34,6 +34,10 @@ export interface GameSettings {
   hideHud: boolean;
   viewmodelFov: number;
   viewmodelSway: number;
+  /** Speed line behind the knife while it spins fast. */
+  spinTrail: boolean;
+  /** Knife spin speed multiplier. */
+  spinSpeed: number;
   showHints: boolean;
 }
 
@@ -60,6 +64,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   hideHud: false,
   viewmodelFov: 65,
   viewmodelSway: 1.0,
+  spinTrail: true,
+  spinSpeed: 1.0,
   showHints: true
 };
 

@@ -59,6 +59,8 @@ export interface ViewmodelRigInstance {
   mixer: THREE.AnimationMixer | null;
   knifeIdleAction: THREE.AnimationAction | null;
   knifeDrawAction: THREE.AnimationAction | null;
+  /** Plays the authored draw clip over the idle, then eases back to the idle. */
+  playDraw: () => void;
   knifeMaterials: THREE.Material[];
   cosmicMaterial: KarambitCosmicMaterial | null;
   applySkin: (skinId: string) => void;
@@ -306,6 +308,21 @@ export class ViewmodelAssetLoader {
       }
     }
 
+    const playDraw = (): void => {
+      if (!mixer || !knifeDrawAction || !knifeIdleAction) return;
+      knifeDrawAction.reset().play();
+      knifeDrawAction.crossFadeFrom(knifeIdleAction, 0.06, false);
+    };
+    if (mixer && knifeDrawAction && knifeIdleAction) {
+      const draw = knifeDrawAction;
+      const idle = knifeIdleAction;
+      mixer.addEventListener('finished', (e) => {
+        if ((e as unknown as { action: THREE.AnimationAction }).action !== draw) return;
+        idle.reset().play();
+        idle.crossFadeFrom(draw, 0.25, false);
+      });
+    }
+
     // Open-hand pose for the right fingers, read from the authored relax clip.
     const fingerOpenPoses: FingerOpenPose[] = [];
     let indexBaseBone: THREE.Object3D | null = null;
@@ -475,6 +492,7 @@ export class ViewmodelAssetLoader {
       mixer,
       knifeIdleAction,
       knifeDrawAction,
+      playDraw,
       knifeMaterials,
       cosmicMaterial,
       applySkin,
@@ -549,6 +567,7 @@ export class ViewmodelAssetLoader {
       mixer: null,
       knifeIdleAction: null,
       knifeDrawAction: null,
+      playDraw: () => undefined,
       knifeMaterials: [cosmicMat],
       cosmicMaterial: cosmicMat,
       applySkin: (skinId: string) => {

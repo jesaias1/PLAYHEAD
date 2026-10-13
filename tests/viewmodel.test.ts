@@ -264,6 +264,10 @@ describe('Viewmodel System — Hands & Karambit', () => {
     }
     expect(vm['activeAction']).toBe('NONE');
     expect(maxDrop).toBeLessThan(1.5);
+    // The landing is reported once (for the soft catch sound), and no whirl is left.
+    expect(vm.consumeSpinLanded()).toBe(true);
+    expect(vm.consumeSpinLanded()).toBe(false);
+    expect(vm.getSpinLevel()).toBe(0);
 
     // Mashing past 2-3 turns brings the line up; it fades once the spin ends.
     for (let frame = 0; frame < 160; frame++) {

@@ -2084,6 +2084,7 @@ export class Game {
     if (this.isRestoringCheckpoint) return; // Prevent respawn races
     this.surfChallenges?.interrupt();
     this.isRestoringCheckpoint = true;
+    this.viewmodelController?.playDraw();
     this.playerController.isRestoring = true;
 
     // Capture the full pre-restore context now: by the time the restore is
@@ -2435,6 +2436,7 @@ export class Game {
   }
 
   private restartTrack(): void {
+    this.viewmodelController?.playDraw();
     if (this.previousStateBeforePause === GameState.MOVEMENT_LAB || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
       if (this.movementLab) {
         this.movementLab.resetPlayer();
@@ -2724,7 +2726,7 @@ export class Game {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
           // Mouse1 keeps the knife spinning like a fidget toy; Mouse2 inspects (as F).
           if (e.button === 0) {
-            if (this.viewmodelController.triggerSpin()) MovementSfx.getInstance().playKnifeSlash();
+            this.viewmodelController.triggerSpin();
           } else {
             this.viewmodelController.triggerInspect();
           }
@@ -3384,6 +3386,8 @@ export class Game {
         mouseDelta.y
       );
       activeVm = this.viewmodelController;
+      this.movementSfx.setKnifeSpinLevel(this.viewmodelController.getSpinLevel());
+      if (this.viewmodelController.consumeSpinLanded()) this.movementSfx.playKnifeCatch();
     } else if (this.stateMachine.is(GameState.REPLAY) && this.replayMode === 'POV') {
       // updatePovReplay already applied the recorded loadout and pose this frame.
       activeVm = this.viewmodelController;

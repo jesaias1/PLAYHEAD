@@ -31,6 +31,8 @@ export class SettingsModal {
   private fullscreenBtn: HTMLButtonElement;
   private vmFovInput: HTMLInputElement;
   private vmSwayInput: HTMLInputElement;
+  private spinTrailInput: HTMLInputElement;
+  private spinSpeedInput: HTMLInputElement;
   private closeBtn: HTMLButtonElement;
 
   private focus: ModalFocus;
@@ -129,6 +131,16 @@ export class SettingsModal {
         </div>
 
         <div class="settings-row">
+          <label class="settings-label">KNIFE SPIN SPEED</label>
+          <input type="range" class="settings-input" id="set-spin-speed" min="0.5" max="1.5" step="0.1" />
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">KNIFE SPIN TRAIL</label>
+          <input type="checkbox" id="set-spin-trail" />
+        </div>
+
+        <div class="settings-row">
           <label class="settings-label">VIEWMODEL ACCENT</label>
           <select class="settings-select" id="set-vm-accent">
             <option value="ADAPTIVE">ADAPTIVE (FOLLOW TRACK PALETTE)</option>
@@ -181,6 +193,8 @@ export class SettingsModal {
     this.fullscreenBtn = this.element.querySelector('#btn-toggle-fullscreen') as HTMLButtonElement;
     this.vmFovInput = this.element.querySelector('#set-vm-fov') as HTMLInputElement;
     this.vmSwayInput = this.element.querySelector('#set-vm-sway') as HTMLInputElement;
+    this.spinSpeedInput = this.element.querySelector('#set-spin-speed') as HTMLInputElement;
+    this.spinTrailInput = this.element.querySelector('#set-spin-trail') as HTMLInputElement;
     this.closeBtn = this.element.querySelector('#btn-set-close') as HTMLButtonElement;
 
     this.focus = new ModalFocus(this.element, () => this.closeBtn.click());
@@ -228,6 +242,8 @@ export class SettingsModal {
     this.hideHudInput.checked = !!s.hideHud;
     this.vmFovInput.value = (s.viewmodelFov || 65).toString();
     this.vmSwayInput.value = (s.viewmodelSway !== undefined ? s.viewmodelSway : 1.0).toString();
+    this.spinSpeedInput.value = (s.spinSpeed !== undefined ? s.spinSpeed : 1.0).toString();
+    this.spinTrailInput.checked = s.spinTrail !== false;
   }
 
   private initEvents(): void {
@@ -324,6 +340,12 @@ export class SettingsModal {
       this.settingsManager.update({ viewmodelFov: parseInt(this.vmFovInput.value, 10) });
     });
 
+    this.spinSpeedInput.addEventListener('input', () => {
+      this.settingsManager.update({ spinSpeed: parseFloat(this.spinSpeedInput.value) });
+    });
+    this.spinTrailInput.addEventListener('change', () => {
+      this.settingsManager.update({ spinTrail: this.spinTrailInput.checked });
+    });
     this.vmSwayInput.addEventListener('input', () => {
       this.settingsManager.update({ viewmodelSway: parseFloat(this.vmSwayInput.value) });
     });
