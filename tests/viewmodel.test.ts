@@ -282,7 +282,7 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
-  it('inspect rolls the knife about its length, shrinks with a wide FOV, and ends at rest', () => {
+  it('inspect turns the knife with the wrist, shrinks with a wide FOV, and ends at rest', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();
     const camCtrl = new CameraController(camera, {} as HTMLElement);
@@ -305,14 +305,14 @@ describe('Viewmodel System — Hands & Karambit', () => {
     };
 
     const normal = peakLift(65);
-    expect(normal.roll).toBeGreaterThan(2.5); // shows the other flat of the blade
+    expect(normal.roll).toBe(0); // the knife never leaves the hand's grip
     expect(vm['activeAction']).toBe('NONE');
     expect(vm['rigInstance'].knifeFlourishGroup.quaternion.angleTo(identity)).toBeCloseTo(0, 6);
 
     // At 120 degrees the arm reaches further into view, so the pose is smaller.
     const wide = peakLift(120);
     expect(wide.lift).toBeLessThan(normal.lift);
-    expect(wide.lift).toBeGreaterThan(normal.lift * 0.5);
+    expect(wide.lift).toBeGreaterThan(normal.lift * 0.3);
 
     vm.dispose();
   });
