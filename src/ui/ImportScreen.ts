@@ -427,8 +427,8 @@ export class ImportScreen {
 
           <div class="custom-course-type" id="custom-course-type" role="radiogroup" aria-label="Course type">
             <span class="course-type-label">COURSE TYPE</span>
-            <button type="button" class="course-type-btn active" id="btn-course-playhead" role="radio" aria-checked="true" data-course-type="PLAYHEAD">M0VEM1NT<span>MIXED MOVEMENT</span></button>
-            <button type="button" class="course-type-btn" id="btn-course-surf" role="radio" aria-checked="false" data-course-type="SURF">SURF<span>FLOW / TRANSFERS / VERTICALITY</span></button>
+            <button type="button" class="course-type-btn active" id="btn-course-surf" role="radio" aria-checked="true" data-course-type="SURF">SURF<span>FLOW / TRANSFERS / VERTICALITY</span></button>
+            <button type="button" class="course-type-btn" id="btn-course-playhead" role="radio" aria-checked="false" data-course-type="PLAYHEAD">PLATFORMS<span>MIXED MOVEMENT</span></button>
           </div>
 
           <div class="custom-actions">          <style>

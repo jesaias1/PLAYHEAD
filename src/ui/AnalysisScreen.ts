@@ -99,7 +99,7 @@ export class AnalysisScreen {
         </div>
 
         <div class="analysis-footer">
-          <div id="analysis-variant" aria-live="polite">NORMAL_MODE</div>
+          <div id="analysis-variant" aria-live="polite">PLATFORMS_MODE</div>
           <div class="ready-academy-entry" id="analysis-academy-entry" hidden>
             <button class="btn-ready-academy" id="btn-ready-academy" type="button" hidden disabled>
               LEARN MOVEMENT // ACADEMY
@@ -233,8 +233,8 @@ export class AnalysisScreen {
 
   public setCourseVariant(surf: boolean, canReturnNormal = false): void {
     this.surfVariant = surf; this.canReturnNormal = canReturnNormal;
-    this.surfBtn.textContent = surf && canReturnNormal ? 'PLAY NORMAL_MODE' : 'PLAY SURF_MODE';
-    this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'NORMAL_MODE';
+    this.surfBtn.textContent = surf && canReturnNormal ? 'PLAY PLATFORMS_MODE' : 'PLAY SURF_MODE';
+    this.element.querySelector('#analysis-variant')!.textContent = surf ? 'SURF_MODE' : 'PLATFORMS_MODE';
     this.surfBtn.hidden = (surf && !canReturnNormal) || this.enterBtn.disabled;
     this.surfBtn.disabled = this.enterBtn.disabled;
     this.syncSurfHint();

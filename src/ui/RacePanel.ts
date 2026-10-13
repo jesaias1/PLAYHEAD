@@ -131,7 +131,7 @@ export class RacePanel {
             </div>
             <label class="race-field-label" for="race-track-select">SIGNAL</label>
             <select class="online-select race-track-select" id="race-track-select" aria-label="Selected signal"></select>
-            <label>MODE <select id="race-mode" aria-label="Race mode"><option value="NORMAL">Normal</option><option value="SURF">Surf</option></select></label>
+            <label>MODE <select id="race-mode" aria-label="Race mode"><option value="SURF">Surf</option><option value="NORMAL">Platforms</option></select></label>
             <span class="race-field-label race-racers-label" id="race-racers-label">RACERS</span>
             <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
             <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
@@ -188,7 +188,7 @@ export class RacePanel {
         <div class="online-host-track hidden" id="race-host-track-row">
           <span class="online-invite-label">TRACK</span>
           <select class="online-select" id="race-host-track-select"></select>
-          <select id="race-host-mode" aria-label="Lobby race mode"><option value="NORMAL">Normal</option><option value="SURF">Surf</option></select>
+          <select id="race-host-mode" aria-label="Lobby race mode"><option value="SURF">Surf</option><option value="NORMAL">Platforms</option></select>
         </div>
 
         <div class="online-players race-player-grid" id="race-lobby-players"></div>

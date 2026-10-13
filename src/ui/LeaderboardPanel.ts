@@ -92,7 +92,7 @@ export class LeaderboardPanel {
         <button class="terminal-btn-subtle" id="lb-play" type="button">> PLAY SIGNAL</button>
       </div>
       <div class="leaderboard-board-tabs" id="lb-board-tabs" role="tablist" aria-label="Board type">
-        <button class="lb-board-tab active" id="lb-board-normal" role="tab" aria-selected="true" type="button" data-board="NORMAL">NORMAL</button>
+        <button class="lb-board-tab active" id="lb-board-normal" role="tab" aria-selected="true" type="button" data-board="NORMAL">PLATFORMS</button>
         <button class="lb-board-tab" id="lb-board-surf" role="tab" aria-selected="false" tabindex="-1" type="button" data-board="SURF">SURF</button>
       </div>
 

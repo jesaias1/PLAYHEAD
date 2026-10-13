@@ -2486,6 +2486,13 @@ export class Game {
   }
 
   private restartTrack(): void {
+    if (this.friendRaceWorld && this.raceActive && !this.raceFinishReported && this.racePhase !== 'FINISHED') {
+      // The shared start cannot be restarted from one client: it would reset the
+      // local timer and song against the opponent's. Close the menu instead.
+      this.ui.raceHud.showNotice('RESTART DISABLED // ONLINE RACE');
+      if (this.stateMachine.is(GameState.PAUSED)) this.resumeGame();
+      return;
+    }
     this.viewmodelController?.playDraw();
     this.pendingRestoreBoost = null;
     this.flowRings?.reset();
@@ -3029,7 +3036,7 @@ export class Game {
         // ONLINE RACE: until GO the player is staged on the start platform and
         // the run timer does not advance, so both clients start from the same
         // authoritative zero. Physics owns every frame after GO.
-        if (this.raceActive && this.racePhase !== 'RACING' && !this.isFinished) {
+        if ((this.raceActive || this.friendRaceWorld) && this.racePhase !== 'RACING' && !this.isFinished) {
           this.holdForRaceStart();
           const songTime = this.audioEngine.getCurrentTime();
           this.world.update(songTime, this.playerController.position, this.cameraController.yaw, dt, this.environment);
@@ -3963,6 +3970,18 @@ export class Game {
     // server now() returned with the room; re-reading it on every room update
     // keeps the countdown, timer, song and results on ONE shared timeline.
     this.raceClockOffsetMs = raceRoomService.getServerClockOffsetMs();
+    // A phase left over from the PREVIOUS race (rematch, lobby return) must not
+    // keep the new race unlocked: any staging state puts everyone back on hold.
+    if (
+      this.friendRaceWorld &&
+      this.racePhase === 'RACING' &&
+      (room.state === 'LOADING' || room.state === 'IN_GAME' || room.state === 'COUNTDOWN')
+    ) {
+      this.racePhase = 'WAITING';
+      this.raceGoArmed = false;
+      this.raceStartAtMs = null;
+      this.updateRaceHudPhase();
+    }
     switch (room.state) {
       case 'LOADING':
         if (!this.raceActive && !this.raceLoading) {
@@ -4121,6 +4140,12 @@ export class Game {
     this.playerController.isRestoring = false;
     this.playerController.resetKeys();
     this.ui.raceHud.showNotice('GO');
+    if (!this.cameraController.getIsLocked()) {
+      // No gesture since the lobby, so the browser may refuse pointer lock now:
+      // the first key press or click captures the mouse (no pause/restart dance).
+      this.relockOnNextInput = true;
+      this.tryRelockAfterEscape();
+    }
 
     // The RPC sets the server's authorized-write flag itself, so the guard
     // accepts the COUNTDOWN -> RUNNING transition. Report honestly if it fails.

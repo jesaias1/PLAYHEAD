@@ -13,12 +13,12 @@ it('merges stored settings without losing the song or inventory filter', () => {
   expect(readMenuPreferences()).toMatchObject({ trackId: 'signal', ownership: 'owned', mode: 'SURF' });
 });
 it.each(['null', '[]', 'broken', '{"mode":"INVALID","slot":"knife","sort":7}'])('rejects malformed preference %s', value => {
-  storage(value); expect(readMenuPreferences()).toMatchObject({ mode: 'NORMAL', slot: 'karambit', sort: 'rarity' });
+  storage(value); expect(readMenuPreferences()).toMatchObject({ mode: 'SURF', slot: 'karambit', sort: 'rarity' });
 });
 it('keeps menus usable with blocked storage', () => {
   vi.stubGlobal('localStorage', { getItem: () => { throw Error(); }, setItem: () => { throw Error(); } });
   expect(() => saveMenuPreferences({ mode: 'SURF' })).not.toThrow();
-  expect(readMenuPreferences().mode).toBe('NORMAL'); expect(readLoadouts()).toEqual([]);
+  expect(readMenuPreferences().mode).toBe('SURF'); expect(readLoadouts()).toEqual([]);
   expect(writeLoadouts([])).toBe(false);
 });
 it('combines case insensitive search with tier and exact duration boundaries', () => {

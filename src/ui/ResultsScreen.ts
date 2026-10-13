@@ -531,7 +531,7 @@ export class ResultsScreen {
     const isSurfRun = surfInfo?.isSurf === true;
     this.surfBadgeElem.classList.toggle('hidden', !isSurfRun);
     if (isSurfRun) {
-      this.surfBadgeElem.textContent = '[SURF] SURF WORLD BOARD // NO NORMAL REWARDS';
+      this.surfBadgeElem.textContent = '[SURF] SURF WORLD BOARD // NO PLATFORM REWARDS';
     }
     this.prepareSignalDropPanel(
       isSurfRun ? 0 : (progressionInfo?.dropsAwarded ?? 0),
