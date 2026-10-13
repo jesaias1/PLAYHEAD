@@ -156,20 +156,17 @@ export class RacePanel {
             <div class="race-friends">
               <div class="race-friend-box">
                 <div class="race-option-title">CREATE A ROOM</div>
-                <span class="race-field-label race-racers-label" id="race-racers-label">HOW MANY RACERS</span>
-                <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
+                <div class="race-option-desc">Get a code and send it to your friends. Up to 8 can join; you start when everyone is ready.</div>
+                <div class="race-capacity race-capacity-hidden" id="race-capacity-seg" aria-hidden="true"></div>
                 <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
-                  <option value="2">2 RACERS</option>
-                  <option value="3">3 RACERS</option>
-                  <option value="4" selected>4 RACERS // RECOMMENDED</option>
-                  <option value="6">6 RACERS</option>
-                  <option value="8">8 RACERS</option>
+                  <option value="8" selected>8 RACERS</option>
                 </select>
                 <button class="btn-hero btn-terminal-exec race-cta" id="race-create-room" type="button">> CREATE ROOM</button>
               </div>
               <div class="race-friend-box">
                 <div class="race-option-title">JOIN WITH A CODE</div>
-                <label class="race-field-label" for="race-join-input">ROOM CODE FROM YOUR FRIEND</label>
+                <div class="race-option-desc">Got a code from a friend? Type it here.</div>
+                <label class="race-field-label race-sr-only" for="race-join-input">Room code</label>
                 <input class="race-code-input" id="race-join-input" type="text" maxlength="8"
                        inputmode="text" placeholder="ENTER CODE" autocomplete="off"
                        spellcheck="false" autocapitalize="characters" aria-label="Room code" />
@@ -206,8 +203,8 @@ export class RacePanel {
                    aria-hidden="true" tabindex="-1" />
           </div>
           <div class="race-lobby-count">
-            <span class="race-lobby-count-label">PLAYERS</span>
-            <span class="race-lobby-count-val"><b id="race-lobby-connected">0</b> / <b id="race-lobby-capacity">4</b></span>
+            <span class="race-lobby-count-label">RACERS IN THE ROOM</span>
+            <span class="race-lobby-count-val"><b id="race-lobby-connected">0</b><b id="race-lobby-capacity" hidden>4</b></span>
           </div>
         </div>
 
@@ -215,6 +212,7 @@ export class RacePanel {
           <div class="race-map-vote-head">VOTE FOR THE MAP <span>if you pick different maps, one of them is drawn at random</span></div>
           <div class="race-map-grid" id="race-map-grid"></div>
           <div class="race-map-votes" id="race-map-votes" aria-live="polite"></div>
+          <div class="race-lobby-guide">Vote for a map, then press READY. The race starts when everyone in the room is ready (2 or more racers).</div>
         </div>
         <div class="online-host-track hidden" id="race-host-track-row">
           <span class="online-invite-label">TRACK</span>
@@ -678,7 +676,7 @@ export class RacePanel {
     identities?: Map<string, { gloveName: string; knifeName: string }>
   ): void {
     this.lobbyPlayersElem.innerHTML = '';
-    const slots = Math.max(room.capacity, players.length);
+    const slots = Math.min(room.capacity, Math.max(2, players.length + 1));
     for (let i = 0; i < slots; i++) {
       const player = players[i];
       const row = document.createElement('div');
