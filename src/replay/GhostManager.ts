@@ -216,6 +216,11 @@ export class GhostManager {
     );
   }
 
+  /** The personal-best run's recorded frames, for the racing line. */
+  public getPbFrames(): ReplayFrame[] | null {
+    return this.pbGhost ? this.pbGhost.getFrames() : null;
+  }
+
   public hasPB(): boolean {
     return this.activePBData !== null;
   }

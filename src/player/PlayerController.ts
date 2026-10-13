@@ -163,6 +163,19 @@ export class PlayerController {
     this.velocity.set(-Math.sin(forwardYaw) * mps, 0, -Math.cos(forwardYaw) * mps);
   }
 
+  /**
+   * One-shot entry boost (see RestorePolicy): raises the horizontal speed to
+   * `units` along the facing, never lowering it and never touching vertical
+   * velocity. Returns whether it changed anything.
+   */
+  public applyEntryBoost(forwardYaw: number, units: number): boolean {
+    if (this.getSpeedUnits() >= units) return false;
+    const vy = this.velocity.y;
+    this.applyRestoreVelocity(forwardYaw, units);
+    this.velocity.y = vy;
+    return true;
+  }
+
   public resetKeys(): void {
     this.keys.forward = false;
     this.keys.backward = false;

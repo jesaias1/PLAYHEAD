@@ -100,6 +100,10 @@ export class GhostRunner {
     this.scene.add(this.group);
   }
 
+  public getFrames(): ReplayFrame[] {
+    return this.frames;
+  }
+
   public setFrames(frames: ReplayFrame[]): void {
     this.frames = frames;
     this.trailCount = 0;

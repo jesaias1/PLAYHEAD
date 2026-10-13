@@ -134,6 +134,28 @@ export class MovementSfx {
     this.spinGain.gain.setTargetAtTime(l * l * 0.016 * this.master(), now, 0.06);
   }
 
+  /** A soft pentatonic ping for a flow ring; each ring in a chain steps up. Very quiet. */
+  public playFlowRing(count: number): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const vol = this.master();
+    if (vol <= 0.001) return;
+    const steps = [0, 2, 4, 7, 9, 12, 14, 16];
+    const f = 523.25 * Math.pow(2, steps[Math.min(steps.length - 1, Math.max(0, count - 1))] / 12);
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, now);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.03 * vol, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
+
   /** The tiniest tick as the knife drops back into the palm. */
   public playKnifeCatch(): void {
     const ctx = this.getContext();

@@ -78,7 +78,9 @@ import { ViewmodelController } from '../viewmodel/ViewmodelController';
 import { ViewmodelCalibrator } from '../viewmodel/ViewmodelCalibrator';
 import { KarambitSkinSystem } from '../viewmodel/KarambitSkinSystem';
 import { PaletteSelector } from '../audio/TrackPalettes';
-import { RestoreReason } from '../player/RestorePolicy';
+import { RestoreReason, computeRestoreBoostUnits } from '../player/RestorePolicy';
+import { FlowRings } from '../surf/FlowRings';
+import { RacingLine } from '../replay/RacingLine';
 import { movementDiagnostics, ViewSnapDetector, MovementDiagEvent, MovementDiagnostics, RawMouseSpikeDetector } from './MovementDiagnostics';
 import { PointerInputProbe } from './PointerInputProbe';
 import { BUILD_LABEL } from './BuildInfo';
@@ -298,6 +300,12 @@ export class Game {
   /** Presentation-only movement feedback (never affects gameplay). */
   public movementFeedback!: MovementFeedbackController;
   private surfChallenges = new SurfChallengeTracker();
+  private flowRings: FlowRings;
+  private racingLine: RacingLine;
+  /** Speed (display units) when the current checkpoint was passed. */
+  private checkpointPassSpeedUnits = 0;
+  /** Waiting for the first W after a checkpoint restore. */
+  private pendingRestoreBoost: { units: number; expires: number } | null = null;
   private movementSfx = MovementSfx.getInstance();
 
   private currentAnalysis: TrackAnalysis | null = null;
@@ -399,6 +407,8 @@ export class Game {
     }
     this.strafeVisualizer = new StrafeVisualizer(this.environment.scene);
     this.surfVisuals = new SurfVisuals(this.environment.scene);
+    this.flowRings = new FlowRings(this.environment.scene);
+    this.racingLine = new RacingLine(this.environment.scene);
 
     // 4. Replay & Ghost Systems
     this.replayRecorder = new ReplayRecorder();
@@ -1639,9 +1649,13 @@ export class Game {
     );
 
     this.currentCheckpoint = null;
+    this.checkpointPassSpeedUnits = 0;
+    this.pendingRestoreBoost = null;
     this.passedCheckpoints.clear();
     this.shownOnboardingCues.clear();
     this.surfChallenges.configure(this.currentCourseType === 'SURF' ? this.currentTrack : null);
+    this.flowRings.configure(this.currentCourseType === 'SURF' ? this.currentTrack : null);
+    this.racingLine.setFrames(null);
     this.playerController.stats.reset();
     this.strafeVisualizer.clear();
     this.surfVisuals.clear();
@@ -2233,12 +2247,13 @@ export class Game {
       // direction, so recovery flows back into gameplay instead of a dead stop.
       // Deliberately NOT applied to a level-start restore: an initial race start
       // must keep zero speed. Applied exactly once; physics owns every frame after.
-      if (hadCheckpoint) {
-        this.playerController.applyRestoreVelocity(
-          spawnYaw,
-          PlayerController.CHECKPOINT_RESTORE_SPEED_UNITS
-        );
-      }
+      // The speed now waits for the first W press (see tickRestoreBoost): a
+      // share of the speed carried through this checkpoint, so the run does not
+      // have to rebuild all of it. Standing still until then.
+      this.flowRings?.reset();
+      this.pendingRestoreBoost = hadCheckpoint
+        ? { units: computeRestoreBoostUnits(this.checkpointPassSpeedUnits), expires: performance.now() + 20000 }
+        : null;
 
       // ==========================================================
       // RESTORE DIAGNOSTICS
@@ -2435,8 +2450,45 @@ export class Game {
     }
   }
 
+  /** First W after a checkpoint restore: the one-shot entry boost (see RestorePolicy). */
+  private tickRestoreBoost(): void {
+    const boost = this.pendingRestoreBoost;
+    if (!boost) return;
+    if (this.isRestoringCheckpoint || this.playerController.isRestoring) return;
+    if (performance.now() > boost.expires) {
+      this.pendingRestoreBoost = null;
+      return;
+    }
+    if (!this.playerController.keysState.forward) return;
+    this.playerController.applyEntryBoost(this.cameraController.yaw, boost.units);
+    this.pendingRestoreBoost = null;
+  }
+
+  /** Optional surf extras: flow rings and the PB racing line. Cosmetic only. */
+  private updateSurfExtras(dt: number): void {
+    const settings = SettingsManager.getInstance().settings;
+    const surf = this.currentCourseType === 'SURF' && this.stateMachine.is(GameState.PLAYING) && !this.friendRaceWorld;
+    const hit = this.flowRings.update(
+      dt,
+      this.playerController.position,
+      surf && settings.flowRings !== false && !this.isRestoringCheckpoint
+    );
+    if (hit) {
+      this.movementSfx.playFlowRing(hit.count);
+      this.viewmodelController.triggerMovementAccent('SURF_LOCK', hit.complete ? 0.7 : 0.3);
+      if (hit.complete) {
+        this.ui.hud.showToast(`FLOW CHAIN // ${hit.total}/${hit.total}`, 1100);
+        this.world.pulseSignal(0.14);
+      }
+    }
+    this.racingLine.setFrames(surf ? this.ghostManager.getPbFrames() : null);
+    this.racingLine.update(this.playerController.position, surf && settings.racingLine !== false);
+  }
+
   private restartTrack(): void {
     this.viewmodelController?.playDraw();
+    this.pendingRestoreBoost = null;
+    this.flowRings?.reset();
     if (this.previousStateBeforePause === GameState.MOVEMENT_LAB || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
       if (this.movementLab) {
         this.movementLab.resetPlayer();
@@ -2503,6 +2555,8 @@ export class Game {
     // leak "solo ghosts disabled" into the next solo Signal.
     this.setFriendRaceWorld(false);
     this.surfChallenges?.configure(null);
+    this.flowRings?.configure(null);
+    this.racingLine?.setFrames(null);
     this.pendingReadyAcademyReturnId = null;
     this.pendingReadyAcademyReturnSurf = false;
     this.ghostManager.dispose();
@@ -3059,6 +3113,8 @@ export class Game {
       ) {
         if (!this.isFinished) {
           this.movementFeedback.update(dt, this.playerController, this.world.physics);
+          this.tickRestoreBoost();
+          this.updateSurfExtras(dt);
           if (this.currentCourseType === 'SURF' && this.stateMachine.is(GameState.PLAYING) && !this.friendRaceWorld && !this.isRestoringCheckpoint) {
             const clear = this.surfChallenges.update(dt, {
               position: this.playerController.position, velocity: this.playerController.velocity,
@@ -3118,6 +3174,10 @@ export class Game {
         this.playerController,
         this.world.visualController.state,
         frameDelta
+      );
+
+      this.world.setSurfSpeedGlow(
+        this.currentCourseType === 'SURF' ? (this.playerController.getSpeedUnits() - 350) / 650 : 0
       );
 
       // Update Surf Visuals
@@ -3203,6 +3263,7 @@ export class Game {
             if (dx * dx + dz * dz < 12.0 * 12.0 && Math.abs(dy) < 6.0 && this.playerController.position.y >= cp.position.y - 2.0) {
               this.passedCheckpoints.add(cp.id);
               this.currentCheckpoint = cp;
+              this.checkpointPassSpeedUnits = this.playerController.getSpeedUnits();
               // NOTE: the void boundary is intentionally NOT re-derived from the
               // checkpoint. It is a world constant (final geometry - margin), so
               // an elevated checkpoint can never raise the death plane above the

@@ -54,6 +54,21 @@ export interface PlayerNumericState {
  */
 export const EMERGENCY_COORD_LIMIT = 1_000_000;
 
+/**
+ * RESTORE ENTRY BOOST. After a checkpoint restore the runner stands still; the
+ * first press of W then gives a share of the speed they had when they passed
+ * that checkpoint, so they do not have to rebuild all of it. A one-shot
+ * initial velocity: no movement constant is touched.
+ */
+export const RESTORE_BOOST_FRACTION = 0.6;
+export const RESTORE_BOOST_MIN_UNITS = 500;
+export const RESTORE_BOOST_MAX_UNITS = 1200;
+
+export function computeRestoreBoostUnits(checkpointPassSpeedUnits: number): number {
+  const speed = Number.isFinite(checkpointPassSpeedUnits) ? Math.max(0, checkpointPassSpeedUnits) : 0;
+  return Math.min(RESTORE_BOOST_MAX_UNITS, Math.max(RESTORE_BOOST_MIN_UNITS, speed * RESTORE_BOOST_FRACTION));
+}
+
 export const isFiniteVec3 = (v: { x: number; y: number; z: number }): boolean =>
   Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 

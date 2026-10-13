@@ -115,6 +115,13 @@ export class World {
   private scene: THREE.Scene;
   private builtAssets: BuiltWorldAssets | null = null;
   /** Authored surf-material emissive captured once so the breath never drifts. */
+  private surfSpeedGlow = 0;
+
+  /** 0..1 from the player's speed: brightens the surf trim. Presentation only. */
+  public setSurfSpeedGlow(level: number): void {
+    this.surfSpeedGlow = Math.max(0, Math.min(1, level));
+  }
+
   private surfMaterialBaseEmissive: number | null = null;
 
   constructor(scene: THREE.Scene) {
@@ -609,11 +616,14 @@ export class World {
     this.playheadSystem.update(playerPos, progress.arcProgress, playerYaw, vState);
     if (this.track?.courseType === 'SURF' && this.builtAssets) {
       const pulse = surfTrimPulse(vState.onsetPulse, vState.bass, effectEmissiveScale, reduceMotion);
+      // SPEED-REACTIVE TRIM: the faster you carry, the brighter and warmer the
+      // ramp edges. Presentation only; it reads speed, never changes it.
+      const glow = this.surfSpeedGlow;
       for (const line of this.builtAssets.edgeLines) {
         if (!line.userData.surfRibbonTrim) continue;
         const material = line.material as THREE.LineBasicMaterial;
-        material.color.copy(vState.palette.secondary).lerp(vState.palette.highlight, pulse.mix);
-        material.opacity = pulse.opacity;
+        material.color.copy(vState.palette.secondary).lerp(vState.palette.highlight, Math.min(1, pulse.mix + glow * 0.5));
+        material.opacity = Math.min(1, pulse.opacity + glow * 0.2);
       }
       // RESTRAINED SURF SURFACE + TRANSFER CUE BREATH. One shared material for
       // every surf deck (never per-node) and the existing checkpoint beacon
@@ -623,7 +633,7 @@ export class World {
       // change; gate/finish/knife beacons are untouched.
       const surfMatBase = this.surfMaterialBaseEmissive ?? this.builtAssets.surfMaterial.emissiveIntensity;
       this.surfMaterialBaseEmissive = surfMatBase;
-      this.builtAssets.surfMaterial.emissiveIntensity = surfMatBase + pulse.surfaceEmissive;
+      this.builtAssets.surfMaterial.emissiveIntensity = surfMatBase + pulse.surfaceEmissive + glow * 0.035;
     }
 
     const syncDelta = songTime - progress.targetSongTime;

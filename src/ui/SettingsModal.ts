@@ -33,6 +33,8 @@ export class SettingsModal {
   private vmSwayInput: HTMLInputElement;
   private spinTrailInput: HTMLInputElement;
   private spinSpeedInput: HTMLInputElement;
+  private flowRingsInput: HTMLInputElement;
+  private racingLineInput: HTMLInputElement;
   private closeBtn: HTMLButtonElement;
 
   private focus: ModalFocus;
@@ -141,6 +143,16 @@ export class SettingsModal {
         </div>
 
         <div class="settings-row">
+          <label class="settings-label">SURF FLOW RINGS</label>
+          <input type="checkbox" id="set-flow-rings" />
+        </div>
+
+        <div class="settings-row">
+          <label class="settings-label">PB RACING LINE</label>
+          <input type="checkbox" id="set-racing-line" />
+        </div>
+
+        <div class="settings-row">
           <label class="settings-label">VIEWMODEL ACCENT</label>
           <select class="settings-select" id="set-vm-accent">
             <option value="ADAPTIVE">ADAPTIVE (FOLLOW TRACK PALETTE)</option>
@@ -195,6 +207,8 @@ export class SettingsModal {
     this.vmSwayInput = this.element.querySelector('#set-vm-sway') as HTMLInputElement;
     this.spinSpeedInput = this.element.querySelector('#set-spin-speed') as HTMLInputElement;
     this.spinTrailInput = this.element.querySelector('#set-spin-trail') as HTMLInputElement;
+    this.flowRingsInput = this.element.querySelector('#set-flow-rings') as HTMLInputElement;
+    this.racingLineInput = this.element.querySelector('#set-racing-line') as HTMLInputElement;
     this.closeBtn = this.element.querySelector('#btn-set-close') as HTMLButtonElement;
 
     this.focus = new ModalFocus(this.element, () => this.closeBtn.click());
@@ -244,6 +258,8 @@ export class SettingsModal {
     this.vmSwayInput.value = (s.viewmodelSway !== undefined ? s.viewmodelSway : 1.0).toString();
     this.spinSpeedInput.value = (s.spinSpeed !== undefined ? s.spinSpeed : 1.0).toString();
     this.spinTrailInput.checked = s.spinTrail !== false;
+    this.flowRingsInput.checked = s.flowRings !== false;
+    this.racingLineInput.checked = s.racingLine !== false;
   }
 
   private initEvents(): void {
@@ -342,6 +358,12 @@ export class SettingsModal {
 
     this.spinSpeedInput.addEventListener('input', () => {
       this.settingsManager.update({ spinSpeed: parseFloat(this.spinSpeedInput.value) });
+    });
+    this.flowRingsInput.addEventListener('change', () => {
+      this.settingsManager.update({ flowRings: this.flowRingsInput.checked });
+    });
+    this.racingLineInput.addEventListener('change', () => {
+      this.settingsManager.update({ racingLine: this.racingLineInput.checked });
     });
     this.spinTrailInput.addEventListener('change', () => {
       this.settingsManager.update({ spinTrail: this.spinTrailInput.checked });

@@ -36,6 +36,10 @@ export interface GameSettings {
   viewmodelSway: number;
   /** Speed line behind the knife while it spins fast. */
   spinTrail: boolean;
+  /** Optional glowing ring chains on some surf ramps. */
+  flowRings: boolean;
+  /** Faint personal-best line a short way ahead of you. */
+  racingLine: boolean;
   /** Knife spin speed multiplier. */
   spinSpeed: number;
   showHints: boolean;
@@ -65,6 +69,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   viewmodelFov: 65,
   viewmodelSway: 1.0,
   spinTrail: true,
+  flowRings: true,
+  racingLine: true,
   spinSpeed: 1.0,
   showHints: true
 };
