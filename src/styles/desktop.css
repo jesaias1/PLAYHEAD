@@ -610,3 +610,6 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 /* m0vem1nt brand art in the window chrome */
 #ui-root .desktop-app-icon.brand-logo-mascot { width: 20px; height: 20px; background: none; object-fit: contain; filter: none; vertical-align: middle; }
 #ui-root .desktop-menubar .brand-logo-text { height: 15px; width: auto; max-width: none; filter: none; vertical-align: middle; }
+
+/* Crisp pixel text: no kerning or synthesis, so glyph spacing stays even on the bitmap-style fonts. */
+#ui-root, #ui-root * { font-kerning: none; font-synthesis: none; text-rendering: optimizeSpeed; }

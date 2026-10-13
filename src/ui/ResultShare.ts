@@ -49,7 +49,7 @@ export interface ShareCardModel {
 }
 
 /** Existing production host. No backend, no deep-link contract assumed. */
-export const PLAYHEAD_SHARE_URL = 'https://playhead-sooty.vercel.app/';
+export const PLAYHEAD_SHARE_URL = 'https://movemint.pro/';
 
 /** PLAYHEAD identity: cyan is the normal signal; surf is a subdued violet. */
 export const SHARE_ACCENT_NORMAL = '#00f0ff';
