@@ -201,6 +201,41 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
+  it('spins the knife about its ring on Mouse1 without moving the calibrated socket', () => {
+    const vm = new ViewmodelController();
+    const camera = new THREE.PerspectiveCamera();
+    const camCtrl = new CameraController(camera, {} as HTMLElement);
+    const physics = new PhysicsWorld();
+    const player = new PlayerController(camCtrl, physics);
+    const rig = vm['rigInstance'];
+    const flourish = rig.knifeFlourishGroup;
+    const identity = new THREE.Quaternion();
+
+    expect(vm.triggerSpin()).toBe(true);
+    // A click while the knife is still turning does not restart it.
+    for (let frame = 0; frame < 20; frame++) vm.update(0.016, player, camCtrl, 0, 0);
+    expect(vm.triggerSpin()).toBe(false);
+    expect(flourish.quaternion.angleTo(identity)).toBeGreaterThan(0.5);
+
+    // The ring's centre stays put while the knife turns round it.
+    const ring = new THREE.Vector3(0, 0.0131, -0.0388);
+    flourish.updateMatrix();
+    expect(ring.clone().applyMatrix4(flourish.matrix).distanceTo(ring)).toBeLessThan(1e-6);
+
+    // The socket keeps its calibration throughout.
+    expect(rig.knifeGroup.position.x).toBeCloseTo(0.0093, 4);
+    expect(rig.knifeGroup.rotation.x).toBeCloseTo(3.034, 4);
+    expect(rig.knifeGroup.scale.x).toBeCloseTo(1.011, 4);
+
+    // Whole turns: the knife lands back exactly where it started.
+    for (let frame = 0; frame < 60; frame++) vm.update(0.016, player, camCtrl, 0, 0);
+    expect(vm['activeAction']).toBe('NONE');
+    expect(flourish.quaternion.angleTo(identity)).toBeCloseTo(0, 6);
+    expect(flourish.position.length()).toBeCloseTo(0, 6);
+
+    vm.dispose();
+  });
+
   it('respects viewmodel settings for MINIMAL and OFF modes', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();

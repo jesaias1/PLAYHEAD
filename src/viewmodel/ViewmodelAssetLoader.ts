@@ -24,10 +24,36 @@ import {
   setGloveMask
 } from './GloveTextures';
 
+/** One right-hand finger bone and the rotation it takes when the hand opens. */
+export interface FingerOpenPose {
+  bone: THREE.Object3D;
+  open: THREE.Quaternion;
+  /** How far this finger goes toward `open` when the hand is fully open. */
+  weight: number;
+}
+
+/** How far each finger opens for the knife spin: the index finger points, the rest fan out. */
+const FINGER_OPEN_WEIGHT: Record<string, number> = {
+  thumb: 1,
+  f_index: 1,
+  f_middle: 0.6,
+  f_ring: 0.65,
+  f_pinky: 0.7
+};
+
 export interface ViewmodelRigInstance {
   rootGroup: THREE.Group;
   armsScene: THREE.Group;
   knifeGroup: THREE.Group;
+  /**
+   * Sits between the calibrated socket and the knife mesh. Procedural knife
+   * motion (the Mouse1 spin) goes here, so the socket itself is never moved.
+   */
+  knifeFlourishGroup: THREE.Group;
+  /** Right-hand finger bones with their open pose. Empty on the fallback rig. */
+  fingerOpenPoses: FingerOpenPose[];
+  /** First bone of the right index finger: the karambit's ring sits on it. */
+  indexBaseBone: THREE.Object3D | null;
   handRBone: THREE.Bone | THREE.Object3D;
   handLBone: THREE.Bone | THREE.Object3D;
   mixer: THREE.AnimationMixer | null;
@@ -236,7 +262,10 @@ export class ViewmodelAssetLoader {
       }
     });
 
-    knifeGroup.add(knifeScene);
+    const knifeFlourishGroup = new THREE.Group();
+    knifeFlourishGroup.name = 'KarambitFlourish';
+    knifeFlourishGroup.add(knifeScene);
+    knifeGroup.add(knifeFlourishGroup);
 
     // Attach karambit into right hand bone socket
     handRBone.add(knifeGroup);
@@ -274,6 +303,27 @@ export class ViewmodelAssetLoader {
         knifeDrawAction = mixer.clipAction(drawClip);
         knifeDrawAction.setLoop(THREE.LoopOnce, 1);
         knifeDrawAction.clampWhenFinished = true;
+      }
+    }
+
+    // Open-hand pose for the right fingers, read from the authored relax clip.
+    const fingerOpenPoses: FingerOpenPose[] = [];
+    let indexBaseBone: THREE.Object3D | null = null;
+    const relaxClip = clipsByName.get('relax');
+    if (relaxClip) {
+      for (const track of relaxClip.tracks) {
+        const parsed = THREE.PropertyBinding.parseTrackName(track.name);
+        if (parsed.propertyName !== 'quaternion') continue;
+        const finger = /^(thumb|f_index|f_middle|f_ring|f_pinky).?0([123]).?R$/.exec(parsed.nodeName);
+        if (!finger) continue;
+        const bone = armsScene.getObjectByName(parsed.nodeName);
+        if (!bone) continue;
+        fingerOpenPoses.push({
+          bone,
+          open: new THREE.Quaternion().fromArray(track.values, 0).normalize(),
+          weight: FINGER_OPEN_WEIGHT[finger[1]]
+        });
+        if (finger[1] === 'f_index' && finger[2] === '1') indexBaseBone = bone;
       }
     }
 
@@ -417,6 +467,9 @@ export class ViewmodelAssetLoader {
       rootGroup,
       armsScene,
       knifeGroup,
+      knifeFlourishGroup,
+      fingerOpenPoses,
+      indexBaseBone,
       handRBone,
       handLBone,
       mixer,
@@ -451,6 +504,8 @@ export class ViewmodelAssetLoader {
     const handRBone = new THREE.Group();
     const handLBone = new THREE.Group();
     const knifeGroup = new THREE.Group();
+    const knifeFlourishGroup = new THREE.Group();
+    knifeGroup.add(knifeFlourishGroup);
 
     handRBone.name = 'hand.R';
     handLBone.name = 'hand.L';
@@ -486,6 +541,9 @@ export class ViewmodelAssetLoader {
       rootGroup,
       armsScene,
       knifeGroup,
+      knifeFlourishGroup,
+      fingerOpenPoses: [],
+      indexBaseBone: null,
       handRBone,
       handLBone,
       mixer: null,

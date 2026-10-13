@@ -36,24 +36,36 @@ interface ActionKey {
 }
 
 /**
- * Forehand cut: a short draw back to the right, then the blade whips across
- * the view to the left and the wrist rolls over, then a settling recovery.
- * View space: +x right, +y up, -z away from the camera.
+ * Knife spin, arm part: the hand lifts and turns in a little while the knife
+ * whirls round the index finger, dips as the handle lands back in the palm,
+ * then settles. View space: +x right, +y up, -z away from the camera.
  */
-const SLASH_FOREHAND: ActionKey[] = [
-  { t: 0.07, pos: [0.045, 0.018, 0.02], rot: [0.06, -0.34, -0.3], ease: 'out' },
-  { t: 0.17, pos: [-0.215, 0.05, -0.12], rot: [-0.2, 0.85, 0.72], ease: 'out' },
-  { t: 0.24, pos: [-0.235, 0.035, -0.105], rot: [-0.22, 0.95, 0.8], ease: 'smooth' },
-  { t: 0.46, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
+const SPIN_KEYS: ActionKey[] = [
+  { t: 0.14, pos: [-0.03, 0.03, 0], rot: [0.08, 0.3, 0.1], ease: 'out' },
+  { t: 0.62, pos: [-0.035, 0.035, 0], rot: [0.1, 0.34, 0.12], ease: 'smooth' },
+  { t: 0.74, pos: [-0.02, 0.01, 0], rot: [0, 0.16, 0.02], ease: 'in' },
+  { t: 0.92, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
 ];
 
-/** Backhand return cut: chained from the forehand, travelling left to right. */
-const SLASH_BACKHAND: ActionKey[] = [
-  { t: 0.06, pos: [-0.2, 0.06, -0.09], rot: [-0.12, 0.8, 0.55], ease: 'out' },
-  { t: 0.16, pos: [0.02, 0.015, -0.11], rot: [-0.1, -0.26, -0.46], ease: 'out' },
-  { t: 0.23, pos: [0.03, 0.005, -0.095], rot: [-0.08, -0.32, -0.52], ease: 'smooth' },
-  { t: 0.44, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
-];
+/** Knife spin timings (s): the fingers open, the knife whirls, the fingers close on it. */
+const SPIN_OPEN_END = 0.13;
+const SPIN_WHIRL_START = 0.07;
+const SPIN_WHIRL_END = 0.68;
+const SPIN_CLOSE_START = 0.6;
+const SPIN_CLOSE_END = 0.84;
+const SPIN_TURNS = 2;
+
+/**
+ * The karambit's finger ring in knife-socket space: the centre of the hole and
+ * the axis through it. Measured from karambit.glb; the knife spins about this.
+ */
+const KARAMBIT_RING_CENTER = new THREE.Vector3(0, 0.0131, -0.0388);
+const KARAMBIT_RING_AXIS = new THREE.Vector3(1, 0, 0);
+
+const smoothstep = (k: number): number => {
+  const c = clamp(k, 0, 1);
+  return c * c * (3 - 2 * c);
+};
 
 /**
  * Inspect: lift the knife to the middle of the view, show one flat of the
@@ -138,16 +150,20 @@ export class ViewmodelController {
   public static readonly DEFAULT_KNIFE_ROT = new THREE.Vector3(3.034, 0.3737, 0.2205);
   public static readonly DEFAULT_KNIFE_SCALE = new THREE.Vector3(1.011, 1.011, 1.011);
 
-  // Viewmodel Actions (presentation only): Mouse1 slash, F inspect, and the
-  // legacy signal pulse. All of them move the ACTION GROUP (hand + knife
-  // together); the calibrated knife socket is never touched.
-  private activeAction: 'NONE' | 'PULSE' | 'SLASH' | 'INSPECT' = 'NONE';
+  // Viewmodel Actions (presentation only): Mouse1 knife spin, F inspect, and
+  // the legacy signal pulse. They move the ACTION GROUP (hand + knife
+  // together); the spin also opens the fingers and turns the knife's flourish
+  // group. The calibrated knife socket is never touched.
+  private activeAction: 'NONE' | 'PULSE' | 'SPIN' | 'INSPECT' = 'NONE';
   private actionTimer = 0;
   private actionDuration = 0;
   private actionKeys: ActionKey[] = [];
-  /** Alternates forehand / backhand so repeated clicks chain like a combo. */
-  private slashBackhand = false;
-  private lastSlashAt = -10;
+  /** Knife spin: how open the fingers are (0..1), and where a re-spin starts from. */
+  private fingerOpen = 0;
+  private fingerOpenFrom = 0;
+  /** Finger rotations as the mixer left them, restored before it runs again. */
+  private readonly fingerBaseQuats: THREE.Quaternion[] = [];
+  private fingersPosed = false;
   private actionClock = 0;
   /** Right-hand position in action-group space: rotations pivot about it. */
   private readonly actionPivot = new THREE.Vector3();
@@ -354,6 +370,7 @@ export class ViewmodelController {
     this.motionGroup.rotation.set(0, 0, 0);
     this.actionGroup.position.set(0, 0, 0);
     this.actionGroup.rotation.set(0, 0, 0);
+    this.resetKnifeSpin();
 
     // Maintain knife socket attachment with current calibrated values
     if (this.rigInstance.knifeGroup) {
@@ -448,33 +465,28 @@ export class ViewmodelController {
   }
 
   /**
-   * Mouse1: a karambit slash. Forehand first; a second click soon after
-   * chains into the backhand return cut. Returns which cut started so the
-   * caller can voice it. Presentation only.
+   * Mouse1: the fingers open and the karambit spins round the index finger,
+   * then the hand closes on it again. A click while the knife is still turning
+   * is ignored; one after the catch flicks straight into the next spin.
+   * Returns whether a spin started so the caller can voice it. Presentation only.
    */
-  public triggerSlash(): 'FOREHAND' | 'BACKHAND' {
-    const chained = this.actionClock - this.lastSlashAt < 0.75;
-    this.slashBackhand = chained ? !this.slashBackhand : false;
-    this.lastSlashAt = this.actionClock;
-    this.beginAction('SLASH', this.slashBackhand ? SLASH_BACKHAND : SLASH_FOREHAND);
+  public triggerSpin(): boolean {
+    if (this.activeAction === 'SPIN' && this.actionTimer < SPIN_WHIRL_END) return false;
+    this.fingerOpenFrom = this.fingerOpen;
+    this.beginAction('SPIN', SPIN_KEYS);
     this.audioImpact = Math.max(this.audioImpact, 1.4);
-    return this.slashBackhand ? 'BACKHAND' : 'FOREHAND';
-  }
-
-  /** Kept for callers of the old micro-jab; it is the slash now. */
-  public triggerMicroJab(): void {
-    this.triggerSlash();
+    return true;
   }
 
   /** F: raise the knife and turn it over to look at both sides. */
   public triggerInspect(): void {
-    if (this.activeAction === 'INSPECT' || this.activeAction === 'SLASH') return;
+    if (this.activeAction === 'INSPECT' || this.activeAction === 'SPIN') return;
     this.beginAction('INSPECT', INSPECT_KEYS);
   }
 
-  private beginAction(kind: 'SLASH' | 'INSPECT', keys: ActionKey[]): void {
+  private beginAction(kind: 'SPIN' | 'INSPECT', keys: ActionKey[]): void {
     // Start from wherever the hand currently is, so interrupting an inspect
-    // with a slash (or chaining slashes) blends instead of popping.
+    // with a spin (or chaining spins) blends instead of popping.
     this.actionFromPos.copy(this.actionPos);
     this.actionFromRot.copy(this.actionRot);
     this.activeAction = kind;
@@ -484,7 +496,7 @@ export class ViewmodelController {
   }
 
   /**
-   * Evaluates the current keyed action (slash / inspect) and poses the action
+   * Evaluates the current keyed action (spin / inspect) and poses the action
    * group. The pose is a translation plus a rotation ABOUT THE RIGHT HAND, so
    * turning the knife over reads as a wrist and forearm move rather than the
    * whole rig swinging round the camera. The off hand simply follows the
@@ -532,11 +544,11 @@ export class ViewmodelController {
       // The off arm answers with a small counter-motion, as a body does when
       // the other shoulder drives forward: it draws back and dips a little and
       // turns slightly with the torso. Moved as a whole from its own shoulder,
-      // so it can never stretch; an inspect barely stirs it.
+      // so it can never stretch; it only stirs.
       const off = this.offArmRoot;
       const handL = this.rigInstance.handLBone;
       if (off && off.parent && handL) {
-        const amount = this.activeAction === 'SLASH' ? 1 : 0.3;
+        const amount = 0.3;
         this.offArmBasePos.copy(off.position);
         this.offArmBaseQuat.copy(off.quaternion);
         group.worldToLocal(handL.getWorldPosition(SCRATCH_A));
@@ -556,6 +568,61 @@ export class ViewmodelController {
     group.rotation.set(this.actionRot.x, this.actionRot.y, this.actionRot.z);
     SCRATCH_C.copy(this.actionPivot).applyEuler(group.rotation);
     group.position.copy(this.actionPivot).sub(SCRATCH_C).add(this.actionPos);
+  }
+
+  /**
+   * The knife spin proper, on top of the keyed arm motion: opens the right
+   * fingers toward the rig's relaxed pose and turns the flourish group about
+   * the karambit's ring. The ring rides on the index finger, so the knife
+   * first follows that finger as it straightens. The fingers are put back
+   * before the mixer next evaluates (see update), as the arm roots are.
+   */
+  private applyKnifeSpin(): void {
+    const rig = this.rigInstance;
+    const t = this.actionTimer;
+    this.fingerOpen =
+      t < SPIN_CLOSE_START
+        ? this.fingerOpenFrom + (1 - this.fingerOpenFrom) * smoothstep(t / SPIN_OPEN_END)
+        : 1 - smoothstep((t - SPIN_CLOSE_START) / (SPIN_CLOSE_END - SPIN_CLOSE_START));
+    const angle =
+      SPIN_TURNS * Math.PI * 2 * smoothstep((t - SPIN_WHIRL_START) / (SPIN_WHIRL_END - SPIN_WHIRL_START));
+
+    // Where the index finger carries the ring, in right-hand space.
+    const index = rig.indexBaseBone;
+    if (index) this.matrixInHand(index, MAT_I).invert();
+    rig.fingerOpenPoses.forEach((finger, i) => {
+      (this.fingerBaseQuats[i] ??= new THREE.Quaternion()).copy(finger.bone.quaternion);
+      finger.bone.quaternion.slerp(finger.open, this.fingerOpen * finger.weight);
+    });
+    this.fingersPosed = rig.fingerOpenPoses.length > 0;
+    if (index) this.matrixInHand(index, MAT_T).multiply(MAT_I);
+    else MAT_T.identity();
+
+    // The same move in socket space, then the turn about the ring.
+    const socket = rig.knifeGroup;
+    socket.updateMatrix();
+    MAT_W.copy(socket.matrix).invert().multiply(MAT_T).multiply(socket.matrix);
+    MAT_L.makeRotationAxis(KARAMBIT_RING_AXIS, angle);
+    SCRATCH_C.copy(KARAMBIT_RING_CENTER).applyMatrix4(MAT_L);
+    MAT_L.setPosition(SCRATCH_A.copy(KARAMBIT_RING_CENTER).sub(SCRATCH_C));
+    MAT_W.multiply(MAT_L);
+    MAT_W.decompose(rig.knifeFlourishGroup.position, rig.knifeFlourishGroup.quaternion, SCRATCH_C);
+  }
+
+  /** A right-hand bone's transform relative to the hand bone. */
+  private matrixInHand(bone: THREE.Object3D, out: THREE.Matrix4): THREE.Matrix4 {
+    out.identity();
+    for (let n: THREE.Object3D | null = bone; n && n !== this.rigInstance.handRBone; n = n.parent) {
+      n.updateMatrix();
+      out.premultiply(n.matrix);
+    }
+    return out;
+  }
+
+  private resetKnifeSpin(): void {
+    this.fingerOpen = 0;
+    this.rigInstance.knifeFlourishGroup.position.set(0, 0, 0);
+    this.rigInstance.knifeFlourishGroup.quaternion.identity();
   }
 
   /**
@@ -662,6 +729,11 @@ export class ViewmodelController {
       this.offArmRoot.position.copy(this.offArmBasePos);
       this.offArmRoot.quaternion.copy(this.offArmBaseQuat);
       this.offArmPosed = false;
+    }
+    // And the fingers the knife spin opened: the mixer skips unchanged tracks.
+    if (this.fingersPosed) {
+      this.rigInstance.fingerOpenPoses.forEach((finger, i) => finger.bone.quaternion.copy(this.fingerBaseQuats[i]));
+      this.fingersPosed = false;
     }
     if (this.leftHandActionOffset.lengthSq() > 0 && this.rigInstance.handLBone) {
       this.rigInstance.handLBone.position.sub(this.leftHandActionOffset);
@@ -846,7 +918,7 @@ export class ViewmodelController {
       }
     }
 
-    // 10. Action Motion on actionGroup (F Signal Pulse & Mouse1 Micro-Jab)
+    // 10. Action Motion on actionGroup (F inspect & Mouse1 knife spin)
     // Moves hand + knife together through additive actionGroup, preserving calibrated knifeGroup transform
     this.actionClock += dt;
     if (this.activeAction !== 'NONE') {
@@ -860,9 +932,11 @@ export class ViewmodelController {
         this.actionRot.set(0, 0, 0);
       } else {
         this.applyKeyedAction();
+        if (this.activeAction === 'SPIN') this.applyKnifeSpin();
       }
       if (progress >= 1.0) {
         this.activeAction = 'NONE';
+        this.resetKnifeSpin();
         this.actionPos.set(0, 0, 0);
         this.actionRot.set(0, 0, 0);
         this.actionGroup.position.set(0, 0, 0);

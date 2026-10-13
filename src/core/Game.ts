@@ -2722,8 +2722,7 @@ export class Game {
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0 && this.cameraController.getIsLocked()) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          const cut = this.viewmodelController.triggerSlash();
-          MovementSfx.getInstance().playKnifeSlash(cut === 'BACKHAND');
+          if (this.viewmodelController.triggerSpin()) MovementSfx.getInstance().playKnifeSlash();
         }
       }
     });
