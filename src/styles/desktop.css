@@ -662,3 +662,30 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .race-map-btn:disabled { opacity: 0.6; }
 #ui-root .race-map-votes { font: 15px/1.3 var(--font-mono); margin-top: 6px; color: var(--accent-color, #00f0ff); overflow-wrap: anywhere; }
 @media (max-width: 700px) { #ui-root .race-map-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Online race landing, v3: one signal card, one big play button, friends below. */
+#ui-root .race-landing-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 0 0 10px; }
+#ui-root .race-landing-title { font: 28px/1 var(--font-mono); margin: 0; }
+#ui-root .race-landing-tagline { font: 13px/1.2 var(--font-sans); color: var(--muted, #aaa); margin: 0; }
+#ui-root .race-board { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.5fr); gap: 12px; align-items: stretch; }
+#ui-root .race-card { box-shadow: var(--sunken); background: rgba(0, 0, 0, 0.25); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+#ui-root .race-card-label { font: 18px/1.2 var(--font-mono); display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+#ui-root .race-card-signal .race-hero { margin: 0; }
+#ui-root .race-card-signal .race-track-select { width: 100%; }
+#ui-root .race-mode-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#ui-root .race-mode-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 6px; font: 15px/1.1 var(--font-mono); }
+#ui-root .race-mode-btn small { font: 11px/1.2 var(--font-sans); opacity: 0.75; }
+#ui-root .race-mode-btn.active { background: #000080; color: #fff; outline: 2px solid var(--accent-color, #00f0ff); outline-offset: -2px; }
+#ui-root .race-quick-main { display: flex; flex-direction: column; gap: 8px; padding: 10px; outline: 2px solid var(--accent-color, #00f0ff); outline-offset: -2px; background: rgba(0, 240, 255, 0.05); }
+#ui-root .race-find-btn { width: 100%; min-height: 54px; font-size: 22px; }
+#ui-root .race-quick-main .race-find-status { font: 14px/1.3 var(--font-sans); text-align: center; color: var(--ink, #ddd); max-width: none; min-height: 2.6em; }
+#ui-root .race-or { display: flex; align-items: center; gap: 10px; color: var(--muted, #aaa); font: 12px/1 var(--font-sans); letter-spacing: 1px; }
+#ui-root .race-or::before, #ui-root .race-or::after { content: ''; flex: 1; border-top: 1px solid rgba(255, 255, 255, 0.18); }
+#ui-root .race-friends { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#ui-root .race-friend-box { display: flex; flex-direction: column; gap: 6px; padding: 10px; box-shadow: var(--sunken); background: rgba(0, 0, 0, 0.2); min-width: 0; }
+#ui-root .race-friend-box .race-cta { width: 100%; margin-top: auto; }
+#ui-root .race-friend-box .race-code-input { width: 100%; letter-spacing: 4px; font-size: 20px; text-align: center; }
+#ui-root .race-landing-hint { font-size: 12px; margin-top: 10px; }
+@media (max-width: 860px) { #ui-root .race-board, #ui-root .race-friends { grid-template-columns: 1fr; } }
+
+#ui-root .race-quick-main .race-find-btn { min-height: 54px !important; font-size: 22px !important; letter-spacing: 2px; }
