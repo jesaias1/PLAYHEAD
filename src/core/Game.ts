@@ -966,7 +966,7 @@ export class Game {
             if (this.replayRecorder.hasData() && !isOvertime) {
               isNewPB = this.ghostManager.saveIfPersonalBest(
                 this.currentTrack.seed,
-                this.currentAnalysis.filename || 'PLAYHEAD TRACK',
+                this.currentAnalysis.filename || 'M0VEM1NT TRACK',
                 results.completionTime,
                 results.score,
                 this.replayRecorder.frames,
@@ -1004,7 +1004,7 @@ export class Game {
               priorPbTime = LeaderboardManager.getInstance().getRecordSummary(
                 this.currentOfficialTrackId
               ).pbTime;
-              const trackName = this.currentAnalysis.filename || 'PLAYHEAD TRACK';
+              const trackName = this.currentAnalysis.filename || 'M0VEM1NT TRACK';
               const progressionKey = this.currentOfficialTrackId;
               // MASTERY: capture authoritative progress before and after the run
               // so the results screen can report only progress that ACTUALLY
@@ -1070,7 +1070,7 @@ export class Game {
               if (surfIdentity) {
                 surfInfo = {
                   boardTrackId: surfIdentity.trackId,
-                  title: this.currentAnalysis.filename || 'PLAYHEAD TRACK',
+                  title: this.currentAnalysis.filename || 'M0VEM1NT TRACK',
                   officialTrackId: this.currentSurfOfficialTrackId ?? ''
                 };
               }
@@ -1122,7 +1122,7 @@ export class Game {
               results,
               this.currentTrack.seed,
               { rivalDelta, isNewPB },
-              this.currentAnalysis.filename || 'PLAYHEAD TRACK',
+              this.currentAnalysis.filename || 'M0VEM1NT TRACK',
               { isOvertime, overtimeDuration },
               { dropsAwarded, bestDropRank, registered: authService.isRegisteredAccount() },
               officialInfo,
@@ -1644,7 +1644,7 @@ export class Game {
     if (!this.currentTrack || this.currentTrack.route.length === 0) return;
 
     this.ui.hud.setTrackInfo(
-      this.currentAnalysis?.filename || 'PLAYHEAD TRACK',
+      this.currentAnalysis?.filename || 'M0VEM1NT TRACK',
       'SECTION 01 // FLOW'
     );
 
@@ -1672,7 +1672,7 @@ export class Game {
     this.onRaceAttemptRestart();
 
     // Prepare ghosts for track
-    this.ghostManager.prepareTrack(this.currentTrack, this.currentAnalysis?.filename || 'PLAYHEAD TRACK');
+    this.ghostManager.prepareTrack(this.currentTrack, this.currentAnalysis?.filename || 'M0VEM1NT TRACK');
     this.ghostManager.start();
 
     // RECORDED GHOST RACE: arm the validated ghost for this run and reset it to
@@ -2321,7 +2321,7 @@ export class Game {
         diag: restoreDiag
       };
     } catch (e) {
-      console.error('[PLAYHEAD ATOMIC RESTORE] Failed during restore transaction:', e);
+      console.error('[M0VEM1NT ATOMIC RESTORE] Failed during restore transaction:', e);
       this.playerController.isRestoring = false;
       this.isRestoringCheckpoint = false;
       this.pendingRestoreVerification = null;

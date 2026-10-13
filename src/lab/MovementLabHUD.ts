@@ -33,7 +33,7 @@ export class MovementLabHUD {
         <div class="lab-hud-header">MOVEMENT LAB // CONTROLS CALIBRATION</div>
         <div class="lab-stat-row">
           <span class="lab-stat-label">PRESET:</span>
-          <span class="lab-stat-val highlight" id="lab-preset">[3] PLAYHEAD</span>
+          <span class="lab-stat-val highlight" id="lab-preset">[3] M0VEM1NT</span>
         </div>
         <div class="lab-stat-row">
           <span class="lab-stat-label">OBSTACLE:</span>
@@ -144,8 +144,8 @@ export class MovementLabHUD {
     const presetLabels: Record<string, string> = {
       CURRENT: '[1] CURRENT (90 accel / 3.0 cap / 3.5 steer)',
       SOURCE: '[2] SOURCE (120 accel / 2.5 cap / 0 steer)',
-      PLAYHEAD: '[3] PLAYHEAD (90 accel / 3.0 cap / 3.5 steer)',
-      TRACK_RUN: '[3] PLAYHEAD (90 accel / 3.0 cap / 3.5 steer)'
+      PLAYHEAD: '[3] M0VEM1NT (90 accel / 3.0 cap / 3.5 steer)',
+      TRACK_RUN: '[3] M0VEM1NT (90 accel / 3.0 cap / 3.5 steer)'
     };
     this.presetElem.textContent = presetLabels[player.currentPreset] || player.currentPreset;
 

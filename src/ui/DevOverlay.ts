@@ -307,7 +307,7 @@ export class DevOverlay {
       : 'CHECKED';
 
     const lines = [
-      '=== PLAYHEAD DEV DIAGNOSTICS (F3) ===',
+      '=== M0VEM1NT DEV DIAGNOSTICS (F3) ===',
       perfBlock,
       `ROUTE CHAIN: ${connStatus}`,
       `PALETTE: ${vs.palette.name} | THEME: ${vs.sectionTheme} (#${vs.sectionIndex + 1}) | REACTIVITY: ${vs.reactivityMultiplier.toFixed(1)}x`,

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   PLAYHEAD — EDITORIAL RETRO-DIGITAL SCREENS DESIGN SYSTEM
+   M0VEM1NT — EDITORIAL RETRO-DIGITAL SCREENS DESIGN SYSTEM
    ========================================================================== */
 
 .screen {
@@ -160,7 +160,7 @@
 /* STICKY GLOBAL NAVIGATION.
    The screen overlay is the ONE vertical scroll owner in this app (the WebGL
    canvas sits behind a fixed, viewport-sized overlay). The nav therefore sticks
-   to the top of that scrollport, with an opaque PLAYHEAD background so it never
+   to the top of that scrollport, with an opaque M0VEM1NT background so it never
    disappears above the page and never lets content show through it. */
 .import-tabs {
   position: sticky;
@@ -2882,7 +2882,7 @@ option:hover, option:focus, option:checked {
 .online-lb-race-btn:hover { background: rgba(157, 140, 255, 0.14); }
 
 /* ==========================================================================
-   PLAYHEAD FRONTEND — fullscreen composition
+   M0VEM1NT FRONTEND — fullscreen composition
    No console box: the menu sits directly on a living backdrop (MenuBackdrop).
    Hero track on the left, a borderless catalogue on the right, a text-only
    navigation bar on top. Colour follows the selected track (--track-accent).
@@ -3460,7 +3460,7 @@ option:hover, option:focus, option:checked {
 #movement-academy-hud .academy-btn-lesson.done { color: #39ff14; border-color: rgba(57, 255, 20, 0.5); }
 /* ==========================================================================
    ONLINE RACE 2.0 — reconstruction (presentation only)
-   Scoped to #panel-race / #race-hud. Reuses the existing PLAYHEAD tokens and
+   Scoped to #panel-race / #race-hud. Reuses the existing M0VEM1NT tokens and
    the living menu backdrop; no new 3D, no form-style controls.
    ========================================================================== */
 

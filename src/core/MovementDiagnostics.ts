@@ -357,7 +357,7 @@ export class MovementDiagnostics {
     // Keep the console output for every event (unconditional: this is the whole
     // point of the mode existing in production).
     const tag = kind === 'RESTORE'
-      ? '[PLAYHEAD RESTORE]'
+      ? '[M0VEM1NT RESTORE]'
       : kind === 'PLAYER_CORRECTION'
         ? '[PLAYER CORRECTION]'
         : kind === 'CAMERA_DESYNC'

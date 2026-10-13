@@ -321,12 +321,12 @@ export class ImportScreen {
     this.element.innerHTML = `
       <div class="import-container terminal-console">
         <header class="brand-header console-topbar">
-          <div class="desktop-title"><span class="desktop-app-icon" aria-hidden="true">▥</span> PLAYHEAD — Music Explorer</div>
+          <div class="desktop-title"><img class="desktop-app-icon brand-logo-mascot" src="/assets/brand/m0vem1nt_mascot.png" alt="" aria-hidden="true" /> M0VEM1NT — Music Explorer</div>
           <span class="desktop-title-detail">Your music, as a place.</span>
         </header>
-        <div class="desktop-menubar" aria-hidden="true"><span>PLAYHEAD</span><span>Music &amp; movement</span><span>14 built-in tracks · Bring your own audio</span></div>
+        <div class="desktop-menubar" aria-hidden="true"><span><img class="brand-logo-text" src="/assets/brand/m0vem1nt_logo_text.png" alt="m0vem1nt" /></span><span>Music &amp; movement</span><span>14 built-in tracks · Bring your own audio</span></div>
 
-        <div class="import-tabs terminal-tabs" role="tablist" aria-label="PLAYHEAD system modules">
+        <div class="import-tabs terminal-tabs" role="tablist" aria-label="m0vem1nt system modules">
           <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">Signal Pack</button>
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">Custom Audio</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">Movement Lab</button>
@@ -427,7 +427,7 @@ export class ImportScreen {
 
           <div class="custom-course-type" id="custom-course-type" role="radiogroup" aria-label="Course type">
             <span class="course-type-label">COURSE TYPE</span>
-            <button type="button" class="course-type-btn active" id="btn-course-playhead" role="radio" aria-checked="true" data-course-type="PLAYHEAD">PLAYHEAD<span>MIXED MOVEMENT</span></button>
+            <button type="button" class="course-type-btn active" id="btn-course-playhead" role="radio" aria-checked="true" data-course-type="PLAYHEAD">M0VEM1NT<span>MIXED MOVEMENT</span></button>
             <button type="button" class="course-type-btn" id="btn-course-surf" role="radio" aria-checked="false" data-course-type="SURF">SURF<span>FLOW / TRANSFERS / VERTICALITY</span></button>
           </div>
 
@@ -561,7 +561,7 @@ export class ImportScreen {
         </div>
 
         <div class="privacy-notice terminal-footer-status">
-          <span class="footer-build">PLAYHEAD // ${BUILD_LABEL}</span>
+          <span class="footer-build">M0VEM1NT // ${BUILD_LABEL}</span>
         </div>
       </div>
     `;

@@ -25,7 +25,7 @@ export class Hud {
     this.element.innerHTML = `
       <div class="hud-top">
         <div class="hud-track-info">
-          <div class="hud-track-title" id="hud-title">PLAYHEAD</div>
+          <div class="hud-track-title" id="hud-title">M0VEM1NT</div>
           <div class="hud-section-info" id="hud-section">SECTION 1 // FLOW</div>
         </div>
         <div class="hud-speed-gauge">

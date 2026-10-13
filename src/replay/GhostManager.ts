@@ -76,7 +76,7 @@ export class GhostManager {
     this.releaseGhosts();
     this.courseIdentity = track.courseIdentity;
 
-    this.currentTrackTitle = trackTitle || 'PLAYHEAD TRACK';
+    this.currentTrackTitle = trackTitle || 'M0VEM1NT TRACK';
     this.playerCheckpointTimes = [];
 
     // 1. Synthesize Rival / Echo ghost deterministically

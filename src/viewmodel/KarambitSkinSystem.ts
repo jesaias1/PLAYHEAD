@@ -156,7 +156,7 @@ export const KARAMBIT_SKINS: KarambitSkin[] = [
     id: 'SIGNAL_CYAN',
     name: '00 // SIGNAL CYAN',
     codename: 'CANONICAL STANDARD',
-    description: 'Canonical PLAYHEAD tactical karambit. Charcoal titanium blade body with high-purity cyan emissive fuller and razor cutting edge.',
+    description: 'Canonical m0vem1nt tactical karambit. Charcoal titanium blade body with high-purity cyan emissive fuller and razor cutting edge.',
     unlockRequirement: 'STANDARD ISSUE — UNLOCKED BY DEFAULT',
     shortRequirement: 'DEFAULT',
     tier: 0,

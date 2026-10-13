@@ -76,7 +76,7 @@ export const MASTERY_GLOVES: readonly MasteryGloveDefinition[] = [
     id: 'STANDARD_ISSUE',
     name: 'STANDARD ISSUE',
     codename: 'BASELINE',
-    description: 'Clean, understated PLAYHEAD glove. Issued to every operator.',
+    description: 'Clean, understated m0vem1nt glove. Issued to every operator.',
     requirement: { kind: 'COMPLETE_ANY' },
     requirementLabel: 'ISSUED BY DEFAULT',
     tier: 0

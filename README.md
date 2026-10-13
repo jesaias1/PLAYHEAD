@@ -1,15 +1,15 @@
-# PLAYHEAD
+# m0vem1nt
 
 > **ENTER THE SIGNAL.**
-> *BECOME THE PLAYHEAD.*
+> *BECOME THE m0vem1nt.*
 
-PLAYHEAD is an experimental first-person movement game that transforms any client-side audio file into a monumental procedural 3D world. You do not simply run while music plays; **the song has become a place, and you are the playhead physically strafing through your music.**
+m0vem1nt is an experimental first-person movement game that transforms any client-side audio file into a monumental procedural 3D world. You do not simply run while music plays; **the song has become a place, and you are the playhead physically strafing through your music.**
 
 ---
 
 ## Visual Language: Monumental Audio Brutalism
 
-PLAYHEAD avoids generic neon cyberpunk clichés and cheap particle explosions in favor of colossal, matte dark architectural forms, dramatic audio-reactive atmospheric fog, high negative space, and curated song-derived monochromatic palettes (`ICE`, `EMBER`, `SIGNAL_RED`, `ACID`, `ULTRAVIOLET`, `GLACIER`).
+m0vem1nt avoids generic neon cyberpunk clichés and cheap particle explosions in favor of colossal, matte dark architectural forms, dramatic audio-reactive atmospheric fog, high negative space, and curated song-derived monochromatic palettes (`ICE`, `EMBER`, `SIGNAL_RED`, `ACID`, `ULTRAVIOLET`, `GLACIER`).
 - **The Song Ahead**: Unactivated, dormant brutalist structures loom out of atmospheric haze.
 - **The Now-Line**: Structures ignite and resonate as the player reaches their exact timestamp in the song.
 - **The Song Behind**: The track cools into deep twilight shadows and fades back into fog.

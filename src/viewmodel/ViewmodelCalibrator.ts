@@ -420,7 +420,7 @@ export class ViewmodelCalibrator {
     }
 
     // 2. Output to dev console
-    console.log('[PLAYHEAD VIEWMODEL CALIBRATION]\n' + fullText);
+    console.log('[M0VEM1NT VIEWMODEL CALIBRATION]\n' + fullText);
   }
 
   private copyViaTextarea(text: string): void {

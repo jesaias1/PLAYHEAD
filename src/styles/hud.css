@@ -1,5 +1,5 @@
 /* ==========================================================================
-   PLAYHEAD — MINIMAL EDITORIAL HUD DESIGN SYSTEM
+   M0VEM1NT — MINIMAL EDITORIAL HUD DESIGN SYSTEM
    ========================================================================== */
 
 #hud-container {
@@ -23,7 +23,7 @@
   visibility: hidden;
 }
 
-/* 1. Top Left: PLAYHEAD Logo + Temporary Section Title */
+/* 1. Top Left: M0VEM1NT Logo + Temporary Section Title */
 .hud-top {
   display: flex;
   justify-content: space-between;

@@ -82,16 +82,16 @@ export class UIManager {
     this.importScreen.mountDesktopBackdrop(this.root, this.analysisScreen.element);
 
     const windows: [HTMLElement, string, string, string?][] = [
-      [this.importScreen.element, '.import-container', 'PLAYHEAD — Music Explorer', '.console-topbar'],
-      [this.analysisScreen.element, '.analysis-container', 'PLAYHEAD — Preparing track'],
-      [this.resultsScreen.element, '.results-container', 'PLAYHEAD — Run report'],
-      [this.pauseScreen.element, '.pause-container', 'PLAYHEAD — Paused', '.pause-title'],
-      [this.settingsModal.element, '.settings-container', 'PLAYHEAD — Settings', '.pause-title'],
-      [this.profileModal.element, '.profile-container', 'PLAYHEAD — Player'],
-      [this.loginModal.element, '.profile-container', 'PLAYHEAD — Account'],
-      [this.armoryModal.element, '.armory-modal-console', 'PLAYHEAD — Armory'],
-      [this.movementLabSongModal.element, '.settings-container', 'PLAYHEAD — Choose music'],
-      [this.decodeModal.element, '.decode-modal-dialog', 'PLAYHEAD — Signal decoder'],
+      [this.importScreen.element, '.import-container', 'M0VEM1NT — Music Explorer', '.console-topbar'],
+      [this.analysisScreen.element, '.analysis-container', 'M0VEM1NT — Preparing track'],
+      [this.resultsScreen.element, '.results-container', 'M0VEM1NT — Run report'],
+      [this.pauseScreen.element, '.pause-container', 'M0VEM1NT — Paused', '.pause-title'],
+      [this.settingsModal.element, '.settings-container', 'M0VEM1NT — Settings', '.pause-title'],
+      [this.profileModal.element, '.profile-container', 'M0VEM1NT — Player'],
+      [this.loginModal.element, '.profile-container', 'M0VEM1NT — Account'],
+      [this.armoryModal.element, '.armory-modal-console', 'M0VEM1NT — Armory'],
+      [this.movementLabSongModal.element, '.settings-container', 'M0VEM1NT — Choose music'],
+      [this.decodeModal.element, '.decode-modal-dialog', 'M0VEM1NT — Signal decoder'],
     ];
     for (const [screen, selector, title, handleSelector] of windows) {
       const panel = screen.querySelector<HTMLElement>(selector);

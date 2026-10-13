@@ -41,7 +41,7 @@ describe('finished result sharing', () => {
     const outcome = await performResultShare(buildShareCardModel(context()), {
       renderPng: async () => blob, download, writeText: async () => { throw new Error('denied'); }
     });
-    expect(download).toHaveBeenCalledWith(blob, 'playhead-signal-drift-official.png');
+    expect(download).toHaveBeenCalledWith(blob, 'm0vem1nt-signal-drift-official.png');
     expect(outcome).toMatchObject({ downloaded: true, copied: false, detail: 'CLIPBOARD BLOCKED' });
   });
   it('passes PNG bytes in a File to native sharing and preserves cancellation', async () => {

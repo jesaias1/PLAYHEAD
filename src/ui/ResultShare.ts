@@ -128,11 +128,11 @@ export function buildShareCardModel(ctx: ShareContext): ShareCardModel {
     `STRAFE ${ctx.results.strafeEfficiency >= 0 ? `${ctx.results.strafeEfficiency}%` : '—'}`
   ];
 
-  const title = ctx.trackTitle.trim() ? ctx.trackTitle.trim().toUpperCase() : 'PLAYHEAD TRACK';
+  const title = ctx.trackTitle.trim() ? ctx.trackTitle.trim().toUpperCase() : 'M0VEM1NT TRACK';
   const rankLine = isUnranked ? 'RANK // UNRANKED' : `RANK // ${rank}`;
 
   const text = [
-    'PLAYHEAD // RUN REPORT',
+    'M0VEM1NT // RUN REPORT',
     `TRACK // ${title}`,
     `MODE  // ${modeLabel}`,
     rankLine,
@@ -146,14 +146,14 @@ export function buildShareCardModel(ctx: ShareContext): ShareCardModel {
     variant,
     accent,
     accentDim,
-    kicker: 'PLAYHEAD // RUN REPORT',
+    kicker: 'M0VEM1NT // RUN REPORT',
     title,
     trackLine: `TRACK // ${title}`,
     modeLine: `MODE  // ${modeLabel}`,
     rankLine,
     timeLine,
     statLines,
-    footerLine: 'PLAYHEAD — YOUR MUSIC, AS A PLACE',
+    footerLine: 'M0VEM1NT — YOUR MUSIC, AS A PLACE',
     verificationLine,
     url: PLAYHEAD_SHARE_URL,
     text
@@ -268,8 +268,8 @@ export interface ShareDeps {
 }
 
 export function defaultShareFileName(model: ShareCardModel): string {
-  const slug = model.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'playhead';
-  return `playhead-${slug}-${model.variant.toLowerCase()}.png`;
+  const slug = model.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'm0vem1nt';
+  return `m0vem1nt-${slug}-${model.variant.toLowerCase()}.png`;
 }
 
 /**
@@ -306,7 +306,7 @@ export async function performResultShare(
   if (canNativeShare && deps.share) {
     deps.onProgress?.('SHARING');
     try {
-      await deps.share({ files: [file!], text: model.text, url: model.url, title: 'PLAYHEAD RUN REPORT' });
+      await deps.share({ files: [file!], text: model.text, url: model.url, title: 'M0VEM1NT RUN REPORT' });
       return { state: 'SHARED', copied: false, downloaded: false };
     } catch (err) {
       const name = err instanceof Error ? err.name : '';

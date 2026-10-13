@@ -1,4 +1,4 @@
-/* PLAYHEAD desktop theme. Loaded after the functional screen/HUD styles.
+/* M0VEM1NT desktop theme. Loaded after the functional screen/HUD styles.
    Geometry, visibility states and gameplay remain owned by their modules. */
 @font-face { font-family: 'Pixel Sans'; src: url('/assets/fonts/ms-sans-serif.woff2') format('woff2'); font-weight: 400; font-display: swap; }
 @font-face { font-family: 'Pixel Sans'; src: url('/assets/fonts/ms-sans-serif-bold.woff2') format('woff2'); font-weight: 700 900; font-display: swap; }
@@ -213,15 +213,15 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .settings-container, #ui-root .profile-container { width: min(640px,100%); }
 #ui-root .analysis-container { width: min(800px,100%); }
 #ui-root :is(.analysis-container,.results-container,.profile-container,.armory-modal-container,.movement-lab-song-container,.decode-container)::before {
-  content: 'PLAYHEAD'; display: block; color: #fff; background: #000080; font-weight: 700;
+  content: 'M0VEM1NT'; display: block; color: #fff; background: #000080; font-weight: 700;
   margin: 0 -12px 14px; padding: 3px 7px; height: 25px;
 }
-#ui-root .analysis-container::before { content: 'PLAYHEAD — Preparing track'; }
-#ui-root .results-container::before { content: 'PLAYHEAD — Run report'; }
-#ui-root .profile-container::before { content: 'PLAYHEAD — Player'; }
-#ui-root .armory-modal-container::before { content: 'PLAYHEAD — Armory'; }
-#ui-root .movement-lab-song-container::before { content: 'PLAYHEAD — Choose music'; }
-#ui-root .decode-container::before { content: 'PLAYHEAD — Signal decoder'; }
+#ui-root .analysis-container::before { content: 'M0VEM1NT — Preparing track'; }
+#ui-root .results-container::before { content: 'M0VEM1NT — Run report'; }
+#ui-root .profile-container::before { content: 'M0VEM1NT — Player'; }
+#ui-root .armory-modal-container::before { content: 'M0VEM1NT — Armory'; }
+#ui-root .movement-lab-song-container::before { content: 'M0VEM1NT — Choose music'; }
+#ui-root .decode-container::before { content: 'M0VEM1NT — Signal decoder'; }
 #ui-root .pause-title { font-size: 12px; background: #000080; color: #fff; margin: 0 -12px 12px; padding: 4px 7px; text-align: left; }
 #ui-root .analysis-kicker { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 #ui-root .analysis-track-title { font: 26px/1.1 var(--font-mono); margin: 14px 0 12px; }
@@ -339,7 +339,7 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .showcase-card .showcase-actions button { letter-spacing: normal; }
 #ui-root .signal-decode-modal-screen .decode-modal-backdrop { background: rgba(0,0,0,.35) !important; backdrop-filter: none !important; }
 #ui-root .signal-decode-modal-screen .decode-modal-dialog { background: var(--face) !important; color: var(--ink); border: 0 !important; box-shadow: var(--raised) !important; padding: 4px 16px 16px !important; max-height: calc(100dvh - 32px); overflow-y: auto; text-align: left !important; }
-#ui-root .decode-modal-dialog::before { content: 'PLAYHEAD — Signal decoder'; display: block; background: #000080; color: #fff; font-weight: 700; padding: 4px 7px; margin: 0 -12px 12px; }
+#ui-root .decode-modal-dialog::before { content: 'M0VEM1NT — Signal decoder'; display: block; background: #000080; color: #fff; font-weight: 700; padding: 4px 7px; margin: 0 -12px 12px; }
 #ui-root .movement-lab-song-screen .settings-container { background: var(--face) !important; border: 0 !important; box-shadow: var(--raised) !important; }
 #ui-root .signal-decode-modal-screen [style*='font-size:'] { font-size: 12px !important; letter-spacing: normal !important; }
 #ui-root .signal-decode-modal-screen #decode-strip-wrapper { background: #080818 !important; border: 0 !important; box-shadow: var(--sunken) !important; }
@@ -362,9 +362,9 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .screen select[style] { background: var(--field) !important; color: var(--ink) !important; font: 12px/1.4 var(--font-sans) !important; }
 #ui-root .pause-title::before { display: none; }
 #ui-root .screen .decode-modal-dialog #decode-celebration { background: var(--face-light) !important; color: var(--ink); box-shadow: var(--sunken) !important; border: 0 !important; }
-#ui-root .movement-lab-song-screen .settings-container::before, #ui-root .armory-modal-console::before { content: 'PLAYHEAD'; display: block; color: #fff; background: #000080; padding: 4px 7px; margin: 0 -12px 12px; font-weight: 700; }
-#ui-root .movement-lab-song-screen .settings-container::before { content: 'PLAYHEAD — Choose music'; }
-#ui-root .armory-modal-console::before { content: 'PLAYHEAD — Armory'; }
+#ui-root .movement-lab-song-screen .settings-container::before, #ui-root .armory-modal-console::before { content: 'M0VEM1NT'; display: block; color: #fff; background: #000080; padding: 4px 7px; margin: 0 -12px 12px; font-weight: 700; }
+#ui-root .movement-lab-song-screen .settings-container::before { content: 'M0VEM1NT — Choose music'; }
+#ui-root .armory-modal-console::before { content: 'M0VEM1NT — Armory'; }
 #ui-root .movement-lab-song-screen .strip-item { background: var(--field); color: var(--ink); border: 1px solid var(--edge); }
 #ui-root .movement-lab-song-screen .strip-item.active { background: #000080; color: #fff; }
 #movement-academy-hud *, #movement-lab-hud * { font-family: var(--font-mono); letter-spacing: normal; border-radius: 0; text-shadow: none; }
@@ -606,3 +606,7 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
   #ui-root #panel-armory > .armory-filters { grid-column: 2; grid-row: 3; }
   #ui-root #panel-armory.hidden { display: none; }
 }
+
+/* m0vem1nt brand art in the window chrome */
+#ui-root .desktop-app-icon.brand-logo-mascot { width: 20px; height: 20px; background: none; object-fit: contain; filter: none; vertical-align: middle; }
+#ui-root .desktop-menubar .brand-logo-text { height: 15px; width: auto; max-width: none; filter: none; vertical-align: middle; }

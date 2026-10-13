@@ -36,7 +36,7 @@ function init() {
     authService,
     cloudProgression
   };
-  console.log('[PLAYHEAD] System online. Enter the signal.');
+  console.log('[m0vem1nt] System online. Enter the signal.');
 }
 
 if (document.readyState === 'loading') {

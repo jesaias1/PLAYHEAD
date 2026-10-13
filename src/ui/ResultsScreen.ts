@@ -128,7 +128,7 @@ export class ResultsScreen {
           <div class="results-title-group">
             <div class="results-kicker">[SYS] RUN REPORT // SIGNAL ARCHIVE</div>
             <h1 class="results-title">RUN REPORT</h1>
-            <div class="results-track-title"><span>[SIGNAL]</span> <span id="res-track-title">PLAYHEAD TRACK</span></div>
+            <div class="results-track-title"><span>[SIGNAL]</span> <span id="res-track-title">M0VEM1NT TRACK</span></div>
             <div class="results-pb-status hidden" id="res-pb-status">[PB] NEW PERSONAL BEST</div>
             <div class="results-surf-badge hidden" id="res-surf-badge">[SURF] SURF WORLD BOARD</div>
           </div>
@@ -359,7 +359,7 @@ export class ResultsScreen {
     results: RunResults,
     seed: number,
     ghostInfo?: { rivalDelta?: number; isNewPB?: boolean },
-    trackTitle = 'PLAYHEAD TRACK',
+    trackTitle = 'M0VEM1NT TRACK',
     overtimeInfo?: { isOvertime: boolean; overtimeDuration: number },
     progressionInfo?: { dropsAwarded: number; bestDropRank?: RunRank; registered?: boolean },
     officialInfo?: {

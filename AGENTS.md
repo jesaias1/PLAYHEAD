@@ -1,11 +1,11 @@
-# AGENTS.md — Durable Rules for PLAYHEAD Sessions
+# AGENTS.md — Durable Rules for m0vem1nt Sessions
 
 Concise operating rules for any agent (DeepSeek Harness, Gemini, or otherwise)
 working in this repository. See `GEMINI.md` for the wider project context.
 
 ## Identity & Stack
 
-- **PLAYHEAD** is a first-person, music-driven movement game.
+- **m0vem1nt** (formerly PLAYHEAD; code identifiers such as `PLAYHEAD_MOVEMENT_V1` keep the old name) is a first-person, music-driven movement game.
 - Stack: Vite + TypeScript + Three.js + Web Audio API. Tests: Vitest.
 - Aesthetic: **Cosmic Pixel Brutalism / PLAYHEAD SIGNAL RENDER** — terminal /
   operator-console UI, monumental brutalist architecture, authored pixel textures.

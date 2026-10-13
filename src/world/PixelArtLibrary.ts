@@ -554,7 +554,7 @@ export class PixelArtLibrary {
       // Header kicker
       ctx.font = 'bold 9px monospace';
       ctx.fillStyle = '#64748b';
-      ctx.fillText('[PLAYHEAD SIGNAL RENDER // NAV SYSTEM]', 14, 16);
+      ctx.fillText('[M0VEM1NT SIGNAL RENDER // NAV SYSTEM]', 14, 16);
 
       // Track Title (large, clean, bold)
       ctx.font = 'bold 20px monospace, "Segoe UI", sans-serif';
@@ -967,7 +967,7 @@ export class PixelArtLibrary {
     accentHex = '#00f0ff',
     secondaryHex = '#ff00aa'
   ): THREE.CanvasTexture {
-    const lines = ['BECOME THE PLAYHEAD', 'SIGNAL IS THE ROUTE', 'DO NOT STOP MOVING', 'ENTER THE SIGNAL'];
+    const lines = ['BECOME M0VEM1NT', 'SIGNAL IS THE ROUTE', 'DO NOT STOP MOVING', 'ENTER THE SIGNAL'];
     const line = lines[variant % lines.length];
     const key = `billboard_mascot_${variant % lines.length}_${accentHex}_${secondaryHex}`;
     const cached = this.cache.has(key);
@@ -1004,7 +1004,7 @@ export class PixelArtLibrary {
         ctx.drawImage(img, 24, 22, 80, 80);
         tex.needsUpdate = true;
       };
-      img.src = '/assets/brand/playhead_mascot.png';
+      img.src = '/assets/brand/m0vem1nt_mascot.png';
     }
     return tex;
   }
