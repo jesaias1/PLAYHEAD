@@ -3493,8 +3493,14 @@ export class Game {
     const leaderboardPanel = this.ui.importScreen.leaderboardPanel;
 
     racePanel.setCallbacks({
-      onCreateRoom: (trackId, capacity, mode) => void this.createRaceRoom(trackId, capacity, mode),
-      onJoinRoom: (code) => void this.joinRaceRoom(code),
+      onCreateRoom: (trackId, capacity, mode) => {
+        racePanel.setTrackPickLocked(false);
+        void this.createRaceRoom(trackId, capacity, mode);
+      },
+      onJoinRoom: (code) => {
+        racePanel.setTrackPickLocked(false);
+        void this.joinRaceRoom(code);
+      },
       onFindOpponent: (trackId, mode) => void this.findRaceOpponent(trackId, mode),
       onCancelFind: () => void this.cancelFindOpponent(),
       onSetReady: (ready) => {
@@ -3828,7 +3834,7 @@ export class Game {
       panel.showError(message);
     };
 
-    let reply = await raceRoomService.matchmakingFind(mode);
+    let reply = await raceRoomService.matchmakingFind(mode, trackId);
     for (;;) {
       if (!alive()) return;
       if (raceRoomService.getRoom()) {
@@ -3843,7 +3849,9 @@ export class Game {
       }
       if (reply.status === 'MATCHED' && reply.role === 'HOST') {
         panel.setSearching(true, 'OPPONENT FOUND // CREATING THE ROOM...');
-        await this.createRaceRoom(trackId, 2, mode);
+        // The server drew one of the two players' chosen signals; nobody picks in the lobby.
+        await this.createRaceRoom(reply.pickedTrackId ?? trackId, 2, mode);
+        panel.setTrackPickLocked(true, 'SIGNAL DRAWN AT RANDOM FROM BOTH PLAYERS\' CHOICES');
         const code = raceRoomService.getRoom()?.inviteCode;
         if (!code || !(await raceRoomService.matchmakingPublish(code))) {
           await fail('MATCH FOUND BUT THE ROOM COULD NOT BE SHARED // TRY AGAIN');
@@ -3859,6 +3867,7 @@ export class Game {
         await raceRoomService.matchmakingLeave();
         panel.setSearching(false);
         await this.joinRaceRoom(reply.inviteCode);
+        panel.setTrackPickLocked(true, 'SIGNAL DRAWN AT RANDOM FROM BOTH PLAYERS\' CHOICES');
         return;
       }
       if (Date.now() - started > 90_000) {
@@ -4450,6 +4459,7 @@ export class Game {
   }
 
   private async leaveRaceRoom(): Promise<void> {
+    this.ui.importScreen.racePanel.setTrackPickLocked(false);
     this.raceLoadGeneration++;
     this.raceActive = false;
     this.raceLoading = false;

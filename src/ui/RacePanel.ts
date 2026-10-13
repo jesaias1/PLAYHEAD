@@ -124,7 +124,7 @@ export class RacePanel {
         </div>
         <div class="race-quick" id="race-quick">
           <button class="btn-hero btn-terminal-exec race-cta race-find-btn" id="race-find-opponent" type="button">> FIND OPPONENT</button>
-          <div class="race-find-status" id="race-find-status" role="status" aria-live="polite"></div>
+          <div class="race-find-status" id="race-find-status" role="status" aria-live="polite">PICK YOUR SIGNAL BELOW // IF YOU AND YOUR OPPONENT PICK DIFFERENT SIGNALS, ONE IS DRAWN AT RANDOM</div>
         </div>
         <div class="race-landing-cols">
           <section class="race-col race-col-create" aria-label="Create race">
@@ -171,6 +171,7 @@ export class RacePanel {
         <div class="race-lobby-head">
           <div class="race-lobby-track">
             <h2 class="race-lobby-title" id="race-lobby-title">SIGNAL</h2>
+            <div class="race-pick-note" id="race-pick-note"></div>
             <div class="race-lobby-meta">
               <span class="race-lobby-bpm" id="race-lobby-bpm">-- BPM</span>
               <span class="race-lobby-sep">//</span>
@@ -211,6 +212,7 @@ export class RacePanel {
       <!-- View: results -->
       <div id="race-results-view" class="race-results hidden">
         <div class="online-results-title" id="race-results-title">RACE COMPLETE</div>
+        <div class="race-winner hidden" id="race-winner" role="status"></div>
         <div class="race-results-head" aria-hidden="true">
           <span>RANK</span><span>RACER</span><span>TIME</span><span>GAP</span>
         </div>
@@ -472,6 +474,18 @@ export class RacePanel {
   }
 
   private searching = false;
+  private trackPickLocked = false;
+
+  /**
+   * Quick-matched rooms have their signal drawn from both players' choices, so
+   * nobody picks one while the room loads. Locking hides the host's picker.
+   */
+  public setTrackPickLocked(locked: boolean, note = ''): void {
+    this.trackPickLocked = locked;
+    const noteElem = this.element.querySelector('#race-pick-note') as HTMLElement | null;
+    if (noteElem) noteElem.textContent = locked ? note : '';
+    if (locked) (this.element.querySelector('#race-host-track-row') as HTMLElement | null)?.classList.add('hidden');
+  }
 
   /** Quick-match search state: the button turns into CANCEL and a status line counts up. */
   public setSearching(searching: boolean, status = ''): void {
@@ -479,7 +493,7 @@ export class RacePanel {
     const btn = this.element.querySelector('#race-find-opponent') as HTMLButtonElement | null;
     const line = this.element.querySelector('#race-find-status') as HTMLElement | null;
     if (btn) btn.textContent = searching ? '> CANCEL SEARCH' : '> FIND OPPONENT';
-    if (line) line.textContent = status;
+    if (line) line.textContent = status || (searching ? '' : 'PICK YOUR SIGNAL BELOW // IF YOU AND YOUR OPPONENT PICK DIFFERENT SIGNALS, ONE IS DRAWN AT RANDOM');
   }
 
   public showError(message: string): void {
@@ -500,7 +514,7 @@ export class RacePanel {
     (this.element.querySelector('#race-results-lobby') as HTMLButtonElement).disabled = !isHost;
     if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
     // Only the host sees the track picker, and only while the room is unlocked.
-    const canPick = isHost && (this.lastRoom?.state ?? 'LOBBY') === 'LOBBY';
+    const canPick = isHost && !this.trackPickLocked && (this.lastRoom?.state ?? 'LOBBY') === 'LOBBY';
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
       'hidden',
       !canPick
@@ -539,7 +553,7 @@ export class RacePanel {
     // Host track picker: only visible, unlocked, host-only.
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
       'hidden',
-      !(this.isHost && room.state === 'LOBBY')
+      !(this.isHost && !this.trackPickLocked && room.state === 'LOBBY')
     );
     if (room.state === 'LOBBY' && this.lobbyHostTrackElem.value !== raceBaseTrackId(room.trackId)) {
       this.lobbyHostTrackElem.value = raceBaseTrackId(room.trackId);
@@ -714,6 +728,36 @@ export class RacePanel {
     this.runFeedback = feedback;
   }
 
+  /** The big "who won" banner above the table: winner, time and the margin. */
+  private renderWinnerBanner(
+    rows: readonly RaceResultRow[],
+    finishers: readonly RaceResultRow[],
+    myUserId: string | null
+  ): void {
+    const banner = this.element.querySelector('#race-winner') as HTMLElement | null;
+    if (!banner) return;
+    const winner = finishers.find((r) => r.place === 1) ?? finishers[0];
+    banner.classList.remove('hidden', 'race-winner-me', 'race-winner-lose');
+    if (!winner) {
+      banner.classList.add('race-winner-lose');
+      banner.innerHTML = '<div class="race-winner-title">NO WINNER</div><div class="race-winner-sub">NOBODY FINISHED</div>';
+      return;
+    }
+    const mine = rows.find((r) => r.userId === myUserId);
+    const won = winner.userId === myUserId;
+    const second = finishers.find((r) => r !== winner);
+    const margin = second && second.gapUs ? ` // BY ${formatRaceTime(Math.abs(second.gapUs))}` : '';
+    const track = this.lastRoom?.trackTitle ? ` // ${this.escape(this.lastRoom.trackTitle.toUpperCase())}` : '';
+    banner.classList.add(won ? 'race-winner-me' : 'race-winner-lose');
+    const title = won ? 'YOU WIN' : `${this.escape(winner.displayName.toUpperCase())} WINS`;
+    let sub = `${formatRaceTime(winner.finishTimeUs)}${margin}${track}`;
+    if (!won && mine) {
+      const yours = mine.dnf || mine.finishTimeUs === null ? 'DNF' : `${formatRaceTime(mine.finishTimeUs)} // PLACE ${mine.place ?? '--'}`;
+      sub += ` // YOU: ${yours}`;
+    }
+    banner.innerHTML = `<div class="race-winner-title">${title}</div><div class="race-winner-sub">${sub}</div>`;
+  }
+
   public renderResults(
     rows: readonly RaceResultRow[],
     myUserId: string | null,
@@ -721,6 +765,8 @@ export class RacePanel {
   ): void {
     const finishers = rows.filter((r) => r.finishTimeUs !== null && !r.dnf);
     this.resultsTitleElem.textContent = finishers.length === 0 ? 'RACE COMPLETE // NO FINISH' : 'RACE COMPLETE';
+
+    this.renderWinnerBanner(rows, finishers, myUserId);
 
     this.resultsElem.innerHTML = '';
     rows.forEach((row) => {

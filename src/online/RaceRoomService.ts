@@ -284,7 +284,14 @@ export function shouldAcceptRemoteGhost(
 }
 
 export type MatchmakingReply =
-  | { ok: true; status: 'WAITING' | 'MATCHED' | 'NONE'; role: 'HOST' | 'GUEST' | null; inviteCode: string | null }
+  | {
+      ok: true;
+      status: 'WAITING' | 'MATCHED' | 'NONE';
+      role: 'HOST' | 'GUEST' | null;
+      inviteCode: string | null;
+      /** HOST only: the signal the server drew from the two players' choices. */
+      pickedTrackId: string | null;
+    }
   | { ok: false; detail: string };
 
 export class RaceRoomService {
@@ -525,8 +532,14 @@ export class RaceRoomService {
   // Once two players meet, the HOST makes an ordinary room and publishes its code;
   // the GUEST picks the code up and joins. The host then chooses the song.
 
-  public async matchmakingFind(mode: 'SURF' | 'NORMAL'): Promise<MatchmakingReply> {
-    return this.matchmakingCall('race_mm_find_v1', { p_mode: mode });
+  public async matchmakingFind(mode: 'SURF' | 'NORMAL', trackId: string): Promise<MatchmakingReply> {
+    const reply = await this.matchmakingCall('race_mm_find_v1', { p_mode: mode, p_track_id: trackId });
+    // Before the v2 migration is applied the function only takes the mode: fall back
+    // to it so matchmaking keeps working (the host then opens the room on its own signal).
+    if (!reply.ok && /p_track_id|could not find the function|schema cache/i.test(reply.detail)) {
+      return this.matchmakingCall('race_mm_find_v1', { p_mode: mode });
+    }
+    return reply;
   }
 
   public async matchmakingPoll(): Promise<MatchmakingReply> {
@@ -552,12 +565,13 @@ export class RaceRoomService {
     const { data, error } = await client.rpc(fn, args);
     if (error) return { ok: false, detail: error.message };
     const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
-    if (!row) return { ok: true, status: 'NONE', role: null, inviteCode: null };
+    if (!row) return { ok: true, status: 'NONE', role: null, inviteCode: null, pickedTrackId: null };
     return {
       ok: true,
       status: row.status === 'MATCHED' || row.status === 'WAITING' ? row.status : 'NONE',
       role: row.role === 'HOST' || row.role === 'GUEST' ? row.role : null,
-      inviteCode: typeof row.invite_code === 'string' ? row.invite_code : null
+      inviteCode: typeof row.invite_code === 'string' ? row.invite_code : null,
+      pickedTrackId: typeof row.picked_track_id === 'string' ? row.picked_track_id : null
     };
   }
 
