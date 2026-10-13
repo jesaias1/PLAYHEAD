@@ -120,15 +120,12 @@ export class RacePanel {
         <div class="race-landing-grid" aria-hidden="true"></div>
         <div class="race-landing-head">
           <h1 class="race-landing-title">ONLINE RACE</h1>
-          <p class="race-landing-tagline">RACE THE SIGNAL TOGETHER</p>
+          <p class="race-landing-tagline">RACE ANOTHER PLAYER TO THE FINISH</p>
         </div>
-        <div class="race-quick" id="race-quick">
-          <button class="btn-hero btn-terminal-exec race-cta race-find-btn" id="race-find-opponent" type="button">> FIND OPPONENT</button>
-          <div class="race-find-status" id="race-find-status" role="status" aria-live="polite">PICK YOUR SIGNAL BELOW // IF YOU AND YOUR OPPONENT PICK DIFFERENT SIGNALS, ONE IS DRAWN AT RANDOM</div>
-        </div>
-        <div class="race-landing-cols">
-          <section class="race-col race-col-create" aria-label="Create race">
-            <div class="race-col-head"><span class="race-col-index">01</span> CREATE RACE</div>
+
+        <section class="race-step" aria-label="Step 1: pick your signal">
+          <div class="race-step-head"><span class="race-step-num">1</span> PICK YOUR SIGNAL <span class="race-step-sub">the song and mode you want to race. It is locked in before the race loads.</span></div>
+          <div class="race-step-body race-pick">
             <div class="race-hero" id="race-create-hero">
               <div class="race-hero-title" id="race-create-title">--</div>
               <div class="race-hero-meta">
@@ -136,30 +133,51 @@ export class RacePanel {
                 <span class="race-hero-diff" id="race-create-diff">--</span>
               </div>
             </div>
-            <label class="race-field-label" for="race-track-select">SIGNAL</label>
-            <select class="online-select race-track-select" id="race-track-select" aria-label="Selected signal"></select>
-            <label>MODE <select id="race-mode" aria-label="Race mode"><option value="SURF">Surf</option><option value="NORMAL">Platforms</option></select></label>
-            <span class="race-field-label race-racers-label" id="race-racers-label">RACERS</span>
-            <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
-            <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
-              <option value="2">2 RACERS</option>
-              <option value="3">3 RACERS</option>
-              <option value="4" selected>4 RACERS // RECOMMENDED</option>
-              <option value="6">6 RACERS</option>
-              <option value="8">8 RACERS</option>
-            </select>
-            <button class="btn-hero btn-terminal-exec race-cta" id="race-create-room" type="button">> CREATE RACE</button>
-          </section>
-          <section class="race-col race-col-join" aria-label="Join race">
-            <div class="race-col-head"><span class="race-col-index">02</span> JOIN RACE</div>
-            <label class="race-field-label" for="race-join-input">ROOM CODE</label>
-            <input class="race-code-input" id="race-join-input" type="text" maxlength="8"
-                   inputmode="text" placeholder="ENTER CODE" autocomplete="off"
-                   spellcheck="false" autocapitalize="characters" aria-label="Room code" />
-            <button class="btn-hero btn-terminal-exec race-cta" id="race-join-btn" type="button">> JOIN RACE</button>
-            <div class="race-join-hint">Ask the host for the room code, then press ENTER.</div>
-          </section>
-        </div>
+            <div class="race-pick-fields">
+              <label class="race-field-label" for="race-track-select">SIGNAL</label>
+              <select class="online-select race-track-select" id="race-track-select" aria-label="Selected signal"></select>
+              <label class="race-field-label" for="race-mode">MODE</label>
+              <select id="race-mode" aria-label="Race mode"><option value="SURF">Surf</option><option value="NORMAL">Platforms</option></select>
+            </div>
+          </div>
+        </section>
+
+        <section class="race-step" aria-label="Step 2: choose how to play">
+          <div class="race-step-head"><span class="race-step-num">2</span> CHOOSE HOW TO PLAY</div>
+          <div class="race-options">
+            <div class="race-option race-option-main" id="race-quick">
+              <div class="race-option-title">QUICK MATCH</div>
+              <div class="race-option-desc">Race a random player right now (1v1).</div>
+              <button class="btn-hero btn-terminal-exec race-cta race-find-btn" id="race-find-opponent" type="button">> FIND OPPONENT</button>
+              <div class="race-find-status" id="race-find-status" role="status" aria-live="polite">PICK YOUR SIGNAL BELOW // IF YOU AND YOUR OPPONENT PICK DIFFERENT SIGNALS, ONE IS DRAWN AT RANDOM</div>
+            </div>
+            <div class="race-option">
+              <div class="race-option-title">PRIVATE ROOM</div>
+              <div class="race-option-desc">Make a room and send the code to your friends.</div>
+              <span class="race-field-label race-racers-label" id="race-racers-label">RACERS</span>
+              <div class="race-capacity" id="race-capacity-seg" role="group" aria-labelledby="race-racers-label"></div>
+              <select class="race-capacity-native" id="race-capacity-select" aria-label="Racer capacity" tabindex="-1">
+                <option value="2">2 RACERS</option>
+                <option value="3">3 RACERS</option>
+                <option value="4" selected>4 RACERS // RECOMMENDED</option>
+                <option value="6">6 RACERS</option>
+                <option value="8">8 RACERS</option>
+              </select>
+              <button class="btn-hero btn-terminal-exec race-cta" id="race-create-room" type="button">> CREATE ROOM</button>
+            </div>
+            <div class="race-option">
+              <div class="race-option-title">JOIN A FRIEND</div>
+              <div class="race-option-desc">Got a room code? Type it in and join.</div>
+              <label class="race-field-label" for="race-join-input">ROOM CODE</label>
+              <input class="race-code-input" id="race-join-input" type="text" maxlength="8"
+                     inputmode="text" placeholder="ENTER CODE" autocomplete="off"
+                     spellcheck="false" autocapitalize="characters" aria-label="Room code" />
+              <button class="btn-hero btn-terminal-exec race-cta" id="race-join-btn" type="button">> JOIN ROOM</button>
+              <div class="race-join-hint">The host's room code is shown in their lobby.</div>
+            </div>
+          </div>
+        </section>
+
         <div class="online-hint race-landing-hint">
           First to the finish wins. 2-8 racers, official Signal Pack tracks only.
           Everyone starts on one synchronized clock.
@@ -483,7 +501,7 @@ export class RacePanel {
   public setTrackPickLocked(locked: boolean, note = ''): void {
     this.trackPickLocked = locked;
     const noteElem = this.element.querySelector('#race-pick-note') as HTMLElement | null;
-    if (noteElem) noteElem.textContent = locked ? note : '';
+    if (noteElem) noteElem.textContent = this.trackPickLocked ? note : '';
     if (locked) (this.element.querySelector('#race-host-track-row') as HTMLElement | null)?.classList.add('hidden');
   }
 
@@ -514,7 +532,7 @@ export class RacePanel {
     (this.element.querySelector('#race-results-lobby') as HTMLButtonElement).disabled = !isHost;
     if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
     // Only the host sees the track picker, and only while the room is unlocked.
-    const canPick = isHost && !this.trackPickLocked && (this.lastRoom?.state ?? 'LOBBY') === 'LOBBY';
+    const canPick = false; // the signal is chosen before the room exists, never while it loads
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
       'hidden',
       !canPick
@@ -553,7 +571,7 @@ export class RacePanel {
     // Host track picker: only visible, unlocked, host-only.
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
       'hidden',
-      !(this.isHost && !this.trackPickLocked && room.state === 'LOBBY')
+      true
     );
     if (room.state === 'LOBBY' && this.lobbyHostTrackElem.value !== raceBaseTrackId(room.trackId)) {
       this.lobbyHostTrackElem.value = raceBaseTrackId(room.trackId);

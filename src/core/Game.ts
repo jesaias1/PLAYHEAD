@@ -3036,7 +3036,9 @@ export class Game {
         // ONLINE RACE: until GO the player is staged on the start platform and
         // the run timer does not advance, so both clients start from the same
         // authoritative zero. Physics owns every frame after GO.
-        if ((this.raceActive || this.friendRaceWorld) && this.racePhase !== 'RACING' && !this.isFinished) {
+        // Staged until GO. Deliberately NOT conditioned on isFinished: a flag left
+        // over from an earlier solo run must never free a racer before the start.
+        if ((this.raceActive || this.friendRaceWorld) && this.racePhase !== 'RACING' && this.racePhase !== 'FINISHED') {
           this.holdForRaceStart();
           const songTime = this.audioEngine.getCurrentTime();
           this.world.update(songTime, this.playerController.position, this.cameraController.yaw, dt, this.environment);
@@ -4237,9 +4239,23 @@ export class Game {
 
     // The RPC sets the server's authorized-write flag itself, so the guard
     // accepts the COUNTDOWN -> RUNNING transition. Report honestly if it fails.
-    void raceRoomService.markRunning().then((r) => {
-      if (!r.ok) this.ui.raceHud.showNotice(`RUNNING FLAG FAILED // ${r.detail}`);
-    });
+    // The server only flips COUNTDOWN -> RUNNING once ITS clock passes the start
+    // time, and silently ignores an earlier request. This client's GO can land a
+    // few milliseconds early, so keep asking until the room really is RUNNING:
+    // otherwise the finish could never be reported.
+    const raceId = raceRoomService.getRaceId();
+    const ensureRunning = async (attempt: number): Promise<void> => {
+      if (!this.raceActive || raceRoomService.getRaceId() !== raceId) return;
+      const r = await raceRoomService.markRunning();
+      await raceRoomService.refreshRoomAndPlayers();
+      if (raceRoomService.getRoom()?.state === 'RUNNING') return;
+      if (attempt >= 20) {
+        this.ui.raceHud.showNotice(`RUNNING FLAG FAILED // ${r.detail}`);
+        return;
+      }
+      window.setTimeout(() => void ensureRunning(attempt + 1), 400);
+    };
+    void ensureRunning(0);
   }
 
   /** Holds the player staged on the start platform until GO. */
@@ -5777,19 +5793,30 @@ export class Game {
       checkpointTotal: this.currentTrack?.checkpoints.length ?? 0
     };
     const raceId = raceRoomService.getRaceId();
+    // The finish MUST reach the server: it is retried (about 40 s) through a late
+    // COUNTDOWN->RUNNING flag, a lost connection, or a racer flagged disconnected.
+    let attempts = 0;
     const report = async (): Promise<void> => {
       if (!this.raceActive || raceRoomService.getRaceId() !== raceId) return;
       const mine = raceRoomService.getPlayers().find(p => p.userId === authService.getUserId());
       if (mine?.finishUs !== null && mine?.finishUs !== undefined) return;
-      if (raceRoomService.getRoom()?.state === 'COUNTDOWN') {
-        window.setTimeout(() => void report(), 100);
+      if (++attempts > 40) {
+        this.ui.raceHud.showNotice('FINISH NOT CONFIRMED // CHECK YOUR CONNECTION');
         return;
       }
-      if (raceRoomService.getRoom()?.state !== 'RUNNING') return;
+      const state = raceRoomService.getRoom()?.state;
+      if (state === 'EXPIRED' || state === 'LOBBY') return;
+      if (state !== 'RUNNING' && state !== 'FINISHED') {
+        // Not running yet on this client's copy of the room: look again shortly.
+        window.setTimeout(() => void report(), 250);
+        return;
+      }
       const result = await raceRoomService.reportFinish(progress);
       if (!result.ok && this.raceActive && raceRoomService.getRaceId() === raceId) {
         this.ui.raceHud.showNotice(`FINISH PENDING // ${result.detail}`);
-        window.setTimeout(() => void report(), 2000);
+        // A racer marked disconnected cannot finish: say we are here, then retry.
+        if (/disconnect/i.test(result.detail)) void raceRoomService.heartbeat();
+        window.setTimeout(() => void report(), 1000);
       }
     };
     void report();

@@ -632,3 +632,21 @@ html, body { background: var(--desktop); font-family: var(--font-sans); -webkit-
 #ui-root .race-winner-lose .race-winner-title { color: #ff6a5c; text-shadow: 0 0 14px rgba(255, 106, 92, 0.4); }
 #ui-root .race-pick-note { font: 15px/1.2 var(--font-mono); color: var(--accent-color, #00f0ff); margin-top: 2px; }
 #ui-root .race-find-status { text-align: center; max-width: 560px; }
+
+/* Online race landing: two clear steps (pick a signal, choose how to play). */
+#ui-root .race-step { margin: 0 0 10px; }
+#ui-root .race-step-head { font: 18px/1.2 var(--font-mono); display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; }
+#ui-root .race-step-num { display: inline-grid; place-items: center; width: 22px; height: 22px; background: #000080; color: #fff; font: 16px/1 var(--font-mono); }
+#ui-root .race-step-sub { font: 12px/1.2 var(--font-sans); color: var(--muted, #aaa); }
+#ui-root .race-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; align-items: start; }
+#ui-root .race-pick-fields { display: grid; gap: 4px; }
+#ui-root .race-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+#ui-root .race-option { box-shadow: var(--sunken); background: rgba(0, 0, 0, 0.25); padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#ui-root .race-option-main { outline: 2px solid var(--accent-color, #00f0ff); outline-offset: -2px; }
+#ui-root .race-option-title { font: 20px/1.1 var(--font-mono); }
+#ui-root .race-option-desc { font-size: 12px; color: var(--muted, #aaa); min-height: 2.4em; }
+#ui-root .race-option .race-cta { width: 100%; margin-top: auto; }
+#ui-root .race-option .race-code-input { width: 100%; letter-spacing: 3px; }
+@media (max-width: 820px) {
+  #ui-root .race-options, #ui-root .race-pick { grid-template-columns: 1fr; }
+}

@@ -96,7 +96,7 @@ export class ImportScreen {
 
   /** Opens 05 // ONLINE on the RACE subsection (e.g. from an invite URL). */
   public openRaceTab(): void {
-    this.switchModule(4);
+    this.switchModule(1);
     this.switchOnlineSection('race');
   }
 
@@ -106,7 +106,7 @@ export class ImportScreen {
 
   /** Opens 05 // ONLINE on the LEADERBOARD subsection. */
   public openLeaderboardTab(): void {
-    this.switchModule(4);
+    this.switchModule(1);
     this.switchOnlineSection('leaderboard');
   }
 
@@ -328,10 +328,10 @@ export class ImportScreen {
 
         <div class="import-tabs terminal-tabs" role="tablist" aria-label="m0vem1nt system modules">
           <button class="import-tab-btn active" id="tab-btn-showcase" type="button" role="tab" aria-selected="true" aria-controls="panel-showcase">Signal Pack</button>
+          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">Online</button>
           <button class="import-tab-btn" id="tab-btn-custom" type="button" role="tab" aria-selected="false" aria-controls="panel-custom" tabindex="-1">Custom Audio</button>
           <button class="import-tab-btn" id="tab-btn-lab" type="button" role="tab" aria-selected="false" aria-controls="panel-lab" tabindex="-1">Movement Lab</button>
           <button class="import-tab-btn" id="tab-btn-armory" type="button" role="tab" aria-selected="false" aria-controls="panel-armory" tabindex="-1">Armory</button>
-          <button class="import-tab-btn" id="tab-btn-online" type="button" role="tab" aria-selected="false" aria-controls="panel-online" tabindex="-1" title="RACE WITH FRIENDS + WORLD LEADERBOARD">Online</button>
         </div>
 
         <!-- 01: THE SIGNAL PACK PANEL: hero deck (selected signal) + catalog list. -->
@@ -1519,7 +1519,7 @@ export class ImportScreen {
 
   /** Opens 04 // ARMORY (used by the results OPEN IN ARMORY action). */
   public openArmoryTab(): void {
-    this.switchModule(3);
+    this.switchModule(4);
   }
 
   /**
@@ -1626,7 +1626,7 @@ export class ImportScreen {
   }
 
   private initEvents(): void {
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
+    const tabs = [this.tabShowcaseBtn, this.tabOnlineBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
     tabs.forEach((tab, index) => {
       tab.addEventListener('click', () => this.switchModule(index));
       tab.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -1801,14 +1801,14 @@ export class ImportScreen {
   }
 
   private switchModule(activeIndex: number): void {
-    if (activeIndex !== 3) this.clearArmoryPreview();
-    const tabs = [this.tabShowcaseBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn, this.tabOnlineBtn];
+    if (activeIndex !== 4) this.clearArmoryPreview();
+    const tabs = [this.tabShowcaseBtn, this.tabOnlineBtn, this.tabCustomBtn, this.tabLabBtn, this.tabArmoryBtn];
     const panels = [
       this.showcasePanel,
+      this.element.querySelector('#panel-online') as HTMLElement,
       this.customPanel,
       this.labPanel,
-      this.armoryPanel,
-      this.element.querySelector('#panel-online') as HTMLElement
+      this.armoryPanel
     ];
     if (activeIndex !== 0) this.stopPreview();
 
@@ -1826,10 +1826,10 @@ export class ImportScreen {
     // the sticky navigation is pinned where the player expects it.
     this.element
       .querySelector('.import-container')
-      ?.classList.toggle('import-container--inventory', activeIndex === 3);
-    this.element.classList.toggle('import-screen--top', activeIndex === 3);
+      ?.classList.toggle('import-container--inventory', activeIndex === 4);
+    this.element.classList.toggle('import-screen--top', activeIndex === 4);
 
-    if (activeIndex === 3) this.renderArmory();
+    if (activeIndex === 4) this.renderArmory();
   }
 
   /** Tears down the isolated Armory preview renderer on screen teardown. */

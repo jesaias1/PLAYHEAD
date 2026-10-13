@@ -40,10 +40,10 @@ describe('Top navigation', () => {
     expect(tabs).toHaveLength(5);
     expect(tabs).toEqual([
       'id="tab-btn-showcase"',
+      'id="tab-btn-online"',
       'id="tab-btn-custom"',
       'id="tab-btn-lab"',
-      'id="tab-btn-armory"',
-      'id="tab-btn-online"'
+      'id="tab-btn-armory"'
     ]);
   });
 
@@ -63,7 +63,7 @@ describe('Top navigation', () => {
 
   it('drives exactly five panels from switchModule', () => {
     const fn = methodBody(importScreen, 'private switchModule(', 900);
-    expect(fn).toMatch(/const tabs = \[[^\]]*tabOnlineBtn\s*\]/);
+    expect(fn).toMatch(/const tabs = \[[^\]]*tabArmoryBtn\s*\]/);
     expect(fn).not.toMatch(/tabRaceBtn|tabLeaderboardBtn/);
     expect(fn).toMatch(/#panel-online/);
   });
@@ -144,10 +144,10 @@ describe('Online section', () => {
 
   it('opening RACE or LEADERBOARD lands on the ONLINE tab with the right section', () => {
     const race = methodBody(importScreen, 'public openRaceTab(', 220);
-    expect(race).toMatch(/switchModule\(4\)/);
+    expect(race).toMatch(/switchModule\(1\)/);
     expect(race).toMatch(/switchOnlineSection\('race'\)/);
     const lb = methodBody(importScreen, 'public openLeaderboardTab(', 220);
-    expect(lb).toMatch(/switchModule\(4\)/);
+    expect(lb).toMatch(/switchModule\(1\)/);
     expect(lb).toMatch(/switchOnlineSection\('leaderboard'\)/);
   });
 
@@ -464,7 +464,7 @@ describe('No functionality lost', () => {
 
   it('the wide inventory console is applied only to the Armory tab', () => {
     const fn = methodBody(importScreen, 'private switchModule(', 1200);
-    expect(fn).toMatch(/import-container--inventory', activeIndex === 3/);
+    expect(fn).toMatch(/import-container--inventory', activeIndex === 4/);
   });
 
   it('every cosmetic id still reaches the inventory', () => {

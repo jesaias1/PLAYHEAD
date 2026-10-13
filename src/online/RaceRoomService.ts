@@ -962,7 +962,14 @@ export class RaceRoomService {
     const client = this.onlineClient.getClient();
     const userId = this.auth.getUserId();
     if (!client || !userId || !this.room) return { ok: false, detail: 'no room' };
-    if (this.room.state !== 'RUNNING') return { ok: false, detail: 'race is not running' };
+    if (this.room.state !== 'RUNNING') {
+      // This copy of the room may simply be behind: the server flips COUNTDOWN to
+      // RUNNING only when a racer asks after the start time, and that update may
+      // not have reached us. Ask again, then re-read the room, before giving up.
+      await this.markRunning();
+      await this.refreshRoomAndPlayers();
+      if ((this.room as RaceRoom | null)?.state !== 'RUNNING') return { ok: false, detail: 'race is not running' };
+    }
     try {
       const { error } = await client.rpc('race_report_finish_v2', {
         p_room_id: this.room.id,
