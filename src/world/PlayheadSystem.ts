@@ -78,6 +78,7 @@ const CHANNEL_RESPONSE: Record<ReactiveChannel, { onset: number; energy: number;
 
 export class PlayheadSystem {
   private activeItems: PlayheadActivationMesh[] = [];
+  private frame = 0;
 
   constructor(_scene: THREE.Scene) {
     // Playhead activation manager initializes with the scene
@@ -131,6 +132,7 @@ export class PlayheadSystem {
     _playerYaw: number,
     visualState: MusicVisualState
   ): void {
+    this.frame = (this.frame + 1) | 0;
     // Process all registered items through Future / Present / Past states
     const songTime = visualState.time;
     const nowWindow = 65.0; // +/- 65 metres around player
@@ -148,6 +150,8 @@ export class PlayheadSystem {
       }
 
       const deltaArc = item.nodeArcLength - playerArcProgress;
+      // Far-away trim is a faint, slowly moving glow: update a quarter of it per frame.
+      if ((deltaArc > 220 || deltaArc < -220) && ((i + this.frame) & 3) !== 0) continue;
 
       // Forward-propagating traveling pulse wave along route edges
       const isLine = item.mesh instanceof THREE.LineSegments || mat instanceof THREE.LineBasicMaterial;

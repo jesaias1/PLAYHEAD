@@ -197,13 +197,16 @@ export interface AdaptiveOptions {
   upshiftFps?: number;
   /** Minimum frames between tier changes (hysteresis). */
   minFramesBetweenChanges?: number;
+  /** Highest tier AUTO may climb to. */
+  maxTier?: Exclude<QualityTier, 'AUTO'>;
 }
 
 export const DEFAULT_ADAPTIVE_OPTIONS: Required<AdaptiveOptions> = {
   sampleWindow: 90,
   downshiftFps: 48,
   upshiftFps: 58,
-  minFramesBetweenChanges: 240
+  minFramesBetweenChanges: 240,
+  maxTier: 'ULTRA'
 };
 
 /** Ordered from cheapest to most expensive. */
@@ -221,12 +224,21 @@ export class AdaptiveQuality {
   private frameTimes: number[] = [];
   private framesSinceChange = 0;
   private options: Required<AdaptiveOptions>;
+  private refreshHz = 60;
 
   constructor(
     public tier: Exclude<QualityTier, 'AUTO'> = AUTO_START_TIER,
     options: AdaptiveOptions = {}
   ) {
     this.options = { ...DEFAULT_ADAPTIVE_OPTIONS, ...options };
+  }
+
+  /**
+   * The display's refresh rate. On a 120/144 Hz screen "58 fps" is a heavy
+   * drop, so the thresholds scale up with it (they are unchanged at 60 Hz).
+   */
+  public setRefreshHz(hz: number): void {
+    this.refreshHz = Number.isFinite(hz) ? Math.max(30, Math.min(360, hz)) : 60;
   }
 
   public get averageFps(): number {
@@ -254,11 +266,20 @@ export class AdaptiveQuality {
 
     const fps = this.averageFps;
     const idx = TIER_ORDER.indexOf(this.tier);
+    const maxIdx = TIER_ORDER.indexOf(this.options.maxTier);
     let nextIdx = idx;
 
-    if (fps < this.options.downshiftFps && idx > 0) {
+    let down = this.options.downshiftFps;
+    let up = this.options.upshiftFps;
+    if (this.refreshHz > 75) {
+      const target = Math.min(this.refreshHz, 165);
+      down = Math.max(down, target * 0.8);
+      up = Math.max(up, target * 0.95);
+    }
+
+    if (fps < down && idx > 0) {
       nextIdx = idx - 1;
-    } else if (fps > this.options.upshiftFps && idx < TIER_ORDER.length - 1) {
+    } else if (fps > up && idx < maxIdx) {
       nextIdx = idx + 1;
     }
 

@@ -205,6 +205,7 @@ export class ViewmodelController {
   private trailPositions = new Float32Array(SPIN_TRAIL_MAX_POINTS * 2 * 3);
   private trailColors = new Float32Array(SPIN_TRAIL_MAX_POINTS * 2 * 3);
   private readonly trailPoints: { p: THREE.Vector3; t: number }[] = [];
+  private readonly trailPool: THREE.Vector3[] = [];
   private trailStrength = 0;
   /** Spin speed from settings (1 = default), and the audio hooks. */
   private spinSpeedScale = 1;
@@ -668,12 +669,16 @@ export class ViewmodelController {
     const now = this.actionClock;
     if (whirling) {
       this.rootGroup.updateMatrixWorld(true);
-      const p = (this.trailPoints.length >= SPIN_TRAIL_MAX_POINTS ? this.trailPoints.shift()!.p : new THREE.Vector3())
+      const p = (this.trailPoints.length >= SPIN_TRAIL_MAX_POINTS
+        ? this.trailPoints.shift()!.p
+        : (this.trailPool.pop() ?? new THREE.Vector3()))
         .copy(KARAMBIT_TIP)
         .applyMatrix4(this.rigInstance.knifeFlourishGroup.matrixWorld);
       this.trailPoints.push({ p, t: now });
     }
-    while (this.trailPoints.length > 0 && now - this.trailPoints[0].t > SPIN_TRAIL_LIFE) this.trailPoints.shift();
+    while (this.trailPoints.length > 0 && now - this.trailPoints[0].t > SPIN_TRAIL_LIFE) {
+      this.trailPool.push(this.trailPoints.shift()!.p);
+    }
 
     const pts = this.trailPoints;
     if (this.trailStrength < 0.02 || pts.length < 2) {

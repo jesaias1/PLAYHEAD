@@ -3495,6 +3495,8 @@ export class Game {
     racePanel.setCallbacks({
       onCreateRoom: (trackId, capacity, mode) => void this.createRaceRoom(trackId, capacity, mode),
       onJoinRoom: (code) => void this.joinRaceRoom(code),
+      onFindOpponent: (trackId, mode) => void this.findRaceOpponent(trackId, mode),
+      onCancelFind: () => void this.cancelFindOpponent(),
       onSetReady: (ready) => {
         void raceRoomService.setReady(ready).then((result) => {
           // The lobby reflects the SERVER's answer, and reports a real failure.
@@ -3801,6 +3803,83 @@ export class Game {
       this.raceIdentities
     );
     void this.refreshRaceIdentities();
+  }
+
+  private matchSearchToken = 0;
+
+  /**
+   * FIND OPPONENT: waits in the server queue until another player searches the same
+   * mode. One of the two becomes host, makes the room and publishes its code; the
+   * other joins it. The host then picks the song in the normal lobby.
+   */
+  private async findRaceOpponent(trackId: string, mode: RaceMode): Promise<void> {
+    const panel = this.ui.importScreen.racePanel;
+    panel.clearError();
+    if (raceRoomService.getRoom()) return;
+    const token = ++this.matchSearchToken;
+    panel.setSearching(true, 'SEARCHING FOR AN OPPONENT...');
+    const started = Date.now();
+    const alive = (): boolean => token === this.matchSearchToken;
+    const fail = async (message: string): Promise<void> => {
+      if (!alive()) return;
+      this.matchSearchToken++;
+      await raceRoomService.matchmakingLeave();
+      panel.setSearching(false);
+      panel.showError(message);
+    };
+
+    let reply = await raceRoomService.matchmakingFind(mode);
+    for (;;) {
+      if (!alive()) return;
+      if (raceRoomService.getRoom()) {
+        // The player joined a room by code meanwhile: drop out of the queue.
+        await this.cancelFindOpponent();
+        return;
+      }
+      if (!reply.ok) {
+        const missing = /race_mm_|function|schema cache/i.test(reply.detail);
+        await fail(missing ? 'MATCHMAKING IS NOT AVAILABLE YET // CREATE A ROOM OR SHARE A CODE' : `MATCHMAKING FAILED // ${reply.detail.toUpperCase()}`);
+        return;
+      }
+      if (reply.status === 'MATCHED' && reply.role === 'HOST') {
+        panel.setSearching(true, 'OPPONENT FOUND // CREATING THE ROOM...');
+        await this.createRaceRoom(trackId, 2, mode);
+        const code = raceRoomService.getRoom()?.inviteCode;
+        if (!code || !(await raceRoomService.matchmakingPublish(code))) {
+          await fail('MATCH FOUND BUT THE ROOM COULD NOT BE SHARED // TRY AGAIN');
+          return;
+        }
+        this.matchSearchToken++;
+        panel.setSearching(false);
+        return;
+      }
+      if (reply.status === 'MATCHED' && reply.role === 'GUEST' && reply.inviteCode) {
+        panel.setSearching(true, 'OPPONENT FOUND // JOINING...');
+        this.matchSearchToken++;
+        await raceRoomService.matchmakingLeave();
+        panel.setSearching(false);
+        await this.joinRaceRoom(reply.inviteCode);
+        return;
+      }
+      if (Date.now() - started > 90_000) {
+        await fail('NO OPPONENT FOUND // TRY AGAIN OR CREATE A ROOM');
+        return;
+      }
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      panel.setSearching(
+        true,
+        reply.status === 'MATCHED' ? 'OPPONENT FOUND // WAITING FOR THEM TO OPEN THE ROOM...' : `SEARCHING FOR AN OPPONENT... ${seconds}s`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (!alive()) return;
+      reply = await raceRoomService.matchmakingPoll();
+    }
+  }
+
+  private async cancelFindOpponent(): Promise<void> {
+    this.matchSearchToken++;
+    this.ui.importScreen.racePanel.setSearching(false);
+    await raceRoomService.matchmakingLeave();
   }
 
   private async joinRaceRoom(code: string): Promise<void> {

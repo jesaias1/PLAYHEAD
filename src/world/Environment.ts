@@ -59,7 +59,9 @@ export class Environment {
    */
   public effectProfile: EffectIntensityProfile = resolveEffectProfile('STANDARD');
 
-  private adaptive: AdaptiveQuality = new AdaptiveQuality('HIGH');
+  // AUTO tops out at HIGH: ULTRA only costs pixels on high-DPI screens and made
+  // AUTO bounce between tiers (each change reallocates the render targets).
+  private adaptive: AdaptiveQuality = new AdaptiveQuality('HIGH', { maxTier: 'HIGH' });
 
   /** Camera-relative key light offset (a theme may move it, e.g. to its moon). */
   private keyLightOffset = DEFAULT_KEY_OFFSET.clone();
@@ -78,7 +80,27 @@ export class Environment {
    */
   public worldProfile: import('./SignalWorldProfile').OfficialWorldProfile | null = null;
 
+  /** Measures the display's refresh rate from the first idle frames, for AUTO quality. */
+  private probeRefreshRate(): void {
+    if (typeof requestAnimationFrame !== 'function') return;
+    const deltas: number[] = [];
+    let last = 0;
+    const step = (now: number): void => {
+      if (last > 0) deltas.push(now - last);
+      last = now;
+      if (deltas.length < 70) {
+        requestAnimationFrame(step);
+        return;
+      }
+      const sorted = deltas.slice(10).sort((a, b) => a - b);
+      const typical = sorted[Math.floor(sorted.length * 0.25)];
+      if (typical > 0) this.adaptive.setRefreshHz(1000 / typical);
+    };
+    requestAnimationFrame(step);
+  }
+
   constructor(container: HTMLElement) {
+    this.probeRefreshRate();
     // 1. Scene & Monumental Brutalist Fog (readable at distance)
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x07080a);
@@ -92,7 +114,7 @@ export class Environment {
     // 3. Renderer
     this.renderer = new THREE.WebGLRenderer({
       powerPreference: 'high-performance',
-      antialias: true,
+      antialias: false, // the post chain renders into non-MSAA targets; an MSAA backbuffer would only cost bandwidth
       alpha: false,
       stencil: false
     });

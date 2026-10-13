@@ -90,6 +90,26 @@ describe('Adaptive quality (AUTO) — hysteresis', () => {
     expect(adaptive.tier).toBe('HIGH');
   });
 
+  it('never climbs past maxTier', () => {
+    const adaptive = new AdaptiveQuality('HIGH', { maxTier: 'HIGH' });
+    for (let i = 0; i < 1500; i++) adaptive.sample(frameAt(60));
+    expect(adaptive.tier).toBe('HIGH');
+    const free = new AdaptiveQuality('HIGH');
+    for (let i = 0; i < 1500; i++) free.sample(frameAt(60));
+    expect(free.tier).toBe('ULTRA');
+  });
+
+  it('judges FPS against a high refresh rate: 70 fps on 144 Hz steps down, on 60 Hz it holds', () => {
+    const fast = new AdaptiveQuality('HIGH', { maxTier: 'HIGH' });
+    fast.setRefreshHz(144);
+    for (let i = 0; i < 600; i++) fast.sample(frameAt(70));
+    expect(fast.tier).not.toBe('HIGH');
+    const slow = new AdaptiveQuality('HIGH', { maxTier: 'HIGH' });
+    slow.setRefreshHz(60);
+    for (let i = 0; i < 600; i++) slow.sample(frameAt(70));
+    expect(slow.tier).toBe('HIGH');
+  });
+
   it('steps down only after a sustained bad window', () => {
     const adaptive = new AdaptiveQuality('HIGH');
     const { sampleWindow, minFramesBetweenChanges } = DEFAULT_ADAPTIVE_OPTIONS;

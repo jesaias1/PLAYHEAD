@@ -144,7 +144,7 @@ export class FlowRings {
   private readonly color = new THREE.Color();
   private readonly base = new THREE.Color(0x00f0ff);
   private lastPos: Vector3Like | null = null;
-  private time = 0;
+  private readonly white = new THREE.Color(1, 1, 1);
 
   constructor(private readonly scene: THREE.Scene) {
     this.group.name = 'FlowRings';
@@ -202,7 +202,6 @@ export class FlowRings {
 
   /** Advances the flashes and reports at most one ring hit this frame. */
   public update(dt: number, position: Vector3Like, enabled: boolean): FlowRingHit | null {
-    this.time += dt;
     this.group.visible = enabled && this.flat.length > 0;
     let result: FlowRingHit | null = null;
     if (enabled && this.lastPos) {
@@ -219,8 +218,15 @@ export class FlowRings {
       }
     }
     this.lastPos = { x: position.x, y: position.y, z: position.z };
-    for (let i = 0; i < this.flash.length; i++) this.flash[i] = Math.max(0, this.flash[i] - dt * 2.2);
-    if (this.mesh) this.refresh();
+    // Buffers are rewritten only while a ring is flashing (or was just hit).
+    let dirty = result !== null;
+    for (let i = 0; i < this.flash.length; i++) {
+      if (this.flash[i] > 0) {
+        this.flash[i] = Math.max(0, this.flash[i] - dt * 2.2);
+        dirty = true;
+      }
+    }
+    if (this.mesh && dirty) this.refresh();
     return result;
   }
 
@@ -230,15 +236,15 @@ export class FlowRings {
     for (let i = 0; i < this.flat.length; i++) {
       const ring = this.flat[i];
       const f = this.flash[i];
-      // A hit ring bursts outward and fades; one still waiting breathes softly.
-      const s = this.hit[i] ? 1 + (1 - f) * 0.9 : 1 + Math.sin(this.time * 2.2 + i) * 0.03;
+      // A hit ring bursts outward and fades.
+      const s = this.hit[i] ? 1 + (1 - f) * 0.9 : 1;
       this.dummy.position.set(ring.center.x, ring.center.y, ring.center.z);
       this.dummy.lookAt(ring.center.x + ring.forward.x, ring.center.y + ring.forward.y, ring.center.z + ring.forward.z);
       this.dummy.scale.setScalar(this.hit[i] && f <= 0 ? 0.0001 : s);
       this.dummy.updateMatrix();
       mesh.setMatrixAt(i, this.dummy.matrix);
       const bright = this.hit[i] ? f : 0.55;
-      this.color.copy(this.base).lerp(new THREE.Color(1, 1, 1), this.hit[i] ? 0.6 : 0.25).multiplyScalar(bright);
+      this.color.copy(this.base).lerp(this.white, this.hit[i] ? 0.6 : 0.25).multiplyScalar(bright);
       mesh.setColorAt(i, this.color);
     }
     mesh.instanceMatrix.needsUpdate = true;

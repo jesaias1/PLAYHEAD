@@ -46,6 +46,9 @@ export interface RaceCatalogEntry {
 export interface RacePanelCallbacks {
   onCreateRoom: (trackId: string, capacity: number, mode?: RaceMode) => void;
   onJoinRoom: (code: string) => void;
+  /** Quick match: search the queue for another player. */
+  onFindOpponent?: (trackId: string, mode: RaceMode) => void;
+  onCancelFind?: () => void;
   onSetReady: (ready: boolean) => void;
   onLeaveRoom: () => void;
   onRematch: () => void;
@@ -118,6 +121,10 @@ export class RacePanel {
         <div class="race-landing-head">
           <h1 class="race-landing-title">ONLINE RACE</h1>
           <p class="race-landing-tagline">RACE THE SIGNAL TOGETHER</p>
+        </div>
+        <div class="race-quick" id="race-quick">
+          <button class="btn-hero btn-terminal-exec race-cta race-find-btn" id="race-find-opponent" type="button">> FIND OPPONENT</button>
+          <div class="race-find-status" id="race-find-status" role="status" aria-live="polite"></div>
         </div>
         <div class="race-landing-cols">
           <section class="race-col race-col-create" aria-label="Create race">
@@ -251,6 +258,15 @@ export class RacePanel {
   }
 
   private initEvents(): void {
+    const findBtn = this.element.querySelector('#race-find-opponent') as HTMLButtonElement;
+    findBtn.addEventListener('click', () => {
+      if (this.searching) {
+        this.callbacks?.onCancelFind?.();
+        return;
+      }
+      const mode = (this.element.querySelector('#race-mode') as HTMLSelectElement).value as RaceMode;
+      this.callbacks?.onFindOpponent?.(this.selectElem.value, mode);
+    });
     (this.element.querySelector('#race-create-room') as HTMLButtonElement).addEventListener(
       'click',
       () => {
@@ -453,6 +469,17 @@ export class RacePanel {
     this.lobbyView.classList.add('hidden');
     this.resultsView.classList.remove('hidden');
     this.rematchNoteElem.textContent = this.isHost ? '' : 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
+  }
+
+  private searching = false;
+
+  /** Quick-match search state: the button turns into CANCEL and a status line counts up. */
+  public setSearching(searching: boolean, status = ''): void {
+    this.searching = searching;
+    const btn = this.element.querySelector('#race-find-opponent') as HTMLButtonElement | null;
+    const line = this.element.querySelector('#race-find-status') as HTMLElement | null;
+    if (btn) btn.textContent = searching ? '> CANCEL SEARCH' : '> FIND OPPONENT';
+    if (line) line.textContent = status;
   }
 
   public showError(message: string): void {

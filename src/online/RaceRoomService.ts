@@ -283,6 +283,10 @@ export function shouldAcceptRemoteGhost(
   return true;
 }
 
+export type MatchmakingReply =
+  | { ok: true; status: 'WAITING' | 'MATCHED' | 'NONE'; role: 'HOST' | 'GUEST' | null; inviteCode: string | null }
+  | { ok: false; detail: string };
+
 export class RaceRoomService {
   private channel: RealtimeChannel | null = null;
   private room: RaceRoom | null = null;
@@ -514,6 +518,47 @@ export class RaceRoomService {
       return { ok: true, room: this.room };
     }
     return { ok: false, detail: 'could not allocate a unique room code' };
+  }
+
+  // ---- MATCHMAKING ("Find Opponent") -------------------------------------------
+  // A small server-side queue (see supabase/migrations/*_race_matchmaking.sql).
+  // Once two players meet, the HOST makes an ordinary room and publishes its code;
+  // the GUEST picks the code up and joins. The host then chooses the song.
+
+  public async matchmakingFind(mode: 'SURF' | 'NORMAL'): Promise<MatchmakingReply> {
+    return this.matchmakingCall('race_mm_find_v1', { p_mode: mode });
+  }
+
+  public async matchmakingPoll(): Promise<MatchmakingReply> {
+    return this.matchmakingCall('race_mm_poll_v1', {});
+  }
+
+  public async matchmakingPublish(inviteCode: string): Promise<boolean> {
+    const client = this.onlineClient.getClient();
+    if (!client) return false;
+    const { data, error } = await client.rpc('race_mm_publish_v1', { p_invite_code: inviteCode });
+    return !error && data === true;
+  }
+
+  public async matchmakingLeave(): Promise<void> {
+    const client = this.onlineClient.getClient();
+    if (!client) return;
+    try { await client.rpc('race_mm_leave_v1'); } catch { /* best effort: stale entries expire server-side */ }
+  }
+
+  private async matchmakingCall(fn: string, args: Record<string, unknown>): Promise<MatchmakingReply> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.auth.getUserId()) return { ok: false, detail: 'not connected / not signed in' };
+    const { data, error } = await client.rpc(fn, args);
+    if (error) return { ok: false, detail: error.message };
+    const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+    if (!row) return { ok: true, status: 'NONE', role: null, inviteCode: null };
+    return {
+      ok: true,
+      status: row.status === 'MATCHED' || row.status === 'WAITING' ? row.status : 'NONE',
+      role: row.role === 'HOST' || row.role === 'GUEST' ? row.role : null,
+      inviteCode: typeof row.invite_code === 'string' ? row.invite_code : null
+    };
   }
 
   /** Guest: resolves a code to a room and joins it. */
