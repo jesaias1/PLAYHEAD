@@ -212,10 +212,17 @@ describe('Viewmodel System — Hands & Karambit', () => {
     const identity = new THREE.Quaternion();
 
     expect(vm.triggerSpin()).toBe(true);
-    // A click while the knife is still turning does not restart it.
-    for (let frame = 0; frame < 20; frame++) vm.update(0.016, player, camCtrl, 0, 0);
-    expect(vm.triggerSpin()).toBe(false);
-    expect(flourish.quaternion.angleTo(identity)).toBeGreaterThan(0.5);
+    // Mashing the button keeps the knife spinning, well past one spin's worth.
+    let lastAngle = 0;
+    for (let frame = 0; frame < 150; frame++) {
+      if (frame % 15 === 0) vm.triggerSpin();
+      vm.update(0.016, player, camCtrl, 0, 0);
+      if (frame > 20) expect(vm['spinAngle']).toBeGreaterThan(lastAngle);
+      lastAngle = vm['spinAngle'];
+    }
+    expect(vm['activeAction']).toBe('SPIN');
+    expect(lastAngle).toBeGreaterThan(Math.PI * 2 * 4);
+    expect(vm['fingerOpen']).toBeGreaterThan(0.9);
 
     // The ring's centre stays put while the knife turns round it.
     const ring = new THREE.Vector3(0, 0.0131, -0.0388);
@@ -227,8 +234,8 @@ describe('Viewmodel System — Hands & Karambit', () => {
     expect(rig.knifeGroup.rotation.x).toBeCloseTo(3.034, 4);
     expect(rig.knifeGroup.scale.x).toBeCloseTo(1.011, 4);
 
-    // Whole turns: the knife lands back exactly where it started.
-    for (let frame = 0; frame < 60; frame++) vm.update(0.016, player, camCtrl, 0, 0);
+    // Stop clicking: it slows to a whole turn and lands back where it started.
+    for (let frame = 0; frame < 200; frame++) vm.update(0.016, player, camCtrl, 0, 0);
     expect(vm['activeAction']).toBe('NONE');
     expect(flourish.quaternion.angleTo(identity)).toBeCloseTo(0, 6);
     expect(flourish.position.length()).toBeCloseTo(0, 6);

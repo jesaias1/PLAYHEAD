@@ -2720,11 +2720,21 @@ export class Game {
     });
 
     window.addEventListener('mousedown', (e) => {
-      if (e.button === 0 && this.cameraController.getIsLocked()) {
+      if ((e.button === 0 || e.button === 2) && this.cameraController.getIsLocked()) {
         if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.MOVEMENT_LAB)) {
-          if (this.viewmodelController.triggerSpin()) MovementSfx.getInstance().playKnifeSlash();
+          // Mouse1 keeps the knife spinning like a fidget toy; Mouse2 inspects (as F).
+          if (e.button === 0) {
+            if (this.viewmodelController.triggerSpin()) MovementSfx.getInstance().playKnifeSlash();
+          } else {
+            this.viewmodelController.triggerInspect();
+          }
         }
       }
+    });
+
+    // Mouse2 is the inspect key in play: no browser context menu over the game.
+    window.addEventListener('contextmenu', (e) => {
+      if (this.cameraController.getIsLocked()) e.preventDefault();
     });
 
     window.addEventListener('keydown', (e) => {

@@ -36,24 +36,16 @@ interface ActionKey {
 }
 
 /**
- * Knife spin, arm part: the hand lifts and turns in a little while the knife
- * whirls round the index finger, dips as the handle lands back in the palm,
- * then settles. View space: +x right, +y up, -z away from the camera.
+ * Knife spin, arm part: while the knife whirls the hand is held lifted and
+ * turned in a little. View space: +x right, +y up, -z away from the camera.
  */
-const SPIN_KEYS: ActionKey[] = [
-  { t: 0.14, pos: [-0.03, 0.03, 0], rot: [0.08, 0.3, 0.1], ease: 'out' },
-  { t: 0.62, pos: [-0.035, 0.035, 0], rot: [0.1, 0.34, 0.12], ease: 'smooth' },
-  { t: 0.74, pos: [-0.02, 0.01, 0], rot: [0, 0.16, 0.02], ease: 'in' },
-  { t: 0.92, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
-];
+const SPIN_HOLD_POS: [number, number, number] = [-0.033, 0.032, 0];
+const SPIN_HOLD_ROT: [number, number, number] = [0.09, 0.32, 0.11];
 
-/** Knife spin timings (s): the fingers open, the knife whirls, the fingers close on it. */
-const SPIN_OPEN_END = 0.13;
-const SPIN_WHIRL_START = 0.07;
-const SPIN_WHIRL_END = 0.68;
-const SPIN_CLOSE_START = 0.6;
-const SPIN_CLOSE_END = 0.84;
-const SPIN_TURNS = 2;
+/** Knife spin is a fidget toy: it runs while clicks keep coming, then catches. */
+const SPIN_SPEED = 20; // rad/s at full whirl (about 3 turns a second)
+const SPIN_SUSTAIN = 0.4; // s after the last click before the knife is caught
+const SPIN_CATCH_MIN_SPEED = 3; // rad/s: never crawl the last bit of a turn
 
 /**
  * The karambit's finger ring in knife-socket space: the centre of the hole and
@@ -61,11 +53,6 @@ const SPIN_TURNS = 2;
  */
 const KARAMBIT_RING_CENTER = new THREE.Vector3(0, 0.0131, -0.0388);
 const KARAMBIT_RING_AXIS = new THREE.Vector3(1, 0, 0);
-
-const smoothstep = (k: number): number => {
-  const c = clamp(k, 0, 1);
-  return c * c * (3 - 2 * c);
-};
 
 /**
  * Inspect: lift the knife to the middle of the view, show one flat of the
@@ -158,9 +145,16 @@ export class ViewmodelController {
   private actionTimer = 0;
   private actionDuration = 0;
   private actionKeys: ActionKey[] = [];
-  /** Knife spin: how open the fingers are (0..1), and where a re-spin starts from. */
+  /** Knife spin: how open the fingers are (0..1) and the knife's turn so far. */
   private fingerOpen = 0;
-  private fingerOpenFrom = 0;
+  private spinAngle = 0;
+  private spinOmega = 0;
+  private spinLastClick = -10;
+  /** The clicks stopped: the knife is slowing to the next whole turn. */
+  private spinCatching = false;
+  /** The knife is back at rest in the palm; the fingers are closing. */
+  private spinAtRest = false;
+  private spinDone = false;
   /** Finger rotations as the mixer left them, restored before it runs again. */
   private readonly fingerBaseQuats: THREE.Quaternion[] = [];
   private fingersPosed = false;
@@ -465,15 +459,23 @@ export class ViewmodelController {
   }
 
   /**
-   * Mouse1: the fingers open and the karambit spins round the index finger,
-   * then the hand closes on it again. A click while the knife is still turning
-   * is ignored; one after the catch flicks straight into the next spin.
-   * Returns whether a spin started so the caller can voice it. Presentation only.
+   * Mouse1: the fingers open and the karambit spins round the index finger.
+   * Every click keeps it going, so mashing the button is a fidget toy; when the
+   * clicks stop the knife slows to a whole turn, drops into the palm and the
+   * hand closes on it. A click at any point, even mid-catch, picks the spin up
+   * again without restarting. Returns true so the caller can voice each click.
+   * Presentation only.
    */
   public triggerSpin(): boolean {
-    if (this.activeAction === 'SPIN' && this.actionTimer < SPIN_WHIRL_END) return false;
-    this.fingerOpenFrom = this.fingerOpen;
-    this.beginAction('SPIN', SPIN_KEYS);
+    this.spinLastClick = this.actionClock;
+    this.spinCatching = false;
+    this.spinAtRest = false;
+    if (this.activeAction !== 'SPIN') {
+      this.spinAngle = 0;
+      this.spinOmega = 0;
+      this.spinDone = false;
+      this.beginAction('SPIN', []);
+    }
     this.audioImpact = Math.max(this.audioImpact, 1.4);
     return true;
   }
@@ -492,7 +494,45 @@ export class ViewmodelController {
     this.activeAction = kind;
     this.actionKeys = keys;
     this.actionTimer = 0;
-    this.actionDuration = keys[keys.length - 1].t;
+    this.actionDuration = keys.length > 0 ? keys[keys.length - 1].t : Infinity;
+  }
+
+  /**
+   * Advances the knife spin: the whirl while clicks keep coming, the catch to a
+   * whole turn once they stop, then the fingers closing. Sets the arm pose the
+   * keyed-action code applies and the finger opening applyKnifeSpin uses.
+   */
+  private updateSpin(dt: number): void {
+    if (!this.spinCatching && !this.spinAtRest && this.actionClock - this.spinLastClick > SPIN_SUSTAIN) {
+      this.spinCatching = true;
+    }
+
+    if (!this.spinAtRest) {
+      if (this.spinCatching) {
+        const target = Math.ceil((this.spinAngle - 1e-4) / (Math.PI * 2)) * Math.PI * 2;
+        const remaining = target - this.spinAngle;
+        this.spinOmega = Math.min(this.spinOmega, Math.max(SPIN_CATCH_MIN_SPEED, remaining * 9));
+        if (remaining <= this.spinOmega * dt) {
+          this.spinAngle = target;
+          this.spinOmega = 0;
+          this.spinAtRest = true;
+        } else {
+          this.spinAngle += this.spinOmega * dt;
+        }
+      } else {
+        this.spinOmega += (SPIN_SPEED - this.spinOmega) * Math.min(1, dt * 10);
+        this.spinAngle += this.spinOmega * dt;
+      }
+    }
+
+    const closing = this.spinAtRest;
+    const blend = Math.min(1, dt * 16);
+    this.fingerOpen += ((closing ? 0 : 1) - this.fingerOpen) * blend;
+    const hold = closing ? 0 : 1;
+    this.actionPos.lerp(SCRATCH_C.fromArray(SPIN_HOLD_POS).multiplyScalar(hold), blend);
+    this.actionRot.lerp(SCRATCH_C.fromArray(SPIN_HOLD_ROT).multiplyScalar(hold), blend);
+
+    if (closing && this.fingerOpen < 0.02 && this.actionPos.lengthSq() < 1e-6) this.spinDone = true;
   }
 
   /**
@@ -514,22 +554,25 @@ export class ViewmodelController {
     if (handR) group.worldToLocal(handR.getWorldPosition(this.actionPivot));
     else this.actionPivot.set(0.12, -0.12, -0.3);
 
-    // Sample the keys, blending out of the pose the action started from.
-    const keys = this.actionKeys;
-    const t = Math.min(this.actionTimer, this.actionDuration);
-    let i = 0;
-    while (i < keys.length - 1 && keys[i].t <= t) i++;
-    const b = keys[i];
-    const aT = i === 0 ? 0 : keys[i - 1].t;
-    const aPos = i === 0 ? this.actionFromPos : SCRATCH_A.fromArray(keys[i - 1].pos);
-    const aRot = i === 0 ? this.actionFromRot : SCRATCH_B.fromArray(keys[i - 1].rot);
-    const span = Math.max(1e-4, b.t - aT);
-    let k = Math.min(1, Math.max(0, (t - aT) / span));
-    if (b.ease === 'out') k = 1 - Math.pow(1 - k, 3);
-    else if (b.ease === 'in') k = k * k;
-    else k = k * k * (3 - 2 * k);
-    this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos), k);
-    this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot), k);
+    // Sample the keys, blending out of the pose the action started from. The
+    // spin has no keys: updateSpin has already set its pose.
+    if (this.activeAction !== 'SPIN') {
+      const keys = this.actionKeys;
+      const t = Math.min(this.actionTimer, this.actionDuration);
+      let i = 0;
+      while (i < keys.length - 1 && keys[i].t <= t) i++;
+      const b = keys[i];
+      const aT = i === 0 ? 0 : keys[i - 1].t;
+      const aPos = i === 0 ? this.actionFromPos : SCRATCH_A.fromArray(keys[i - 1].pos);
+      const aRot = i === 0 ? this.actionFromRot : SCRATCH_B.fromArray(keys[i - 1].rot);
+      const span = Math.max(1e-4, b.t - aT);
+      let k = Math.min(1, Math.max(0, (t - aT) / span));
+      if (b.ease === 'out') k = 1 - Math.pow(1 - k, 3);
+      else if (b.ease === 'in') k = k * k;
+      else k = k * k * (3 - 2 * k);
+      this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos), k);
+      this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot), k);
+    }
 
     // Preferred: pose the KNIFE ARM ALONE. The motion is applied to the root
     // bone of the right arm, so the off hand stays exactly in its idle pose at
@@ -579,13 +622,7 @@ export class ViewmodelController {
    */
   private applyKnifeSpin(): void {
     const rig = this.rigInstance;
-    const t = this.actionTimer;
-    this.fingerOpen =
-      t < SPIN_CLOSE_START
-        ? this.fingerOpenFrom + (1 - this.fingerOpenFrom) * smoothstep(t / SPIN_OPEN_END)
-        : 1 - smoothstep((t - SPIN_CLOSE_START) / (SPIN_CLOSE_END - SPIN_CLOSE_START));
-    const angle =
-      SPIN_TURNS * Math.PI * 2 * smoothstep((t - SPIN_WHIRL_START) / (SPIN_WHIRL_END - SPIN_WHIRL_START));
+    const angle = this.spinAngle;
 
     // Where the index finger carries the ring, in right-hand space.
     const index = rig.indexBaseBone;
@@ -621,6 +658,11 @@ export class ViewmodelController {
 
   private resetKnifeSpin(): void {
     this.fingerOpen = 0;
+    this.spinAngle = 0;
+    this.spinOmega = 0;
+    this.spinCatching = false;
+    this.spinAtRest = false;
+    this.spinDone = false;
     this.rigInstance.knifeFlourishGroup.position.set(0, 0, 0);
     this.rigInstance.knifeFlourishGroup.quaternion.identity();
   }
@@ -923,7 +965,9 @@ export class ViewmodelController {
     this.actionClock += dt;
     if (this.activeAction !== 'NONE') {
       this.actionTimer += dt;
-      const progress = Math.min(1.0, this.actionTimer / this.actionDuration);
+      if (this.activeAction === 'SPIN') this.updateSpin(dt);
+      const progress =
+        this.activeAction === 'SPIN' ? (this.spinDone ? 1 : 0) : Math.min(1.0, this.actionTimer / this.actionDuration);
       if (this.activeAction === 'PULSE') {
         const p = Math.sin(progress * Math.PI);
         this.actionGroup.position.set(0.002 * p, 0.014 * p, -0.012 * p);
