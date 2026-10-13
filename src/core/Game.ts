@@ -4423,16 +4423,29 @@ export class Game {
 
     // MAP VOTE: wait briefly for every racer's vote, then draw. Same inputs on every
     // client give the same map; the map is visual only, never part of the course.
+    // The SERVER draws it once (first racer to ask), so every client gets the same
+    // answer even if a vote packet was lost. Only if the server cannot answer do we
+    // fall back to the local draw from the votes we have seen.
     const racers = raceRoomService.getPlayers().filter((p) => p.connected).map((p) => p.userId);
-    for (let waited = 0; waited < 2500 && racers.some((id) => !raceRoomService.getMapVotes().has(id)); waited += 100) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    const draw = drawRaceMap(
+    const serverKey = await raceRoomService.resolveMap(this.defaultRaceMapKey());
+    let draw = drawRaceMap(
       raceRoomService.getRaceId() ?? room.raceId,
       raceRoomService.getMapVotes(),
       racers,
       this.defaultRaceMapKey()
     );
+    if (serverKey) draw = { key: serverKey, options: draw.options.includes(serverKey) ? draw.options : [...draw.options, serverKey], drawn: draw.options.length > 1 };
+    else {
+      for (let waited = 0; waited < 2500 && racers.some((id) => !raceRoomService.getMapVotes().has(id)); waited += 100) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      draw = drawRaceMap(
+        raceRoomService.getRaceId() ?? room.raceId,
+        raceRoomService.getMapVotes(),
+        racers,
+        this.defaultRaceMapKey()
+      );
+    }
     this.selectedMapKey = draw.key;
     const mapName = ENVIRONMENT_MAPS.find((m) => m.key === draw.key)?.name ?? draw.key;
     this.ui.raceHud.showNotice(`MAP // ${mapName}${draw.drawn ? ' (DRAWN FROM THE VOTES)' : ''}`);

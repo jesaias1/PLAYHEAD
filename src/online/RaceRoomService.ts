@@ -1386,6 +1386,7 @@ export class RaceRoomService {
     const me = this.auth.getUserId();
     if (!me) return;
     this.mapVotes.set(me, key);
+    void this.persistMapVote(key);
     this.callbacks.onMapVotes?.();
     const send = (): void => {
       const mine = this.mapVotes.get(me);
@@ -1394,6 +1395,37 @@ export class RaceRoomService {
     };
     send();
     if (this.mapVoteTimer === null) this.mapVoteTimer = window.setInterval(send, 1000);
+  }
+
+  /** Stores the vote on the server so the draw cannot depend on dropped packets. Best effort. */
+  private async persistMapVote(key: string): Promise<void> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return;
+    try {
+      await client.rpc('race_set_map_vote_v1', { p_room_id: this.room.id, p_key: key });
+    } catch {
+      /* the migration may not be applied yet: the broadcast still shows the vote */
+    }
+  }
+
+  /**
+   * Asks the server for this race's map. The first racer to ask triggers the one
+   * random draw; everyone else gets that same answer. Null if the server cannot
+   * answer (older database, network), so the caller falls back to the local draw.
+   */
+  public async resolveMap(defaultKey: string): Promise<string | null> {
+    const client = this.onlineClient.getClient();
+    if (!client || !this.room) return null;
+    try {
+      const answer = await Promise.race([
+        client.rpc('race_resolve_map_v1', { p_room_id: this.room.id, p_race_id: this.room.raceId, p_default: defaultKey }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+      ]);
+      if (!answer || answer.error || typeof answer.data !== 'string') return null;
+      return /^[A-Z0-9_]{2,40}$/.test(answer.data) ? answer.data : null;
+    } catch {
+      return null;
+    }
   }
 
   private stopMapVotes(): void {
