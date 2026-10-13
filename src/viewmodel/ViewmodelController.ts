@@ -65,19 +65,58 @@ const KARAMBIT_RING_CENTER = new THREE.Vector3(0, 0.0131, -0.0388);
 const KARAMBIT_RING_AXIS = new THREE.Vector3(1, 0, 0);
 /** The blade tip in the same space: the vertex farthest from the ring. */
 const KARAMBIT_TIP = new THREE.Vector3(0, -0.0815, 0.1921);
+/** Along the knife, ring to tip: rolling about it shows the blade's two flats. */
+const KARAMBIT_LENGTH_AXIS = KARAMBIT_TIP.clone().sub(KARAMBIT_RING_CENTER).normalize();
 
 /**
- * Inspect: lift the knife to the middle of the view, show one flat of the
- * blade, roll the wrist to show the other, then lower it again.
+ * Inspect: the hand lifts the knife to the middle of the view with the
+ * fingers a little loose, the KNIFE rolls over about its own length to show
+ * both flats (see INSPECT_AXIS), then the hand settles back. The arm itself
+ * only lifts and leans a little: swinging the whole arm to show the blade
+ * brought the cut end of the arm mesh into view at wide viewmodel FOV.
  */
 const INSPECT_KEYS: ActionKey[] = [
-  { t: 0.32, pos: [-0.12, 0.085, -0.02], rot: [0.12, 0.5, 0.95], ease: 'smooth' },
-  { t: 0.95, pos: [-0.125, 0.09, -0.015], rot: [0.16, 0.42, 1.08], ease: 'smooth' },
-  { t: 1.3, pos: [-0.115, 0.1, -0.03], rot: [-0.12, -0.12, 0.18], ease: 'smooth' },
-  { t: 1.95, pos: [-0.11, 0.105, -0.025], rot: [-0.16, -0.18, 0.1], ease: 'smooth' },
-  { t: 2.2, pos: [-0.11, 0.07, -0.02], rot: [0.05, 0.2, 0.5], ease: 'smooth' },
-  { t: 2.6, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
+  { t: 0.3, pos: [-0.1, 0.07, -0.02], rot: [0.1, 0.35, 0.3], ease: 'smooth' },
+  { t: 0.85, pos: [-0.105, 0.075, -0.02], rot: [0.12, 0.4, 0.35], ease: 'smooth' },
+  { t: 1.15, pos: [-0.1, 0.08, -0.02], rot: [0.02, 0.15, 0.2], ease: 'smooth' },
+  { t: 1.7, pos: [-0.1, 0.085, -0.025], rot: [-0.04, 0.05, 0.12], ease: 'smooth' },
+  { t: 2.05, pos: [-0.065, 0.045, -0.01], rot: [0.04, 0.15, 0.15], ease: 'smooth' },
+  { t: 2.4, pos: [0, 0, 0], rot: [0, 0, 0], ease: 'smooth' }
 ];
+/** The roll's turn (rad) at the end of each phase: show one flat, hold, show the other. */
+const INSPECT_ROLL_FIRST = [0.3, 0.85] as const;
+const INSPECT_ROLL_SECOND = [1.15, 1.7] as const;
+const INSPECT_FINGER_OPEN = 0.4;
+/** Viewmodel FOV the inspect and spin poses were tuned at. */
+const POSE_REFERENCE_FOV = 65;
+
+/** Fingers open one after another, index first, pinky last (and fold in the opposite order). */
+const FINGER_STAGGER_MAX = 0.45;
+const FINGER_DELAYS: Record<string, number> = { thumb: 0.04, index: 0, middle: 0.1, ring: 0.2, pinky: 0.3 };
+
+/** Springy settle: a small nod as the spin starts and as the knife drops back into the palm. */
+const KICK_STIFFNESS = 220;
+const KICK_DAMPING = 16;
+
+const smoothstep = (k: number): number => {
+  const c = clamp(k, 0, 1);
+  return c * c * (3 - 2 * c);
+};
+
+/** Ease with a slight overshoot at the end, so a roll settles instead of stopping dead. */
+const easeInOutBack = (x: number): number => {
+  const c = clamp(x, 0, 1);
+  const c2 = 1.525;
+  return c < 0.5
+    ? (Math.pow(2 * c, 2) * ((c2 + 1) * 2 * c - c2)) / 2
+    : (Math.pow(2 * c - 2, 2) * ((c2 + 1) * (c * 2 - 2) + c2) + 2) / 2;
+};
+
+/** How late a finger bone starts opening, from its name (three.js drops the dots: f_index01R). */
+const fingerDelay = (boneName: string): number => {
+  const m = /^(?:f_)?(thumb|index|middle|ring|pinky)0?(\d)/.exec(boneName);
+  return m ? FINGER_DELAYS[m[1]] + 0.04 * (Number(m[2]) - 1) : 0;
+};
 
 const SCRATCH_A = new THREE.Vector3();
 const SCRATCH_B = new THREE.Vector3();
@@ -169,6 +208,13 @@ export class ViewmodelController {
   private spinDone = false;
   private spinCatchTarget = 0;
   private spinRestTime = 0;
+  /** Springy nod and the wrist's small circle, added on top of the arm pose. */
+  private kickY = 0;
+  private kickVel = 0;
+  private readonly spinWobblePos = new THREE.Vector3();
+  private readonly spinWobbleRot = new THREE.Vector3();
+  private readonly posePos = new THREE.Vector3();
+  private readonly poseRot = new THREE.Vector3();
 
   // Speed line behind the blade tip while the knife whirls fast.
   private trailMesh: THREE.Mesh | null = null;
@@ -488,6 +534,8 @@ export class ViewmodelController {
    * Presentation only.
    */
   public triggerSpin(): boolean {
+    // The inspect rolls the knife about a different axis; let it finish first.
+    if (this.activeAction === 'INSPECT') return false;
     this.spinLastClick = this.actionClock;
     this.spinCatching = false;
     this.spinAtRest = false;
@@ -496,6 +544,7 @@ export class ViewmodelController {
       this.spinAngle = 0;
       this.spinOmega = 0;
       this.spinDone = false;
+      this.kickVel = -0.12; // a small dip before the hand lifts
       this.beginAction('SPIN', []);
     }
     this.audioImpact = Math.max(this.audioImpact, 1.4);
@@ -546,6 +595,8 @@ export class ViewmodelController {
           this.spinAngle = this.spinCatchTarget;
           this.spinOmega = 0;
           this.spinAtRest = true;
+          this.kickVel = -0.16; // the handle lands in the palm
+          this.audioImpact = Math.max(this.audioImpact, 0.9);
         } else {
           this.spinAngle += this.spinOmega * dt;
         }
@@ -563,7 +614,42 @@ export class ViewmodelController {
     this.actionPos.lerp(SCRATCH_C.fromArray(SPIN_HOLD_POS).multiplyScalar(hold), blend);
     this.actionRot.lerp(SCRATCH_C.fromArray(SPIN_HOLD_ROT).multiplyScalar(hold), blend);
 
-    if (closing && this.fingerOpen < 0.03 && this.actionPos.lengthSq() < 1e-6) this.spinDone = true;
+    // Follow-through: a springy nod, and a small circle of the wrist in time with the knife.
+    const h = Math.min(dt, 0.033);
+    this.kickVel += (-KICK_STIFFNESS * this.kickY - KICK_DAMPING * this.kickVel) * h;
+    this.kickY += this.kickVel * h;
+    const swirl = Math.min(1, this.spinOmega / SPIN_SPEED) * this.fingerOpen;
+    this.spinWobblePos.set(0, this.kickY + 0.004 * Math.sin(this.spinAngle * 2) * swirl, 0);
+    this.spinWobbleRot.set(
+      -this.kickY * 3 + 0.035 * Math.sin(this.spinAngle) * swirl,
+      0.03 * Math.cos(this.spinAngle) * swirl,
+      0
+    );
+
+    if (
+      closing &&
+      this.fingerOpen < 0.03 &&
+      this.actionPos.lengthSq() < 1e-6 &&
+      Math.abs(this.kickY) < 1e-3 &&
+      Math.abs(this.kickVel) < 0.02
+    ) {
+      this.spinDone = true;
+    }
+  }
+
+  /** Inspect: the knife's roll and how loosely the hand holds it, from the action clock. */
+  private updateInspect(): number {
+    const t = this.actionTimer;
+    const roll = (a: readonly [number, number]): number => easeInOutBack((t - a[0]) / (a[1] - a[0]));
+    let angle: number;
+    if (t <= INSPECT_ROLL_FIRST[0]) angle = 0;
+    else if (t < INSPECT_ROLL_FIRST[1]) angle = Math.PI * roll(INSPECT_ROLL_FIRST);
+    else if (t <= INSPECT_ROLL_SECOND[0]) angle = Math.PI;
+    else if (t < INSPECT_ROLL_SECOND[1]) angle = Math.PI + Math.PI * roll(INSPECT_ROLL_SECOND);
+    else angle = Math.PI * 2;
+    this.fingerOpen =
+      INSPECT_FINGER_OPEN * smoothstep((t - 0.1) / 0.3) * (1 - smoothstep((t - 1.85) / 0.35));
+    return angle;
   }
 
   /**
@@ -675,20 +761,29 @@ export class ViewmodelController {
     // spin has no keys: updateSpin has already set its pose.
     if (this.activeAction !== 'SPIN') {
       const keys = this.actionKeys;
+      // The arm reaches further into view as the FOV widens: shrink the pose to match.
+      const reach =
+        this.activeAction === 'INSPECT'
+          ? clamp(
+              Math.tan((POSE_REFERENCE_FOV * Math.PI) / 360) / Math.tan((this.camera.fov * Math.PI) / 360),
+              0.55,
+              1
+            )
+          : 1;
       const t = Math.min(this.actionTimer, this.actionDuration);
       let i = 0;
       while (i < keys.length - 1 && keys[i].t <= t) i++;
       const b = keys[i];
       const aT = i === 0 ? 0 : keys[i - 1].t;
-      const aPos = i === 0 ? this.actionFromPos : SCRATCH_A.fromArray(keys[i - 1].pos);
-      const aRot = i === 0 ? this.actionFromRot : SCRATCH_B.fromArray(keys[i - 1].rot);
+      const aPos = i === 0 ? this.actionFromPos : SCRATCH_A.fromArray(keys[i - 1].pos).multiplyScalar(reach);
+      const aRot = i === 0 ? this.actionFromRot : SCRATCH_B.fromArray(keys[i - 1].rot).multiplyScalar(reach);
       const span = Math.max(1e-4, b.t - aT);
       let k = Math.min(1, Math.max(0, (t - aT) / span));
       if (b.ease === 'out') k = 1 - Math.pow(1 - k, 3);
       else if (b.ease === 'in') k = k * k;
       else k = k * k * (3 - 2 * k);
-      this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos), k);
-      this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot), k);
+      this.actionPos.copy(aPos).lerp(SCRATCH_C.fromArray(b.pos).multiplyScalar(reach), k);
+      this.actionRot.copy(aRot).lerp(SCRATCH_C.fromArray(b.rot).multiplyScalar(reach), k);
     }
 
     // Preferred: pose the KNIFE ARM ALONE. The motion is applied to the root
@@ -698,7 +793,9 @@ export class ViewmodelController {
     if (arm && arm.parent) {
       this.armBasePos.copy(arm.position);
       this.armBaseQuat.copy(arm.quaternion);
-      this.poseArmRoot(arm, this.actionPivot, this.actionPos, this.actionRot);
+      this.posePos.copy(this.actionPos).add(this.spinWobblePos);
+      this.poseRot.copy(this.actionRot).add(this.spinWobbleRot);
+      this.poseArmRoot(arm, this.actionPivot, this.posePos, this.poseRot);
       this.armPosed = true;
 
       // The off arm answers with a small counter-motion, as a body does when
@@ -731,22 +828,23 @@ export class ViewmodelController {
   }
 
   /**
-   * The knife spin proper, on top of the keyed arm motion: opens the right
-   * fingers toward the rig's relaxed pose and turns the flourish group about
-   * the karambit's ring. The ring rides on the index finger, so the knife
-   * first follows that finger as it straightens. The fingers are put back
-   * before the mixer next evaluates (see update), as the arm roots are.
+   * The knife flourish proper (spin or inspect roll), on top of the keyed arm
+   * motion: opens the right fingers toward the rig's relaxed pose, one after
+   * another, and turns the flourish group about `axis` through the karambit's
+   * ring. The ring rides on the index finger, so the knife first follows that
+   * finger as it straightens. The fingers are put back before the mixer next
+   * evaluates (see update), as the arm roots are.
    */
-  private applyKnifeSpin(): void {
+  private applyKnifeFlourish(angle: number, axis: THREE.Vector3): void {
     const rig = this.rigInstance;
-    const angle = this.spinAngle;
 
     // Where the index finger carries the ring, in right-hand space.
     const index = rig.indexBaseBone;
     if (index) this.matrixInHand(index, MAT_I).invert();
     rig.fingerOpenPoses.forEach((finger, i) => {
       (this.fingerBaseQuats[i] ??= new THREE.Quaternion()).copy(finger.bone.quaternion);
-      finger.bone.quaternion.slerp(finger.open, this.fingerOpen * finger.weight);
+      const amount = smoothstep(this.fingerOpen * (1 + FINGER_STAGGER_MAX) - fingerDelay(finger.bone.name));
+      finger.bone.quaternion.slerp(finger.open, amount * finger.weight);
     });
     this.fingersPosed = rig.fingerOpenPoses.length > 0;
     if (index) this.matrixInHand(index, MAT_T).multiply(MAT_I);
@@ -756,7 +854,7 @@ export class ViewmodelController {
     const socket = rig.knifeGroup;
     socket.updateMatrix();
     MAT_W.copy(socket.matrix).invert().multiply(MAT_T).multiply(socket.matrix);
-    MAT_L.makeRotationAxis(KARAMBIT_RING_AXIS, angle);
+    MAT_L.makeRotationAxis(axis, angle);
     SCRATCH_C.copy(KARAMBIT_RING_CENTER).applyMatrix4(MAT_L);
     MAT_L.setPosition(SCRATCH_A.copy(KARAMBIT_RING_CENTER).sub(SCRATCH_C));
     MAT_W.multiply(MAT_L);
@@ -775,6 +873,10 @@ export class ViewmodelController {
 
   private resetKnifeSpin(): void {
     this.fingerOpen = 0;
+    this.kickY = 0;
+    this.kickVel = 0;
+    this.spinWobblePos.set(0, 0, 0);
+    this.spinWobbleRot.set(0, 0, 0);
     this.spinAngle = 0;
     this.spinOmega = 0;
     this.spinCatching = false;
@@ -1093,8 +1195,10 @@ export class ViewmodelController {
         this.actionPos.set(0, 0, 0);
         this.actionRot.set(0, 0, 0);
       } else {
+        const roll = this.activeAction === 'INSPECT' ? this.updateInspect() : 0;
         this.applyKeyedAction();
-        if (this.activeAction === 'SPIN') this.applyKnifeSpin();
+        if (this.activeAction === 'SPIN') this.applyKnifeFlourish(this.spinAngle, KARAMBIT_RING_AXIS);
+        else if (this.activeAction === 'INSPECT') this.applyKnifeFlourish(roll, KARAMBIT_LENGTH_AXIS);
       }
       if (progress >= 1.0) {
         this.activeAction = 'NONE';

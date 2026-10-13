@@ -278,6 +278,41 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
+  it('inspect rolls the knife about its length, shrinks with a wide FOV, and ends at rest', () => {
+    const vm = new ViewmodelController();
+    const camera = new THREE.PerspectiveCamera();
+    const camCtrl = new CameraController(camera, {} as HTMLElement);
+    const physics = new PhysicsWorld();
+    const player = new PlayerController(camCtrl, physics);
+    const identity = new THREE.Quaternion();
+    const peakLift = (fov: number): { lift: number; roll: number } => {
+      vm.setFov(fov);
+      vm.triggerInspect();
+      let lift = 0;
+      let roll = 0;
+      for (let frame = 0; frame < 200; frame++) {
+        vm.update(1 / 60, player, camCtrl, 0, 0);
+        lift = Math.max(lift, vm['actionPos'].y);
+        roll = Math.max(roll, vm['rigInstance'].knifeFlourishGroup.quaternion.angleTo(identity));
+        // A click mid-inspect does not start a spin that would fight the roll.
+        if (frame === 30) expect(vm.triggerSpin()).toBe(false);
+      }
+      return { lift, roll };
+    };
+
+    const normal = peakLift(65);
+    expect(normal.roll).toBeGreaterThan(2.5); // shows the other flat of the blade
+    expect(vm['activeAction']).toBe('NONE');
+    expect(vm['rigInstance'].knifeFlourishGroup.quaternion.angleTo(identity)).toBeCloseTo(0, 6);
+
+    // At 120 degrees the arm reaches further into view, so the pose is smaller.
+    const wide = peakLift(120);
+    expect(wide.lift).toBeLessThan(normal.lift);
+    expect(wide.lift).toBeGreaterThan(normal.lift * 0.5);
+
+    vm.dispose();
+  });
+
   it('respects viewmodel settings for MINIMAL and OFF modes', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();
