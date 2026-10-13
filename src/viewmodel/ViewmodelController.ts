@@ -45,7 +45,17 @@ const SPIN_HOLD_ROT: [number, number, number] = [0.09, 0.32, 0.11];
 /** Knife spin is a fidget toy: it runs while clicks keep coming, then catches. */
 const SPIN_SPEED = 20; // rad/s at full whirl (about 3 turns a second)
 const SPIN_SUSTAIN = 0.4; // s after the last click before the knife is caught
-const SPIN_CATCH_MIN_SPEED = 3; // rad/s: never crawl the last bit of a turn
+const SPIN_CATCH_DECEL = 40; // rad/s^2: how gently the knife slows once the clicks stop
+const SPIN_CATCH_EASE = 6; // 1/s: the last stretch eases out instead of braking hard
+const SPIN_CATCH_MIN_SPEED = 0.6; // rad/s: the last sliver of the turn, so it never stalls
+const SPIN_REST_HOLD = 0.12; // s the knife sits in the palm before the fingers close
+const SPIN_CLOSE_RATE = 8; // 1/s: how fast the hand settles shut (opening is quicker)
+
+/** Speed line: shows once the knife has turned this many times in one go. */
+const SPIN_TRAIL_TURNS = 2.5;
+const SPIN_TRAIL_LIFE = 0.07; // s of the blade tip's path the line keeps
+const SPIN_TRAIL_MAX_POINTS = 48;
+const SPIN_TRAIL_HALF_WIDTH = 0.005;
 
 /**
  * The karambit's finger ring in knife-socket space: the centre of the hole and
@@ -53,6 +63,8 @@ const SPIN_CATCH_MIN_SPEED = 3; // rad/s: never crawl the last bit of a turn
  */
 const KARAMBIT_RING_CENTER = new THREE.Vector3(0, 0.0131, -0.0388);
 const KARAMBIT_RING_AXIS = new THREE.Vector3(1, 0, 0);
+/** The blade tip in the same space: the vertex farthest from the ring. */
+const KARAMBIT_TIP = new THREE.Vector3(0, -0.0815, 0.1921);
 
 /**
  * Inspect: lift the knife to the middle of the view, show one flat of the
@@ -155,6 +167,15 @@ export class ViewmodelController {
   /** The knife is back at rest in the palm; the fingers are closing. */
   private spinAtRest = false;
   private spinDone = false;
+  private spinCatchTarget = 0;
+  private spinRestTime = 0;
+
+  // Speed line behind the blade tip while the knife whirls fast.
+  private trailMesh: THREE.Mesh | null = null;
+  private trailPositions = new Float32Array(SPIN_TRAIL_MAX_POINTS * 2 * 3);
+  private trailColors = new Float32Array(SPIN_TRAIL_MAX_POINTS * 2 * 3);
+  private readonly trailPoints: { p: THREE.Vector3; t: number }[] = [];
+  private trailStrength = 0;
   /** Finger rotations as the mixer left them, restored before it runs again. */
   private readonly fingerBaseQuats: THREE.Quaternion[] = [];
   private fingersPosed = false;
@@ -470,6 +491,7 @@ export class ViewmodelController {
     this.spinLastClick = this.actionClock;
     this.spinCatching = false;
     this.spinAtRest = false;
+    this.spinRestTime = 0;
     if (this.activeAction !== 'SPIN') {
       this.spinAngle = 0;
       this.spinOmega = 0;
@@ -505,15 +527,23 @@ export class ViewmodelController {
   private updateSpin(dt: number): void {
     if (!this.spinCatching && !this.spinAtRest && this.actionClock - this.spinLastClick > SPIN_SUSTAIN) {
       this.spinCatching = true;
+      // Slow at a steady rate to the first whole turn that leaves room to stop.
+      const stopping = (this.spinOmega * this.spinOmega) / (2 * SPIN_CATCH_DECEL);
+      this.spinCatchTarget = Math.ceil((this.spinAngle + stopping - 1e-4) / (Math.PI * 2)) * Math.PI * 2;
     }
 
     if (!this.spinAtRest) {
       if (this.spinCatching) {
-        const target = Math.ceil((this.spinAngle - 1e-4) / (Math.PI * 2)) * Math.PI * 2;
-        const remaining = target - this.spinAngle;
-        this.spinOmega = Math.min(this.spinOmega, Math.max(SPIN_CATCH_MIN_SPEED, remaining * 9));
+        const remaining = this.spinCatchTarget - this.spinAngle;
+        this.spinOmega = Math.min(
+          this.spinOmega,
+          Math.max(
+            SPIN_CATCH_MIN_SPEED,
+            Math.min(Math.sqrt(2 * SPIN_CATCH_DECEL * Math.max(0, remaining)), remaining * SPIN_CATCH_EASE)
+          )
+        );
         if (remaining <= this.spinOmega * dt) {
-          this.spinAngle = target;
+          this.spinAngle = this.spinCatchTarget;
           this.spinOmega = 0;
           this.spinAtRest = true;
         } else {
@@ -525,14 +555,101 @@ export class ViewmodelController {
       }
     }
 
-    const closing = this.spinAtRest;
-    const blend = Math.min(1, dt * 16);
+    if (this.spinAtRest) this.spinRestTime += dt;
+    const closing = this.spinAtRest && this.spinRestTime > SPIN_REST_HOLD;
+    const blend = Math.min(1, dt * (closing ? SPIN_CLOSE_RATE : 16));
     this.fingerOpen += ((closing ? 0 : 1) - this.fingerOpen) * blend;
     const hold = closing ? 0 : 1;
     this.actionPos.lerp(SCRATCH_C.fromArray(SPIN_HOLD_POS).multiplyScalar(hold), blend);
     this.actionRot.lerp(SCRATCH_C.fromArray(SPIN_HOLD_ROT).multiplyScalar(hold), blend);
 
-    if (closing && this.fingerOpen < 0.02 && this.actionPos.lengthSq() < 1e-6) this.spinDone = true;
+    if (closing && this.fingerOpen < 0.03 && this.actionPos.lengthSq() < 1e-6) this.spinDone = true;
+  }
+
+  /**
+   * The speed line: a tapering ribbon along the path the blade tip took in the
+   * last moment, drawn additively in the accent colour. It only shows once the
+   * knife has turned a few times in one go and fades as the spin slows.
+   */
+  private updateSpinTrail(dt: number): void {
+    const whirling = this.activeAction === 'SPIN' && !this.spinAtRest;
+    const fast = whirling && this.spinAngle > SPIN_TRAIL_TURNS * Math.PI * 2 && this.spinOmega > 10;
+    this.trailStrength += ((fast ? 1 : 0) - this.trailStrength) * Math.min(1, dt * (fast ? 12 : 9));
+
+    const now = this.actionClock;
+    if (whirling) {
+      this.rootGroup.updateMatrixWorld(true);
+      const p = (this.trailPoints.length >= SPIN_TRAIL_MAX_POINTS ? this.trailPoints.shift()!.p : new THREE.Vector3())
+        .copy(KARAMBIT_TIP)
+        .applyMatrix4(this.rigInstance.knifeFlourishGroup.matrixWorld);
+      this.trailPoints.push({ p, t: now });
+    }
+    while (this.trailPoints.length > 0 && now - this.trailPoints[0].t > SPIN_TRAIL_LIFE) this.trailPoints.shift();
+
+    const pts = this.trailPoints;
+    if (this.trailStrength < 0.02 || pts.length < 2) {
+      if (this.trailMesh) this.trailMesh.visible = false;
+      return;
+    }
+    if (!this.trailMesh) this.trailMesh = this.createTrailMesh();
+    const mesh = this.trailMesh;
+    const pos = this.trailPositions;
+    const col = this.trailColors;
+    // Accent colour, lifted toward white so it reads as light, not paint.
+    SCRATCH_C.set(this.accentColor.r, this.accentColor.g, this.accentColor.b).lerp(SCRATCH_D.set(1, 1, 1), 0.45);
+    for (let i = 0; i < pts.length; i++) {
+      const age = (now - pts[i].t) / SPIN_TRAIL_LIFE;
+      const life = Math.max(0, 1 - age);
+      const prev = pts[Math.max(0, i - 1)].p;
+      const next = pts[Math.min(pts.length - 1, i + 1)].p;
+      // Across the path, square to the line of sight (the camera sits at the origin).
+      SCRATCH_A.copy(next).sub(prev).cross(pts[i].p).normalize();
+      const w = SPIN_TRAIL_HALF_WIDTH * life * this.trailStrength;
+      const b = i * 6;
+      pos[b] = pts[i].p.x + SCRATCH_A.x * w;
+      pos[b + 1] = pts[i].p.y + SCRATCH_A.y * w;
+      pos[b + 2] = pts[i].p.z + SCRATCH_A.z * w;
+      pos[b + 3] = pts[i].p.x - SCRATCH_A.x * w;
+      pos[b + 4] = pts[i].p.y - SCRATCH_A.y * w;
+      pos[b + 5] = pts[i].p.z - SCRATCH_A.z * w;
+      const f = life * life * this.trailStrength;
+      for (let k = 0; k < 2; k++) {
+        col[b + k * 3] = SCRATCH_C.x * f;
+        col[b + k * 3 + 1] = SCRATCH_C.y * f;
+        col[b + k * 3 + 2] = SCRATCH_C.z * f;
+      }
+    }
+    const geo = mesh.geometry;
+    geo.getAttribute('position').needsUpdate = true;
+    geo.getAttribute('color').needsUpdate = true;
+    geo.setDrawRange(0, (pts.length - 1) * 6);
+    mesh.visible = true;
+  }
+
+  private createTrailMesh(): THREE.Mesh {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.trailColors, 3).setUsage(THREE.DynamicDrawUsage));
+    const index: number[] = [];
+    for (let i = 0; i < SPIN_TRAIL_MAX_POINTS - 1; i++) {
+      const a = i * 2;
+      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    geo.setIndex(index);
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'KnifeSpinTrail';
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 10;
+    this.scene.add(mesh);
+    return mesh;
   }
 
   /**
@@ -663,6 +780,7 @@ export class ViewmodelController {
     this.spinCatching = false;
     this.spinAtRest = false;
     this.spinDone = false;
+    this.spinRestTime = 0;
     this.rigInstance.knifeFlourishGroup.position.set(0, 0, 0);
     this.rigInstance.knifeFlourishGroup.quaternion.identity();
   }
@@ -991,6 +1109,8 @@ export class ViewmodelController {
       this.actionGroup.rotation.set(0, 0, 0);
     }
 
+    this.updateSpinTrail(dt);
+
     // Decay audio impact
     if (this.audioImpact > 0) {
       this.audioImpact = Math.max(0, this.audioImpact - dt * 3.5);
@@ -1141,6 +1261,10 @@ export class ViewmodelController {
       window.removeEventListener('resize', this.onResize);
     }
     this.styleFilter.dispose();
+    if (this.trailMesh) {
+      this.trailMesh.geometry.dispose();
+      (this.trailMesh.material as THREE.Material).dispose();
+    }
     this.rigInstance.dispose();
     // Release the shared mastery glove texture cache with the viewmodel.
     disposeGloveTextureCaches();

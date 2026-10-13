@@ -243,6 +243,41 @@ describe('Viewmodel System — Hands & Karambit', () => {
     vm.dispose();
   });
 
+  it('draws a speed line from the blade tip only after a few turns, and eases to rest after one click', () => {
+    const vm = new ViewmodelController();
+    const camera = new THREE.PerspectiveCamera();
+    const camCtrl = new CameraController(camera, {} as HTMLElement);
+    const physics = new PhysicsWorld();
+    const player = new PlayerController(camCtrl, physics);
+
+    // One click: about a turn or two, no speed line, and the knife slows
+    // smoothly (no big drop in speed from one frame to the next).
+    vm.triggerSpin();
+    let prev = 0;
+    let maxDrop = 0;
+    let steps = 0;
+    while (vm['activeAction'] === 'SPIN' && steps++ < 600) {
+      vm.update(1 / 60, player, camCtrl, 0, 0);
+      expect(vm['trailStrength']).toBe(0);
+      maxDrop = Math.max(maxDrop, prev - vm['spinOmega']);
+      prev = vm['spinOmega'];
+    }
+    expect(vm['activeAction']).toBe('NONE');
+    expect(maxDrop).toBeLessThan(1.5);
+
+    // Mashing past 2-3 turns brings the line up; it fades once the spin ends.
+    for (let frame = 0; frame < 160; frame++) {
+      if (frame % 10 === 0) vm.triggerSpin();
+      vm.update(1 / 60, player, camCtrl, 0, 0);
+    }
+    expect(vm['trailStrength']).toBeGreaterThan(0.9);
+    expect(vm['trailMesh']?.visible).toBe(true);
+    for (let frame = 0; frame < 300; frame++) vm.update(1 / 60, player, camCtrl, 0, 0);
+    expect(vm['trailMesh']?.visible).toBe(false);
+
+    vm.dispose();
+  });
+
   it('respects viewmodel settings for MINIMAL and OFF modes', () => {
     const vm = new ViewmodelController();
     const camera = new THREE.PerspectiveCamera();
