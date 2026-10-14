@@ -1,5 +1,6 @@
 import { loadRaceCourse, nextRaceTrackId, raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 import { drawRaceMap } from '../online/MapVote';
+import { formatRaceTime } from '../ui/RaceHud';
 /**
  * Master Game Controller for TRACK//RUN
  * Integrates StateMachine, AudioEngine, World, PlayerController, Replay, and UI
@@ -549,7 +550,13 @@ export class Game {
         this.ui.pauseScreen.hide();
         this.ui.settingsModal.show();
       },
-      onNewTrack: () => this.returnToImport()
+      onNewTrack: () => {
+        const inRace = this.raceActive || this.friendRaceWorld || raceRoomService.getRoom() !== null;
+        this.returnToImport();
+        // Quitting an online race ends the race session too: otherwise the room, the
+        // shared-clock state and the staging hold would carry into the next run.
+        if (inRace) void this.leaveRaceRoom();
+      }
     });
 
     // Armory Modal
@@ -916,8 +923,18 @@ export class Game {
             // music, run timer and replay recording wait for the synchronized GO.
             // Persistently zero horizontal velocity so nobody inches forward.
             this.playerController.velocity.set(0, 0, 0);
+            // A NEW race starts un-finished. This branch used to skip the reset below,
+            // so after any earlier finish (a rematch, or a solo run before it) the
+            // race ran with isFinished stuck at true: no hold at the start and no
+            // finish detection at the goal.
+            this.isFinished = false;
           } else if (prevState === GameState.PAUSED && !this.isQuickRestarting) {
-            this.audioEngine.resume();
+            if (this.friendRaceWorld && this.raceActive && this.racePhase === 'RACING' && this.raceStartAtMs !== null) {
+              // The shared race clock kept running while the menu was open.
+              this.audioEngine.play(this.raceSongStartSec + Math.max(0, (this.raceNowMs() - this.raceStartAtMs) / 1000));
+            } else {
+              this.audioEngine.resume();
+            }
           } else if (!this.isQuickRestarting) {
             this.isFinished = false;
             this.audioEngine.play(this.currentCheckpoint ? this.currentCheckpoint.time : 0);
@@ -3512,10 +3529,12 @@ export class Game {
     racePanel.setCallbacks({
       onMapVote: (key) => raceRoomService.setMyMapVote(key),
       onCreateRoom: (trackId, capacity, mode) => {
+        if (this.matchSearching) void this.cancelFindOpponent();
         racePanel.setTrackPickLocked(false);
         void this.createRaceRoom(trackId, capacity, mode);
       },
       onJoinRoom: (code) => {
+        if (this.matchSearching) void this.cancelFindOpponent();
         racePanel.setTrackPickLocked(false);
         void this.joinRaceRoom(code);
       },
@@ -3831,6 +3850,7 @@ export class Game {
   }
 
   private matchSearchToken = 0;
+  private matchSearching = false;
 
   /**
    * FIND OPPONENT: waits in the server queue until another player searches the same
@@ -3842,12 +3862,14 @@ export class Game {
     panel.clearError();
     if (raceRoomService.getRoom()) return;
     const token = ++this.matchSearchToken;
+    this.matchSearching = true;
     panel.setSearching(true, 'SEARCHING FOR AN OPPONENT...');
     const started = Date.now();
     const alive = (): boolean => token === this.matchSearchToken;
     const fail = async (message: string): Promise<void> => {
       if (!alive()) return;
       this.matchSearchToken++;
+      this.matchSearching = false;
       await raceRoomService.matchmakingLeave();
       panel.setSearching(false);
       panel.showError(message);
@@ -3868,6 +3890,7 @@ export class Game {
       }
       if (reply.status === 'MATCHED' && reply.role === 'HOST') {
         panel.setSearching(true, 'OPPONENT FOUND // CREATING THE ROOM...');
+        this.ui.importScreen.openRaceTab();
         // The server drew one of the two players' chosen signals; nobody picks in the lobby.
         await this.createRaceRoom(reply.pickedTrackId ?? trackId, 2, mode);
         panel.setTrackPickLocked(true, 'SIGNAL DRAWN AT RANDOM FROM BOTH PLAYERS\' CHOICES');
@@ -3877,12 +3900,15 @@ export class Game {
           return;
         }
         this.matchSearchToken++;
+        this.matchSearching = false;
         panel.setSearching(false);
         return;
       }
       if (reply.status === 'MATCHED' && reply.role === 'GUEST' && reply.inviteCode) {
         panel.setSearching(true, 'OPPONENT FOUND // JOINING...');
+        this.ui.importScreen.openRaceTab();
         this.matchSearchToken++;
+        this.matchSearching = false;
         await raceRoomService.matchmakingLeave();
         panel.setSearching(false);
         await this.joinRaceRoom(reply.inviteCode);
@@ -3906,6 +3932,7 @@ export class Game {
 
   private async cancelFindOpponent(): Promise<void> {
     this.matchSearchToken++;
+    this.matchSearching = false;
     this.ui.importScreen.racePanel.setSearching(false);
     await raceRoomService.matchmakingLeave();
   }
@@ -4022,7 +4049,7 @@ export class Game {
     this.ui.raceHud.hide();
     this.clearRaceGhosts();
     this.setFriendRaceWorld(false);
-    if (this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.FINISHED)) {
+    if (this.stateMachine.is(GameState.PAUSED) || this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.FINISHED)) {
       this.stateMachine.transitionTo(GameState.IMPORT);
     }
     const panel = this.ui.importScreen.racePanel;
@@ -4232,6 +4259,7 @@ export class Game {
     if (!this.raceActive || this.raceFinishReported || this.racePhase === 'RACING') return;
     if (!room || (room.state !== 'COUNTDOWN' && room.state !== 'RUNNING') || room.startAtMs !== this.raceStartAtMs) return;
     this.racePhase = 'RACING';
+    this.isFinished = false;
     this.updateRaceHudPhase();
     this.ui.raceHud.setCountdown(null);
 
@@ -4248,6 +4276,7 @@ export class Game {
     // Song, run timer and replay recording all start from the SAME position.
     this.runElapsedTime = songTarget;
     this.audioEngine.play(songTarget);
+    if (this.stateMachine.is(GameState.PAUSED)) this.audioEngine.pause();
     this.replayRecorder.start();
     this.startPovRecording();
     this.ghostManager.start();
@@ -4544,7 +4573,7 @@ export class Game {
     // Leaving the race world restores normal solo ghost eligibility.
     this.setFriendRaceWorld(false);
     await raceRoomService.leaveRoom();
-    if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.FINISHED)) {
+    if (this.stateMachine.is(GameState.PLAYING) || this.stateMachine.is(GameState.PAUSED) || this.stateMachine.is(GameState.COUNTDOWN) || this.stateMachine.is(GameState.FINISHED)) {
       this.stateMachine.transitionTo(GameState.IMPORT);
     }
     this.ui.importScreen.racePanel.showSelect();
@@ -5867,6 +5896,11 @@ export class Game {
         return;
       }
       const result = await raceRoomService.reportFinish(progress);
+      if (result.ok) {
+        const locked = raceRoomService.getPlayers().find(p => p.userId === authService.getUserId())?.finishUs ?? null;
+        this.ui.raceHud.showNotice(locked !== null ? `FINISH LOCKED IN // ${formatRaceTime(locked)}` : 'FINISH LOCKED IN');
+        return;
+      }
       if (!result.ok && this.raceActive && raceRoomService.getRaceId() === raceId) {
         this.ui.raceHud.showNotice(`FINISH PENDING // ${result.detail}`);
         // A racer marked disconnected cannot finish: say we are here, then retry.
