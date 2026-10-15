@@ -880,11 +880,22 @@ export class Game {
 
         case GameState.ANALYSING:
           this.ui.hideAllScreens();
+          // An online race has already chosen everything (signal, course, map): it
+          // goes straight to the staged world behind its own loading card instead
+          // of the solo analysis / map-picker screen.
+          if (this.raceLoading) {
+            this.ui.raceHud.show();
+            break;
+          }
           this.ui.analysisScreen.show();
           break;
 
         case GameState.READY:
           this.ui.hideAllScreens();
+          if (this.raceLoading) {
+            this.ui.raceHud.show();
+            break;
+          }
           this.ui.analysisScreen.show(prevState !== GameState.ANALYSING);
           if (this.currentAnalysis) {
             this.ui.analysisScreen.displayAnalysis(this.currentAnalysis);
@@ -4449,6 +4460,7 @@ export class Game {
     this.ui.hideAllScreens();
     this.ui.raceHud.show();
     this.ui.raceHud.showNotice('SESSION STARTING');
+    this.ui.raceHud.setLoading('LOADING RACE', level.title);
 
     // MAP VOTE: wait briefly for every racer's vote, then draw. Same inputs on every
     // client give the same map; the map is visual only, never part of the course.
@@ -4478,6 +4490,7 @@ export class Game {
     this.selectedMapKey = draw.key;
     const mapName = ENVIRONMENT_MAPS.find((m) => m.key === draw.key)?.name ?? draw.key;
     this.ui.raceHud.showNotice(`MAP // ${mapName}${draw.drawn ? ' (DRAWN FROM THE VOTES)' : ''}`);
+    this.ui.raceHud.setLoading('LOADING RACE', `${level.title} // ${mapName}`);
 
     // Enter the normal track flow; the shared clock starts at startAtMs.
     await this.loadPresetTrack(level.baseId);
@@ -4497,6 +4510,7 @@ export class Game {
     // opponent is visible on the start platform without moving.
     this.publishLocalGhostSample();
 
+    this.ui.raceHud.setLoading(null);
     // AUTO-LAUNCH: enter the staged gameplay scene. This replaces the manual
     // EXEC SONG step entirely — reaching LOADING is the instruction to load.
     this.stateMachine.transitionTo(GameState.COUNTDOWN);

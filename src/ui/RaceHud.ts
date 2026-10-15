@@ -101,6 +101,7 @@ export class RaceHud {
 
       <div class="race-hud-notice hidden" id="race-notice"></div>
 
+
       <div class="race-hud-phase hidden" id="race-phase">
         <div class="race-phase-title" id="race-phase-title">SIGNAL CHECK</div>
         <div class="race-phase-count" id="race-phase-count"></div>
@@ -133,6 +134,7 @@ export class RaceHud {
   }
 
   public hide(): void {
+    this.loadingElem?.classList.add('hidden');
     this.element.classList.add('hidden');
     this.clearNotice();
   }
@@ -257,6 +259,33 @@ export class RaceHud {
   }
 
   /** Small, non-blocking notification (e.g. a racer improving, joining). */
+  private loadingElem: HTMLElement | null = null;
+
+  /**
+   * Full-screen loading card while an online race builds its world (null hides it).
+   * It lives on the UI root, not inside the HUD: the HUD is positioned with a
+   * transform, which would make a fixed child fill only the HUD's own box.
+   */
+  public setLoading(title: string | null, sub = ''): void {
+    if (!this.loadingElem) {
+      if (title === null) return;
+      const box = document.createElement('div');
+      box.id = 'race-loading';
+      box.className = 'race-loading hidden';
+      box.setAttribute('role', 'status');
+      box.innerHTML =
+        '<div class="race-loading-title" id="race-loading-title"></div>' +
+        '<div class="race-loading-sub" id="race-loading-sub"></div>' +
+        '<div class="race-loading-bar" aria-hidden="true"><span></span></div>';
+      (document.getElementById('ui-root') ?? document.body).appendChild(box);
+      this.loadingElem = box;
+    }
+    this.loadingElem.classList.toggle('hidden', title === null);
+    if (title === null) return;
+    (this.loadingElem.querySelector('#race-loading-title') as HTMLElement).textContent = title;
+    (this.loadingElem.querySelector('#race-loading-sub') as HTMLElement).textContent = sub;
+  }
+
   public showNotice(text: string): void {
     this.noticeElem.textContent = text;
     this.noticeElem.classList.remove('hidden');
