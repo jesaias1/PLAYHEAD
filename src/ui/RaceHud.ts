@@ -35,6 +35,8 @@ export interface RaceHudState {
   myFinishTimeUs: number | null;
   dnf: boolean;
   rivals: RaceHudRivalView[];
+  /** Round trip to the server in ms, or null when unknown. */
+  pingMs?: number | null;
 }
 
 export function formatRaceTime(us: number | null): string {
@@ -88,6 +90,7 @@ export class RaceHud {
           <span class="race-hud-clock-val" id="race-clock">00:00.000</span>
         </div>
         <div class="race-hud-delta" id="race-delta"></div>
+        <div class="race-hud-ping" id="race-ping" title="Round trip to the race server"></div>
       </div>
 
       <div class="race-hud-rivals" id="race-rivals"></div>
@@ -140,6 +143,12 @@ export class RaceHud {
   }
 
   public update(state: RaceHudState): void {
+    const ping = this.element.querySelector('#race-ping') as HTMLElement | null;
+    if (ping) {
+      const ms = state.pingMs ?? null;
+      ping.textContent = ms === null ? '' : `PING ${ms} ms`;
+      ping.dataset.quality = ms === null ? '' : ms < 80 ? 'good' : ms < 160 ? 'ok' : 'bad';
+    }
     this.clockElem.textContent = formatRaceClock(state.raceElapsedUs);
     this.placementElem.textContent = state.placement === null ? '--' : String(state.placement);
     const total = this.element.querySelector('#race-place-total') as HTMLElement;

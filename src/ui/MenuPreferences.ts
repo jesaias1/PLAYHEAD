@@ -1,14 +1,18 @@
 export interface MenuPreferences {
   trackId: string; mode: 'NORMAL' | 'SURF'; slot: 'karambit' | 'gloves';
+  /** Last signal and course chosen on the Online page. */
+  raceTrackId: string; raceMode: 'NORMAL' | 'SURF';
   ownership: 'all' | 'owned' | 'locked'; family: 'all' | 'drop' | 'mastery'; sort: 'rarity' | 'name';
 }
 const KEY = 'playhead.menu.v1';
-const defaults: MenuPreferences = { trackId: '', mode: 'SURF', slot: 'karambit', ownership: 'all', family: 'all', sort: 'rarity' };
+const defaults: MenuPreferences = { trackId: '', mode: 'SURF', raceTrackId: '', raceMode: 'SURF', slot: 'karambit', ownership: 'all', family: 'all', sort: 'rarity' };
 export function readMenuPreferences(): MenuPreferences {
   let raw: Record<string, unknown> = {};
   try { const value = JSON.parse(localStorage.getItem(KEY) ?? '{}'); if (value && typeof value === 'object' && !Array.isArray(value)) raw = value; } catch { /* Defaults remain usable offline/private. */ }
   const pick = <T extends string>(key: string, choices: readonly T[], fallback: T): T => choices.includes(raw[key] as T) ? raw[key] as T : fallback;
   return { trackId: typeof raw.trackId === 'string' ? raw.trackId.slice(0, 120) : '',
+    raceTrackId: typeof raw.raceTrackId === 'string' ? raw.raceTrackId.slice(0, 120) : '',
+    raceMode: pick('raceMode', ['NORMAL', 'SURF'], defaults.raceMode),
     // Surf became the main mode: menus saved before that default to it once.
     mode: raw.modeVersion === 2 ? pick('mode', ['NORMAL', 'SURF'], defaults.mode) : 'SURF', slot: pick('slot', ['karambit', 'gloves'], defaults.slot),
     ownership: pick('ownership', ['all', 'owned', 'locked'], defaults.ownership),

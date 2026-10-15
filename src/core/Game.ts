@@ -1,5 +1,6 @@
 import { loadRaceCourse, nextRaceTrackId, raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 import { drawRaceMap } from '../online/MapVote';
+import { clearRaceSession, readRaceSession, saveRaceSession } from '../online/RaceSessionMemory';
 import { formatRaceTime } from '../ui/RaceHud';
 /**
  * Master Game Controller for TRACK//RUN
@@ -3549,7 +3550,12 @@ export class Game {
         racePanel.setTrackPickLocked(false);
         void this.joinRaceRoom(code);
       },
-      onFindOpponent: (trackId, mode) => void this.findRaceOpponent(trackId, mode),
+      onFindOpponent: (trackId, mode, anySignal) => void this.findRaceOpponent(trackId, mode, anySignal),
+      onRematchRequest: () => {
+        const me = raceRoomService.getPlayers().find((p) => p.userId === authService.getUserId());
+        raceRoomService.sendRematchRequest(me?.displayName ?? 'A RACER');
+        this.ui.importScreen.racePanel.setRematchNote('REQUEST SENT // WAITING FOR THE HOST TO START THE REMATCH');
+      },
       onCancelFind: () => void this.cancelFindOpponent(),
       onSetReady: (ready) => {
         void raceRoomService.setReady(ready).then((result) => {
@@ -3656,6 +3662,10 @@ export class Game {
       },
       onGhost: (sample) => this.onRemoteGhostSample(sample),
       onMapVotes: () => this.ui.importScreen.racePanel.refreshMapVotes(),
+      onRematchRequest: (name) => {
+        this.ui.importScreen.racePanel.setRematchNote(`${name.toUpperCase()} WANTS A REMATCH // PRESS REMATCH`);
+        if (this.friendRaceWorld) this.ui.raceHud.showNotice(`${name.toUpperCase()} WANTS A REMATCH`);
+      },
       onPlayerJoined: (player) => {
         this.ui.raceHud.showNotice(`${player.displayName} // JOINED`);
       },
@@ -3677,6 +3687,14 @@ export class Game {
       this.pendingInviteCode = invite;
       this.ui.importScreen.openRaceTab();
       void this.consumePendingInvite();
+    } else {
+      // A refresh in the middle of a lobby: go back to the room we were in.
+      const remembered = readRaceSession();
+      if (remembered) {
+        this.pendingInviteCode = remembered;
+        this.restoringRace = true;
+        void this.consumePendingInvite();
+      }
     }
   }
 
@@ -3691,19 +3709,37 @@ export class Game {
    * Joins a ?room= invite once an authenticated session exists.
    * Retries briefly because anonymous auth is asynchronous.
    */
+  private restoringRace = false;
+  private droppedRacers = new Set<string>();
+  private soloWinNoticeShown = false;
+
   private async consumePendingInvite(): Promise<void> {
     const code = this.pendingInviteCode;
     if (!code) return;
+    const restoring = this.restoringRace;
+    this.restoringRace = false;
 
     for (let attempt = 0; attempt < 20; attempt++) {
       if (authService.isSignedIn()) {
         this.pendingInviteCode = null;
         await this.joinRaceRoom(code);
+        if (restoring) {
+          const panel = this.ui.importScreen.racePanel;
+          if (raceRoomService.getRoom()) {
+            this.ui.importScreen.openRaceTab();
+            this.ui.raceHud.showNotice('REJOINED YOUR ROOM');
+          } else {
+            // The room is gone or already racing: forget it quietly.
+            panel.clearError();
+            clearRaceSession();
+          }
+        }
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     this.pendingInviteCode = null;
+    if (restoring) return;
     this.ui.importScreen.racePanel.showError(
       'COULD NOT JOIN ROOM // ONLINE SESSION UNAVAILABLE\n' + code
     );
@@ -3846,6 +3882,7 @@ export class Game {
       return;
     }
     panel.setHost(true);
+    saveRaceSession(result.room.inviteCode);
     // Canonical identity is verified against the room row, not assumed.
     const verdict = raceRoomService.verifyLocalMap(level.track);
     panel.setMapState(verdict.ok ? 'OK' : 'MISMATCH', verdict.ok ? '' : verdict.detail.replace(/\n/g, ' '));
@@ -3868,7 +3905,7 @@ export class Game {
    * mode. One of the two becomes host, makes the room and publishes its code; the
    * other joins it. The host then picks the song in the normal lobby.
    */
-  private async findRaceOpponent(trackId: string, mode: RaceMode): Promise<void> {
+  private async findRaceOpponent(trackId: string, mode: RaceMode, anySignal = false): Promise<void> {
     const panel = this.ui.importScreen.racePanel;
     panel.clearError();
     if (raceRoomService.getRoom()) return;
@@ -3886,7 +3923,12 @@ export class Game {
       panel.showError(message);
     };
 
-    let reply = await raceRoomService.matchmakingFind(mode, trackId);
+    // "Any signal" brings no pick of its own: the other racer's choice is used, which
+    // makes a match more likely to be found quickly. A host with nothing to draw from
+    // opens the room on the signal currently selected.
+    let reply = await raceRoomService.matchmakingFind(mode, anySignal ? '' : trackId);
+    let searchingNow: number | null = null;
+    let polls = 0;
     for (;;) {
       if (!alive()) return;
       if (raceRoomService.getRoom()) {
@@ -3931,9 +3973,11 @@ export class Game {
         return;
       }
       const seconds = Math.floor((Date.now() - started) / 1000);
+      if (polls++ % 3 === 0) searchingNow = await raceRoomService.matchmakingCount(mode);
+      const others = searchingNow === null ? '' : ` // ${Math.max(0, searchingNow - 1)} OTHER${searchingNow - 1 === 1 ? '' : 'S'} SEARCHING`;
       panel.setSearching(
         true,
-        reply.status === 'MATCHED' ? 'OPPONENT FOUND // WAITING FOR THEM TO OPEN THE ROOM...' : `SEARCHING FOR AN OPPONENT... ${seconds}s`
+        reply.status === 'MATCHED' ? 'OPPONENT FOUND // WAITING FOR THEM TO OPEN THE ROOM...' : `SEARCHING FOR AN OPPONENT... ${seconds}s${others}`
       );
       await new Promise((resolve) => setTimeout(resolve, 1500));
       if (!alive()) return;
@@ -3976,6 +4020,7 @@ export class Game {
       return;
     }
     panel.setMapState('OK');
+    saveRaceSession(result.room.inviteCode);
 
     panel.setHost(raceRoomService.isHost());
     panel.showLobby();
@@ -4033,6 +4078,30 @@ export class Game {
     } finally { this.raceContinuationPending = false; }
   }
 
+  /**
+   * An opponent who disconnects or is marked DNF mid-race is announced. When every
+   * other racer is gone the player is told to simply finish the course to win: the
+   * results then show the win and that the opponent disconnected.
+   */
+  private notifyOpponentDrops(room: RaceRoom, players: readonly RacePlayer[]): void {
+    if (room.state !== 'RUNNING' || !this.friendRaceWorld || !this.raceActive) return;
+    const me = authService.getUserId();
+    const others = players.filter((p) => p.userId !== me);
+    for (const p of others) {
+      if ((p.dnf || !p.connected) && !p.finished && !this.droppedRacers.has(p.userId)) {
+        this.droppedRacers.add(p.userId);
+        this.ui.raceHud.showNotice(`${p.displayName.toUpperCase()} DISCONNECTED`);
+      }
+    }
+    if (
+      !this.soloWinNoticeShown && this.racePhase === 'RACING' && !this.raceFinishReported &&
+      others.length > 0 && others.every((p) => p.dnf || !p.connected)
+    ) {
+      this.soloWinNoticeShown = true;
+      this.ui.raceHud.showNotice('OPPONENT LEFT // FINISH THE COURSE TO WIN');
+    }
+  }
+
   /** The map a racer who has not voted gets: the song's own map, or the city. */
   private defaultRaceMapKey(): string {
     const trackId = raceRoomService.getRoom()?.trackId;
@@ -4042,6 +4111,9 @@ export class Game {
 
   private returnToRaceLobby(): void {
     this.selectedMapKey = null;
+    raceRoomService.clearMapVotes();
+    this.droppedRacers.clear();
+    this.soloWinNoticeShown = false;
     this.raceLoadGeneration++;
     const room = raceRoomService.getRoom();
     if (!room) {
@@ -4135,6 +4207,7 @@ export class Game {
       this.raceStartAtMs = null;
       this.updateRaceHudPhase();
     }
+    this.notifyOpponentDrops(room, players);
     switch (room.state) {
       case 'LOADING':
         if (!this.raceActive && !this.raceLoading) {
@@ -4572,6 +4645,8 @@ export class Game {
   }
 
   private async leaveRaceRoom(): Promise<void> {
+    clearRaceSession();
+    this.droppedRacers.clear();
     this.selectedMapKey = null;
     this.ui.importScreen.racePanel.setTrackPickLocked(false);
     this.raceLoadGeneration++;
@@ -4628,7 +4703,8 @@ export class Game {
       finished: this.raceFinishReported,
       myFinishTimeUs: me?.finishUs ?? null,
       dnf: me?.dnf ?? false,
-      rivals: this.buildRivalViews(players, myId)
+      rivals: this.buildRivalViews(players, myId),
+      pingMs: raceRoomService.getPingMs()
     });
 
     // FINISH SPECTATOR: once we have finished (or DNF'd) keep watching the

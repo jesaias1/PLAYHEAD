@@ -173,10 +173,21 @@ export class RemoteGhostRenderer {
   private teleportId: number | undefined;
   private readonly samples: { at: number; x: number; y: number; z: number; yaw: number }[] = [];
   private interpolationAt = 0;
+  /** How far behind "now" the ghost is drawn: grows with measured jitter so it never has to guess. */
+  private interpDelayMs = 100;
+  private meanIntervalMs = 83;
+  private intervalDevMs = 0;
+  private lastArrivalAt = 0;
+  private gapsSeen = 0;
   private distanceM: number | null = null;
   private color = RIVAL_SIGNAL_COLOR;
   private effectScale = 1;
   private stateScale = 1;
+
+  /** How far behind real time the opponent is drawn right now (ms). */
+  public getInterpolationDelayMs(): number {
+    return this.interpDelayMs;
+  }
 
   /** Presence authority, as reported by the room. */
   private remotePresent = true;
@@ -236,8 +247,22 @@ export class RemoteGhostRenderer {
       this.samples.length = 0;
       this.hasTarget = false;
     }
-    this.samples.push({ at: Date.now(), x: sample.x, y: sample.y, z: sample.z, yaw: sample.yaw });
-    if (this.samples.length === 1) this.interpolationAt = Date.now() - 100;
+    const arrived = Date.now();
+    if (this.lastArrivalAt > 0 && !discontinuity) {
+      const gap = Math.min(1000, arrived - this.lastArrivalAt);
+      this.meanIntervalMs += (gap - this.meanIntervalMs) * 0.1;
+      this.intervalDevMs += (Math.abs(gap - this.meanIntervalMs) - this.intervalDevMs) * 0.1;
+      this.gapsSeen++;
+      // A bit over one packet plus twice the jitter: steady links stay snappy,
+      // shaky ones get a deeper buffer instead of stuttering.
+      // Only after a handful of packets: a couple of samples say nothing about jitter.
+      if (this.gapsSeen >= 6) {
+        this.interpDelayMs = Math.max(100, Math.min(300, this.meanIntervalMs * 1.2 + this.intervalDevMs * 2));
+      }
+    }
+    this.lastArrivalAt = arrived;
+    this.samples.push({ at: arrived, x: sample.x, y: sample.y, z: sample.z, yaw: sample.yaw });
+    if (this.samples.length === 1) this.interpolationAt = arrived - this.interpDelayMs;
     if (this.samples.length > 8) this.samples.shift();
 
     this.targetPos.set(sample.x, sample.y, sample.z);
@@ -349,7 +374,7 @@ export class RemoteGhostRenderer {
 
   /** Moves the interpolated pose towards the newest received transform. */
   private advanceInterpolation(dt: number): void {
-    this.interpolationAt = Math.max(this.interpolationAt + Math.max(0, dt) * 1000, Date.now() - 100);
+    this.interpolationAt = Math.max(this.interpolationAt + Math.max(0, dt) * 1000, Date.now() - this.interpDelayMs);
     if (this.samples.length >= 2) {
       const renderAt = this.interpolationAt;
       while (this.samples.length > 2 && this.samples[1].at <= renderAt) this.samples.shift();

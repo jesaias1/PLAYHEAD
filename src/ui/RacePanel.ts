@@ -1,4 +1,5 @@
 import { ENVIRONMENT_MAPS } from '../world/themes/EnvironmentThemeRegistry';
+import { readMenuPreferences, saveMenuPreferences } from './MenuPreferences';
 import { raceBaseTrackId, raceMode, type RaceMode } from '../online/RaceCourse';
 /**
  * 05 // ONLINE RACE — the PLAYHEAD multiplayer race hub.
@@ -50,7 +51,9 @@ export interface RacePanelCallbacks {
   /** This racer voted for a map. */
   onMapVote?: (key: string) => void;
   /** Quick match: search the queue for another player. */
-  onFindOpponent?: (trackId: string, mode: RaceMode) => void;
+  onFindOpponent?: (trackId: string, mode: RaceMode, anySignal: boolean) => void;
+  /** A non-host racer asks the host for a rematch. */
+  onRematchRequest?: () => void;
   onCancelFind?: () => void;
   onSetReady: (ready: boolean) => void;
   onLeaveRoom: () => void;
@@ -150,6 +153,7 @@ export class RacePanel {
             <div class="race-card-label"><span class="race-step-num">2</span> PLAY</div>
             <div class="race-quick-main" id="race-quick">
               <button class="btn-hero btn-terminal-exec race-cta race-find-btn" id="race-find-opponent" type="button">> FIND OPPONENT</button>
+              <label class="race-any"><input type="checkbox" id="race-any-signal" /> I don't mind which signal (finds a match faster)</label>
               <div class="race-find-status" id="race-find-status" role="status" aria-live="polite">MATCHES YOU WITH ANOTHER PLAYER // IF YOU PICK DIFFERENT SIGNALS, ONE IS DRAWN AT RANDOM</div>
             </div>
             <div class="race-or"><span>OR PLAY WITH FRIENDS</span></div>
@@ -241,8 +245,8 @@ export class RacePanel {
         <div class="online-lobby-status" id="race-rematch-note"></div>
         <div class="online-lobby-actions race-results-actions">
           <button class="terminal-btn-subtle" id="race-results-next" type="button">PLAY NEXT SONG</button>
-          <button class="btn-hero btn-terminal-exec" id="race-results-rematch" type="button">> REMATCH</button>
-          <button class="terminal-btn-subtle" id="race-results-lobby" type="button">RETURN TO LOBBY</button>
+          <button class="btn-hero btn-terminal-exec" id="race-results-rematch" type="button">> REMATCH // NEW MAP VOTE</button>
+          <button class="terminal-btn-subtle hidden" id="race-results-lobby" type="button">RETURN TO LOBBY</button>
           <button class="terminal-btn-subtle" id="race-results-leave" type="button">LEAVE ROOM</button>
         </div>
       </div>
@@ -286,9 +290,11 @@ export class RacePanel {
     const syncModeButtons = (): void => {
       modeButtons.forEach((b) => b.classList.toggle('active', b.dataset.mode === modeSelect.value));
     };
+    modeSelect.value = readMenuPreferences().raceMode;
     modeButtons.forEach((b) =>
       b.addEventListener('click', () => {
         modeSelect.value = b.dataset.mode ?? 'SURF';
+        saveMenuPreferences({ raceMode: modeSelect.value === 'NORMAL' ? 'NORMAL' : 'SURF' });
         modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
         syncModeButtons();
       })
@@ -301,7 +307,8 @@ export class RacePanel {
         return;
       }
       const mode = (this.element.querySelector('#race-mode') as HTMLSelectElement).value as RaceMode;
-      this.callbacks?.onFindOpponent?.(this.selectElem.value, mode);
+      const any = (this.element.querySelector('#race-any-signal') as HTMLInputElement).checked;
+      this.callbacks?.onFindOpponent?.(this.selectElem.value, mode, any);
     });
     (this.element.querySelector('#race-create-room') as HTMLButtonElement).addEventListener(
       'click',
@@ -330,6 +337,7 @@ export class RacePanel {
     // in sync with the authoritative select elements.
     this.selectElem.addEventListener('change', () => {
       this.selectedTrackId = this.selectElem.value;
+      saveMenuPreferences({ raceTrackId: this.selectElem.value });
       this.renderCreateHero();
     });
     this.capacityElem.addEventListener('change', () => this.syncCapacitySegments());
@@ -370,7 +378,7 @@ export class RacePanel {
     });
     (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).addEventListener(
       'click',
-      () => this.callbacks?.onRematch()
+      () => (this.isHost ? this.callbacks?.onRematch() : this.callbacks?.onRematchRequest?.())
     );
     (this.element.querySelector('#race-results-lobby') as HTMLButtonElement).addEventListener(
       'click',
@@ -419,6 +427,9 @@ export class RacePanel {
     this.selectElem.innerHTML = options;
     this.lobbyHostTrackElem.innerHTML = options;
     if (entries.length > 0 && !this.selectElem.value) this.selectElem.value = entries[0].id;
+    // Start on the signal this player raced last, when it is still in the catalog.
+    const remembered = readMenuPreferences().raceTrackId;
+    if (remembered && entries.some((e) => e.id === remembered)) this.selectElem.value = remembered;
     this.selectedTrackId = this.selectElem.value;
     this.renderCapacitySegments();
     this.syncCapacitySegments();
@@ -504,7 +515,7 @@ export class RacePanel {
     this.selectView.classList.add('hidden');
     this.lobbyView.classList.add('hidden');
     this.resultsView.classList.remove('hidden');
-    this.rematchNoteElem.textContent = this.isHost ? '' : 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
+    this.rematchNoteElem.textContent = this.isHost ? '' : 'ASK THE HOST FOR A REMATCH OR THE NEXT SONG';
   }
 
   private searching = false;
@@ -580,10 +591,13 @@ export class RacePanel {
   public setHost(isHost: boolean): void {
     this.isHost = isHost;
     this.lobbyStartBtn.classList.add('hidden');
-    (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).disabled = !isHost;
+    // Everyone can press REMATCH: the host starts it, a guest asks the host.
+    (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).textContent = isHost
+      ? '> REMATCH // NEW MAP VOTE'
+      : '> ASK FOR A REMATCH';
     (this.element.querySelector('#race-results-next') as HTMLButtonElement).disabled = !isHost;
     (this.element.querySelector('#race-results-lobby') as HTMLButtonElement).disabled = !isHost;
-    if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'WAITING FOR HOST // NEXT SONG, REMATCH OR LOBBY';
+    if (!isHost && !this.resultsView.classList.contains('hidden')) this.rematchNoteElem.textContent = 'ASK THE HOST FOR A REMATCH OR THE NEXT SONG';
     // Only the host sees the track picker, and only while the room is unlocked.
     const canPick = false; // the signal is chosen before the room exists, never while it loads
     (this.element.querySelector('#race-host-track-row') as HTMLElement).classList.toggle(
@@ -641,7 +655,7 @@ export class RacePanel {
     this.renderReadyButton();
 
     const connected = players.filter((p) => p.connected);
-    (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).disabled = !this.isHost || connected.length < 2;
+    (this.element.querySelector('#race-results-rematch') as HTMLButtonElement).disabled = connected.length < 2;
     (this.element.querySelector('#race-results-next') as HTMLButtonElement).disabled = !this.isHost || connected.length < 2;
     const allReady = computeAllReady(players);
 
@@ -822,7 +836,8 @@ export class RacePanel {
     const track = this.lastRoom?.trackTitle ? ` // ${this.escape(this.lastRoom.trackTitle.toUpperCase())}` : '';
     banner.classList.add(won ? 'race-winner-me' : 'race-winner-lose');
     const title = won ? 'YOU WIN' : `${this.escape(winner.displayName.toUpperCase())} WINS`;
-    let sub = `${formatRaceTime(winner.finishTimeUs)}${margin}${track}`;
+    const dropped = rows.some((r) => r.userId !== winner.userId && r.dnf);
+    let sub = `${formatRaceTime(winner.finishTimeUs)}${margin}${track}${dropped ? ' // OPPONENT DISCONNECTED' : ''}`;
     if (!won && mine) {
       const yours = mine.dnf || mine.finishTimeUs === null ? 'DNF' : `${formatRaceTime(mine.finishTimeUs)} // PLACE ${mine.place ?? '--'}`;
       sub += ` // YOU: ${yours}`;

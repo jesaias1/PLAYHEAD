@@ -248,6 +248,8 @@ export interface RaceRoomCallbacks {
   onGhost?: (sample: GhostSample) => void;
   /** A racer's map vote arrived or changed (see MapVote.ts). */
   onMapVotes?: () => void;
+  /** Another racer asked for a rematch from the results screen. */
+  onRematchRequest?: (displayName: string) => void;
   onPlayerJoined?: (player: RacePlayer) => void;
   onPlayerLeft?: (userId: string) => void;
   onFinished?: (results: RaceResultRow[]) => void;
@@ -544,6 +546,18 @@ export class RaceRoomService {
     return reply;
   }
 
+  /** Players searching in this mode right now; null when the server cannot say. */
+  public async matchmakingCount(mode: 'SURF' | 'NORMAL'): Promise<number | null> {
+    const client = this.onlineClient.getClient();
+    if (!client) return null;
+    try {
+      const { data, error } = await client.rpc('race_mm_waiting_count_v1', { p_mode: mode });
+      return error || typeof data !== 'number' ? null : data;
+    } catch {
+      return null;
+    }
+  }
+
   public async matchmakingPoll(): Promise<MatchmakingReply> {
     return this.matchmakingCall('race_mm_poll_v1', {});
   }
@@ -801,12 +815,23 @@ export class RaceRoomService {
     }
   }
 
+  private pingMs: number | null = null;
+
+  /** Smoothed round-trip time to the server in ms, or null before the first heartbeat. */
+  public getPingMs(): number | null {
+    return this.pingMs === null ? null : Math.round(this.pingMs);
+  }
+
   /** Presence heartbeat: keeps a live tab from being expired server-side. */
   public async heartbeat(): Promise<void> {
     const client = this.onlineClient.getClient();
     if (!client || !this.room) return;
     try {
+      const sentAt = performance.now();
       await client.rpc('race_heartbeat_v2', { p_room_id: this.room.id, p_race_id: this.room.raceId });
+      const rtt = performance.now() - sentAt;
+      // Smoothed round trip to the server: the "ping" shown in the race HUD.
+      this.pingMs = this.pingMs === null ? rtt : this.pingMs * 0.7 + rtt * 0.3;
     } catch {
       /* best effort: presence only */
     }
@@ -1063,6 +1088,11 @@ export class RaceRoomService {
 
     const channel = client.channel(`race:${room.id}`, {
       config: { broadcast: { self: false } }
+    });
+
+    channel.on('broadcast', { event: 'rematch_request' }, (payload) => {
+      const who = (payload?.payload as { name?: unknown } | undefined)?.name;
+      this.callbacks.onRematchRequest?.(typeof who === 'string' ? who.slice(0, 32) : 'A RACER');
     });
 
     channel.on('broadcast', { event: 'map_vote' }, (payload) => {
@@ -1426,6 +1456,18 @@ export class RaceRoomService {
     } catch {
       return null;
     }
+  }
+
+  /** Forgets every racer's map vote, so a rematch opens a fresh vote. */
+  public clearMapVotes(): void {
+    this.mapVotes.clear();
+    this.callbacks.onMapVotes?.();
+  }
+
+  /** Tells the room this racer wants a rematch (the host starts it). */
+  public sendRematchRequest(displayName: string): void {
+    if (!this.channel) return;
+    void this.channel.send({ type: 'broadcast', event: 'rematch_request', payload: { name: displayName } });
   }
 
   private stopMapVotes(): void {
